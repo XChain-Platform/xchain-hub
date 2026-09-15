@@ -168,33 +168,20 @@ const hookAt2320 = function () {
         sinon.restore();
     };
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('initialises with empty queue and failures maps', function () {
+// ── recordFailure ────────────────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('recordFailure()', function () { it('ignores calls with empty pubkey', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.queueSize()).to.equal(0);
-            expect(sc.failuresFor('any')).to.deep.equal([]);
+            sc.recordFailure('', 'rid1');
+            sc.recordFailure(null, 'rid2');
+            expect(sc.failuresFor('')).to.have.length(0);
         }); }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '7' } });
+// ── recordFailure ────────────────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('recordFailure()', function () { it('normalises pubkey to lowercase', function () {
+            let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(7);
-        }); }); });
-
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_WINDOW_MS from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_WINDOW_MS: '3600000' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureWindowMs).to.equal(3600000);
-        }); }); });
-
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('uses defaults when config is empty', function () {
-            let hub = makeHub({ p2pConfig: {} });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(3);
-            expect(sc.failureWindowMs).to.equal(24 * 60 * 60 * 1000);
+            sc.recordFailure('PUBKEY123', 'rid1');
+            expect(sc.failuresFor('pubkey123')).to.have.length(1);
         }); }); });
 }

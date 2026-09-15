@@ -168,33 +168,53 @@ const hookAt2320 = function () {
         sinon.restore();
     };
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('initialises with empty queue and failures maps', function () {
+// ── register / isSpotCheck ──────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('register() / isSpotCheck()', function () { it('registers a spot-check and reports isSpotCheck=true', function () {
             let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+            sc.register('REQ001', 'http_get', 'expected pattern');
+            expect(sc.isSpotCheck('REQ001')).to.be.true;
+            expect(sc.isSpotCheck('req001')).to.be.true; // case-insensitive
+        }); }); });
+
+// ── register / isSpotCheck ──────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('register() / isSpotCheck()', function () { it('returns false for unknown requestIds', function () {
+            let hub = makeHub();
+            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+            expect(sc.isSpotCheck('unknown')).to.be.false;
+        }); }); });
+
+// ── register / isSpotCheck ──────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('register() / isSpotCheck()', function () { it('ignores registration with empty requestId', function () {
+            let hub = makeHub();
+            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+            sc.register('', 'http_get', 'pattern');
             expect(sc.queueSize()).to.equal(0);
-            expect(sc.failuresFor('any')).to.deep.equal([]);
         }); }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '7' } });
+// ── register / isSpotCheck ──────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('register() / isSpotCheck()', function () { it('ignores registration with no providerId', function () {
+            let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(7);
+            sc.register('rid1', '', 'pattern');
+            expect(sc.queueSize()).to.equal(0);
         }); }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_WINDOW_MS from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_WINDOW_MS: '3600000' } });
+// ── register / isSpotCheck ──────────────────────────────────────────────
+describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('register() / isSpotCheck()', function () { it('drops the oldest entry when MAX_QUEUE_SIZE (1024) is exceeded', function () {
+            let hub = makeHub();
             let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureWindowMs).to.equal(3600000);
-        }); }); });
-
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('uses defaults when config is empty', function () {
-            let hub = makeHub({ p2pConfig: {} });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(3);
-            expect(sc.failureWindowMs).to.equal(24 * 60 * 60 * 1000);
+            // Fill the queue to capacity
+            for (let i = 0; i < 1024; i++) {
+                sc.register('rid' + i, 'http_get', 'p');
+            }
+            expect(sc.queueSize()).to.equal(1024);
+            // rid0 is the first/oldest entry
+            expect(sc.isSpotCheck('rid0')).to.be.true;
+            // Adding one more evicts rid0
+            sc.register('rid_new', 'http_get', 'p');
+            expect(sc.queueSize()).to.equal(1024);
+            expect(sc.isSpotCheck('rid0')).to.be.false;
+            expect(sc.isSpotCheck('rid_new')).to.be.true;
         }); }); });
 }

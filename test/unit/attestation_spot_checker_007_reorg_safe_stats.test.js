@@ -164,37 +164,95 @@ function makeFlakyRegistry(reason, unavailableFor, then) {
 }
 
 {
-const hookAt2320 = function () {
-        sinon.restore();
-    };
+const hookAt24737 = function () { sinon.restore(); };
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('initialises with empty queue and failures maps', function () {
-            let hub = makeHub();
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.queueSize()).to.equal(0);
-            expect(sc.failuresFor('any')).to.deep.equal([]);
-        }); }); });
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('persists a passing spot-check as a row (passed=1) keyed by block_index', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        sc.register('r1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('r1', 500, ['aa'.repeat(32)]));
+        expect(db.rows).to.have.length(1);
+        expect(db.rows[0].passed).to.equal(1);
+        expect(db.rows[0].block_index).to.equal(500);
+        expect(db.rows[0].validator_pubkey).to.equal('aa'.repeat(32));
+    }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '7' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(7);
-        }); }); });
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('persists a failing spot-check as a row (passed=0) for every signer', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('r2', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('r2', 600, ['aa'.repeat(32), 'bb'.repeat(32)]));
+        expect(db.rows).to.have.length(2);
+        expect(db.rows.every(r => r.passed === 0)).to.be.true;
+    }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_WINDOW_MS from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_WINDOW_MS: '3600000' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureWindowMs).to.equal(3600000);
-        }); }); });
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('statsFor aggregates total/failed/passed from persisted rows', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const scFail = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        const pk = 'cc'.repeat(32);
+        scFail.register('rf', 'http_get', 'e');
+        await scFail.onRequestFinalized(okEvent('rf', 10, [pk]));
+        const scPass = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        scPass.register('rp', 'http_get', 'e');
+        await scPass.onRequestFinalized(okEvent('rp', 11, [pk]));
+        const stats = await scFail.statsFor(pk);
+        expect(stats).to.deep.equal({ total: 2, failed: 1, passed: 1 });
+    }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('uses defaults when config is empty', function () {
-            let hub = makeHub({ p2pConfig: {} });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(3);
-            expect(sc.failureWindowMs).to.equal(24 * 60 * 60 * 1000);
-        }); }); });
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('rollback deletes rows above the reorg height and clears in-memory failures', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('low',  'http_get', 'e');
+        sc.register('high', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('low',  100, ['dd'.repeat(32)]));
+        await sc.onRequestFinalized(okEvent('high', 200, ['dd'.repeat(32)]));
+        expect(db.rows).to.have.length(2);
+        expect(sc.failuresFor('dd'.repeat(32))).to.have.length(2);
+
+        const removed = await sc.rollback(150);
+        expect(removed).to.equal(1);                 // only the block-200 row
+        expect(db.rows).to.have.length(1);
+        expect(db.rows[0].block_index).to.equal(100);
+        expect(sc.failuresFor('dd'.repeat(32))).to.have.length(0);  // window cleared
+    }); });
+
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('persist is a no-op (no throw) when the hub has no DB', async function () {
+        const hub = makeHub();               // no db
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        sc.register('r', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('r', 5, ['ee'.repeat(32)]));  // must not throw
+        expect(await sc.statsFor('ee'.repeat(32))).to.deep.equal({ total: 0, failed: 0, passed: 0 });
+    }); });
+
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('rollback is a safe no-op (returns 0) with no DB but still clears the window', async function () {
+        const hub = makeHub();
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.recordFailure('ff'.repeat(32), 'x');
+        expect(sc.failuresFor('ff'.repeat(32))).to.have.length(1);
+        const removed = await sc.rollback(10);
+        expect(removed).to.equal(0);
+        expect(sc.failuresFor('ff'.repeat(32))).to.have.length(0);
+    }); });
+
+describe('AttestationSpotChecker: reorg-safe stats', function () { afterEach(hookAt24737); it('start() wires reorg:confirmed to rollback and stop() unwires it', async function () {
+        const db    = makeFakeDb();
+        const reorg = new EventEmitter();
+        const hub   = makeHub({ db, reorgHandler: reorg });
+        const sc    = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('a', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('a', 300, ['ab'.repeat(32)]));
+        await sc.start();
+        expect(reorg.listenerCount('reorg:confirmed')).to.equal(1);
+
+        reorg.emit('reorg:confirmed', { reorgHeight: 250 });
+        await new Promise(r => setImmediate(r));
+        expect(db.rows).to.have.length(0);           // block-300 row rolled back
+
+        await sc.stop();
+        expect(reorg.listenerCount('reorg:confirmed')).to.equal(0);
+    }); });
 }

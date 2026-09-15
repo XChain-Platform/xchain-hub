@@ -164,37 +164,85 @@ function makeFlakyRegistry(reason, unavailableFor, then) {
 }
 
 {
-const hookAt2320 = function () {
-        sinon.restore();
-    };
+const hookAt29604 = function () { sinon.restore(); };
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('initialises with empty queue and failures maps', function () {
-            let hub = makeHub();
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.queueSize()).to.equal(0);
-            expect(sc.failuresFor('any')).to.deep.equal([]);
-        }); }); });
+const DAY = 24 * 60 * 60 * 1000;
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '7' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(7);
-        }); }); });
+function seedRow(db, rid, ageMs) {
+        db.rows.push({
+            validator_pubkey: 'ab'.repeat(32), provider_id: 'http_get', request_id: rid,
+            block_index: 10, passed: 1, checked_at: Date.now() - ageMs
+        });
+    }
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_WINDOW_MS from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_WINDOW_MS: '3600000' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureWindowMs).to.equal(3600000);
-        }); }); });
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('prunes outcome rows past the retention window and keeps recent ones', async function () {
+        const db  = makeFakeDb();
+        const sc  = new AttestationSpotChecker(makeHub({ db }), makeProviderRegistry(true));
+        seedRow(db, 'old',    120 * DAY);
+        seedRow(db, 'recent',   2 * DAY);
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('uses defaults when config is empty', function () {
-            let hub = makeHub({ p2pConfig: {} });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(3);
-            expect(sc.failureWindowMs).to.equal(24 * 60 * 60 * 1000);
-        }); }); });
+        const pruned = await sc.pruneStats();
+        expect(pruned, 'only the row past the 90-day default window').to.equal(1);
+        expect(db.rows.map(r => r.request_id)).to.deep.equal(['recent']);
+        expect(sc.statsPruned).to.equal(1);
+    }); });
+
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('floors the window at the rolling failure window, so a tiny config cannot delete live evidence', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        hub.p2pConfig = { SPOT_CHECK_STATS_RETENTION_MS: '1000' };   // 1s, far below the 24h window
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        seedRow(db, 'hour-old', 60 * 60 * 1000);
+
+        const pruned = await sc.pruneStats();
+        expect(pruned, 'an hour-old row is still inside the 24h failure window').to.equal(0);
+        expect(db.counts.retentionWindowSec).to.equal(Math.ceil(sc.failureWindowMs / 1000));
+    }); });
+
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('an explicit 0 disables the sweep entirely', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        hub.p2pConfig = { SPOT_CHECK_STATS_RETENTION_MS: '0' };
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        seedRow(db, 'ancient', 400 * DAY);
+
+        expect(sc.statsRetentionMs).to.equal(0);
+        expect(await sc.pruneStats()).to.equal(0);
+        expect(db.counts.retentionDeletes, 'no DELETE is issued at all').to.equal(0);
+        expect(db.rows).to.have.length(1);
+    }); });
+
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('persisting an outcome sweeps once, then throttles', async function () {
+        const db = makeFakeDb();
+        const sc = new AttestationSpotChecker(makeHub({ db }), makeProviderRegistry(true));
+        seedRow(db, 'old', 120 * DAY);
+
+        sc.register('r1', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('r1', 500, ['aa'.repeat(32)]));
+        await sc._statsSweep;
+        expect(db.counts.retentionDeletes, 'the first persisted outcome sweeps').to.equal(1);
+        expect(db.rows.some(r => r.request_id === 'old'), 'the aged row is gone').to.equal(false);
+
+        sc.register('r2', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('r2', 501, ['aa'.repeat(32)]));
+        await sc._statsSweep;
+        expect(db.counts.retentionDeletes, 'the next outcome is throttled out').to.equal(1);
+    }); });
+
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('a failing sweep is swallowed and never breaks the judging path', async function () {
+        const db = makeFakeDb();
+        const sc = new AttestationSpotChecker(makeHub({ db }), makeProviderRegistry(true));
+        sinon.stub(sc, 'pruneStats').rejects(new Error('DB gone'));
+        sinon.stub(console, 'warn');
+
+        sc.register('r1', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('r1', 500, ['aa'.repeat(32)]));   // must not throw
+        expect(await sc._statsSweep).to.equal(0);
+        expect(db.rows, 'the outcome still persisted').to.have.length(1);
+    }); });
+
+describe('AttestationSpotChecker: stats retention', function () { afterEach(hookAt29604); it('is a safe no-op with no DB wired', async function () {
+        const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry(true));
+        expect(await sc.pruneStats()).to.equal(0);
+    }); });
 }

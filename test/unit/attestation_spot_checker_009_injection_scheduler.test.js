@@ -164,37 +164,129 @@ function makeFlakyRegistry(reason, unavailableFor, then) {
 }
 
 {
-const hookAt2320 = function () {
-        sinon.restore();
-    };
+const hookAt33644 = function () { sinon.restore(); };
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('initialises with empty queue and failures maps', function () {
-            let hub = makeHub();
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.queueSize()).to.equal(0);
-            expect(sc.failuresFor('any')).to.deep.equal([]);
-        }); }); });
+const CORPUS = [
+        { providerId: 'http_get', prompt: 'q1', expectedPattern: 'a1' },
+        { providerId: 'llm',      prompt: 'q2', expectedPattern: 'a2' }
+    ];
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_THRESHOLD from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_THRESHOLD: '7' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(7);
-        }); }); });
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('isTruthy accepts common truthy spellings only', function () {
+        const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
+        ['1', 'true', 'TRUE', 'yes', 'on', true].forEach(v => expect(sc.isTruthy(v)).to.be.true);
+        ['0', 'false', '', 'off', undefined, null].forEach(v => expect(sc.isTruthy(v)).to.be.false);
+    }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('reads SPOT_CHECK_FAILURE_WINDOW_MS from config', function () {
-            let hub = makeHub({ p2pConfig: { SPOT_CHECK_FAILURE_WINDOW_MS: '3600000' } });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureWindowMs).to.equal(3600000);
-        }); }); });
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('parses a corpus from a JSON string and from an array, dropping malformed entries', function () {
+        const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
+        const parsed = sc.parseCorpus(JSON.stringify([
+            { provider_id: 'http_get', prompt: 'p', expected: 'x' },  // snake_case aliases
+            { prompt: 'no provider' },                                // dropped
+            { providerId: 'llm' },                                    // dropped (no prompt)
+            'garbage'                                                 // dropped
+        ]));
+        expect(parsed).to.deep.equal([{ providerId: 'http_get', prompt: 'p', expectedPattern: 'x' }]);
+        expect(sc.parseCorpus('not json')).to.deep.equal([]);
+        expect(sc.parseCorpus(null)).to.deep.equal([]);
+    }); });
 
-// ── Constructor ─────────────────────────────────────────────────────────
-describe('AttestationSpotChecker', function () { afterEach(hookAt2320); describe('constructor', function () { it('uses defaults when config is empty', function () {
-            let hub = makeHub({ p2pConfig: {} });
-            let sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
-            expect(sc.failureThreshold).to.equal(3);
-            expect(sc.failureWindowMs).to.equal(24 * 60 * 60 * 1000);
-        }); }); });
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('scheduler stays idle when SPOT_CHECK_ENABLED is unset', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: { SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('scheduler stays idle when enabled but no injector is wired', async function () {
+        const hub = makeHub({ p2pConfig: { SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('scheduler stays idle when enabled with an injector but an empty corpus', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: { SPOT_CHECK_ENABLED: 'true' } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('starts a scheduler interval when enabled + injector + corpus, and stop() clears it', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_INTERVAL_MS: '999999', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.not.equal(null);
+        await sc.stop();
+        expect(sc._scheduler).to.equal(null);
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('schedulerTick injects via the injector and registers the returned request_id', async function () {
+        const injector = sinon.stub()
+            .onFirstCall().resolves({ requestId: 'SYNTH1' })
+            .onSecondCall().resolves('SYNTH2');   // bare-string return also accepted
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc.schedulerTick();
+        expect(n).to.equal(2);
+        expect(injector.callCount).to.equal(2);
+        expect(sc.isSpotCheck('SYNTH1')).to.be.true;
+        expect(sc.isSpotCheck('SYNTH2')).to.be.true;
+        // Corpus round-robins: first entry is http_get, second is llm.
+        expect(injector.firstCall.args[0].providerId).to.equal('http_get');
+        expect(injector.secondCall.args[0].providerId).to.equal('llm');
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('round-robins the corpus cursor across ticks', async function () {
+        const injector = sinon.stub().callsFake(() => Promise.resolve({ requestId: 'rid' + Math.random() }));
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });  // maxPerTick default 1
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.schedulerTick();
+        await sc.schedulerTick();
+        await sc.schedulerTick();
+        expect(injector.getCall(0).args[0].prompt).to.equal('q1');
+        expect(injector.getCall(1).args[0].prompt).to.equal('q2');
+        expect(injector.getCall(2).args[0].prompt).to.equal('q1');  // wrapped
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('a throwing injector does not abort the batch or throw out of the tick', async function () {
+        const injector = sinon.stub()
+            .onFirstCall().rejects(new Error('encoder down'))
+            .onSecondCall().resolves({ requestId: 'OK2' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc.schedulerTick();     // must not throw
+        expect(n).to.equal(1);
+        expect(sc.isSpotCheck('OK2')).to.be.true;
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('does not register when the injector returns no request_id', async function () {
+        const injector = sinon.stub().resolves({ notARequestId: true });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc.schedulerTick();
+        expect(n).to.equal(0);
+        expect(sc.queueSize()).to.equal(0);
+    }); });
+
+describe('AttestationSpotChecker: injection scheduler', function () { afterEach(hookAt33644); it('skips the tick under queue backpressure (near capacity)', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        for (let i = 0; i < 1000; i++) sc.register('q' + i, 'http_get', 'e');  // >= 90% of 1024
+        const n = await sc.schedulerTick();
+        expect(n).to.equal(0);
+        expect(injector.called).to.be.false;
+    }); });
 }
