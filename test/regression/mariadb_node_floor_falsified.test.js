@@ -32,11 +32,13 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-describe('Regression: mariadb does not need the Node 22.12 require(esm) floor @regression', function () {
+function registerSuitePart1() {
     this.timeout(20000);
+}
 
-    const pkgRoot = path.join(__dirname, '../..');
+const pkgRoot = path.join(__dirname, '../..');
 
+function registerSuitePart2() {
     it('mariadb resolves via package.json exports "require" condition to a .cjs file', function () {
         const resolved = require.resolve('mariadb', { paths: [pkgRoot] });
         assert.ok(/\.cjs$/.test(resolved),
@@ -59,7 +61,9 @@ describe('Regression: mariadb does not need the Node 22.12 require(esm) floor @r
         assert.ok(/\.cjs$/.test(requireCondition.default || ''),
             'mariadb exports["."].require.default "' + requireCondition.default + '" is not a .cjs file');
     });
+}
 
+function registerSuitePart3() {
     it("require('mariadb') loads with require(esm) disabled outright", function () {
         const result = cp.spawnSync(process.execPath,
             ['--no-experimental-require-module', '-e', "require('mariadb'); process.exit(0);"],
@@ -72,7 +76,9 @@ describe('Regression: mariadb does not need the Node 22.12 require(esm) floor @r
             'require(\'mariadb\') hit ERR_REQUIRE_ESM even though it resolves to a .cjs file: ' +
             result.stderr);
     });
+}
 
+function registerSuitePart4() {
     it('control: a genuinely ESM-only package DOES fail the same way, proving the check above is not vacuous', function () {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'esm-only-control-'));
         try {
@@ -92,8 +98,19 @@ describe('Regression: mariadb does not need the Node 22.12 require(esm) floor @r
             fs.rmSync(dir, { recursive: true, force: true });
         }
     });
+}
 
+function registerSuitePart5() {
     it("require('mariadb') loads on the current runtime (sanity: matches the ledger's live-driver claim)", function () {
         assert.doesNotThrow(() => require('mariadb'));
     });
+}
+
+describe('Regression: mariadb does not need the Node 22.12 require(esm) floor @regression', function () {
+    registerSuitePart1.call(this);
+    registerSuitePart2();
+    registerSuitePart3();
+    registerSuitePart4();
+    registerSuitePart5();
+
 });
