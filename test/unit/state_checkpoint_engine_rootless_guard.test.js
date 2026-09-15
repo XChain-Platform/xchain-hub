@@ -102,161 +102,241 @@ async function startAll(bus) {
 async function tickAll(bus) {
   for (let nd of bus.nodes) await nd.engine._tick();
 }
+
+// ── The rootless-checkpoint guard runs on EVERY path ──────────
+//
+// The propose path always refused to sign a post-flag-day checkpoint with no
+// light-client roots. That was the only place the rule lived, and it is the one
+// path an attacker does not control. The canonical hides the gap: the root suffix
+// is the EMPTY STRING when roots are null, so a rootless proposal and a rootless
+// self-derivation produce byte-identical canonicals, the follower's "matches my
+// indexer?" check passes, and it co-signs. Quorum then forms and every hub
+// persists a checkpoint carrying none of the commitment its flag-day requires.
+
+const ROOTED = {
+  state_root: 'a'.repeat(64),
+  state_root_version: 1,
+  block_merkle_root: 'b'.repeat(64),
+  block_merkle_version: 1
+};
+const ROOTLESS = {
+  state_root: null,
+  state_root_version: null,
+  block_merkle_root: null,
+  block_merkle_version: null
+};
+function cp(extra) {
+  return Object.assign({
+    chain: 'BTC',
+    network: 'regtest',
+    block_index: 10,
+    block_hash: TIP.block_hash,
+    ledger_hash: TIP.ledger_hash,
+    actions_hash: TIP.actions_hash,
+    contract_hash: TIP.contract_hash,
+    checkpoint_seq: 200,
+    snapshot_block: 200
+  }, extra);
+}
 function registerSplitSuitePart1() {
+  it('isRootless is true only when commitment is active AND a root is missing', function () {
+    expect(StateCheckpointEngine.isRootless(cp(ROOTLESS)), 'active + no roots').to.equal(true);
+    expect(StateCheckpointEngine.isRootless(cp(ROOTED)), 'active + roots').to.equal(false);
+    // A partially-populated checkpoint is just as unusable as an empty one.
+    expect(StateCheckpointEngine.isRootless(cp(Object.assign({}, ROOTED, {
+      block_merkle_root: null
+    }))), 'one missing root still counts').to.equal(true);
+    expect(StateCheckpointEngine.isRootless(cp(Object.assign({}, ROOTED, {
+      state_root_version: null
+    }))), 'a missing VERSION still counts').to.equal(true);
+    expect(StateCheckpointEngine.isRootless(null), 'null input').to.equal(false);
+  });
+  it('the canonical does NOT distinguish rootless from rooted, which is why the guard is needed', function () {
+    // This is the property that made the co-sign check useless on its own: the
+    // suffix collapses to '' so two rootless hubs agree byte-for-byte.
+    const a = StateCheckpointEngine.canonicalCheckpoint(cp(ROOTLESS));
+    const b = StateCheckpointEngine.canonicalCheckpoint(cp(ROOTLESS));
+    expect(a).to.equal(b);
+    expect(a).to.not.equal(StateCheckpointEngine.canonicalCheckpoint(cp(ROOTED)));
+  });
+  it('persist REFUSES a rootless checkpoint, writing neither snapshot nor row', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    let before = nd.db.checkpoints.length;
+    let threw = null;
+    try {
+      await nd.engine.acceptFinalized(cp(ROOTLESS), [{
+        pubkey: nd.pubkey,
+        sig: 'a'
+      }], 1, true);
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw, 'must fail closed rather than persist').to.not.equal(null);
+    expect(String(threw.message)).to.match(/rootless checkpoint/);
+    expect(nd.db.checkpoints.length, 'no row written').to.equal(before);
+  });
+
+  // ── SWQ gate plane, asserted rather than silently switched ──
+  //
+  // This engine resolves the stake-weighted-quorum gate on the DEPLOYMENT network
+  // while StateAnchorPublisher resolves the same gate on the RECORD's network
+  // (resolveQuorumNetwork). Two files, one gate, two planes. The v1 call is
+  // kept on purpose: switching to cp.network would let a PEER choose this hub's
+  // quorum rule by asserting a network in a gossiped checkpoint, which is worse
+  // than the drift being fixed. So a genuine disagreement is refused loudly.
+}
+function registerSplitSuitePart2() {
+  it('refuses a checkpoint whose network disagrees with the deployment network', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    nd.engine.network = 'mainnet'; // deployment plane
+    let threw = null;
+    try {
+      await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, {
+        network: 'regtest'
+      })), [{
+        pubkey: nd.pubkey,
+        sig: 'a'
+      }], 1, true);
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw, 'a cross-network checkpoint must be refused').to.not.equal(null);
+    expect(String(threw.message)).to.match(/network mismatch/);
+    expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+    expect(nd.db.checkpoints.length, 'nothing persisted').to.equal(0);
+  });
+
+  // Third call site of the same predicate. The indexer byte-match further down
+  // handleSignReq rebuilds the canonical with the network OUR OWN indexer reports,
+  // so it sees record-vs-indexer drift and is blind to record-vs-DEPLOYMENT drift:
+  // co-sign membership resolves the SWQ gate on this.network, so without this the
+  // follower contributes a signature under one plane and then refuses the finalized
+  // checkpoint under the other.
+}
+function registerSplitSuitePart3() {
+  it('co-sign REFUSES a checkpoint whose network disagrees with the deployment network', async function () {
+    let bus = buildMesh(2, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    let other = bus.nodes[1];
+    nd.engine.network = 'mainnet'; // deployment plane
+    let types = [];
+    let pm = nd.engine.peerManager;
+    let orig = pm.broadcast.bind(pm);
+    pm.broadcast = (type, data) => {
+      types.push(type);
+      return orig(type, data);
+    };
+    let threw = null;
+    try {
+      await nd.engine.handleSignReq({
+        type: 'XCHK_SIGN_REQ',
+        sender: other.pubkey,
+        data: {
+          checkpoint: cp(Object.assign({}, ROOTED, {
+            network: 'regtest'
+          })),
+          sig_pubkey: other.pubkey,
+          sig: 'a'
+        }
+      });
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw, 'a cross-network SIGN_REQ must be refused, not silently co-signed').to.not.equal(null);
+    expect(String(threw.message)).to.match(/network mismatch in co-sign/);
+    expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+    expect(types.includes('XCHK_SIGN'), 'no co-signature left the hub').to.equal(false);
+  });
+}
+function registerSplitSuitePart4() {
+  it('accepts when the two agree', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    // Both planes set to mainnet, where snapshot_block 200 is far below the
+    // 961000 SWQ anchor, so the gate stays OFF and the mesh's count-based
+    // capabilitySnapshot mock is the right shape. (Using regtest here would flip
+    // SWQ on from genesis and need a weight snapshot the mock does not implement,
+    // which tests the harness rather than the assert.)
+    nd.engine.network = 'mainnet';
+    await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, {
+      network: 'mainnet'
+    })), [{
+      pubkey: nd.pubkey,
+      sig: 'a'
+    }], 1, true);
+    expect(nd.db.checkpoints.length).to.equal(1);
+  });
+
+  // An UNSCOPED hub is a different, already-documented problem (#2236): it
+  // resolves every flag-day gate to OFF. It is warned about, not refused, because
+  // refusing would take every unscoped deployment offline at once.
+}
+function registerSplitSuitePart5() {
+  it('an unscoped hub warns once but keeps working (legacy path preserved)', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    nd.engine.network = '';
+    let warnings = [];
+    let orig = console.warn;
+    console.warn = (...a) => warnings.push(a.join(' '));
+    try {
+      await nd.engine.acceptFinalized(cp(ROOTED), [{
+        pubkey: nd.pubkey,
+        sig: 'a'
+      }], 1, true);
+      await nd.engine.acceptFinalized(cp(Object.assign({}, ROOTED, {
+        checkpoint_seq: 201,
+        snapshot_block: 201
+      })), [{
+        pubkey: nd.pubkey,
+        sig: 'b'
+      }], 1, true);
+    } finally {
+      console.warn = orig;
+    }
+    expect(nd.db.checkpoints.length, 'still persists').to.equal(2);
+    let unscoped = warnings.filter(w => /NO deployment network/.test(w));
+    expect(unscoped.length, 'warned exactly once, not per checkpoint').to.equal(1);
+  });
+  it('persist ACCEPTS the same checkpoint once the roots are present', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    await nd.engine.acceptFinalized(cp(ROOTED), [{
+      pubkey: nd.pubkey,
+      sig: 'a'
+    }], 1, true);
+    expect(nd.db.checkpoints.length, 'a rooted checkpoint still persists normally').to.equal(1);
+  });
+}
+function registerSplitSuitePart6() {
   afterEach(async function () {
     for (let bus of buses) {
       for (let nd of bus.nodes) await nd.engine.stop();
     }
     buses = [];
   });
-  it('canonical string matches the ANCHOR spec byte-for-byte', function () {
-    let canon = StateCheckpointEngine.canonicalCheckpoint({
-      chain: 'BTC',
-      network: 'mainnet',
-      block_index: 900123,
-      block_hash: 'ab'.repeat(32),
-      ledger_hash: 'cd'.repeat(32),
-      actions_hash: 'ef'.repeat(32),
-      contract_hash: '01'.repeat(32),
-      checkpoint_seq: 417,
-      snapshot_block: 900120
-    });
-    expect(canon).to.equal('XCHECKPOINT|BTC|mainnet|900123|' + 'ab'.repeat(32) + '|' + 'cd'.repeat(32) + '|' + 'ef'.repeat(32) + '|' + '01'.repeat(32) + '|417|900120');
-  });
-  it('N=1: single-validator set self-signs and writes immediately', async function () {
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, {
-      label: 'the single-validator round to self-sign and write'
-    });
-    let nd = bus.nodes[0];
-    expect(nd.finalized.length).to.equal(1);
-    expect(nd.db.checkpoints.length).to.equal(1);
-    let row = nd.db.checkpoints[0];
-    expect(row.chain).to.equal('BTC');
-    expect(row.block_index).to.equal(TIP.block_index);
-    let sigs = JSON.parse(row.validator_signatures);
-    expect(sigs.length).to.equal(1);
-    let canon = StateCheckpointEngine.canonicalCheckpoint(nd.finalized[0].checkpoint);
-    expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey)).to.be.true;
-    // Streamed to the indexer mirror (capability snapshot rows + the checkpoint row).
-    expect(nd.hub.hubDbBroadcaster.rows.some(r => r.table === 'state_checkpoints')).to.be.true;
-  });
-}
-function registerSplitSuitePart2() {
-  it('restart does not re-checkpoint: cadence latch is restored from persisted rows', async function () {
-    // First boot: one checkpoint at btcBlock 100 (default intervalBlocks 6).
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    let nd = bus.nodes[0];
-    await nd.engine.start();
-    await nd.engine._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 1, {
-      label: 'the first boot to write its checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'after first boot').to.equal(1);
-    let seqAfterBoot = nd.db.checkpoints[0].checkpoint_seq;
-
-    // Simulate a restart: a fresh engine over the SAME hub/db, btcBlock
-    // unchanged (no new interval elapsed). Pre-fix this re-checkpointed
-    // immediately (latch null) and burned another on-chain anchor round.
-    let restarted = new StateCheckpointEngine(nd.hub);
-    restarted._indexerCall = async () => Object.assign({}, TIP);
-    await restarted.start();
-    expect(restarted._lastCheckpointBtcBlock, 'latch restored on start').to.equal(100);
-    await restarted._tick();
-    // _tick() is awaited and the latch decision is taken inside it, so the
-    // no-op is already decided; there is no later condition to poll for.
-    expect(nd.db.checkpoints.length, 'no extra checkpoint after restart').to.equal(1);
-    expect(nd.db.checkpoints[0].checkpoint_seq).to.equal(seqAfterBoot);
-
-    // Once btcBlock advances past the interval, it checkpoints again.
-    restarted.hub._resolveBtcLatestBlock = async () => 100 + restarted.intervalBlocks;
-    await restarted._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 2, {
-      label: 'the post-interval tick to write a second checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'checkpoints again past the interval').to.equal(2);
-  });
-}
-function registerSplitSuitePart3() {
-  it('N=4: leader collects 2f+1, every node writes the same quorum-signed row', async function () {
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1), {
-      label: 'every node to write the quorum-signed row'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' rows').to.equal(1);
-      let sigs = JSON.parse(nd.db.checkpoints[0].validator_signatures);
-      expect(sigs.length).to.be.at.least(3); // quorum 2f+1 = 3
-      let canon = StateCheckpointEngine.canonicalCheckpoint(bus.nodes[0].finalized[0] ? bus.nodes[0].finalized[0].checkpoint : nd.db.checkpoints[0]);
-      expect(sigs.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
-    }
-    // Only the cadence leader emits as leader, but all nodes hold identical rows.
-    let rows = bus.nodes.map(nd => JSON.stringify([nd.db.checkpoints[0].chain, nd.db.checkpoints[0].block_index, nd.db.checkpoints[0].ledger_hash, nd.db.checkpoints[0].checkpoint_seq]));
-    expect(new Set(rows).size).to.equal(1);
-  });
-  it('every node (followers included) persists the oracle_publish snapshot at finalize', async function () {
-    // Bug-C analog: only the cadence leader persisted capability_snapshots
-    // (in _tick), but ANCHOR verifiers check checkpoint signatures against
-    // whichever hub DB they mirror; a follower's DB may be the only one
-    // they read.
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1 && nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101).length === 4), {
-      label: 'every node to persist the checkpoint and its oracle_publish snapshot'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' checkpoint').to.equal(1);
-      let snaps = nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101);
-      expect(snaps.length, 'node ' + nd.i + ' snapshot rows').to.equal(4);
-    }
-  });
-}
-function registerSplitSuitePart4() {
-  it('a diverged replica refuses to sign; 3 honest of 4 still reach quorum', async function () {
-    let bus = buildMesh(4, {
-      btcBlock: 101,
-      hashesFor: self => {
-        let leader = leaderNode(buses[0], 101);
-        if (self !== leader && self.i === divergedIndex(buses[0], leader)) {
-          return Object.assign({}, TIP, {
-            ledger_hash: 'ff'.repeat(32)
-          }); // diverged state
-        }
-        return TIP;
-      }
-    });
-    function divergedIndex(b, leader) {
-      return b.nodes.find(nd => nd !== leader).i;
-    }
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => leaderNode(bus, 101).db.checkpoints.length === 1, {
-      label: 'the leader to reach quorum without the diverged replica'
-    });
-    let leader = leaderNode(bus, 101);
-    expect(leader.db.checkpoints.length).to.equal(1);
-    let sigs = JSON.parse(leader.db.checkpoints[0].validator_signatures);
-    expect(sigs.length).to.equal(3); // 4 minus the diverged refuser
-    let diverged = bus.nodes.find(nd => nd !== leader);
-    expect(sigs.some(s => s.pubkey === diverged.pubkey)).to.be.false;
+  describe('rootless-checkpoint guard on co-sign and persist (#3092)', function () {
+    registerSplitSuitePart1();
+    registerSplitSuitePart2();
+    registerSplitSuitePart3();
+    registerSplitSuitePart4();
+    registerSplitSuitePart5();
   });
 }
 describe('StateCheckpointEngine', function () {
-  registerSplitSuitePart1();
-  registerSplitSuitePart2();
-  registerSplitSuitePart3();
-  registerSplitSuitePart4();
+  registerSplitSuitePart6();
 });

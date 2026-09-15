@@ -109,149 +109,146 @@ function registerSplitSuitePart1() {
     }
     buses = [];
   });
-  it('canonical string matches the ANCHOR spec byte-for-byte', function () {
-    let canon = StateCheckpointEngine.canonicalCheckpoint({
-      chain: 'BTC',
-      network: 'mainnet',
-      block_index: 900123,
-      block_hash: 'ab'.repeat(32),
-      ledger_hash: 'cd'.repeat(32),
-      actions_hash: 'ef'.repeat(32),
-      contract_hash: '01'.repeat(32),
-      checkpoint_seq: 417,
-      snapshot_block: 900120
-    });
-    expect(canon).to.equal('XCHECKPOINT|BTC|mainnet|900123|' + 'ab'.repeat(32) + '|' + 'cd'.repeat(32) + '|' + 'ef'.repeat(32) + '|' + '01'.repeat(32) + '|417|900120');
-  });
-  it('N=1: single-validator set self-signs and writes immediately', async function () {
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, {
-      label: 'the single-validator round to self-sign and write'
-    });
-    let nd = bus.nodes[0];
-    expect(nd.finalized.length).to.equal(1);
-    expect(nd.db.checkpoints.length).to.equal(1);
-    let row = nd.db.checkpoints[0];
-    expect(row.chain).to.equal('BTC');
-    expect(row.block_index).to.equal(TIP.block_index);
-    let sigs = JSON.parse(row.validator_signatures);
-    expect(sigs.length).to.equal(1);
-    let canon = StateCheckpointEngine.canonicalCheckpoint(nd.finalized[0].checkpoint);
-    expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey)).to.be.true;
-    // Streamed to the indexer mirror (capability snapshot rows + the checkpoint row).
-    expect(nd.hub.hubDbBroadcaster.rows.some(r => r.table === 'state_checkpoints')).to.be.true;
-  });
-}
-function registerSplitSuitePart2() {
-  it('restart does not re-checkpoint: cadence latch is restored from persisted rows', async function () {
-    // First boot: one checkpoint at btcBlock 100 (default intervalBlocks 6).
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    let nd = bus.nodes[0];
-    await nd.engine.start();
-    await nd.engine._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 1, {
-      label: 'the first boot to write its checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'after first boot').to.equal(1);
-    let seqAfterBoot = nd.db.checkpoints[0].checkpoint_seq;
-
-    // Simulate a restart: a fresh engine over the SAME hub/db, btcBlock
-    // unchanged (no new interval elapsed). Pre-fix this re-checkpointed
-    // immediately (latch null) and burned another on-chain anchor round.
-    let restarted = new StateCheckpointEngine(nd.hub);
-    restarted._indexerCall = async () => Object.assign({}, TIP);
-    await restarted.start();
-    expect(restarted._lastCheckpointBtcBlock, 'latch restored on start').to.equal(100);
-    await restarted._tick();
-    // _tick() is awaited and the latch decision is taken inside it, so the
-    // no-op is already decided; there is no later condition to poll for.
-    expect(nd.db.checkpoints.length, 'no extra checkpoint after restart').to.equal(1);
-    expect(nd.db.checkpoints[0].checkpoint_seq).to.equal(seqAfterBoot);
-
-    // Once btcBlock advances past the interval, it checkpoints again.
-    restarted.hub._resolveBtcLatestBlock = async () => 100 + restarted.intervalBlocks;
-    await restarted._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 2, {
-      label: 'the post-interval tick to write a second checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'checkpoints again past the interval').to.equal(2);
-  });
-}
-function registerSplitSuitePart3() {
-  it('N=4: leader collects 2f+1, every node writes the same quorum-signed row', async function () {
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1), {
-      label: 'every node to write the quorum-signed row'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' rows').to.equal(1);
-      let sigs = JSON.parse(nd.db.checkpoints[0].validator_signatures);
-      expect(sigs.length).to.be.at.least(3); // quorum 2f+1 = 3
-      let canon = StateCheckpointEngine.canonicalCheckpoint(bus.nodes[0].finalized[0] ? bus.nodes[0].finalized[0].checkpoint : nd.db.checkpoints[0]);
-      expect(sigs.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
-    }
-    // Only the cadence leader emits as leader, but all nodes hold identical rows.
-    let rows = bus.nodes.map(nd => JSON.stringify([nd.db.checkpoints[0].chain, nd.db.checkpoints[0].block_index, nd.db.checkpoints[0].ledger_hash, nd.db.checkpoints[0].checkpoint_seq]));
-    expect(new Set(rows).size).to.equal(1);
-  });
-  it('every node (followers included) persists the oracle_publish snapshot at finalize', async function () {
-    // Bug-C analog: only the cadence leader persisted capability_snapshots
-    // (in _tick), but ANCHOR verifiers check checkpoint signatures against
-    // whichever hub DB they mirror; a follower's DB may be the only one
-    // they read.
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1 && nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101).length === 4), {
-      label: 'every node to persist the checkpoint and its oracle_publish snapshot'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' checkpoint').to.equal(1);
-      let snaps = nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101);
-      expect(snaps.length, 'node ' + nd.i + ' snapshot rows').to.equal(4);
-    }
-  });
-}
-function registerSplitSuitePart4() {
-  it('a diverged replica refuses to sign; 3 honest of 4 still reach quorum', async function () {
+  it('two diverged replicas of 4 → no quorum, nothing written anywhere', async function () {
     let bus = buildMesh(4, {
       btcBlock: 101,
       hashesFor: self => {
         let leader = leaderNode(buses[0], 101);
-        if (self !== leader && self.i === divergedIndex(buses[0], leader)) {
-          return Object.assign({}, TIP, {
-            ledger_hash: 'ff'.repeat(32)
-          }); // diverged state
-        }
+        let followers = buses[0].nodes.filter(nd => nd !== leader);
+        if (self === followers[0] || self === followers[1]) return Object.assign({}, TIP, {
+          ledger_hash: 'ff'.repeat(32)
+        });
         return TIP;
       }
     });
-    function divergedIndex(b, leader) {
-      return b.nodes.find(nd => nd !== leader).i;
-    }
     await startAll(bus);
     await tickAll(bus);
-    await waitUntil(() => leaderNode(bus, 101).db.checkpoints.length === 1, {
-      label: 'the leader to reach quorum without the diverged replica'
+    // Quorum (3) is unreachable, so wait on the stall point: the leader holds its
+    // own signature plus the one honest follower's and can collect no more.
+    await waitUntil(() => {
+      let round = [...leaderNode(bus, 101).engine.pending.values()][0];
+      return round && round.signatures.size >= 2;
+    }, {
+      label: 'the single honest co-sign to reach the leader'
     });
+    for (let nd of bus.nodes) expect(nd.db.checkpoints.length, 'node ' + nd.i).to.equal(0);
+  });
+}
+function registerSplitSuitePart2() {
+  it('followers never co-sign a stale checkpoint_seq (replay guard)', async function () {
+    let bus = buildMesh(4, {
+      btcBlock: 101
+    });
+    await startAll(bus);
+    // seq is derived from snapshot_block, so the leader proposes seq 101
+    // (btcBlock 101). Pre-record that same seq on every follower so the proposal
+    // is a genuine replay (cp.checkpoint_seq 101 <= recorded maxSeq 101).
     let leader = leaderNode(bus, 101);
-    expect(leader.db.checkpoints.length).to.equal(1);
-    let sigs = JSON.parse(leader.db.checkpoints[0].validator_signatures);
-    expect(sigs.length).to.equal(3); // 4 minus the diverged refuser
-    let diverged = bus.nodes.find(nd => nd !== leader);
-    expect(sigs.some(s => s.pubkey === diverged.pubkey)).to.be.false;
+    for (let nd of bus.nodes) {
+      if (nd === leader) continue;
+      nd.db.checkpoints.push({
+        id: 1,
+        chain: 'BTC',
+        network: 'regtest',
+        block_index: 1,
+        block_hash: '',
+        ledger_hash: '',
+        actions_hash: '',
+        contract_hash: '',
+        checkpoint_seq: 101,
+        snapshot_block: 101,
+        validator_signatures: '[]'
+      });
+    }
+    let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== leader), 'handleSignReq');
+    await tickAll(bus);
+    await waitUntil(() => reqsHandled() === bus.nodes.length - 1, {
+      label: 'every follower to finish judging the replayed SIGN_REQ'
+    });
+    // No follower signed → leader stuck below quorum → no new row on the leader.
+    expect(leader.db.checkpoints.length).to.equal(0);
+  });
+}
+function registerSplitSuitePart3() {
+  it('SIGN_REQ from a non-leader validator is ignored', async function () {
+    let bus = buildMesh(4, {
+      btcBlock: 101
+    });
+    await startAll(bus);
+    let leader = leaderNode(bus, 101);
+    let impostor = bus.nodes.find(nd => nd !== leader);
+    let cp = {
+      chain: 'BTC',
+      network: TIP.network,
+      block_index: TIP.block_index,
+      block_hash: TIP.block_hash,
+      ledger_hash: TIP.ledger_hash,
+      actions_hash: TIP.actions_hash,
+      contract_hash: TIP.contract_hash,
+      // seq must match the value derived from snapshot_block, so the REQ
+      // clears the deterministic-seq guard and is rejected specifically by the
+      // non-leader (cadence) check we are exercising here.
+      checkpoint_seq: 101,
+      snapshot_block: 101
+    };
+    let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
+    let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== impostor), 'handleSignReq');
+    // Impostor broadcasts a well-formed, correctly signed REQ, but isn't the cadence leader.
+    impostor.engine.peerManager.broadcast(StateCheckpointEngine.XCHK_SIGN_REQ, {
+      checkpoint: cp,
+      sig_pubkey: impostor.pubkey,
+      sig: impostor.identity.sign(canon)
+    });
+    await waitUntil(() => reqsHandled() === bus.nodes.length - 1, {
+      label: 'every peer to finish judging the non-leader SIGN_REQ'
+    });
+    for (let nd of bus.nodes) expect(nd.db.checkpoints.length, 'node ' + nd.i).to.equal(0);
+  });
+}
+function registerSplitSuitePart4() {
+  it('multi-chain: one cadence tick checkpoints EVERY configured chain (BTC,LTC,DOGE)', async function () {
+    // The per-chain loop in _tick (one round per chain under a single cadence leader)
+    // is otherwise only exercised single-chain. A single-validator set self-signs each
+    // chain's round immediately, so one tick must land one row per configured chain.
+    let bus = buildMesh(1, {
+      btcBlock: 100,
+      chains: ['BTC', 'LTC', 'DOGE']
+    });
+    await startAll(bus);
+    await tickAll(bus);
+    await waitUntil(() => bus.nodes[0].db.checkpoints.length === 3, {
+      label: 'one tick to checkpoint all three configured chains'
+    });
+    let nd = bus.nodes[0];
+    expect(nd.db.checkpoints.map(r => r.chain).sort()).to.deep.equal(['BTC', 'DOGE', 'LTC']);
+    // Each chain's row carries its own valid self-signature over its own canonical
+    // (the chain name is part of the preimage, so the three sigs are distinct).
+    for (let row of nd.db.checkpoints) {
+      let sigs = JSON.parse(row.validator_signatures);
+      expect(sigs.length, row.chain + ' sigs').to.equal(1);
+      let canon = StateCheckpointEngine.canonicalCheckpoint(row);
+      expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey), row.chain + ' verifies').to.be.true;
+    }
+  });
+  it('confirmations offset: checkpoints the tip MINUS CHECKPOINT_CONFIRMATIONS (snapshot_block unchanged)', async function () {
+    // tip.block_index = 500; runRound re-fetches getblockhashes at (tip - confirmations),
+    // so the persisted block_index is 497 while snapshot_block tracks the BTC cadence block.
+    let bus = buildMesh(1, {
+      btcBlock: 100,
+      confirmations: 3,
+      hashesFor: (self, params) => Object.assign({}, TIP, params && params.block_index != null ? {
+        block_index: params.block_index
+      } : {})
+    });
+    await startAll(bus);
+    await tickAll(bus);
+    await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, {
+      label: 'the offset round to write its checkpoint'
+    });
+    let nd = bus.nodes[0];
+    expect(nd.db.checkpoints.length).to.equal(1);
+    expect(nd.db.checkpoints[0].block_index, 'tip minus confirmations').to.equal(TIP.block_index - 3); // 497
+    expect(nd.db.checkpoints[0].snapshot_block, 'cadence block, not offset').to.equal(100);
   });
 }
 describe('StateCheckpointEngine', function () {

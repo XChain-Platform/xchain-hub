@@ -102,161 +102,181 @@ async function startAll(bus) {
 async function tickAll(bus) {
   for (let nd of bus.nodes) await nd.engine._tick();
 }
+
+// ── Follower co-sign freshness bound (finding 1781) ─────────────────────
+// The follower must decline to co-sign a SIGN_REQ whose leader-supplied
+// snapshot_block deviates from its OWN resolved BTC tip beyond
+// cosignToleranceBlocks. snapshot_block selects the validator set and every
+// flag-day gate, so an unbounded stale value enables leader-grinding and
+// flag-day regression. Fail-closed when we cannot resolve our own tip.
+
+// Build a valid SIGN_REQ for `snapshotBlock`, signed by the cadence
+// leader for that block, using the shared TIP block data.
+function makeSignReq(bus, snapshotBlock) {
+  let leader = leaderNode(bus, snapshotBlock);
+  let cp = {
+    chain: 'BTC',
+    network: TIP.network,
+    block_index: TIP.block_index,
+    block_hash: TIP.block_hash,
+    ledger_hash: TIP.ledger_hash,
+    actions_hash: TIP.actions_hash,
+    contract_hash: TIP.contract_hash,
+    // seq is derived from snapshot_block; use the derived value so
+    // these freshness-bound cases exercise the freshness guard, not the seq guard.
+    checkpoint_seq: snapshotBlock,
+    snapshot_block: snapshotBlock,
+    state_root: TIP.state_root,
+    state_root_version: TIP.state_root_version,
+    block_merkle_root: TIP.block_merkle_root,
+    block_merkle_version: TIP.block_merkle_version
+  };
+  let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
+  let sig = leader.identity.sign(canonical);
+  let env = {
+    type: 'XCHK_SIGN_REQ',
+    sender: leader.pubkey,
+    data: {
+      checkpoint: cp,
+      sig_pubkey: leader.pubkey,
+      sig
+    }
+  };
+  let follower = bus.nodes.find(nd => nd.pubkey !== leader.pubkey);
+  return {
+    env,
+    follower
+  };
+}
+
+// Record XCHK_SIGN co-sign broadcasts from a follower.
+function watchCosign(follower) {
+  let signs = [];
+  let pm = follower.engine.peerManager;
+  let orig = pm.broadcast.bind(pm);
+  pm.broadcast = (type, data) => {
+    if (type === 'XCHK_SIGN') signs.push(data);
+    return orig(type, data);
+  };
+  return signs;
+}
 function registerSplitSuitePart1() {
+  it('co-signs a SIGN_REQ whose snapshot_block matches our own BTC tip (fresh)', async function () {
+    let SNAP = 500;
+    let bus = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0
+    });
+    let {
+      env,
+      follower
+    } = makeSignReq(bus, SNAP);
+    follower.hub._resolveBtcLatestBlock = async () => SNAP; // exactly fresh
+    let signs = watchCosign(follower);
+    await follower.engine.handleSignReq(env);
+    expect(signs.length, 'follower co-signed a fresh snapshot_block').to.equal(1);
+  });
+  it('declines to co-sign when snapshot_block is staler than the tolerance', async function () {
+    let SNAP = 500;
+    let bus = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0
+    });
+    let {
+      env,
+      follower
+    } = makeSignReq(bus, SNAP);
+    // Our tip has moved well past the proposed snapshot_block (> default 144).
+    follower.hub._resolveBtcLatestBlock = async () => SNAP + 200;
+    expect(200).to.be.greaterThan(follower.engine.cosignToleranceBlocks);
+    let signs = watchCosign(follower);
+    await follower.engine.handleSignReq(env);
+    expect(signs.length, 'stale snapshot_block declined').to.equal(0);
+  });
+}
+function registerSplitSuitePart2() {
+  it('fails closed (declines) when it cannot resolve its own BTC tip', async function () {
+    let SNAP = 500;
+    let bus = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0
+    });
+    let {
+      env,
+      follower
+    } = makeSignReq(bus, SNAP);
+    follower.hub._resolveBtcLatestBlock = async () => null; // no own tip
+    let signs = watchCosign(follower);
+    await follower.engine.handleSignReq(env);
+    expect(signs.length, 'missing own tip fails closed').to.equal(0);
+  });
+
+  // Review board #7582: a MALFORMED tolerance must not disable this whole guard.
+  // parseInt('invalid') is NaN and `Math.abs(delta) > NaN` is always false, so an
+  // unclamped typo in CHECKPOINT_COSIGN_TOLERANCE_BLOCKS silently removes the
+  // freshness bound on a wire field that selects the validator set, the leader
+  // ladder and every flag-day gate. The constructor clamps to the default on any
+  // non-negative failure, which is the idiom `confirmations` two lines above uses.
+  it('a MALFORMED tolerance falls back to the default and still declines a stale request', async function () {
+    let SNAP = 500;
+    let bus = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0,
+      cosignTolerance: 'invalid'
+    });
+    let {
+      env,
+      follower
+    } = makeSignReq(bus, SNAP);
+    expect(follower.engine.cosignToleranceBlocks, 'a nonnumeric value must not become NaN').to.equal(144);
+    follower.hub._resolveBtcLatestBlock = async () => SNAP + 9900;
+    let signs = watchCosign(follower);
+    await follower.engine.handleSignReq(env);
+    expect(signs.length, 'a 9,900-block-stale snapshot_block must be declined').to.equal(0);
+  });
+}
+function registerSplitSuitePart3() {
+  it('honours a VALID operator tolerance in both directions', async function () {
+    let SNAP = 500;
+    let bus = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0,
+      cosignTolerance: '10'
+    });
+    let {
+      env,
+      follower
+    } = makeSignReq(bus, SNAP);
+    expect(follower.engine.cosignToleranceBlocks).to.equal(10);
+    follower.hub._resolveBtcLatestBlock = async () => SNAP + 5; // inside the window
+    let signs = watchCosign(follower);
+    await follower.engine.handleSignReq(env);
+    expect(signs.length, 'a value the default would also accept is co-signed').to.equal(1);
+    let bus2 = buildMesh(2, {
+      btcBlock: SNAP,
+      confirmations: 0,
+      cosignTolerance: '10'
+    });
+    let second = makeSignReq(bus2, SNAP);
+    second.follower.hub._resolveBtcLatestBlock = async () => SNAP + 50; // outside 10, inside 144
+    let signs2 = watchCosign(second.follower);
+    await second.follower.engine.handleSignReq(second.env);
+    expect(signs2.length, 'a tightened window is actually enforced').to.equal(0);
+  });
+}
+function registerSplitSuitePart4() {
   afterEach(async function () {
     for (let bus of buses) {
       for (let nd of bus.nodes) await nd.engine.stop();
     }
     buses = [];
   });
-  it('canonical string matches the ANCHOR spec byte-for-byte', function () {
-    let canon = StateCheckpointEngine.canonicalCheckpoint({
-      chain: 'BTC',
-      network: 'mainnet',
-      block_index: 900123,
-      block_hash: 'ab'.repeat(32),
-      ledger_hash: 'cd'.repeat(32),
-      actions_hash: 'ef'.repeat(32),
-      contract_hash: '01'.repeat(32),
-      checkpoint_seq: 417,
-      snapshot_block: 900120
-    });
-    expect(canon).to.equal('XCHECKPOINT|BTC|mainnet|900123|' + 'ab'.repeat(32) + '|' + 'cd'.repeat(32) + '|' + 'ef'.repeat(32) + '|' + '01'.repeat(32) + '|417|900120');
-  });
-  it('N=1: single-validator set self-signs and writes immediately', async function () {
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, {
-      label: 'the single-validator round to self-sign and write'
-    });
-    let nd = bus.nodes[0];
-    expect(nd.finalized.length).to.equal(1);
-    expect(nd.db.checkpoints.length).to.equal(1);
-    let row = nd.db.checkpoints[0];
-    expect(row.chain).to.equal('BTC');
-    expect(row.block_index).to.equal(TIP.block_index);
-    let sigs = JSON.parse(row.validator_signatures);
-    expect(sigs.length).to.equal(1);
-    let canon = StateCheckpointEngine.canonicalCheckpoint(nd.finalized[0].checkpoint);
-    expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey)).to.be.true;
-    // Streamed to the indexer mirror (capability snapshot rows + the checkpoint row).
-    expect(nd.hub.hubDbBroadcaster.rows.some(r => r.table === 'state_checkpoints')).to.be.true;
-  });
-}
-function registerSplitSuitePart2() {
-  it('restart does not re-checkpoint: cadence latch is restored from persisted rows', async function () {
-    // First boot: one checkpoint at btcBlock 100 (default intervalBlocks 6).
-    let bus = buildMesh(1, {
-      btcBlock: 100
-    });
-    let nd = bus.nodes[0];
-    await nd.engine.start();
-    await nd.engine._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 1, {
-      label: 'the first boot to write its checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'after first boot').to.equal(1);
-    let seqAfterBoot = nd.db.checkpoints[0].checkpoint_seq;
-
-    // Simulate a restart: a fresh engine over the SAME hub/db, btcBlock
-    // unchanged (no new interval elapsed). Pre-fix this re-checkpointed
-    // immediately (latch null) and burned another on-chain anchor round.
-    let restarted = new StateCheckpointEngine(nd.hub);
-    restarted._indexerCall = async () => Object.assign({}, TIP);
-    await restarted.start();
-    expect(restarted._lastCheckpointBtcBlock, 'latch restored on start').to.equal(100);
-    await restarted._tick();
-    // _tick() is awaited and the latch decision is taken inside it, so the
-    // no-op is already decided; there is no later condition to poll for.
-    expect(nd.db.checkpoints.length, 'no extra checkpoint after restart').to.equal(1);
-    expect(nd.db.checkpoints[0].checkpoint_seq).to.equal(seqAfterBoot);
-
-    // Once btcBlock advances past the interval, it checkpoints again.
-    restarted.hub._resolveBtcLatestBlock = async () => 100 + restarted.intervalBlocks;
-    await restarted._tick();
-    await waitUntil(() => nd.db.checkpoints.length === 2, {
-      label: 'the post-interval tick to write a second checkpoint'
-    });
-    expect(nd.db.checkpoints.length, 'checkpoints again past the interval').to.equal(2);
-  });
-}
-function registerSplitSuitePart3() {
-  it('N=4: leader collects 2f+1, every node writes the same quorum-signed row', async function () {
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1), {
-      label: 'every node to write the quorum-signed row'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' rows').to.equal(1);
-      let sigs = JSON.parse(nd.db.checkpoints[0].validator_signatures);
-      expect(sigs.length).to.be.at.least(3); // quorum 2f+1 = 3
-      let canon = StateCheckpointEngine.canonicalCheckpoint(bus.nodes[0].finalized[0] ? bus.nodes[0].finalized[0].checkpoint : nd.db.checkpoints[0]);
-      expect(sigs.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
-    }
-    // Only the cadence leader emits as leader, but all nodes hold identical rows.
-    let rows = bus.nodes.map(nd => JSON.stringify([nd.db.checkpoints[0].chain, nd.db.checkpoints[0].block_index, nd.db.checkpoints[0].ledger_hash, nd.db.checkpoints[0].checkpoint_seq]));
-    expect(new Set(rows).size).to.equal(1);
-  });
-  it('every node (followers included) persists the oracle_publish snapshot at finalize', async function () {
-    // Bug-C analog: only the cadence leader persisted capability_snapshots
-    // (in _tick), but ANCHOR verifiers check checkpoint signatures against
-    // whichever hub DB they mirror; a follower's DB may be the only one
-    // they read.
-    let bus = buildMesh(4, {
-      btcBlock: 101
-    });
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1 && nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101).length === 4), {
-      label: 'every node to persist the checkpoint and its oracle_publish snapshot'
-    });
-    for (let nd of bus.nodes) {
-      expect(nd.db.checkpoints.length, 'node ' + nd.i + ' checkpoint').to.equal(1);
-      let snaps = nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101);
-      expect(snaps.length, 'node ' + nd.i + ' snapshot rows').to.equal(4);
-    }
-  });
-}
-function registerSplitSuitePart4() {
-  it('a diverged replica refuses to sign; 3 honest of 4 still reach quorum', async function () {
-    let bus = buildMesh(4, {
-      btcBlock: 101,
-      hashesFor: self => {
-        let leader = leaderNode(buses[0], 101);
-        if (self !== leader && self.i === divergedIndex(buses[0], leader)) {
-          return Object.assign({}, TIP, {
-            ledger_hash: 'ff'.repeat(32)
-          }); // diverged state
-        }
-        return TIP;
-      }
-    });
-    function divergedIndex(b, leader) {
-      return b.nodes.find(nd => nd !== leader).i;
-    }
-    await startAll(bus);
-    await tickAll(bus);
-    await waitUntil(() => leaderNode(bus, 101).db.checkpoints.length === 1, {
-      label: 'the leader to reach quorum without the diverged replica'
-    });
-    let leader = leaderNode(bus, 101);
-    expect(leader.db.checkpoints.length).to.equal(1);
-    let sigs = JSON.parse(leader.db.checkpoints[0].validator_signatures);
-    expect(sigs.length).to.equal(3); // 4 minus the diverged refuser
-    let diverged = bus.nodes.find(nd => nd !== leader);
-    expect(sigs.some(s => s.pubkey === diverged.pubkey)).to.be.false;
+  describe('co-sign freshness bound (finding 1781)', function () {
+    registerSplitSuitePart1();
+    registerSplitSuitePart2();
+    registerSplitSuitePart3();
   });
 }
 describe('StateCheckpointEngine', function () {
-  registerSplitSuitePart1();
-  registerSplitSuitePart2();
-  registerSplitSuitePart3();
   registerSplitSuitePart4();
 });
