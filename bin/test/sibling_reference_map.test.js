@@ -118,6 +118,59 @@ describe('bin/sibling-reference-map.js', function () {
                 `expected the resolved carrier list, got ${sites[0].listCandidates.length}`);
             assert.ok(sites[0].listCandidates.includes('src/rollcall_activation.js'));
         });
+
+        it('sees a require of path.join over __dirname, resolved through the calls of its function', () => {
+            const source = [
+                "const path = require('path');",
+                'function loadActivation(moduleName, predicate){',
+                "    try { return require(path.join(__dirname, '..', moduleName + '.js'))[predicate]; } catch (e) { return null; }",
+                '}',
+                "const gates = { bridge: loadActivation('xchain_bridge_activation', 'isOn'), token: loadActivation('token_bridge_activation', 'isOn') };",
+            ].join('\n');
+            const sites = refs.computedRequireSites(source, 'src/cross_chain');
+            assert.strictEqual(sites.length, 1);
+            assert.deepStrictEqual(sites[0].listCandidates, ['src/xchain_bridge_activation.js', 'src/token_bridge_activation.js']);
+        });
+
+        it('follows a name bound to path.join into the require that loads it, through the loop that calls its function', () => {
+            const source = [
+                "const GATES = [['rollcall_activation', ['A']], ['xcall_activation', ['B']]];",
+                'function loadGateModule(mod){',
+                "    const file = path.join(__dirname, mod + '.js');",
+                '    return require(file);',
+                '}',
+                'function loadAll(){ for (const [mod, names] of GATES) { loadGateModule(mod); } }',
+            ].join('\n');
+            const sites = refs.computedRequireSites(source, 'src');
+            assert.strictEqual(sites.length, 1);
+            assert.deepStrictEqual(sites[0].listCandidates, ['src/rollcall_activation.js', 'src/xcall_activation.js']);
+        });
+
+        it('still sees the concatenated form inside its loop', () => {
+            const source = "for (const mod of ['a_activation', 'b_activation']) { m = require('./' + mod + '.js'); }";
+            const sites = refs.computedRequireSites(source, 'src');
+            assert.strictEqual(sites.length, 1);
+            assert.deepStrictEqual(sites[0].listCandidates, ['src/a_activation.js', 'src/b_activation.js']);
+        });
+
+        it('reports a require of an unbound name as a site with no candidates, and a literal binding as none', () => {
+            const sites = refs.computedRequireSites('function load(modulePath){ return require(modulePath); }', 'src/lib');
+            assert.strictEqual(sites.length, 1);
+            assert.deepStrictEqual(sites[0].listCandidates, []);
+            const literal = "const file = path.join(__dirname, 'x.js');\nconst other = './y.js';\nrequire(file); require(other); require('./z.js');";
+            assert.strictEqual(refs.computedRequireSites(literal, 'src').length, 0);
+        });
+
+        it('finds the bridge gates and the provider loader in this tree, each in its current spelling', () => {
+            const src = path.resolve(__dirname, '../../src');
+            const read = (rel) => fs.readFileSync(path.join(src, rel), 'utf8');
+            const bridge = refs.computedRequireSites(read('cross_chain/bridge_engine.js'), 'src/cross_chain');
+            assert.strictEqual(bridge.length, 1, 'one site loads every bridge gate');
+            assert.deepStrictEqual(bridge[0].listCandidates.slice().sort(),
+                ['src/token_bridge_activation.js', 'src/token_policy_activation.js', 'src/xchain_bridge_activation.js']);
+            assert.strictEqual(refs.computedRequireSites(read('validators/provider_registry.js'), 'src/validators').length, 1,
+                'the provider loader builds its path from an id read at run time');
+        });
     });
 
     describe('what the sweep must not count', () => {
