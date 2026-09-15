@@ -18,34 +18,35 @@ const { createMockHub }    = require('../helpers/mockHub');
 const { buildSubmissions } = require('../helpers/fixtures');
 const gen                  = require('./helpers/generators');
 
-describe('Fuzz: OracleConsensus', function () {
 
-    let hub, oc, oracleRound;
+
+let hub, oc, oracleRound;
+
+// Helper: build submissions for a single coin pair from an array of prices
+function submissionsForPair(prices, coinPair) {
+    let entries = prices.map((p, i) => ({
+        sender: 'validator-' + i,
+        prices: [{ coinPair: coinPair || 'BTC/USD', price: String(p) }]
+    }));
+    return buildSubmissions(entries);
+}
+function registerBeforeEachHook() {
 
     beforeEach(function () {
         hub = createMockHub();
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         oc = new OracleConsensus(hub, oracleRound);
     });
+}
+
+function registerAfterEachHook() {
 
     afterEach(function () {
         sinon.restore();
     });
+}
 
-    // Helper: build submissions for a single coin pair from an array of prices
-    function submissionsForPair(prices, coinPair) {
-        let entries = prices.map((p, i) => ({
-            sender: 'validator-' + i,
-            prices: [{ coinPair: coinPair || 'BTC/USD', price: String(p) }]
-        }));
-        return buildSubmissions(entries);
-    }
-
-    // -----------------------------------------------------------------
-    // _aggregate()
-    // -----------------------------------------------------------------
-
-    describe('_aggregate()', function () {
+function registerAggregateTestCases1() {
 
         it('output is always null or a valid 8-decimal string', function () {
             fc.assert(fc.property(gen.fc_submissionMap(1, 20), gen.fc_knownCoinPair(), function (subs, pair) {
@@ -90,6 +91,9 @@ describe('Fuzz: OracleConsensus', function () {
                 }
             ), { numRuns: 200 });
         });
+}
+
+function registerAggregateTestCases2() {
 
         it('output is always positive when not null (with finite inputs)', function () {
             // Note: The generator only produces finite positive prices, so this
@@ -144,6 +148,9 @@ describe('Fuzz: OracleConsensus', function () {
                 }
             ), { numRuns: 200 });
         });
+}
+
+function registerAggregateTestCases3() {
 
         it('Infinity is correctly filtered out by _aggregate', function () {
             let entries = [
@@ -198,6 +205,9 @@ describe('Fuzz: OracleConsensus', function () {
                 }
             ), { numRuns: 200 });
         });
+}
+
+function registerAggregateTestCases4() {
 
         it('unknown coin pair always returns null', function () {
             fc.assert(fc.property(
@@ -210,7 +220,24 @@ describe('Fuzz: OracleConsensus', function () {
                 }
             ), { numRuns: 100 });
         });
+
+}
+
+function registerAggregateTests() {
+
+    // -----------------------------------------------------------------
+    // _aggregate()
+    // -----------------------------------------------------------------
+
+    describe('_aggregate()', function () {
+        registerAggregateTestCases1();
+        registerAggregateTestCases2();
+        registerAggregateTestCases3();
+        registerAggregateTestCases4();
     });
+}
+
+function registerAggregateAllTests() {
 
     // -----------------------------------------------------------------
     // _aggregateAll()
@@ -239,6 +266,9 @@ describe('Fuzz: OracleConsensus', function () {
             }), { numRuns: 200 });
         });
     });
+}
+
+function registerGetQuorumTests() {
 
     // -----------------------------------------------------------------
     // getQuorum()
@@ -270,6 +300,9 @@ describe('Fuzz: OracleConsensus', function () {
             }), { numRuns: 100 });
         });
     });
+}
+
+function registerDigestTests() {
 
     // -----------------------------------------------------------------
     // _digest()
@@ -309,6 +342,9 @@ describe('Fuzz: OracleConsensus', function () {
             ), { numRuns: 200 });
         });
     });
+}
+
+function registerGetLeaderTests() {
 
     // -----------------------------------------------------------------
     // _getLeader()
@@ -348,4 +384,13 @@ describe('Fuzz: OracleConsensus', function () {
             }), { numRuns: 50 });
         });
     });
+}
+describe('Fuzz: OracleConsensus', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerAggregateTests();
+    registerAggregateAllTests();
+    registerGetQuorumTests();
+    registerDigestTests();
+    registerGetLeaderTests();
 });
