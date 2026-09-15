@@ -73,6 +73,14 @@ const GOLDEN_HASH = {
 };
 
 function registerRegistryBasics() {
+    // These four cases pin the coin registry's public surface: the fixed
+    // launch list, the per-network config shape every caller depends on,
+    // the explicit failure on an unknown tick or network (a caller must
+    // never silently fall through to undefined config), and the golden
+    // consensus hash itself. Every other helper in this file assumes the
+    // registry still looks like this, so a regression here is the first
+    // signal, not a downstream wireFormat or firstBlock failure that would
+    // otherwise be harder to trace back to its actual cause.
     it('exposes the three launch coins with full-name mappings', () => {
         expect(coins.ALLOWED_COINS).to.deep.equal(['BTC', 'LTC', 'DOGE']);
         expect(coins.COIN_FULL_NAME).to.deep.equal({ BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' });
@@ -111,6 +119,14 @@ function registerRegistryBasics() {
 }
 
 function registerWireFormatTests() {
+    // Three cases, one property each: the map itself resolves to the value
+    // every vendoring service bundles, folding it into the hash actually
+    // changes the hash when it differs, and a display-only field that has
+    // no business being consensus-critical stays out of the pinned subset.
+    // Keeping these as separate cases means a failure names exactly which
+    // of the three broke, rather than a single combined assertion whose
+    // failure message would still need to be traced back to one of them by
+    // hand.
     // This test once asserted the OPPOSITE: that wireFormat stayed
     // OUT of the consensus hash. That was the bug. wireFormat selects the block
     // parser (XChainBlockDecoder keys default/mweb/auxpow off it, and XChainDecoder
@@ -152,6 +168,10 @@ function registerWireFormatTests() {
 }
 
 function registerFirstBlockTests() {
+    // The firstBlock twin of the wireFormat tests above, asserted the same
+    // way for the same reason: prove the field is folded into the hash, then
+    // prove folding it in actually changes the hash when the value differs,
+    // so the second case cannot pass by coincidence if the fold is removed.
     // The firstBlock twin of the wireFormat fold above. This test once
     // asserted firstBlock stayed OUT of the subset on the reading that a scan start is
     // node-local. It is not: the decoder sets startBlockIndex from it
@@ -180,6 +200,14 @@ function registerFirstBlockTests() {
 }
 
 describe('coins registry', () => {
+    // The three helpers above are grouped by what each one guards, not by
+    // call order: registry sanity, the wireFormat fold, and the firstBlock
+    // fold are three independent ways the consensus hash can silently stop
+    // matching what every vendoring service actually bundles, so each earns
+    // its own coverage rather than being asserted once and assumed to cover
+    // the others. A change that breaks only one of the three should fail
+    // only its own case, so the failing test name says which invariant
+    // actually broke instead of leaving that to a debugging session.
     registerRegistryBasics();
     registerWireFormatTests();
     registerFirstBlockTests();

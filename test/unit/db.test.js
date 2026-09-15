@@ -74,6 +74,10 @@ function registerCircuitBreakerTests() {
     // -----------------------------------------------------------------
     // Circuit breaker
     // -----------------------------------------------------------------
+    // A stalled MariaDB host otherwise costs every caller a full connect timeout
+    // on every query, one at a time, until the pool itself starves. Tripping open
+    // after a threshold of failures fails fast instead, and the half-open probe
+    // below is what lets the hub notice recovery without a restart.
 
     describe('circuit breaker', function () {
         let db;
