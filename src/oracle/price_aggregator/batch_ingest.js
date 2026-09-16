@@ -60,7 +60,8 @@ function duplicateBatchRoundRead(round) {
 // quantity from every other time column here: block_timestamp is when the
 // round was priced, this is when the chain could first show it. Fee pricing
 // bounds itself on it so a hub-connected node and a chain-only node select
-// the same round (price_fee_batch_landed_activation.js in the indexer).
+// the same round (the indexer's registry row
+// price_fee_batch_landed_activation.PRICE_FEE_BATCH_LANDED_ACTIVATION in src/protocol_changes/gates_2.js).
 // The round's admission map lands in its per-chain columns, every federation
 // column named so a legacy round NULLs them rather than leaving a default a later
 // schema edit could change under a signed row. Appended AFTER created_at so every
