@@ -30,6 +30,9 @@ const crypto = require('crypto');
 const dns    = require('dns');
 const net    = require('net');
 const { URL } = require('url');
+const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 const USER_AGENT = 'XChain-Attestation/1.0';
 
@@ -56,7 +59,7 @@ const USER_AGENT = 'XChain-Attestation/1.0';
 // attestation fleet into an internal port scanner and make that hub fetch a
 // URL its peers structurally cannot reach, diverging the round. Same shape as
 // the platform's other regtest-only seams (OracleConsensus
-// ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub._oracleMaxAgeSeconds).
+// ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub.oracleMaxAgeSeconds).
 //
 // The network comes from `options.network` first (AttestationRound passes the
 // hub's api.js-validated HUB_NETWORK; the e2e harness runs several hubs in one
@@ -148,13 +151,9 @@ function pinnedLookup(pinned) {
     };
 }
 
-// Issue a GET against `url`. https only, no redirects, no cookies, fixed UA,
-// configurable timeout and body cap. Returns { body: Buffer, meta: '<status>' }.
-exports.fetch = async (payload, options) => {
-    options       = options || {};
-    let maxBytes  = Number(options.maxResponseBytes) || 32768;
-    let timeoutMs = Number(options.timeoutMs)        || 10000;
-
+// Parses `payload` as an https URL. Throws on a non-string, an unparseable URL or
+// any other scheme.
+function parseHttpsUrl(payload) {
     if (!payload || typeof payload !== 'string')
         throw new Error('http_get: payload must be a string URL');
 
@@ -163,25 +162,61 @@ exports.fetch = async (payload, options) => {
     catch (_) { throw new Error('http_get: invalid URL'); }
     if (url.protocol !== 'https:')
         throw new Error('http_get: only https:// URLs allowed');
+    return url;
+}
 
-    // WHATWG URL keeps brackets on IPv6 literals; strip for net/dns use.
-    const bareHost = url.hostname.replace(/^\[|\]$/g, '');
+// True when the ATTESTATION_HTTP_GET_ALLOW_PRIVATE hatch applies to this request,
+// which is only on regtest. Synchronous on purpose, so a hatched request is still
+// issued inside the fetch call itself, before any await.
+function isPrivateHatchHonored(options) {
     // Escape hatch, network-gated (see the header). Off regtest the hatch is
     // dropped and the full guard runs: the literal check, the resolve-once
-    // rejection of any non-public answer, and the pinned `lookup` below.
-    const hatchSet = process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1';
-    const network  = String(options.network || process.env.HUB_NETWORK || '').toLowerCase();
+    // rejection of any non-public answer, and the pinned `lookup` in issueGet.
+    const hatchSet = hubConfig.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1';
+    const network  = String(options.network || hubConfig.HUB_NETWORK || '').toLowerCase();
     if (hatchSet && network !== 'regtest' && !warnedHatchIgnored) {
         warnedHatchIgnored = true;
-        console.log('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +
+        logger.info('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +
             (network || '<unset>') + '; the http_get SSRF guard stays active. This hatch is ' +
             'honored only on regtest, where attesting a local endpoint is the point.');
     }
-    const pinned = (hatchSet && network === 'regtest')
-        ? null
-        : await resolvePinnedAddress(bareHost);
+    return hatchSet && network === 'regtest';
+}
 
-    return await new Promise((resolve, reject) => {
+// Buffers one response up to `maxBytes`, destroying the request past the cap, and
+// settles with { body, meta } on end.
+function collectResponse(res, req, maxBytes, safeResolve, safeReject) {
+    // No automatic redirects: a 3xx terminates with the body as-is so callers
+    // can decide policy. byte_equality is stricter without redirect chaos.
+    let chunks = [];
+    let total  = 0;
+    res.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > maxBytes) {
+            req.destroy();
+            safeReject(new Error('http_get: response exceeds maxResponseBytes (' + maxBytes + ')'));
+            return;
+        }
+        chunks.push(chunk);
+    });
+    // meta = the HTTP status code, and it is INTENTIONALLY part of the
+    // agreement key (agree() groups on SHA256(body || meta)): a contract
+    // attesting a URL agrees on what the server actually said, status
+    // included, so a 200 body and a 500/404 body never collide. The
+    // tradeoff is that an endpoint returning different statuses to
+    // different validators (caching 200/304, rate-limit 429/503,
+    // load-balanced backends) fails to reach quorum and the request
+    // expires rather than surfacing a retryable error. This is by design;
+    // callers must point http_get at a byte-and-status-stable endpoint
+    // (see xchain-documentation protocol/providers/README.md).
+    res.on('end',   () => safeResolve({ body: Buffer.concat(chunks), meta: String(res.statusCode) }));
+    res.on('error', (e) => safeReject(new Error('http_get: response error: ' + e.message)));
+}
+
+// Issues the GET, pinned to `pinned` when it is set, and settles exactly once:
+// with the response, or with an Error on overflow, transport failure or timeout.
+function issueGet(url, pinned, maxBytes, timeoutMs) {
+    return new Promise((resolve, reject) => {
         let settled = false;
         let safeReject = (e) => { if (!settled) { settled = true; reject(e); } };
         let safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
@@ -197,33 +232,7 @@ exports.fetch = async (payload, options) => {
             // Host header still use the hostname). Undefined only when the
             // regtest-gated ATTESTATION_HTTP_GET_ALLOW_PRIVATE hatch applied.
             lookup:   pinned ? pinnedLookup(pinned) : undefined
-        }, (res) => {
-            // No automatic redirects: a 3xx terminates with the body as-is so callers
-            // can decide policy. byte_equality is stricter without redirect chaos.
-            let chunks = [];
-            let total  = 0;
-            res.on('data', (chunk) => {
-                total += chunk.length;
-                if (total > maxBytes) {
-                    req.destroy();
-                    safeReject(new Error('http_get: response exceeds maxResponseBytes (' + maxBytes + ')'));
-                    return;
-                }
-                chunks.push(chunk);
-            });
-            // meta = the HTTP status code, and it is INTENTIONALLY part of the
-            // agreement key (agree() groups on SHA256(body || meta)): a contract
-            // attesting a URL agrees on what the server actually said, status
-            // included, so a 200 body and a 500/404 body never collide. The
-            // tradeoff is that an endpoint returning different statuses to
-            // different validators (caching 200/304, rate-limit 429/503,
-            // load-balanced backends) fails to reach quorum and the request
-            // expires rather than surfacing a retryable error. This is by design;
-            // callers must point http_get at a byte-and-status-stable endpoint
-            // (see xchain-documentation protocol/providers/README.md).
-            res.on('end',   () => safeResolve({ body: Buffer.concat(chunks), meta: String(res.statusCode) }));
-            res.on('error', (e) => safeReject(new Error('http_get: response error: ' + e.message)));
-        });
+        }, (res) => collectResponse(res, req, maxBytes, safeResolve, safeReject));
         req.on('error',   (e) => safeReject(new Error('http_get: request error: ' + e.message)));
         req.on('timeout', ()  => { req.destroy(); safeReject(new Error('http_get: timeout after ' + timeoutMs + 'ms')); });
         // Node's https `timeout` option arms an IDLE-socket timer only: it
@@ -238,6 +247,24 @@ exports.fetch = async (payload, options) => {
         req.once('close', () => clearTimeout(deadlineTimer));
         req.end();
     });
+}
+
+// Issue a GET against `url`. https only, no redirects, no cookies, fixed UA,
+// configurable timeout and body cap. Returns { body: Buffer, meta: '<status>' }.
+exports.fetch = async (payload, options) => {
+    options       = options || {};
+    let maxBytes  = Number(options.maxResponseBytes) || 32768;
+    let timeoutMs = Number(options.timeoutMs)        || 10000;
+
+    const url = parseHttpsUrl(payload);
+
+    // WHATWG URL keeps brackets on IPv6 literals; strip for net/dns use.
+    const bareHost = url.hostname.replace(/^\[|\]$/g, '');
+    const pinned = isPrivateHatchHonored(options)
+        ? null
+        : await resolvePinnedAddress(bareHost);
+
+    return await issueGet(url, pinned, maxBytes, timeoutMs);
 };
 
 // byte_equality consensus: group proposals by SHA256(body || meta), return the
@@ -249,7 +276,7 @@ exports.fetch = async (payload, options) => {
 //
 // NOTE: agree() returns a winner body when the simple-majority quorum is met,
 // but finalization of a byte_equality round also requires max(quorum, redundancy)
-// winner-matching signatures (see AttestationConsensus._checkCommitQuorum). A
+// winner-matching signatures (see AttestationConsensus.checkCommitQuorum). A
 // follower only re-signs on byte-identical body match (AttestationConsensus ~582).
 // So when redundancy=3, effective finalization requires 3-of-3 byte-identical
 // signatures, not the 2-of-3 majority this function's quorum check alone suggests.

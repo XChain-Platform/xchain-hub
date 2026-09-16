@@ -75,10 +75,17 @@
 
 'use strict';
 
-const fs   = require('fs');
 const path = require('path');
 
-const SpendCeiling = require('./spend_ceiling.js');
+const SpendCeiling = require('../providers/effector_spend/spend_ceiling.js');
+const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
+// The await-safe reservation and the restart persistence live in
+// src/providers/effector_spend/ and are installed on the prototype below, so every
+// effector keeps calling guard.<method>() on the one class this file exports.
+const reservationMethods = require('../providers/effector_spend/reservation.js');
+const persistenceMethods = require('../providers/effector_spend/persistence.js');
 
 // $2000 AML admission ceiling, in USD cents. The hard clamp on the per-window
 // spend budget: no operator config can raise the effective cap above this.
@@ -104,7 +111,7 @@ class SpendGuard {
     // label:  capability label used in log lines and the pause registry key.
     constructor(prefix, cfg, label){
         cfg = cfg || {};
-        let env = process.env;
+        let env = hubConfig.env();
         this.prefix = prefix;
         this.label  = label || prefix;
 
@@ -169,20 +176,20 @@ class SpendGuard {
     isPaused(){ return this.paused; }
 
     // ---- Gate 2b: cost window helpers ----
-    _prune(now){
+    prune(now){
         let cutoff = now - this.windowMs;
         while (this._spends.length && this._spends[0].t <= cutoff) this._spends.shift();
     }
     spentInWindow(now){
         now = now || Date.now();
-        this._prune(now);
+        this.prune(now);
         let sum = 0;
         for (let e of this._spends) sum += e.cost;
         return sum;
     }
     // Normalize a per-broadcast cost to a positive USD-cents integer, defaulting
     // to the configured estimate when the caller supplies nothing usable.
-    _cost(cost){
+    computeCost(cost){
         let c = Number(cost);
         if (!Number.isFinite(c) || c <= 0) return this.estSpendUsdCents;
         return c;
@@ -205,9 +212,9 @@ class SpendGuard {
         // The store already refused a write, so a spend authorised here could not be
         // recorded. Same fail-closed rule reserve() applies, reached by the sites that
         // use the pure-predicate pair instead.
-        if (!this._storeUsable()){
+        if (!this.storeUsable()){
             this.blocked.persist++;
-            return { ok: false, reason: this._persistBlockedReason() };
+            return { ok: false, reason: this.persistBlockedReason() };
         }
 
         // A configured floor that never receives a balance is silently inert:
@@ -216,7 +223,7 @@ class SpendGuard {
         // (e.g. FullNodeChallengeRound calls check() with no balance argument).
         if (opts.balance === undefined && this.minBalance > 0 && !this._warnedFloorInert){
             this._warnedFloorInert = true;
-            console.warn(this.label + ': ' + this.prefix +
+            logger.warn(this.label + ': ' + this.prefix +
                 '_MIN_BALANCE=' + this.minBalance + ' is configured but check() is called with no balance; ' +
                 'the wallet floor is INERT for this effector (no balance source wired).');
         }
@@ -236,7 +243,7 @@ class SpendGuard {
             return { ok: false, reason: this.ceiling.noteBlocked(now) };
         }
 
-        let cost = this._cost(opts.cost);
+        let cost = this.computeCost(opts.cost);
         if (this.spentInWindow(now) + cost > this.maxSpendUsdCents){
             this.blocked.spend++;
             return { ok: false, reason: this.label + ': rolling per-window spend ceiling reached ($' +
@@ -251,242 +258,9 @@ class SpendGuard {
     record(cost){
         let now = Date.now();
         this.ceiling.record(now);
-        this._prune(now);
-        this._spends.push({ t: now, cost: this._cost(cost) });
-        this._persist();
-    }
-
-    // ---- Await-safe gate: reserve before the send, release if it never went out ----
-    // check()/allow() are pure predicates and record() runs after the
-    // awaited broadcast, so every caller that awaits between the two leaves a window
-    // in which concurrent callers all read the same pre-send budget and all spend.
-    // reserve() runs the same gates and CONSUMES the budget in the same synchronous
-    // turn, which closes that window by construction on Node's single thread.
-    //
-    // Returns an opaque token, or null when a gate blocked (call noteBlocked() for
-    // the reason, exactly as after a false allow()). The reservation IS the record:
-    // never call record() for a reserved send, or the spend is counted twice.
-    reserve(cost){
-        if (this.paused){ this.blocked.pause++; return null; }
-        let now = Date.now();
-        if (!this.ceiling.allow(now)){ this.blocked.spend++; return null; }
-        let c = this._cost(cost);
-        if (this.spentInWindow(now) + c > this.maxSpendUsdCents){ this.blocked.spend++; return null; }
-
-        this._reserveSeq = (this._reserveSeq || 0) + 1;
-        let token = { id: this._reserveSeq, ceilingHandle: this.ceiling.reserve(now), settled: false };
-        this._spends.push({ t: now, cost: c, reservation: token.id });
-        // Persist the RESERVATION too: a crash between reserving and sending must not
-        // hand the restart its budget back, since the send may well have gone out.
-        //
-        // And if that write does not land, the reservation does not authorise anything.
-        // Roll it back in this same synchronous turn and refuse: an unrecorded spend is
-        // indistinguishable, after a restart, from a spend that never happened, so
-        // authorising one turns a read-only disk into an unbounded allowance. The hub
-        // goes visibly silent instead (operator ruling: fail closed).
-        if (!this._persist()){
-            let i = this._spends.findIndex(e => e.reservation === token.id);
-            if (i >= 0) this._spends.splice(i, 1);
-            this.ceiling.release(token.ceilingHandle);
-            token.settled = true;                    // a stray release() must stay a no-op
-            this.blocked.persist++;
-            return null;
-        }
-        return token;
-    }
-
-    // The send went out: keep the reserved budget as the recorded spend and make the
-    // token inert, so a later stray release() cannot hand back a real spend.
-    //
-    // `actualCost` (USD cents) re-prices the reservation for a caller that only learns
-    // the REAL cost after the send: the llm provider reserves at an estimate and its
-    // claude_spawn transport reports total_cost_usd on return, so settling at the
-    // invoice keeps the window tracking money actually spent instead of a guess.
-    // Omitted or unusable keeps the reserved estimate, which is what every on-chain
-    // effector wants - a broadcast fee is known before it is sent.
-    commit(token, actualCost){
-        if (!token) return;
-        token.settled = true;
-        let c = Number(actualCost);
-        if (!Number.isFinite(c) || c <= 0) return;
-        let i = this._spends.findIndex(e => e.reservation === token.id);
-        if (i < 0) return;
-        this._spends[i].cost = c;
-        this._persist();
-    }
-
-    // The send never went out (blocked, threw, or was abandoned): give the budget
-    // back. Idempotent, and a no-op on a committed token; a missed release only
-    // over-counts, which fails closed and ages out within one window.
-    release(token){
-        if (!token || token.settled) return;
-        token.settled = true;
-        let i = this._spends.findIndex(e => e.reservation === token.id);
-        if (i >= 0) this._spends.splice(i, 1);
-        this.ceiling.release(token.ceilingHandle);
-        this._persist();
-    }
-
-    // ---- Restart persistence ----
-    // Both windows lived only in memory, so a restart emptied them and handed the
-    // effector its FULL per-window allowance again - which breaks the invariant at
-    // the top of this file, since a crash-loop then spends a whole window's budget
-    // per restart. The durable half is the same JSONL/`./data` idiom the hub already
-    // uses for its spend audits (AttestationRelay's WAL, FullNodeChallengeRound's
-    // spend log), kept SYNCHRONOUS so check()/allow()/record() stay the pure,
-    // non-async predicates their five call sites depend on.
-    //
-    // Call from the effector's start(), never the constructor: a guard is
-    // constructed in tests and by non-spending code paths, and none of those should
-    // touch the disk or inherit a live hub's consumed budget.
-    //
-    // The path comes from `this.statePath` (env `<PREFIX>_SPEND_STATE_PATH`, then
-    // cfg, then ./data/spend-state/<label>.json) so a caller or test overrides it the
-    // way it overrides walPath/queuePath. It is resolved ONCE, here, against the cwd
-    // the hub booted in: a relative default plus a later process.chdir() would split
-    // one effector's window across two files, which reads as a restarting allowance -
-    // the exact defect this method exists to close.
-    persistTo(statePath){
-        this._statePath = path.resolve(statePath || this.statePath);
-        this._loadState();
-        return this;
-    }
-
-    // Fold the saved window back in. Rules, all fail-closed:
-    //   absent, store writable   -> first run; start empty.
-    //   absent, store unwritable -> the file could never have been written, so an
-    //                               empty read is not evidence of a first run.
-    //   unreadable/corrupt       -> assume the window may already be spent (seed
-    //                               CONSUMED), because a broken store must never
-    //                               read as a green light.
-    //   valid                    -> prune to the live window and rebuild BOTH ceilings.
-    // A persisted RESERVATION is loaded as a plain spend: the process that could have
-    // released it is gone, and over-counting blocks rather than overspends.
-    _loadState(){
-        let text;
-        try { text = fs.readFileSync(this._statePath, 'utf8'); }
-        catch(e){
-            if (e && e.code === 'ENOENT'){
-                // A first run and a store that was never writable raise the same
-                // ENOENT, and only the first has earned a fresh allowance. On a
-                // read-only disk _persist() lands no byte, so without this the
-                // window resets on every restart and the ceiling is unbounded
-                // across them, which is the one shape this file exists to stop.
-                if (this._storeIsWritable()) return;
-                this._seedConsumed('absent, and its directory does not accept writes');
-                return;
-            }
-            this._seedConsumed('unreadable (' + (e && e.code ? e.code : 'error') + ')');
-            return;
-        }
-        let saved;
-        try { saved = JSON.parse(text); }
-        catch(e){ this._seedConsumed('corrupt JSON'); return; }
-        if (!saved || !Array.isArray(saved.spends)){ this._seedConsumed('unrecognized shape'); return; }
-
-        let now = Date.now();
-        let cutoff = now - this.windowMs;
-        for (let e of saved.spends){
-            let t = Number(e && e.t), c = Number(e && e.cost);
-            if (!Number.isFinite(t) || t <= cutoff) continue;   // outside the live window
-            if (t > now) t = now;                               // clock moved back; never park a spend in the future
-            this._spends.push({ t: t, cost: Number.isFinite(c) && c > 0 ? c : this.estSpendUsdCents });
-            this.ceiling.record(t);                             // the count ceiling shares every entry
-        }
-        this._spends.sort((a, b) => a.t - b.t);                 // _prune() assumes ascending
-        if (this._spends.length)
-            console.log(this.label + ': restored ' + this._spends.length + ' spend(s) totalling $' +
-                        (this.spentInWindow(now) / 100).toFixed(2) + ' from ' + this._statePath +
-                        '; the per-window ceiling survives this restart');
-    }
-
-    // Could _persist() land a byte here? Permission probe only: it creates nothing
-    // and writes nothing, so the write path keeps its single call site and this
-    // stays safe to run during construction.
-    //
-    // Walks to the nearest existing ancestor because _persist() mkdirs the tree it
-    // needs, so an absent directory under a writable parent is still a store this
-    // hub can write. Anything else (no permission, no reachable parent) is not.
-    _storeIsWritable(){
-        let dir = path.dirname(this._statePath);
-        for (let hops = 0; hops < 64; hops++){
-            try {
-                fs.accessSync(dir, fs.constants.W_OK);
-                return true;
-            } catch(e){
-                if (!e || e.code !== 'ENOENT') return false;   // present but refused
-                let parent = path.dirname(dir);
-                if (parent === dir) return false;              // reached the root
-                dir = parent;
-            }
-        }
-        return false;
-    }
-
-    // Assume the window is spent. Costs at most one window of liveness on a broken
-    // store, versus handing a restart a full fresh allowance.
-    _seedConsumed(why){
-        let now = Date.now();
-        this._spends.push({ t: now, cost: this.maxSpendUsdCents });
-        this.ceiling.seedConsumed(now);
-        console.warn(this.label + ': spend state at ' + this._statePath + ' is ' + why +
-                     '; assuming the window is already spent (fail-closed) until it rolls over');
-    }
-
-    // Write-through after every mutation. Never throws on the broadcast path, but it
-    // REPORTS: true when the state is durable (or persistence was never armed), false
-    // when the write failed. Swallowing the failure silently was the defect - the
-    // caller went on to authorise a broadcast the store had no record of, so the next
-    // restart read an empty window and handed the effector its full allowance back,
-    // once per restart, exactly the unbounded-across-restarts shape persistTo() exists
-    // to close. Operator ruling 2026-09-09/2026-09-11: fail closed.
-    _persist(){
-        if (!this._statePath) return true;
-        try {
-            fs.mkdirSync(path.dirname(this._statePath), { recursive: true });
-            fs.writeFileSync(this._statePath, JSON.stringify({
-                label: this.label, windowMs: this.windowMs, savedAt: Date.now(), spends: this._spends
-            }));
-            if (this._persistBroken){
-                // The disk came back (remount, freed space, fixed permissions). Clear
-                // the refusal in the same place that raised it, and re-arm the warning
-                // so a LATER failure is announced again instead of staying silent
-                // behind a stale warned-once flag.
-                this._persistBroken    = false;
-                this._lastPersistError = null;
-                this._warnedWrite      = false;
-                console.log(this.label + ': spend state at ' + this._statePath +
-                            ' accepts writes again; spends resume');
-            }
-            return true;
-        } catch(e){
-            this._persistBroken    = true;
-            this._lastPersistError = (e && e.message) ? e.message : String(e);
-            if (!this._warnedWrite){
-                this._warnedWrite = true;
-                console.warn(this.label + ': could not persist spend state to ' + this._statePath +
-                             ' (' + this._lastPersistError + '); REFUSING to authorise further spends ' +
-                             'until the store accepts writes (fail-closed)');
-            }
-            return false;
-        }
-    }
-
-    // Pre-send guard on the store itself. A store that has already refused a write
-    // cannot record the spend the caller is about to make, so while it is broken
-    // every gate refuses. Re-probes by writing the CURRENT state (idempotent, and the
-    // same bytes _persist() would have written), so a hub whose disk comes back
-    // resumes on its own rather than needing a restart to notice.
-    _storeUsable(){
-        if (!this._statePath || !this._persistBroken) return true;
-        return this._persist();
-    }
-
-    // Why the store gate refused, in the same shape as every other gate's reason.
-    _persistBlockedReason(){
-        return this.label + ': spend state at ' + this._statePath + ' is unwritable (' +
-               (this._lastPersistError || 'write failed') + '); refusing to authorise a spend ' +
-               'this hub cannot record (fail-closed)';
+        this.prune(now);
+        this._spends.push({ t: now, cost: this.computeCost(cost) });
+        this.persist();
     }
 
     // ---- Legacy drop-in shims for former SpendCeiling call sites ----
@@ -495,16 +269,16 @@ class SpendGuard {
     // pause in here is what makes a runtime pause reach the primary broadcast path.
     allow(cost){
         if (this.paused) return false;
-        if (!this._storeUsable()) return false;
+        if (!this.storeUsable()) return false;
         let now = Date.now();
         if (!this.ceiling.allow(now)) return false;
-        return this.spentInWindow(now) + this._cost(cost) <= this.maxSpendUsdCents;
+        return this.spentInWindow(now) + this.computeCost(cost) <= this.maxSpendUsdCents;
     }
     // Actionable skip message matching whichever gate tripped.
     noteBlocked(now){
         now = now || Date.now();
         if (this.paused) return this.label + ': effector spend PAUSED (' + (this.pauseReason || '') + ')';
-        if (this._persistBroken) return this._persistBlockedReason();
+        if (this._persistBroken) return this.persistBlockedReason();
         if (!this.ceiling.allow(now)) return this.ceiling.noteBlocked(now);
         return this.label + ': rolling per-window spend ceiling reached ($' +
                (this.maxSpendUsdCents / 100).toFixed(2) + ')';
@@ -528,6 +302,23 @@ class SpendGuard {
         };
     }
 }
+
+// Install each part's methods on the prototype non-enumerably, as src/db/index.js does,
+// so a moved method stays indistinguishable from one declared in the class above. A
+// name already on the prototype throws rather than one part replacing another's method.
+function installParts(target, parts) {
+    for (const part of parts) {
+        const descriptors = {};
+        for (const name of Object.keys(part)) {
+            if (Object.prototype.hasOwnProperty.call(target, name))
+                throw new Error('Duplicate SpendGuard method: ' + name + ' is already on the prototype');
+            descriptors[name] = { value: part[name], enumerable: false, writable: true, configurable: true };
+        }
+        Object.defineProperties(target, descriptors);
+    }
+}
+
+installParts(SpendGuard.prototype, [reservationMethods, persistenceMethods]);
 
 // ---- Per-capability runtime-pause control surface ----
 SpendGuard.registry          = registry;

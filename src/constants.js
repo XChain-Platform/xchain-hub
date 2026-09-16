@@ -46,7 +46,7 @@ const PRICE_MAX = 10_000_000_000;
 const XCALL_MAX_HOPS = 2;
 
 // Co-sign deviation band for the oracle PREPARE content-validation gate
-// (OracleConsensus._handlePropose): a follower refuses to co-sign a proposed price
+// (OracleConsensus.handlePropose): a follower refuses to co-sign a proposed price
 // that deviates more than this fraction from its own local aggregate for the pair.
 // MUST be federation-uniform: if hubs used different bands, identical aggregates
 // could yield different accept/withhold decisions (a liveness divergence on the ±band
@@ -89,7 +89,7 @@ const DEFAULT_ORACLE_SUBMISSION_WINDOW_MS = 180000;
 // into the v0 ingest / PROPOSE co-sign fence. Those are separate literals from these,
 // so a coin or fiat added to one lane alone is accepted there and rejected on the
 // other. All three sources are pinned against each other by
-// test/unit/constants-conformance.test.js (#7215). DERIVED_PAIRS below is the one
+// test/unit/shared/constants_conformance.test.js (#7215). DERIVED_PAIRS below is the one
 // deliberate asymmetry and must NOT join this fence.
 const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
@@ -107,7 +107,7 @@ const MAX_MEMO_LENGTH = 250;
 // source lands (spec step 2) this constant is purely permissive and inert.
 //
 // It is also deliberately NOT added to the skipped-row sites
-// (OracleConsensus._storeSkippedRound and the missing-pair marker), which answer
+// (OracleConsensus.storeSkippedRound and the missing-pair marker), which answer
 // "which pairs did this hub expect to produce and fail to". A pair with no producer
 // yet is unbuilt, not dropped; writing a skipped row for it every round would make
 // the dashboard health signal permanently red for a pair nothing is trying to
@@ -215,7 +215,7 @@ const MAX_SOURCE_ADDRESS_LENGTH = 100;
 // Default ATTEST PBFT round lifetime (2 min per request lifecycle). Shared, not
 // copied, because AttestationRound floors its `seen` retry window at this value
 // plus one poll: that floor exists precisely to stop the seen window nesting
-// inside a live consensus round (a nested window re-`_startRound`s a request
+// inside a live consensus round (a nested window re-`startRound`s a request
 // whose round is still pending and pays for a second provider fetch). A bare
 // literal on each side kept the two coupled only while the copies happened to
 // be equal, so a one-sided raise of the consensus default silently re-opened

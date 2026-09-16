@@ -1,6 +1,9 @@
 # Loaded by every mocha invocation in this repo, which is the point: the unit,
 # security, regression, integration and e2e scripts are separate command lines,
 # and a bootstrap wired into only one of them leaves the others running with the
-# console patch installed. See test/setup.js for what it does and why.
+# console patch installed. See test/setup/index.js for what it does and why.
+# The bootstrap lives in a directory because the naming rule grades every other
+# basename under test/ as a suite, and no suite name is free for a file that is
+# required rather than run.
 require:
-  - ./test/setup.js
+  - ./test/setup/index.js

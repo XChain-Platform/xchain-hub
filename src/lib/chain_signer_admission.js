@@ -40,7 +40,7 @@
  *     senders and inflate an address-keyed tally to a full forged quorum.
  *     Deduped by key, those same N envelopes collapse to one vote.
  *
- * This is the same union transport already applies (PeerManager._verifySignature:
+ * This is the same union transport already applies (PeerManager.verifySignature:
  * a key in the chain-effective set OR in the registry's pubkey set), which is
  * what makes the permissionless promise true: staking on chain is sufficient to
  * be counted, with no operator having to hand-register the joiner first.
@@ -82,7 +82,7 @@ function provenPubkey(envelope) {
 // True iff the validator registry binds some addr to this pubkey. The registry
 // is Map<addr, pubkeyHex> and is consulted here as an addr-independent pubkey
 // SET, so a key rotated under a new addr is admitted as soon as the registry
-// carries it. Mirrors PeerManager._registryHasPubkey.
+// carries it. Mirrors PeerManager.registryHasPubkey.
 function registryHasPubkey(registry, pubkeyHexLower) {
     if (!registry || typeof registry.values !== 'function') return false;
     for (let v of registry.values()) {

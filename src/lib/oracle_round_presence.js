@@ -53,10 +53,15 @@ const DEFAULT_RANGE = 50;
 // Number('') and Number(null) are both 0, so an absent bound would silently become
 // round 0 and make the answer claim every round since genesis is missing. Reject the
 // empty-ish values explicitly rather than trusting Number.isFinite alone.
+// Unsafe magnitudes go too: at or past 2^53 an increment is a no-op, so the emit
+// loop below can never pass a bound of that size (a finite bound is not a reachable
+// one). Rejecting it here makes the module safe for every caller, not just the RPC.
 function toInt(v) {
     if (v === null || v === undefined || v === '' || typeof v === 'boolean') return null;
     let n = Number(v);
-    return Number.isFinite(n) ? Math.trunc(n) : null;
+    if (!Number.isFinite(n)) return null;
+    n = Math.trunc(n);
+    return Number.isSafeInteger(n) ? n : null;
 }
 
 // Fold price_snapshots rows (any order, any subset of the range) into one entry
@@ -94,7 +99,12 @@ function summarizeRoundPresence(rows, fromRound, toRound) {
 
     let out = [];
     let missing = [];
-    for (let r = from; r <= to; r++) {
+    // Count the rounds out rather than comparing against `to`: a comparison-driven
+    // loop is only as bounded as its increment, and one answer never carries more
+    // than MAX_RANGE rounds regardless of the span a caller hands in.
+    let span = Math.min(to - from + 1, MAX_RANGE);
+    for (let i = 0; i < span; i++) {
+        let r = from + i;
         let entry = byRound.get(r);
         if (!entry) {
             missing.push(r);
@@ -123,9 +133,22 @@ function presenceDigest(rounds) {
 // rounds where they disagree, each with the per-hub status, so an operator sees
 // "round 26: validator03 skipped, everyone else missing" rather than a bare
 // "digests differ". `answers` is [{ hub, presence }].
+//
+// Two invariants the statuses map alone cannot hold. One vote per hub identity: the
+// map is keyed by the hub string, so a repeated endpoint would overwrite its own
+// statuses and diverge from nothing. And fewer than two usable answers is never
+// agreement: one unchallenged answer proves nothing, and reporting it as agreement
+// is a false all-clear on exactly the federation check this module exists for.
 function comparePresence(answers) {
-    let entries = (answers || []).filter(a => a && a.presence && Array.isArray(a.presence.rounds));
-    if (entries.length < 2) return { agreed: entries.length === 1, divergent: [], hubs: entries.length };
+    let entries = [];
+    let seenHubs = new Set();
+    for (let a of (answers || [])) {
+        if (!a || !a.presence || !Array.isArray(a.presence.rounds)) continue;
+        if (seenHubs.has(a.hub)) continue;
+        seenHubs.add(a.hub);
+        entries.push(a);
+    }
+    if (entries.length < 2) return { agreed: false, divergent: [], hubs: entries.length };
 
     let byRound = new Map();
     for (let { hub, presence } of entries) {

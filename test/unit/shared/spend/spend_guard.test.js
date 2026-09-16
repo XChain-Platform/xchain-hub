@@ -1,0 +1,278 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ ********************************************************************/
+
+'use strict';
+
+const { expect } = require('chai');
+const SpendGuard = require('../../../../src/lib/spend_guard.js');
+
+const PFX = 'SGTEST';
+
+function clearEnv(){
+    for (let k of Object.keys(process.env)){
+        if (k.indexOf(PFX + '_') === 0) delete process.env[k];
+    }
+}
+
+describe('SpendGuard', function () {
+
+    afterEach(function () {
+        clearEnv();
+        SpendGuard.unregister(PFX);
+        SpendGuard.unregister('SGTEST-LABEL');
+    });
+
+    registerSpendWindowTests();
+    registerBalanceFloorTests();
+    registerCapabilityPauseTests();
+    registerLegacySpendCeilingTests();
+    registerReservationSuite();
+});
+
+function registerSpendWindowTests() {
+
+    describe('rolling fee-window cap clamped at $2000', function () {
+
+        it('defaults ON at the $2000 hard clamp (config-default-enabled)', function () {
+            const g = new SpendGuard(PFX, {});
+            expect(g.maxSpendUsdCents).to.equal(200000);
+            expect(g.maxSpendUsdCents).to.equal(SpendGuard.HARD_CAP_USD_CENTS);
+        });
+
+        it('lets an operator LOWER the cap', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '5000' });
+            expect(g.maxSpendUsdCents).to.equal(5000);
+        });
+
+        it('CLAMPS any attempt to raise the cap above $2000', function () {
+            process.env[PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW'] = '999999999';
+            const g = new SpendGuard(PFX, {});
+            expect(g.maxSpendUsdCents).to.equal(200000);
+        });
+
+        it('blocks the broadcast that would exceed the window budget', function () {
+            // cap $2 (200c), est cost $1 (100c) => 2 broadcasts fit, 3rd blocked
+            const g = new SpendGuard(PFX, {
+                [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '200',
+                [PFX + '_EST_SPEND_USD_CENTS']: '100'
+            });
+            expect(g.check().ok).to.equal(true); g.record();
+            expect(g.check().ok).to.equal(true); g.record();
+            let r = g.check();
+            expect(r.ok).to.equal(false);
+            expect(r.reason).to.match(/spend ceiling/i);
+        });
+
+        it('tracks ACTUAL per-broadcast cost when the caller supplies it', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '500' });
+            g.record(300);
+            expect(g.spentInWindow()).to.equal(300);
+            // 300 + 250 = 550 > 500 => blocked
+            expect(g.check({ cost: 250 }).ok).to.equal(false);
+            // 300 + 150 = 450 <= 500 => allowed
+            expect(g.check({ cost: 150 }).ok).to.equal(true);
+        });
+
+        it('record() only counts sends that actually went out; check() is side-effect free', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '300' });
+            g.check(); g.check(); g.check();     // pre-send probes, no spend
+            expect(g.spentInWindow()).to.equal(0);
+        });
+    });
+}
+
+function registerBalanceFloorTests() {
+
+    describe('balance floor', function () {
+
+        it('blocks a null (unreadable) balance fail-closed', function () {
+            const g = new SpendGuard(PFX, {});
+            let r = g.check({ balance: null });
+            expect(r.ok).to.equal(false);
+            expect(r.reason).to.match(/unreadable/i);
+        });
+
+        it('blocks a balance below the configured floor', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MIN_BALANCE']: '10' });
+            expect(g.check({ balance: 9.99 }).ok).to.equal(false);
+            expect(g.check({ balance: 10 }).ok).to.equal(true);
+        });
+
+        it('skips the floor entirely when no balance is provided (undefined)', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MIN_BALANCE']: '10' });
+            expect(g.check().ok).to.equal(true);          // no balance source => not gated on balance
+        });
+    });
+}
+
+function registerCapabilityPauseTests() {
+
+    describe('per-capability runtime pause', function () {
+
+        it('blocks every spend while paused, and resumes cleanly', function () {
+            const g = new SpendGuard(PFX, {});
+            expect(g.check().ok).to.equal(true);
+            g.pause('incident');
+            expect(g.isPaused()).to.equal(true);
+            let r = g.check();
+            expect(r.ok).to.equal(false);
+            expect(r.reason).to.match(/PAUSED/);
+            g.resume();
+            expect(g.check().ok).to.equal(true);
+        });
+
+        it('folds the pause into the legacy allow() so the primary path is gated', function () {
+            const g = new SpendGuard(PFX, {});
+            expect(g.allow()).to.equal(true);
+            g.pause();
+            expect(g.allow()).to.equal(false);   // fe3aedbf fix: pause reaches allow()-gated primary path
+        });
+
+        it('pauses/resumes a specific capability by label via the registry', function () {
+            const g = new SpendGuard(PFX, {}, 'SGTEST-LABEL');
+            expect(SpendGuard.get('SGTEST-LABEL')).to.equal(g);
+            expect(SpendGuard.pauseCapability('SGTEST-LABEL', 'ops')).to.equal(true);
+            expect(g.isPaused()).to.equal(true);
+            expect(SpendGuard.resumeCapability('SGTEST-LABEL')).to.equal(true);
+            expect(g.isPaused()).to.equal(false);
+            expect(SpendGuard.pauseCapability('no-such-label')).to.equal(false);
+        });
+    });
+}
+
+function registerLegacySpendCeilingTests() {
+
+    describe('legacy SpendCeiling drop-in compatibility', function () {
+
+        it('honors the count ceiling via allow()/record()/noteBlocked()', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '2' });
+            expect(g.allow()).to.equal(true); g.record();
+            expect(g.allow()).to.equal(true); g.record();
+            expect(g.allow()).to.equal(false);
+            expect(g.noteBlocked()).to.match(/ceiling/i);
+        });
+    });
+}
+
+function registerReservationSuite() {
+    // allow()/record() alone leave a gap: a caller can pass allow(), start an
+    // async send, and a second caller can pass allow() too before the first
+    // ever calls record(), so the window undercounts in-flight spend and a
+    // burst of concurrent callers can clear the cap together. reserve()
+    // closes that gap by consuming budget at the moment of the call, before
+    // any await; commit() settles it to the real cost once known, and
+    // release() gives it back only if the reservation never became a real
+    // spend, split into its own suite because both halves matter on their own.
+
+    describe('reserve()/commit()/release()', function () {
+        registerReservationLifecycleTests();
+        registerReservationCostTests();
+    });
+}
+
+function registerReservationLifecycleTests() {
+    it('consumes budget at reserve time, before any send can be awaited', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '1' });
+            const t = g.reserve();
+            expect(t).to.be.an('object');
+            // The window is already spent for a second caller, though no send has
+            // completed and record() was never called: this is the whole point.
+            expect(g.allow()).to.equal(false);
+            expect(g.reserve()).to.equal(null);
+            g.commit(t);
+            expect(g.stats().count.inWindow).to.equal(1);
+        });
+
+        it('release() hands the budget back so a failed send costs nothing', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '1' });
+            const t = g.reserve();
+            expect(g.allow()).to.equal(false);
+            g.release(t);
+            expect(g.allow()).to.equal(true);
+            expect(g.stats().count.inWindow).to.equal(0);
+            expect(g.spentInWindow()).to.equal(0);
+        });
+
+        it('release() is idempotent and never frees a committed spend', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '2' });
+            const a = g.reserve(), b = g.reserve();
+            g.commit(a);
+            g.release(b); g.release(b);          // double release frees exactly one slot
+            expect(g.stats().count.inWindow).to.equal(1);
+            g.release(a);                         // committed: must not be given back
+            expect(g.stats().count.inWindow).to.equal(1);
+        });
+
+        it('reserves against the USD budget too, and refuses when it would overshoot', function () {
+            const g = new SpendGuard(PFX, {
+                [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '200',
+                [PFX + '_EST_SPEND_USD_CENTS']: '100'
+            });
+            const a = g.reserve(), b = g.reserve();
+            expect(a).to.not.equal(null);
+            expect(b).to.not.equal(null);
+            expect(g.spentInWindow()).to.equal(200);
+            expect(g.reserve()).to.equal(null);   // third would exceed the $2 window budget
+            expect(g.stats().blocked.spend).to.be.greaterThan(0);
+        });
+}
+
+function registerReservationCostTests() {
+        // A caller that only learns the real cost after the send (the llm
+        // provider's CLI transport reports total_cost_usd on return) settles the
+        // reservation at the invoice instead of leaving the estimate in the window.
+        it('commit(token, actualCost) re-prices the reservation to the real cost', function () {
+            const g = new SpendGuard(PFX, {
+                [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '1000',
+                [PFX + '_EST_SPEND_USD_CENTS']: '100'
+            });
+            const t = g.reserve();
+            expect(g.spentInWindow()).to.equal(100);      // the estimate, pre-send
+            g.commit(t, 7);
+            expect(g.spentInWindow()).to.equal(7);        // the invoice, post-send
+        });
+
+        it('commit() without a cost keeps the reserved estimate, as every on-chain effector wants', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            const t = g.reserve();
+            g.commit(t);
+            expect(g.spentInWindow()).to.equal(100);
+        });
+
+        it('ignores an unusable actual cost rather than zeroing the spend', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            for (const bad of [0, -5, NaN, null, undefined, 'free']){
+                const t = g.reserve();
+                g.commit(t, bad);
+            }
+            // Six reservations, none re-priced to nothing by a junk invoice.
+            expect(g.spentInWindow()).to.equal(600);
+        });
+
+        it('a re-priced spend still cannot be handed back by a late release()', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            const t = g.reserve();
+            g.commit(t, 42);
+            g.release(t);
+            expect(g.spentInWindow()).to.equal(42);
+        });
+
+        it('refuses to reserve while the capability is paused', function () {
+            const g = new SpendGuard(PFX, {});
+            g.pause('incident');
+            expect(g.reserve()).to.equal(null);
+            g.resume();
+            expect(g.reserve()).to.be.an('object');
+        });
+}

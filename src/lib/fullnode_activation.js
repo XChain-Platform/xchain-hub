@@ -14,18 +14,26 @@
  *
  * XChain Hub - NODEPROOF full-node tier activation config
  *
- * The verified-full-node tier (NODEPROOF.md) ships INERT: the canonical coin
- * bundle carries REWARD_SHARE '0' and an empty GENESIS_VERIFIERS list, and the
- * launch genesis parameters keep it that way at launch. Activation is therefore a deliberate, fleet-wide
- * config change, and every knob it touches is a CONSENSUS parameter:
+ * The verified-full-node tier (xchain-documentation/protocol/actions/nodeproof.md)
+ * ships INERT: the canonical coin bundle carries REWARD_SHARE '0' and an empty
+ * GENESIS_VERIFIERS list, and the launch genesis parameters (turning the tier on
+ * later is a governance call) keep it that way at launch. Activation is therefore
+ * a deliberate, fleet-wide config change, and every knob it touches is a
+ * CONSENSUS parameter:
  *
- *   REWARD_SHARE               splits the oracle-round budget into the base and
- *                              full-node tranches (indexer price.js). A hub or
- *                              indexer with a different value derives different
- *                              validator_rewards rows -> different block hashes.
+ *   REWARD_SHARE               the tier's on/off switch (isActive below), and the
+ *                              fraction of the oracle-round budget that
+ *                              nodeproof.md routes to verified full nodes. No
+ *                              reward code reads it today: the indexer's PRICE
+ *                              handler (xchain-indexer src/actions/price/index.js)
+ *                              derives no validator_rewards rows, so nothing pays
+ *                              the full-node tranche yet. It still sits in the
+ *                              coin consensus subset (src/coins/index.js), so a
+ *                              bundle carrying a different value no longer
+ *                              matches CONSENSUS_CONFIG_PIN.
  *   GENESIS_VERIFIERS          the bootstrap verifier universe, unioned with the
  *                              on-chain verified set on BOTH sides (hub
- *                              _eligibleVerifiers / indexer _eligibleVerifierSet).
+ *                              _eligibleVerifiers / indexer eligibleVerifierSet).
  *                              It is the leader-election domain and the 2/3+1
  *                              quorum denominator, so a divergent list means a
  *                              quorum one hub assembles is one the chain rejects.
@@ -40,7 +48,7 @@
  *                              tranche (reward-only tier; there is no slashing).
  *
  * This module is the hub's preflight for that change. It is pure (no I/O) and is
- * consumed by XChainHub._assertCanonicalFullnode, which mirrors the MIN_STAKE
+ * consumed by XChainHub.assertCanonicalFullnode, which mirrors the MIN_STAKE
  * assert: on mainnet/testnet a divergent or incoherent block is REFUSED
  * fail-closed, on regtest/standalone it warns so venues can run their own knobs.
  *
@@ -142,9 +150,9 @@ function diffCanonical(operator, canonical){
     return problems;
 }
 
-// Is the tier switched on? Activation is REWARD_SHARE > 0 and nothing else: that
-// single value is what flips price.js from the single 'oracle_round' reward row
-// to the two-tranche 'oracle_base' + 'oracle_full_node' split.
+// Is the tier switched on? Activation is REWARD_SHARE > 0 and nothing else. The answer
+// gates the deadlock checks in validateActivation and the ACTIVE/INERT text the hub boot
+// log and FullNodeChallengeRound print (describeActivation); no reward row depends on it.
 function isActive(fn){
     if(!isPlainObject(fn)) return false;
     let share = Number(fn.REWARD_SHARE);
@@ -164,7 +172,7 @@ function validateActivation(fn){
         let share = Number(raw);
         if(!Number.isFinite(share) || String(raw).trim() === '')
             problems.push('REWARD_SHARE is not a number: ' + JSON.stringify(raw) +
-                          ' (price.js compares it against 0 and multiplies the round budget by it)');
+                          ' (isActive compares it against 0, and nodeproof.md defines it as a fraction of the round budget)');
         else if(share < 0 || share > 1)
             problems.push('REWARD_SHARE ' + JSON.stringify(raw) + ' is outside [0,1]; it is the FRACTION ' +
                           'of the oracle-round budget routed to verified full nodes, so >1 pays out more ' +

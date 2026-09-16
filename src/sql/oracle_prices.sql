@@ -12,6 +12,15 @@ CREATE TABLE oracle_prices (
     effective_at    BIGINT UNSIGNED NOT NULL,     -- when this price takes effect (block_time, or block_time+86400 for updates)
     action_index    BIGINT UNSIGNED NOT NULL,     -- action_index of the PRICE v1 tx on source_chain
     push_generation BIGINT NOT NULL DEFAULT 0,     -- source-chain reorg fence (item 5308): bumped each rollback; a retraction deletes only rows with push_generation <= the rollback's generation, so a re-published row (higher generation) survives
+    -- ADMISSION HEIGHT, and deliberately ONE unsigned column rather than the per-chain map
+    -- the signed rails carry. This row has no signatures, no validator_signatures and no
+    -- canonical at all, so there is nothing to stamp a map into; the height is the PUBLISHING
+    -- chain's, which source_chain already names, and the hub populates it from its own ingest
+    -- of the PRICE v1 tx so any reader can verify it against that chain. The barrier certifies
+    -- it against heights[oracle_prices][source_chain], not against the reading chain's own B,
+    -- which is why every chain can read the row without a per-chain entry. effective_at stays
+    -- the economic filter (the 24 h update window). NULL is the legacy row.
+    admit_block     BIGINT UNSIGNED DEFAULT NULL,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_oracle_action (source_chain, action_index),
     KEY idx_oracle_tick (source_address, coin, tick, fiat),

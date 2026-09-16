@@ -15,7 +15,7 @@
  * XChain Hub - canonical integer spelling guard
  *
  * Every hub consensus engine signs its row's integer fields VERBATIM
- * (`String(r.field)` inside _canonicalMatch) but re-checks them NUMERICALLY
+ * (`String(r.field)` inside canonicalMatch) but re-checks them NUMERICALLY
  * (`Number(a) === Number(b)`), and every downstream verifier rebuilds the
  * canonical from a NORMALIZED integer: the XCALL/XMATCH mirrors round-trip
  * through BIGINT columns, and the ATTEST relay legs are re-parsed with
@@ -24,7 +24,7 @@
  * fallback), pass follower validation, collect an honest quorum over bytes
  * containing that spelling, and leave a finalized row whose signatures no
  * verifier can ever reproduce. The row still exists, so the engine's own
- * _rowExists/duplicate guards never re-relay it: the call is stranded for good.
+ * rowExists/duplicate guards never re-relay it: the call is stranded for good.
  *
  * The guard is deliberately on the FOLLOWER side and fail-closed. It leaves the
  * signed canonical format untouched, so it needs no activation flag and no

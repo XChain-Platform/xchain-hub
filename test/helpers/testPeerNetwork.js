@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const WebSocket   = require('ws');
-const PeerManager = require('../../src/PeerManager');
+const PeerManager = require('../../src/peers/manager');
 
 /**
  * Build a valid P2P envelope for message injection.

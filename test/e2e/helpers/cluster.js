@@ -15,7 +15,7 @@ const helmet            = require('helmet');
 const cors              = require('cors');
 const jsonRouter        = require('express-json-rpc-router');
 const XChainHub         = require('../../../src/XChainHub');
-const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const ValidatorIdentity = require('../../../src/validators/identity');
 const testDb            = require('../../helpers/testDb');
 
 const DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
@@ -396,7 +396,7 @@ function createCluster(nodeCount, overrides) {
                     if (!pm) continue;
                     for (let j = 0; j < nodeCount; j++) {
                         if (i === j) continue;
-                        pm._connectToPeer('127.0.0.1:' + nodes[j].p2pPort);
+                        pm.connectToPeer('127.0.0.1:' + nodes[j].p2pPort);
                     }
                 }
                 // Wait for connections to establish: poll actual peer
@@ -550,7 +550,7 @@ function createCluster(nodeCount, overrides) {
         async triggerOracleRound(index) {
             let hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.oracle) throw new Error('No oracle on node ' + index);
-            await hub.oracle._executeRound();
+            await hub.oracle.executeRound();
         },
 
         /**
@@ -560,7 +560,7 @@ function createCluster(nodeCount, overrides) {
             let promises = [];
             for (let i = 0; i < nodes.length; i++) {
                 if (nodes[i].hub && nodes[i].hub.oracle) {
-                    promises.push(nodes[i].hub.oracle._executeRound());
+                    promises.push(nodes[i].hub.oracle.executeRound());
                 }
             }
             await Promise.all(promises);
@@ -581,7 +581,7 @@ function createCluster(nodeCount, overrides) {
         async triggerGovernanceTally(index) {
             let hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.governance) throw new Error('No governance on node ' + index);
-            await hub.governance._checkExpiredProposals();
+            await hub.governance.checkExpiredProposals();
         },
 
         /** Number of nodes in the cluster */

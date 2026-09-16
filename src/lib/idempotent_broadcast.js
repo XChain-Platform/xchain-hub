@@ -31,7 +31,7 @@
  *     rejection proof that NO money moved: a multi-phase signer hook can be
  *     rejected on its reveal after its funding transaction is already on chain,
  *     so an error carrying `fundsCommitted` is AMBIGUOUS whatever its shape.
- *     (Was duplicated verbatim as _isAmbiguousSendError in
+ *     (Was duplicated verbatim as isAmbiguousSendError in
  *     Oracle/Attest/Anchor/FullNode.)
  *
  *   isNeverSentError(e)

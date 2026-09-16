@@ -1,0 +1,263 @@
+'use strict';
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const sinon      = require('sinon');
+const { expect } = require('chai');
+const fc         = require('fast-check');
+const Consensus  = require('../../src/consensus/pbft');
+const { createMockHub } = require('../helpers/mockHub');
+const { makeValidator } = require('../helpers/fixtures');
+const gen               = require('./helpers/generators');
+
+
+
+let hub, consensus;
+function registerBeforeEachHook() {
+
+    beforeEach(function () {
+        hub = createMockHub();
+        consensus = new Consensus(hub);
+    });
+}
+
+function registerAfterEachHook() {
+
+    afterEach(function () {
+        // Clean up any pending proposal timers
+        for (let [, prop] of consensus.pendingProposals) {
+            if (prop.timer) clearTimeout(prop.timer);
+        }
+        consensus.pendingProposals.clear();
+        sinon.restore();
+    });
+}
+
+function registerGetLeaderTestCases1() {
+
+        it('always returns a validator from the set', function () {
+            fc.assert(fc.property(
+                fc.integer({ min: 1, max: 50 }),
+                fc.integer({ min: 0, max: 10000 }),
+                function (N, seq) {
+                    let validators = gen.fc_validatorSet(N);
+                    consensus.setValidatorSet(validators);
+                    consensus.view = 0;
+                    let leader = consensus.getLeader(seq);
+                    expect(validators).to.deep.include(leader);
+                }
+            ), { numRuns: 200 });
+        });
+
+        it('is deterministic for same seq and view', function () {
+            fc.assert(fc.property(
+                fc.integer({ min: 1, max: 20 }),
+                fc.integer({ min: 0, max: 10000 }),
+                fc.integer({ min: 0, max: 20 }),
+                function (N, seq, view) {
+                    let validators = gen.fc_validatorSet(N);
+                    consensus.setValidatorSet(validators);
+                    consensus.view = view;
+                    expect(consensus.getLeader(seq)).to.deep.equal(consensus.getLeader(seq));
+                }
+            ), { numRuns: 200 });
+        });
+
+        it('returns undefined for empty validator set (no crash)', function () {
+            fc.assert(fc.property(fc.integer({ min: 0, max: 100000 }), function (seq) {
+                consensus.setValidatorSet([]);
+                let leader = consensus.getLeader(seq);
+                // Empty set: arr[seq % 0] = arr[NaN] = undefined
+                expect(leader === undefined || leader === null).to.be.true;
+            }), { numRuns: 50 });
+        });
+}
+
+function registerGetLeaderTestCases2() {
+
+        it('view change rotates the leader', function () {
+            fc.assert(fc.property(
+                fc.integer({ min: 2, max: 20 }),
+                fc.integer({ min: 0, max: 1000 }),
+                function (N, seq) {
+                    let validators = gen.fc_validatorSet(N);
+                    consensus.setValidatorSet(validators);
+
+                    consensus.view = 0;
+                    let leader1 = consensus.getLeader(seq);
+                    consensus.view = 1;
+                    let leader2 = consensus.getLeader(seq);
+
+                    // With N >= 2 validators, view change should rotate leader
+                    // (unless seq + view wraps to same index, which is N-periodic)
+                    // At minimum, both must be valid validators
+                    expect(validators).to.deep.include(leader1);
+                    expect(validators).to.deep.include(leader2);
+                }
+            ), { numRuns: 100 });
+        });
+
+}
+
+function registerGetLeaderTests() {
+
+    // -----------------------------------------------------------------
+    // getLeader()
+    // -----------------------------------------------------------------
+
+    describe('getLeader()', function () {
+        registerGetLeaderTestCases1();
+        registerGetLeaderTestCases2();
+    });
+}
+
+function registerGetQuorumTests() {
+
+    // -----------------------------------------------------------------
+    // getQuorum()
+    // -----------------------------------------------------------------
+
+    describe('getQuorum()', function () {
+
+        it('never exceeds N', function () {
+            fc.assert(fc.property(fc.integer({ min: 1, max: 100 }), function (N) {
+                consensus.setValidatorSet(gen.fc_validatorSet(N));
+                expect(consensus.getQuorum()).to.be.at.most(N);
+            }), { numRuns: 100 });
+        });
+
+        it('is monotonically non-decreasing as N increases', function () {
+            fc.assert(fc.property(fc.integer({ min: 2, max: 99 }), function (N) {
+                consensus.setValidatorSet(gen.fc_validatorSet(N));
+                let q1 = consensus.getQuorum();
+                consensus.setValidatorSet(gen.fc_validatorSet(N + 1));
+                let q2 = consensus.getQuorum();
+                expect(q2).to.be.at.least(q1);
+            }), { numRuns: 100 });
+        });
+
+        it('is always >= 1 for N >= 4', function () {
+            fc.assert(fc.property(fc.integer({ min: 4, max: 100 }), function (N) {
+                consensus.setValidatorSet(gen.fc_validatorSet(N));
+                expect(consensus.getQuorum()).to.be.at.least(1);
+            }), { numRuns: 100 });
+        });
+
+        it('returns 0 for N <= 1 (single-node fallback)', function () {
+            consensus.setValidatorSet(gen.fc_validatorSet(1));
+            expect(consensus.getQuorum()).to.equal(0);
+        });
+    });
+}
+
+function registerDigestTests() {
+
+    // -----------------------------------------------------------------
+    // digest()
+    // -----------------------------------------------------------------
+
+    describe('digest()', function () {
+
+        it('always returns a 64-char hex string', function () {
+            fc.assert(fc.property(gen.fc_configObject(), function (config) {
+                let d = consensus.digest(config);
+                expect(d).to.match(/^[0-9a-f]{64}$/);
+            }), { numRuns: 200 });
+        });
+
+        it('is deterministic (same input always produces same output)', function () {
+            fc.assert(fc.property(gen.fc_configObject(), function (config) {
+                expect(consensus.digest(config)).to.equal(consensus.digest(config));
+            }), { numRuns: 200 });
+        });
+
+        it('different configs produce different digests', function () {
+            fc.assert(fc.property(
+                fc.string({ minLength: 1, maxLength: 20 }),
+                fc.string({ minLength: 1, maxLength: 20 }),
+                function (key, value) {
+                    let config1 = { [key]: value };
+                    let config2 = { [key]: value + 'x' };
+                    expect(consensus.digest(config1)).to.not.equal(consensus.digest(config2));
+                }
+            ), { numRuns: 200 });
+        });
+    });
+}
+
+function registerHandlePrePrepareMessageValidationTests() {
+
+    // -----------------------------------------------------------------
+    // handlePrePrepare() message validation
+    // -----------------------------------------------------------------
+
+    describe('handlePrePrepare() message validation', function () {
+
+        it('arbitrary envelope data never crashes', function () {
+            fc.assert(fc.property(
+                fc.oneof(
+                    fc.record({
+                        seq:          fc.anything(),
+                        configDigest: fc.anything(),
+                        config:       fc.anything()
+                    }),
+                    fc.constant({}),
+                    fc.constant({ seq: 1 }),
+                    fc.constant({ seq: 'bad', configDigest: 'abc', config: {} }),
+                    fc.constant({ seq: null, configDigest: null, config: null }),
+                    fc.record({
+                        seq:          fc.integer({ min: -100, max: 1000 }),
+                        configDigest: fc.string({ maxLength: 64 }),
+                        config:       fc.anything({ maxDepth: 2 })
+                    })
+                ),
+                function (data) {
+                    consensus.setValidatorSet([makeValidator(1)]);
+                    let envelope = { data: data, sender: 'ws://peer:10001' };
+                    expect(function () { consensus.handlePrePrepare(envelope); }).to.not.throw();
+                }
+            ), { numRuns: 200 });
+        });
+
+        it('non-positive or non-number seq is always rejected', function () {
+            fc.assert(fc.property(
+                fc.oneof(
+                    fc.constant(0),
+                    fc.constant(-1),
+                    fc.constant(-100),
+                    fc.string({ maxLength: 10 }),
+                    fc.constant(null),
+                    fc.constant(undefined),
+                    fc.constant(NaN),
+                    fc.constant(1.5)
+                ),
+                function (invalidSeq) {
+                    consensus.setValidatorSet([makeValidator(1)]);
+                    let proposalsBefore = consensus.pendingProposals.size;
+                    let envelope = {
+                        data:   { seq: invalidSeq, configDigest: 'abc', config: {} },
+                        sender: 'ws://peer:10001'
+                    };
+                    consensus.handlePrePrepare(envelope);
+                    expect(consensus.pendingProposals.size).to.equal(proposalsBefore);
+                }
+            ), { numRuns: 50 });
+        });
+    });
+}
+describe('Fuzz: Consensus', function () {
+    registerBeforeEachHook();
+    registerAfterEachHook();
+    registerGetLeaderTests();
+    registerGetQuorumTests();
+    registerDigestTests();
+    registerHandlePrePrepareMessageValidationTests();
+});

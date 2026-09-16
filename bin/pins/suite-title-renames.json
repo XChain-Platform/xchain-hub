@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "note": "Title renames that ride a commit ahead of the deferred at1-suite-titles.json re-pin. Each entry is old title to new title, keyed by the file's current path.",
+  "titles": {
+    "test/unit/attestation/publisher/attestation_publisher_003_queue_i_o.test.js": {
+      "_enqueue appends a JSON line and readQueue parses it back": "enqueue appends a JSON line and readQueue parses it back",
+      "_enqueue appends multiple entries correctly": "enqueue appends multiple entries correctly",
+      "_enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)": "enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)",
+      "_enqueue returns true on a durable write (item 2681)": "enqueue returns true on a durable write (item 2681)"
+    },
+    "test/unit/cross_chain/dex/cross_chain_dex_engine_07_write_finalized_match_fail_closed_snapshot_persist.test.js": {
+      "_insertMatchRow(): retracted-row revive": "insertMatchRow(): retracted-row revive"
+    },
+    "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": {
+      "_enqueue()": "enqueue()"
+    }
+  }
+}

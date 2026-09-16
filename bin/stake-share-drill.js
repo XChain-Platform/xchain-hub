@@ -31,7 +31,7 @@
 'use strict';
 
 const axios = require('axios');
-const { projectCompetingStake } = require('../src/lib/stake_share_monitor.js');
+const { projectCompetingStake } = require('../src/validators/stake_share_monitor.js');
 
 function arg(name, fallback) {
     const i = process.argv.indexOf('--' + name);

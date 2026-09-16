@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.17.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-6%2C784%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.19.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-7%2C342%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -215,7 +215,7 @@ neither source sets one, so these defaults hold on an unconfigured box:
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~5,966 tests) |
+| `npm test` | Run unit tests (~6,524 tests) |
 | `npm run test:integration` | Integration tests (~98 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
@@ -227,7 +227,7 @@ neither source sets one, so these defaults hold on an unconfigured box:
 | `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite (6,784 tests) |
+| `npm run test:all` | Complete test suite (7,342 tests) |
 
 ### Running the DB-backed tiers
 
@@ -237,7 +237,7 @@ suites expect, runs them and drops the container again.
 ```bash
 bin/run-db-tiers.sh                    # integration tier
 bin/run-db-tiers.sh unit integration
-bin/run-db-tiers.sh -- test/integration/api/jsonrpc.integration.test.js
+bin/run-db-tiers.sh -- test/integration/api/jsonrpc.test.js
 ```
 
 **One trap it guards, because there is no way to configure around it.** The oracle
@@ -257,7 +257,7 @@ a failure that looks like broken code. A symlinked sibling satisfies it.
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit | ~3,023 | 114 files covering `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleConsensus.test.js`, `CrossChainDexEngine.test.js`, `Governance.test.js`, `AttestationConsensus.test.js`, `AttestationPublisher.test.js`, `StateAnchorPublisher.test.js`, `ReorgHandler.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.coverage.test.js`, and many more. Excludes the boundary files, which are counted on their own row below |
+| Unit | ~3,023 | 114 files covering `xchain_hub.test.js`, `consensus.test.js`, `peer_manager.test.js`, `oracle_consensus.test.js`, `cross_chain_dex_engine.test.js`, `governance.test.js`, `attestation_consensus.test.js`, `attestation_publisher.test.js`, `state_anchor_publisher.test.js`, `reorg_handler.test.js`, `reward_tracker.test.js`, `slash_detector.test.js`, `db_coverage.test.js`, and many more. Excludes the boundary files, which are counted on their own row below |
 | Security | ~87 | SQL safety, parameter injection, authentication, rate limiting |
 | Boundary | ~287 | 15 files in two directories: `test/unit/boundary/` holds the per-module edge cases (config, consensus, cross-chain, db, fee quote, governance, P2P, price fetcher, quorum, reorg, rewards, slashing, trimmed median, validator), `test/boundary/` holds the flag-day consensus activation gates |
 | Integration | ~89 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
@@ -275,8 +275,8 @@ predates the split and is unit-scoped, so those 273 cases run under `npm test` a
 `npm run ci` as well as under `npm run test:boundary`; `test/boundary/` was added later
 for the consensus flag-day activation gates and runs only under `npm run test:boundary`,
 which globs both paths. A guard test
-(`test/unit/boundary/boundary-suite-coverage.boundary.test.js`) fails if any
-`*.boundary.test.js` file exists that the `test:boundary` globs would not pick up, so a
+(`test/unit/boundary/boundary_suite_coverage.test.js`) fails if any spec in a
+directory named `boundary` exists that the `test:boundary` globs would not pick up, so a
 third boundary directory cannot go silently unrun.
 
 ## JSON-RPC API

@@ -54,7 +54,7 @@
  *
  ********************************************************************/
 
-const { loadSignerHooks } = require('../lib/signer-loader.js');
+const { loadSignerHooks } = require('../lib/signer_loader.js');
 
 // Dogecoin base58 pay-to-pubkey-hash prefixes by network. Mainnet version byte
 // 0x1e renders as 'D'; testnet/regtest version byte 0x71 renders as 'n'. P2SH is

@@ -35,11 +35,13 @@
  * @param {string} [name] config key name, named in the warning when the fallback fires
  * @returns {number}
  */
+const { getLogger } = require('../observability');
+const logger = getLogger();
 function positiveIntConfig(raw, dflt, name) {
     if (raw === undefined || raw === null || raw === '') return dflt;
     let n = parseInt(raw, 10);
     if (Number.isInteger(n) && n > 0) return n;
-    console.warn('config: ' + (name || 'value') + '="' + raw + '" is not a positive integer; ' +
+    logger.warn('config: ' + (name || 'value') + '="' + raw + '" is not a positive integer; ' +
         'using the default (' + dflt + '). A non-positive cap disables the ring it sizes.');
     return dflt;
 }

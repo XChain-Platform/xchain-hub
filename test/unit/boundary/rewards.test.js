@@ -1,0 +1,159 @@
+'use strict';
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const sinon         = require('sinon');
+const { expect }    = require('chai');
+const RewardTracker = require('../../../src/anchor/reward_tracker');
+const { createMockHub } = require('../../helpers/mockHub');
+
+// Generate valid unique 64-hex-char pubkeys for testing
+function hexPubkey(n) {
+    let hex = n.toString(16).padStart(64, '0');
+    return hex.slice(0, 64);
+}
+
+let hub, rt;
+function insertAmounts() {
+    return hub.db.doQuery.getCalls()
+        .filter(c => c.args[0].includes('validator_rewards'))
+        .map(c => c.args[1][2]);
+}
+
+describe('Boundary: RewardTracker', registerBoundaryRewardTracker);
+
+function registerBoundaryRewardTracker() {
+    beforeEach(function () {
+        hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '10.00000000' } });
+        rt  = new RewardTracker(hub);
+    });
+    afterEach(function () {
+        sinon.restore();
+    });
+    // Division precision: equal-split with toFixed(8)
+    describe('distributeRewards(): per-validator precision', registerDistributeRewardsPerValidatorPrecision);
+    // Zero participants: early-return guard
+    describe('distributeRewards(): zero participants', registerDistributeRewardsZeroParticipants);
+    // Minimum satoshi reward amounts
+    describe('distributeRewards(): minimum rewardPerRound precision', registerDistributeRewardsMinimumRewardPerRoundPrecision);
+}
+
+function registerDistributeRewardsPerValidatorPrecision() {
+    it('10 / 1 = 10.00000000 (exact, no rounding loss)', test1011000000000ExactNoRoundingLoss);
+    it('10 / 3 = 3.33333333 (truncated, total 9.99999999, 1 satoshi lost)', test103333333333TruncatedTotal9999999991SatoshiLost);
+    // The 9th decimal of 10/7 is 8, so this is the case where the old float
+    // + toFixed(8) split rounded UP to 1.42857143 and minted a satoshi: 7 x
+    // that is 10.00000001, above the budget it split and one satoshi off
+    // what the indexer's bcmulfloor derivation credits. The expectation is
+    // written out rather than recomputed with the construct under test, so
+    // it pins the value and not the code.
+    it('10 / 7 = 1.42857142 (floored; half-up would mint a satoshi)', test107142857142FlooredHalfUpWouldMintASatoshi);
+    it('10 / 100 = 0.10000000 (exact)', test10100010000000Exact);
+    it('10 / 1000 = 0.01000000', test101000001000000);
+}
+async function test1011000000000ExactNoRoundingLoss() {
+    await rt.distributeRewards(1, [hexPubkey(1)]);
+
+    let amounts = insertAmounts();
+    expect(amounts).to.have.length(1);
+    expect(amounts[0]).to.equal('10.00000000');
+}
+async function test103333333333TruncatedTotal9999999991SatoshiLost() {
+    await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2), hexPubkey(3)]);
+
+    let amounts = insertAmounts();
+    expect(amounts).to.have.length(3);
+    amounts.forEach(a => expect(a).to.equal('3.33333333'));
+
+    // Verify total loss: 3 × 3.33333333 = 9.99999999, not 10
+    let total = amounts.reduce((sum, a) => sum + parseFloat(a), 0);
+    expect(total).to.be.closeTo(9.99999999, 1e-9);
+}
+async function test107142857142FlooredHalfUpWouldMintASatoshi() {
+    let participants = Array.from({ length: 7 }, (_, i) => hexPubkey(i + 1));
+    await rt.distributeRewards(1, participants);
+
+    let amounts = insertAmounts();
+    expect(amounts).to.have.length(7);
+    amounts.forEach(a => expect(a).to.equal('1.42857142'));
+
+    // Conservation: the recorded rows never sum above the round budget.
+    let total = amounts.reduce((sum, a) => sum + parseFloat(a), 0);
+    expect(total).to.be.at.most(10);
+}
+async function test10100010000000Exact() {
+    let participants = Array.from({ length: 100 }, (_, i) => hexPubkey(i + 1));
+    await rt.distributeRewards(1, participants);
+
+    let amounts = insertAmounts();
+    expect(amounts).to.have.length(100);
+    amounts.forEach(a => expect(a).to.equal('0.10000000'));
+}
+async function test101000001000000() {
+    let participants = Array.from({ length: 1000 }, (_, i) => hexPubkey(i + 1));
+    await rt.distributeRewards(1, participants);
+
+    let amounts = insertAmounts();
+    expect(amounts).to.have.length(1000);
+    amounts.forEach(a => expect(a).to.equal('0.01000000'));
+}
+
+function registerDistributeRewardsZeroParticipants() {
+    it('empty array → returns early, zero DB calls', testEmptyArrayReturnsEarlyZeroDBCalls);
+    it('null participants → returns early, zero DB calls', testNullParticipantsReturnsEarlyZeroDBCalls);
+}
+async function testEmptyArrayReturnsEarlyZeroDBCalls() {
+    await rt.distributeRewards(1, []);
+
+    expect(hub.db.doQuery.callCount).to.equal(0);
+}
+async function testNullParticipantsReturnsEarlyZeroDBCalls() {
+    await rt.distributeRewards(1, null);
+
+    expect(hub.db.doQuery.callCount).to.equal(0);
+}
+
+function registerDistributeRewardsMinimumRewardPerRoundPrecision() {
+    it('rewardPerRound = 0.00000001 / 1 → 0.00000001 (1 satoshi, exact)', testRewardPerRound00000000110000000011SatoshiExact);
+    it('rewardPerRound = 0.00000001 / 3 → toFixed(8) rounds to 0.00000000 (sub-satoshi lost)', testRewardPerRound0000000013ToFixed8RoundsTo000000000SubSatoshi);
+    it('rewardPerRound = 0 → throws invalid reward error', testRewardPerRound0ThrowsInvalidRewardError);
+}
+async function testRewardPerRound00000000110000000011SatoshiExact() {
+    hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0.00000001' } });
+    rt  = new RewardTracker(hub);
+
+    await rt.distributeRewards(1, [hexPubkey(1)]);
+
+    let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('validator_rewards'));
+    expect(calls).to.have.length(1);
+    expect(calls[0].args[1][2]).to.equal('0.00000001');
+}
+async function testRewardPerRound0000000013ToFixed8RoundsTo000000000SubSatoshi() {
+    hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0.00000001' } });
+    rt  = new RewardTracker(hub);
+
+    await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2), hexPubkey(3)]);
+
+    let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('validator_rewards'));
+    expect(calls).to.have.length(3);
+    calls.forEach(c => expect(c.args[1][2]).to.equal('0.00000000'));
+}
+async function testRewardPerRound0ThrowsInvalidRewardError() {
+    hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0' } });
+    rt  = new RewardTracker(hub);
+
+    try {
+        await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2)]);
+        expect.fail('should have thrown');
+    } catch (e) {
+        expect(e.message).to.include('Invalid reward amount');
+    }
+}

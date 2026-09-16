@@ -1,0 +1,364 @@
+'use strict';
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+// PRICE batch ingest: pushpricebatch JSON-RPC method (spec
+// spec section 5.7, decision D22).
+//
+// Coverage:
+//   - the method is registered in WRITE_METHODS (bulk-keyed like every other
+//     forward write) and deliberately absent from REORG_WRITE_METHODS;
+//   - the handler mirrors pushpriceround's validation and {error} convention;
+//   - the handler delegates verification/storage to
+//     hub.priceAggregator.receiveValidatedBatch and returns its result
+//     verbatim.
+//
+// The aggregator is STUBBED here (sinon), never the real PriceAggregator:
+// receiveValidatedBatch is being built in a parallel session and this suite
+// must pass regardless of that work's state. This file only proves the RPC
+// surface calls the contracted method with the contracted shape and returns
+// what it gets back; the real batch-signature/dedupe behavior needs its own
+// exercise once PriceAggregator.js lands receiveValidatedBatch for real.
+const sinon      = require('sinon');
+const { expect } = require('chai');
+const proxyquire = require('proxyquire').noPreserveCache();
+const { waitUntil } = require('../../../helpers/waitUntil');
+const KEY = 'test-hub-key';
+// Boot src/api.js with everything heavy stubbed out. Captures both the
+// app.use() middlewares (for the WRITE_METHODS/REORG_WRITE_METHODS auth
+// checks) and the jsonRpcController methods object passed to
+// express-json-rpc-router (for driving the handler directly). Pattern lifted
+// from sensitiveReadAuth.test.js, which establishes that this is how api.js
+// boots under proxyquire with no real DB/network.
+function createApiHarness(hubOverrides) {
+    const useCalls = [];
+    const mockApp = {
+        use:  sinon.stub().callsFake((fn) => { useCalls.push(fn); }),
+        get:  sinon.stub(),
+        post: sinon.stub(),
+        set:  sinon.stub(),
+        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
+    };
+    const mockServer = {
+        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); }),
+        on: sinon.stub()
+    };
+    const mockExpress = sinon.stub().returns(mockApp);
+    mockExpress.json = sinon.stub().returns(function expressJson() {});
+    const mockHub = new Proxy(Object.assign({}, hubOverrides), {
+        get: (target, prop) => {
+            if (!(prop in target)) target[prop] = sinon.stub().callsFake(async () => ({}));
+            return target[prop];
+        }
+    });
+    const captured = { controller: null };
+    const mockJsonRouter = sinon.stub().callsFake((opts) => {
+        captured.controller = opts.methods;
+        return function routerMw() {};
+    });
+    return { useCalls, mockServer, mockExpress, mockHub, mockJsonRouter, captured };
+}
+function loadApiWithEnv(env, harness) {
+    const saved = {};
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT',
+                     'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
+        saved[k] = process.env[k];
+        delete process.env[k];
+    }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999'
+    }, env);
+    try {
+        proxyquire('../../../../src/api', {
+            'dotenv': { config: sinon.stub() },
+            'express': harness.mockExpress,
+            'helmet': sinon.stub().returns(function helmetMw() {}),
+            'cors': sinon.stub().returns(function corsMw() {}),
+            'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
+            'express-json-rpc-router': harness.mockJsonRouter,
+            'http': { createServer: sinon.stub().returns(harness.mockServer) },
+            'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
+            'geoip-lite': { lookup: sinon.stub().returns(null) },
+            './XChainHub': function () { return harness.mockHub; }
+        });
+    } finally {
+        for (const [k, v] of Object.entries(saved)) {
+            if (v === undefined) delete process.env[k];
+            else process.env[k] = v;
+        }
+    }
+}
+function driveMiddleware(mw, methodOrMethods, apiKey) {
+    const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(body) { this.body = body; return this; }
+    };
+    const body = Array.isArray(methodOrMethods)
+        ? methodOrMethods.map((m, i) => ({ method: m, id: i + 1 }))
+        : { method: methodOrMethods, id: 1 };
+    let nexted = false;
+    mw({ body, headers: apiKey ? { 'x-api-key': apiKey } : {} },
+       res, () => { nexted = true; });
+    return { nexted, res };
+}
+function findAuthMiddleware(useCalls) {
+    const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3);
+    for (const fn of candidates) {
+        try {
+            const probe = driveMiddleware(fn, 'updateconfig', 'wrong-key-probe');
+            const open  = driveMiddleware(fn, 'ping', undefined);
+            if (open.nexted && (probe.res.statusCode === 401 || probe.nexted)) return fn;
+        } catch (_) { /* not the auth middleware */ }
+    }
+    return null;
+}
+async function bootApi(env, hubOverrides) {
+    const harness = createApiHarness(hubOverrides);
+    loadApiWithEnv(env, harness);
+    // server.listen() is the last step of the async boot IIFE, so it is the
+    // signal every app.use() middleware AND the jsonRouter({methods}) call
+    // have both already happened; poll for it rather than guessing timing.
+    await waitUntil(() => harness.mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
+    const authMw = findAuthMiddleware(harness.useCalls);
+    expect(authMw, 'auth middleware not found among app.use() calls').to.not.equal(null);
+    expect(harness.captured.controller, 'jsonRpcController not captured from jsonRouter({methods})').to.not.equal(null);
+    return {
+        request:      (method, apiKey)  => driveMiddleware(authMw, method, apiKey),
+        requestBatch: (methods, apiKey) => driveMiddleware(authMw, methods, apiKey),
+        controller:   harness.captured.controller,
+        mockHub:      harness.mockHub
+    };
+}
+{
+    let registerwriteMethodsReorgWriteMethodsRegistration2;
+    {
+        async function isBulkKeyedLikeEveryOtherTest4() {
+            const api = await bootApi({ HUB_API_KEY: KEY });
+            expect(api.request('pushpricebatch', undefined).res.statusCode).to.equal(401);
+            expect(api.request('pushpricebatch', KEY).nexted).to.equal(true);
+        }
+        async function isNotInReorgWriteMethodsTest5() {
+            const RKEY = 'test-reorg-key';
+            const api = await bootApi({ HUB_API_KEY: KEY, HUB_REORG_API_KEY: RKEY });
+            // The reorg key authorizes only pushpricereorg/pushxcallreorg/pushdexreorg;
+            // pushpricebatch must still fall back to needing the BULK key.
+            expect(api.request('pushpricebatch', RKEY).res.statusCode).to.equal(401);
+            expect(api.request('pushpricebatch', KEY).nexted).to.equal(true);
+        }
+        async function keylessBootPushpricebatchPassesUnauthenticatedLikeTest6() {
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
+            expect(api.request('pushpricebatch', undefined).nexted).to.equal(true);
+        }
+        function writeMethodsReorgWriteMethodsRegistrationSuite3() {
+            it('is bulk-keyed like every other forward write (registered in WRITE_METHODS)', isBulkKeyedLikeEveryOtherTest4);
+            it('is NOT in REORG_WRITE_METHODS: the reorg key alone does not authorize it', isNotInReorgWriteMethodsTest5);
+            it('keyless boot: pushpricebatch passes unauthenticated like other writes', keylessBootPushpricebatchPassesUnauthenticatedLikeTest6);
+        }
+        registerwriteMethodsReorgWriteMethodsRegistration2 = function registerSuite() {
+            describe('WRITE_METHODS / REORG_WRITE_METHODS registration', writeMethodsReorgWriteMethodsRegistrationSuite3);
+        };
+    }
+    let registerhandlerValidationMirrorsPushpriceroundSError7;
+    {
+        let api;
+        async function sourceChainIsRequiredTest9() {
+            const result = await api.controller.pushpricebatch({
+                first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ error: 'source_chain is required' });
+        }
+        // THROWN, not returned: an unknown chain refuses the call's own arguments, which a
+        // replay can never turn into an acceptance, so it belongs in the envelope's error
+        // slot where a queueing caller classes it terminal. api.push-unknown-chain.test.js
+        // covers the shape across all four durable push handlers.
+        async function sourceChainMustBeAnAllowedTest10() {
+            let thrown = null;
+            try {
+                await api.controller.pushpricebatch({
+                    source_chain: 'NOPE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+                });
+            } catch (err) { thrown = err; }
+            expect(thrown).to.be.an('error');
+            expect(thrown.code).to.equal(-32602);
+            expect(thrown.message).to.match(/chain must be one of/);
+        }
+        async function firstRoundIsRequiredTest11() {
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ error: 'first_round is required' });
+        }
+        async function lastRoundIsRequiredTest12() {
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ error: 'last_round is required' });
+        }
+        async function roundsMustBeAnArrayTest13() {
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: 'not-an-array'
+            });
+            expect(result).to.deep.equal({ error: 'rounds must be an array' });
+        }
+        async function anEmptyRoundsArrayPassesValidationTest14() {
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            // stub hub.priceAggregator (via the Proxy default) resolves {} - proves
+            // the handler got past validation and called through.
+            expect(result).to.not.have.property('error');
+        }
+        function handlerValidationMirrorsPushpriceroundSErrorSuite8() {
+            before(async function () {
+                // priceAggregator.receiveValidatedBatch stubbed here too (see the
+                // delegation describe() below for why): these tests only exercise
+                // the validation guards ABOVE that call, so the stub's return value
+                // does not matter beyond "not throwing".
+                api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' },
+                    { priceAggregator: { receiveValidatedBatch: sinon.stub().resolves({ accepted: true, stored: 0, duplicates: 0, rejected: 0 }) } });
+            });
+            it('source_chain is required', sourceChainIsRequiredTest9);
+            it('source_chain must be an allowed chain', sourceChainMustBeAnAllowedTest10);
+            it('first_round is required', firstRoundIsRequiredTest11);
+            it('last_round is required', lastRoundIsRequiredTest12);
+            it('rounds must be an array', roundsMustBeAnArrayTest13);
+            it('an empty rounds array passes validation (aggregator decides emptiness)', anEmptyRoundsArrayPassesValidationTest14);
+        }
+        registerhandlerValidationMirrorsPushpriceroundSError7 = function registerSuite() {
+            describe('handler validation (mirrors pushpriceround\'s {error} convention)', handlerValidationMirrorsPushpriceroundSErrorSuite8);
+        };
+    }
+    let registeraggregatorNotReady15;
+    {
+        async function returnsErrorWhenHubPriceaggregatorIsTest17() {
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: undefined });
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ error: 'price aggregator not ready' });
+        }
+        function aggregatorNotReadySuite16() {
+            it('returns {error} when hub.priceAggregator is unset', returnsErrorWhenHubPriceaggregatorIsTest17);
+        }
+        registeraggregatorNotReady15 = function registerSuite() {
+            describe('aggregator not ready', aggregatorNotReadySuite16);
+        };
+    }
+    let registerdelegationToPriceaggregatorReceivevalidatedbatchStubbed18;
+    {
+        // This is the integration seam with the OTHER builder's PriceAggregator.js
+        // work (spec item 11). The contract pinned in the batching spec
+        // section 5.7 / decision D13: receiveValidatedBatch(source_chain, payload)
+        // returns {accepted, stored, duplicates, rejected}, accepted iff every round
+        // either stored or deduped. This suite stubs that method so it is green
+        // whether or not PriceAggregator.js has landed the real implementation yet;
+        // exercising the REAL aggregator behind pushpricebatch is not this suite's job.
+        async function callsReceivevalidatedbatchWithSourceChainAndTest20() {
+            const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+            const rounds = [{ round: 1, timestamp: 111, btc_block_height: 100, pairs: [{ pair: 'XCHAIN/USD', price: '1' }] }];
+            const result = await api.controller.pushpricebatch({
+                source_chain:     'DOGE',
+                first_round:      1,
+                last_round:       6,
+                btc_block_height: 100,
+                rounds:           rounds,
+                block_time:       1735689600,
+                sigs:             [{ pubkey: 'abc', sig: 'def' }],
+                action_index:     42,
+                block_index:      7,
+                push_generation:  3
+            });
+            expect(receiveValidatedBatch.calledOnce).to.equal(true);
+            const [sourceChainArg, payloadArg] = receiveValidatedBatch.firstCall.args;
+            expect(sourceChainArg).to.equal('DOGE');
+            expect(payloadArg).to.deep.equal({
+                first_round:      1,
+                last_round:       6,
+                btc_block_height: 100,
+                rounds:           rounds,
+                block_time:       1735689600,
+                sigs:             [{ pubkey: 'abc', sig: 'def' }],
+                action_index:     42,
+                block_index:      7,
+                push_generation:  3
+            });
+            expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        }
+        // THE BATCH PUSH DELIBERATELY CARRIES NO ADMISSION MAP, and this is the case that
+        // says so out loud, because the sibling handler pushpriceround now does carry one.
+        // The difference is not an oversight: the v0 ROUND canonical covers the map, so a
+        // pushed map is verifiable against the producer's signatures, while the BATCH
+        // canonical serializes only {round, timestamp, btc_block_height, pairs} per round.
+        // An admit_blocks on this payload would therefore be an UNSIGNED consensus field
+        // that a relay could rewrite in flight with every signature still verifying, which
+        // is the one thing this rail may never accept. When the batch canonical gains the
+        // field across its three byte-twins (this hub's buildPriceBatchPayload,
+        // OracleConsensus.buildPriceBatchPayload and the indexer's ed25519 twin), the
+        // handler gains the key and this case becomes its parity assertion.
+        async function doesNotForwardAnAdmitBlocksTest21() {
+            const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+            await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 1, btc_block_height: 100,
+                rounds: [{ round: 1, timestamp: 111, btc_block_height: 100, pairs: [] }],
+                block_time: 1735689600, sigs: [], action_index: 1, block_index: 1, push_generation: 0,
+                admit_blocks: { BTC: 104, DOGE: 5000004, LTC: 2400004 }
+            });
+            const payload = receiveValidatedBatch.firstCall.args[1];
+            expect('admit_blocks' in payload).to.equal(false,
+                'an unsigned admission map reached the batch verifier');
+        }
+        async function returnsTheAggregatorResultVerbatimOnTest22() {
+            const receiveValidatedBatch = sinon.stub().resolves({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ accepted: true, stored: 5, duplicates: 1, rejected: 0 });
+        }
+        async function returnsTheAggregatorRejectionVerbatimOnTest23() {
+            const receiveValidatedBatch = sinon.stub().resolves({ accepted: false, stored: 0, duplicates: 0, rejected: 6 });
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ accepted: false, stored: 0, duplicates: 0, rejected: 6 });
+        }
+        async function catchesAThrownAggregatorErrorIntoTest24() {
+            const receiveValidatedBatch = sinon.stub().rejects(new Error('boom'));
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' }, { priceAggregator: { receiveValidatedBatch } });
+            const result = await api.controller.pushpricebatch({
+                source_chain: 'DOGE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+            });
+            expect(result).to.deep.equal({ error: 'boom' });
+        }
+        function delegationToPriceaggregatorReceivevalidatedbatchStubbedSuite19() {
+            it('calls receiveValidatedBatch with source_chain and the mirrored+extended params', callsReceivevalidatedbatchWithSourceChainAndTest20);
+            it('does NOT forward an admit_blocks the batch canonical could not have signed', doesNotForwardAnAdmitBlocksTest21);
+            it('returns the aggregator result verbatim on a partial-dedupe outcome', returnsTheAggregatorResultVerbatimOnTest22);
+            it('returns the aggregator rejection verbatim on a signature/structural failure', returnsTheAggregatorRejectionVerbatimOnTest23);
+            it('catches a thrown aggregator error into {error}, same convention as pushpriceround', catchesAThrownAggregatorErrorIntoTest24);
+        }
+        registerdelegationToPriceaggregatorReceivevalidatedbatchStubbed18 = function registerSuite() {
+            describe('delegation to PriceAggregator.receiveValidatedBatch (stubbed)', delegationToPriceaggregatorReceivevalidatedbatchStubbedSuite19);
+        };
+    }
+    function hubPushpricebatchJsonRpcPriceBatchSuite1() {
+        afterEach(function () { sinon.restore(); });
+        registerwriteMethodsReorgWriteMethodsRegistration2();
+        registerhandlerValidationMirrorsPushpriceroundSError7();
+        registeraggregatorNotReady15();
+        registerdelegationToPriceaggregatorReceivevalidatedbatchStubbed18();
+    }
+    describe('hub pushpricebatch JSON-RPC (PRICE batch ingest, spec section 5.7)', hubPushpricebatchJsonRpcPriceBatchSuite1);
+}

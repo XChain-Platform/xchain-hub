@@ -1,0 +1,59 @@
+{
+  "consensus_rules_digest": "94fde4ed0286cf609098631af5673d2b93abd991ff6bcf17698a26591d3384b7",
+  "consensus_rules_gates": {
+    "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
+    "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
+    "anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION": "{\"mainnet\":0,\"regtest\":0,\"testnet\":0}",
+    "attest_relay_activation.ATTEST_RELAY_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
+    "checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":146000}",
+    "cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
+    "equivocation_header.EQUIV_HEADER_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
+    "price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION": "{\"mainnet\":0,\"regtest\":0,\"testnet\":0}",
+    "price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
+    "retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
+    "rollcall_activation.ROLLCALL_ACTIVATION": "{\"mainnet\":0,\"regtest\":null,\"testnet\":151200}",
+    "snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION": "{\"mainnet\":0,\"regtest\":0,\"testnet\":0}",
+    "stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
+    "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION": "{\"mainnet\":0,\"regtest\":0,\"testnet\":150780}",
+    "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING": "{\"confirmations\":3,\"maxSlots\":2}",
+    "attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION": "{\"mainnet\":null,\"regtest\":0,\"testnet\":151324}",
+    "attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION": "{\"mainnet\":null,\"regtest\":0,\"testnet\":151800}",
+    "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2": "{\"headroom\":1,\"maxSlots\":2,\"startOffset\":0}",
+    "rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":152208}",
+    "xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION": "{\"BTC:mainnet\":9999999999,\"BTC:testnet\":152929,\"DOGE:mainnet\":9999999999,\"DOGE:testnet\":67902062,\"LTC:mainnet\":9999999999,\"LTC:testnet\":4887898,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":null,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":null,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
+    "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":null,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":null,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
+    "mirror_admission_activation.ADMIT_MARGIN_BLOCKS": "{\"anchor_reward_attestations\":144,\"attestation_responses\":1,\"default\":4,\"oracle_prices\":1}",
+    "mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS": "1",
+    "mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS": "{\"BTC\":6,\"DOGE\":60,\"LTC\":24,\"default\":6}",
+    "anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":null}",
+    "anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S": "64800",
+    "mirror_admission_activation.CHAIN_CODE_RE": "{}",
+    "mirror_admission_activation.CANONICAL_HEIGHT_RE": "{}"
+  },
+  "gate_key_count": 33,
+  "absent_gates": [],
+  "gates_field": "anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S,anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION,anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION,attest_relay_activation.ATTEST_RELAY_ACTIVATION,attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2,attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION,checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION,cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION,equivocation_header.EQUIV_HEADER_ACTIVATION,mirror_admission_activation.ADMIT_MARGIN_BLOCKS,mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS,mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS,mirror_admission_activation.CANONICAL_HEIGHT_RE,mirror_admission_activation.CHAIN_CODE_RE,mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION,mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION,mirror_admission_activation.admissionCanonicalField,mirror_admission_activation.decodeAdmitBlocks,mirror_admission_activation.encodeAdmitBlocks,mirror_admission_activation.isAdmissionEra,price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION,price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION,retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION,rollcall_activation.ROLLCALL_ACTIVATION,rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION,snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION,stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION,xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION",
+  "gates_field_hash": "f19f21f028823fa1aa784e4220724ea13dabd02a1c7d7bb963bc72c8ec4d85b5",
+  "coin_consensus_pins": {
+    "BTC:mainnet": "242cf3cfcb4ff494d43b3d39775938f822f03a45326beff3b125ca102648e6ad",
+    "LTC:mainnet": "5fd9f1dda65b55faf6a5e507a4a81bd2a5ba6813d8a3ed1f04cd27b99fec03c3",
+    "DOGE:mainnet": "78c298463e586fed8daa1979d9dfe58f4d6de32efd01ae45024b9490e871b1cc",
+    "BTC:testnet": "fcff7c1f46a8f7a75ddb7e1e4fb30f9e0c72d72f307a75a9d9357ffad29452c0",
+    "LTC:testnet": "57373962a5c562f8ceb98fceb482c586741ecf8dd6335965c76f9b8e61a4eb87",
+    "DOGE:testnet": "5276c0a0fb161bbfd4e8b0acaabf38751dded4370ecce86455c57eb5de0e9bb2",
+    "BTC:regtest": "63ee757834f6f815045321090fd89b446e784f442e3e7abf84b8c0fb3b479324",
+    "LTC:regtest": "ab30c1d1fd444ca3dca1a9ec855bd587422e87d5e5e5e6b6f9ddadd1d2fb587d",
+    "DOGE:regtest": "34f8dafeff36f7c8ca3b327c3c915251e78e64448742860620522a92a69368a0"
+  },
+  "coin_consensus_pin_hash": "11361a67803ecc556381b6abbdf3389fbc53156e8b1436c6463f5affc31ff151",
+  "coin_pin_armed_networks": [
+    "testnet",
+    "regtest"
+  ],
+  "coin_pin_skipped_networks": [
+    "mainnet"
+  ],
+  "hub_schema_version": 6,
+  "carrier_logic_digest": "634843646cbb4ee2493bd076b64d9ab17aead0b6ec58370e0e2dcb94984bd6d0"
+}

@@ -1,4 +1,7 @@
 'use strict';
+const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 /*********************************************************************
  *
@@ -42,9 +45,6 @@
  *
  ********************************************************************/
 
-const TABLE   = 'capability_snapshots';
-const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source, btc_chain_id)';
-
 /**
  * Normalize a resolved validator set into snapshot rows, exactly as the six in-loop
  * copies did. Split out so a caller can broadcast the same values it wrote without
@@ -76,7 +76,7 @@ async function resolveBtcChainId(db){
         if(!db || typeof db.getChainTip !== 'function') return null;
         // capability_snapshots has no network column: the set belongs to the hub, so the
         // hub's own network is the one to ask about.
-        let tip = await db.getChainTip('bitcoin', process.env.HUB_NETWORK || '');
+        let tip = await db.getChainTip('bitcoin', hubConfig.HUB_NETWORK || '');
         return (tip && tip.chainId) ? tip.chainId : null;
     } catch(e){
         return null;
@@ -108,7 +108,7 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     // roster nears VALIDATOR_QUERY_LIMIT: either gate this refusal behind an activation
     // check at that point, or re-affirm the ungated ruling.
     if(validators && validators.truncated === true){
-        console.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
+        logger.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
                      ' capability snapshot at block ' + block +
                      ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
         return [];
@@ -119,16 +119,12 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     let chainId = (btcChainId === undefined) ? await resolveBtcChainId(db)
                                              : (btcChainId || null);
 
-    let args = [];
-    for(let r of rows)
-        args.push(r.snapshot_block, r.capability, r.signing_pubkey, r.amount, r.source, chainId);
-
-    await db.doQuery(
-        'INSERT IGNORE INTO ' + TABLE + ' ' + COLUMNS + ' VALUES ' +
-        rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', '),
-        args);
+    // One statement, in db/capability_snapshots.js: the single-statement shape is
+    // what makes the mirror all-or-nothing, and the reason it must not be chunked
+    // is recorded beside the statement itself.
+    await db.createCapabilitySnapshots(rows, chainId);
 
     return rows;
 }
 
-module.exports = { TABLE, COLUMNS, normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };
+module.exports = { normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };

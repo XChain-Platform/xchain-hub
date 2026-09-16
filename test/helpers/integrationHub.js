@@ -34,7 +34,7 @@ const { bftQuorumOrSingle } = require('../../src/lib/bft_quorum.js');
 // Keep this list in step with what the fixture actually provides.
 const HUB_SURFACE = [
     'getPeerManager', 'getIdentity', 'getOracle', 'getConsensus', 'getCrossChain',
-    'applyConfig', '_resolveBtcNetwork', '_resolveBtcLatestBlock'
+    'applyConfig', 'resolveBtcNetwork', 'resolveBtcLatestBlock'
 ];
 
 // Shared p2pConfig floor. ORACLE_EPOCH_START is required (OracleRound's
@@ -68,7 +68,7 @@ function assertHubSurface() {
 /**
  * A capability-snapshot stand-in that seats an exact validator set at any block.
  *
- * CrossChainEngine._resolveQuorum fails CLOSED without one: a federated hub
+ * CrossChainEngine.resolveQuorum fails CLOSED without one: a federated hub
  * (live quorum > 0) that cannot resolve a deterministic cross_chain snapshot
  * refuses to attest rather than fork N against its peers. Multi-validator
  * integration tests must therefore supply this, not just a validator set.
@@ -134,8 +134,8 @@ function createIntegrationHub(db, validatorAddr, overrides = {}) {
         // no BTC indexer is configured); btcLatestBlock defaults to null, which is
         // the "no indexer reachable" answer and keeps single-node paths on their
         // round-number anchor.
-        _resolveBtcNetwork:     sinon.stub().resolves(overrides.btcNetwork || 'mainnet'),
-        _resolveBtcLatestBlock: sinon.stub().resolves(
+        resolveBtcNetwork:     sinon.stub().resolves(overrides.btcNetwork || 'mainnet'),
+        resolveBtcLatestBlock: sinon.stub().resolves(
             'btcLatestBlock' in overrides ? overrides.btcLatestBlock : null),
         _peerManager:   pm
     };

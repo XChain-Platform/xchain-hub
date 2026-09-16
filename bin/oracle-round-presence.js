@@ -28,12 +28,41 @@
  *
  * Read-only: it broadcasts nothing and writes nothing.
  *
- * Exit codes: 0 agreed, 1 divergent, 2 could not reach enough hubs.
+ * Exit codes: 0 agreed, 1 divergent, 2 could not compare (an invalid invocation,
+ * or fewer than two distinct hubs with a usable answer).
  */
 'use strict';
 
 const axios = require('axios');
 const { comparePresence } = require('../src/lib/oracle_round_presence.js');
+
+// The URL string is the only hub identity there is: presence answers carry no hub id,
+// so two DNS aliases of one host stay indistinguishable and this does not pretend
+// otherwise. Collapsing the exact repeats is what stops `--hubs A,A` from clearing the
+// two-hub gate, comparing a hub to itself, and printing agreement.
+function dedupeHubs(list) {
+    const seen = new Set();
+    const out = [];
+    for (const hub of list) {
+        const key = hub.replace(/\/+$/, '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(hub);
+    }
+    return out;
+}
+
+// Explicit bounds are validated before any request, because Number('oops') is NaN and
+// JSON.stringify writes NaN as null: every hub would then resolve its own upper bound
+// and the run would still print an agreed/divergent verdict over ranges that never
+// matched. Returns the normalized number, or an error string naming the flag.
+function numericFlag(flag, raw, min) {
+    if (raw === null || raw === undefined) return { value: null };
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < min)
+        return { error: flag + ' must be a whole number >= ' + min + '; got "' + raw + '"' };
+    return { value: n };
+}
 
 // Argv and env are read here and nowhere else, so the orchestration below can be
 // driven from a test. The range-pinning property this tool exists for lives only in
@@ -45,8 +74,8 @@ function parseArgs(argv, env) {
         return i === -1 || i === list.length - 1 ? fallback : list[i + 1];
     };
     return {
-        hubs: String(arg('hubs', (env && env.HUB_RPC_URLS) || ''))
-            .split(',').map(s => s.trim()).filter(Boolean),
+        hubs: dedupeHubs(String(arg('hubs', (env && env.HUB_RPC_URLS) || ''))
+            .split(',').map(s => s.trim()).filter(Boolean)),
         from: arg('from', null),
         to: arg('to', null),
         limit: arg('limit', null),
@@ -72,54 +101,90 @@ async function ask(hub, params) {
     return result;
 }
 
+// The explicit bounds, validated and normalized, or null once the reason they cannot
+// be used has been printed.
+function parseBounds(opts) {
+    const bounds = {};
+    for (const [flag, key, raw, min] of [['--from', 'from', opts.from, 0],
+                                        ['--to', 'to', opts.to, 0],
+                                        ['--limit', 'limit', opts.limit, 1]]) {
+        const parsed = numericFlag(flag, raw, min);
+        if (parsed.error) { console.error(parsed.error); return null; }
+        bounds[key] = parsed.value;
+    }
+    if (bounds.from !== null && bounds.to !== null && bounds.from > bounds.to) {
+        console.error('--from must not be greater than --to; got ' + bounds.from + ' and ' + bounds.to);
+        return null;
+    }
+    return bounds;
+}
+
+// Resolve the range from the first hub that reports a usable one, then pin it for
+// everyone. Advancing past an empty answer is the point: a freshly resynced or
+// wiped hub listed first would otherwise abort every run of the check. Returns null
+// once it has printed that no hub could anchor the range.
+async function resolveRange(hubs, bounds) {
+    if (bounds.from !== null && bounds.to !== null) return { from_round: bounds.from, to_round: bounds.to };
+    let empty = 0;
+    let unreached = 0;
+    for (const hub of hubs) {
+        let presence = null;
+        try { presence = await ask(hub, { from_round: bounds.from, to_round: bounds.to, limit: bounds.limit }); }
+        catch (err) {
+            unreached++;
+            console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err));
+            continue;
+        }
+        if (usableRange(presence)) return { from_round: presence.from_round, to_round: presence.to_round };
+        empty++;
+        console.error('warn: ' + hub + ' answered with no recorded rounds; trying the next hub.');
+    }
+    console.error('No hub returned a usable round range (' + empty +
+        ' answered empty, ' + unreached + ' unreachable).');
+    return null;
+}
+
+// Every hub asked about the one pinned range, split into usable answers and the hubs
+// that could not supply one.
+async function collectAnswers(hubs, range) {
+    const answers = [];
+    const unreachable = [];
+    for (const hub of hubs) {
+        let presence = null;
+        try { presence = await ask(hub, range); }
+        catch (err) { unreachable.push({ hub, error: (err && err.message) || String(err) }); continue; }
+        // Usable means exactly what comparePresence counts as usable. Counting raw
+        // replies here while the comparison re-filters for a rounds array lets two
+        // hubs, one of them malformed (version skew, a mangling proxy), leave ONE
+        // view to be reported as federation agreement.
+        if (!presence || !Array.isArray(presence.rounds)) {
+            unreachable.push({ hub, error: 'answered without a rounds array' });
+            continue;
+        }
+        answers.push({ hub, presence });
+    }
+    return { answers, unreachable };
+}
+
 // Returns the exit code rather than exiting, so a test can drive the whole run and
 // assert the outcome. Exit codes: 0 agreed, 1 divergent, 2 could not compare.
 async function main(opts) {
-    const { hubs: HUBS, from: FROM, to: TO, limit: LIMIT, json: JSON_OUT } = opts;
+    const { hubs: HUBS, json: JSON_OUT } = opts;
     if (HUBS.length < 2) {
-        console.error('Name at least two hubs: --hubs http://h1:4000,http://h2:4000 ' +
+        console.error('Name at least two DISTINCT hubs: --hubs http://h1:4000,http://h2:4000 ' +
             '(or set HUB_RPC_URLS). Comparing one hub to itself proves nothing.');
         return 2;
     }
 
-    // Resolve the range from the first hub that reports a usable one, then pin it for
-    // everyone. Advancing past an empty answer is the point: a freshly resynced or
-    // wiped hub listed first would otherwise abort every run of the check.
-    let range = { from_round: FROM, to_round: TO, limit: LIMIT };
-    if (range.from_round === null || range.to_round === null) {
-        let anchor = null;
-        let empty = 0;
-        let unreached = 0;
-        for (const hub of HUBS) {
-            let presence = null;
-            try { presence = await ask(hub, { from_round: FROM, to_round: TO, limit: LIMIT }); }
-            catch (err) {
-                unreached++;
-                console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err));
-                continue;
-            }
-            if (usableRange(presence)) { anchor = presence; break; }
-            empty++;
-            console.error('warn: ' + hub + ' answered with no recorded rounds; trying the next hub.');
-        }
-        if (!anchor) {
-            console.error('No hub returned a usable round range (' + empty +
-                ' answered empty, ' + unreached + ' unreachable).');
-            return 2;
-        }
-        range = { from_round: anchor.from_round, to_round: anchor.to_round };
-    } else {
-        range = { from_round: Number(FROM), to_round: Number(TO) };
-    }
+    const bounds = parseBounds(opts);
+    if (!bounds) return 2;
+    const range = await resolveRange(HUBS, bounds);
+    if (!range) return 2;
 
-    const answers = [];
-    const unreachable = [];
-    for (const hub of HUBS) {
-        try { answers.push({ hub, presence: await ask(hub, range) }); }
-        catch (err) { unreachable.push({ hub, error: (err && err.message) || String(err) }); }
-    }
+    const { answers, unreachable } = await collectAnswers(HUBS, range);
     if (answers.length < 2) {
-        console.error('Reached ' + answers.length + ' hub(s); need at least two to compare.');
+        console.error('Reached ' + answers.length + ' hub(s) with a usable answer; ' +
+            'need at least two to compare.');
         return 2;
     }
 
@@ -130,7 +195,11 @@ async function main(opts) {
                                          missing: a.presence.missing })) }, null, 2));
         return comparison.agreed ? 0 : 1;
     }
+    return printVerdict(range, answers, unreachable, comparison);
+}
 
+// The human report. Returns the exit code the verdict carries.
+function printVerdict(range, answers, unreachable, comparison) {
     console.log('Rounds ' + range.from_round + '-' + range.to_round +
         ' across ' + answers.length + ' hub(s)');
     for (const { hub, presence } of answers) {

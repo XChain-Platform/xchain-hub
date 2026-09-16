@@ -13,6 +13,14 @@ CREATE TABLE price_snapshots (
     source_chain        VARCHAR(10) NOT NULL DEFAULT 'DOGE',  -- which chain carried the PRICE v0 tx (audit/diagnostics)
     source_action_index BIGINT,                                -- action_index of the PRICE tx on source_chain (NULL for hub-finalized)
     push_generation     BIGINT NOT NULL DEFAULT 0,             -- source-chain reorg fence: see oracle_prices
+    -- ADMISSION HEIGHTS over the round's read set, which is every chain (members 2 and 3).
+    -- A price round is SIGNED (consensus_proof), so this map is inside the signed bytes and
+    -- is a seventh signed row type per R2 (a). Distinct from reference_block, which is the
+    -- round's own BTC anchor for v0-proofed rows and the LANDING chain's height for a
+    -- batch-sourced round, and is therefore not an admission height on any chain.
+    admit_block_btc     BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc     BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge    BIGINT UNSIGNED DEFAULT NULL,
     batch_block_time    BIGINT NOT NULL DEFAULT 0,             -- clock of the block the PRICE batch carrying this round LANDED in; 0 = no landed batch seen yet (a round this hub finalized over P2P, ahead of its batch). Stamped by PriceAggregator batch ingest for every round a landed batch carries, stored or deduped, and mirrored to every indexer that follows this hub.
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_round_pair (round_number, coin_pair),
