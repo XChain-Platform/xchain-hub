@@ -154,7 +154,11 @@ const hookAt6668 = function () {
     };
 
 const hookAt6849 = function () {
-        process.env = envSnapshot;
+        // Restore by key, never by assignment: a module that holds the
+        // environment by reference (the activation registry arms its regtest
+        // rows from it at each read) must keep seeing the live object.
+        for (const k of Object.keys(process.env)) if (!(k in envSnapshot)) delete process.env[k];
+        Object.assign(process.env, envSnapshot);
         sinon.restore();
     };
 

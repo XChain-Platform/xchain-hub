@@ -19,7 +19,8 @@
  * row of the same key, every value the rules digest names is a row, a miss
  * throws naming the key instead of reading null, get() hands out frozen rows
  * while copy() hands out mutable ones, the venue's regtest arming is applied
- * once at registration, the block lives in the part files and nowhere else,
+ * when a row is read (D78: the environment as it stands at that moment, with
+ * no registry purge), the block lives in the part files and nowhere else,
  * and every part file is a byte twin of the indexer's.
  *
  ********************************************************************/
@@ -32,7 +33,6 @@ const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
-const { purgeRegistry } = require('./helpers/purge_registry.js');
 
 const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
@@ -67,15 +67,14 @@ function same(a, b) {
     return crd.canonical(a) === crd.canonical(b);
 }
 
-// A fresh registry booted under `env` (one variable set, or cleared when the
-// value is undefined), read through `fn`, with the cache and the environment
-// put back exactly as they were.
+// The one loaded registry read through `fn` under `env` (one variable set, or
+// cleared when the value is undefined), with the environment put back exactly
+// as it was. No purge: the arming is applied at each read (D78), so the
+// registry every suite holds answers for the venue as it stands now.
 function bootedWith(name, value, fn) {
     const saved = process.env[name];
     if (value === undefined) delete process.env[name]; else process.env[name] = value;
-    const restore = purgeRegistry();
-    try { return fn(require('../../../src/consensus/gate_registry.js')); } finally {
-        restore();
+    try { return fn(registry); } finally {
         if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
     }
 }
@@ -222,7 +221,7 @@ describe('src/consensus/gate_registry.js: the readers', function () {
     });
 });
 
-describe('src/consensus/gate_registry.js: regtest arming at registration', function () {
+describe('src/consensus/gate_registry.js: regtest arming from the environment', function () {
 
     const ROLLCALL  = 'rollcall_activation.ROLLCALL_ACTIVATION';
     const ADMISSION = 'mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION';
@@ -275,28 +274,27 @@ describe('src/consensus/gate_registry.js: regtest arming at registration', funct
     });
 });
 
-describe('src/consensus/gate_registry.js: the arming is read once', function () {
+describe('src/consensus/gate_registry.js: the arming follows the environment at each read', function () {
 
-    const ROLLCALL = 'rollcall_activation.ROLLCALL_ACTIVATION';
+    const GATES = 'rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION';
 
-    it('keeps the loaded registry\'s arming when the environment moves under a running process', function () {
-        const before = registry.get(ROLLCALL).regtest;
-        const saved = process.env.XC_ROLLCALL_REGTEST_ACTIVATION;
-        process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed';
+    it('a carrier re-required alone, with no registry purge, reads the venue as it stands now', function () {
+        const before = registry.get(GATES).regtest;
+        expect(before, 'the suite runs bare').to.equal(null);
+        const saved = process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION;
+        process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed';
+        const id = require.resolve('../../../src/rollcall_gates_activation.js');
+        const cached = require.cache[id];
         try {
-            expect(registry.get(ROLLCALL).regtest, 'an activation height that can change under a running process is not one').to.equal(before);
-            const id = require.resolve('../../../src/rollcall_gates_activation.js');
-            const cached = require.cache[id];
-            try {
-                delete require.cache[id];
-                expect(require('../../../src/rollcall_gates_activation.js').ROLLCALL_GATES_ACTIVATION.regtest,
-                    'a carrier re-required alone reads the registry it was booted with').to.equal(registry.get('rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION').regtest);
-            } finally {
-                if (cached) require.cache[id] = cached; else delete require.cache[id];
-            }
+            expect(registry.get(GATES).regtest, 'the loaded registry answers for the environment at the read').to.equal(0);
+            delete require.cache[id];
+            expect(require('../../../src/rollcall_gates_activation.js').ROLLCALL_GATES_ACTIVATION.regtest,
+                'a carrier re-required alone sees the armed table, as its own literal did').to.equal(0);
         } finally {
-            if (saved === undefined) delete process.env.XC_ROLLCALL_REGTEST_ACTIVATION;
-            else process.env.XC_ROLLCALL_REGTEST_ACTIVATION = saved;
+            if (cached) require.cache[id] = cached; else delete require.cache[id];
+            if (saved === undefined) delete process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION;
+            else process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = saved;
         }
+        expect(registry.get(GATES).regtest, 'restored, the bare reading is back').to.equal(before);
     });
 });

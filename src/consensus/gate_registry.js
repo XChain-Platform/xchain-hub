@@ -27,12 +27,15 @@
  * byte for byte. Copy with cp, prove with cmp: nothing in a twin is edited
  * here, and no key, spelling or order in the block changes inside a window.
  *
- * REGTEST ARMING happens ONCE, at registration, from this process's
- * environment (shared_rows.js registerRows): the block writes the five
- * venue-armed regtest entries UNPINNED and the queue arms them before the row
- * is stored, so the bare reading is the block literal and the armed reading is
- * the venue's. A test that re-arms must purge this entry AND the gate_registry/
- * part tree from the require cache and re-require, the way the indexer's do.
+ * REGTEST ARMING is applied WHEN A ROW IS READ (shared_rows.js registerRows
+ * installs it as the core's read overlay): the block writes the five
+ * venue-armed regtest entries UNPINNED, the registry stores that committed
+ * table, and every get(), copy(), rows() and activeAt() arms the entry from
+ * this process's environment as it stands at that moment. The bare reading is
+ * the block literal and the armed reading is the venue's; a test that re-arms
+ * sets the variable and re-requires the carrier, with no registry purge. The
+ * environment object goes through config.env(), which hands back the live
+ * process environment itself, read by reference at each read.
  *
  * Readers get(), copy(), has(), keys(), rows() and activeAt(). A miss THROWS a
  * RegistryMissError naming the key: a row a build lacks is a build defect and
@@ -48,7 +51,8 @@ const { registerRows } = require('./gate_registry/shared_rows.js');
 
 // The SHARED block, loaded for effect: each part queues its rows into
 // shared_rows.js as it loads; registerRows() below replays them, in part
-// order, into the one registry with the venue's regtest arming applied.
+// order, into the one registry and installs the venue's regtest arming as
+// its read overlay.
 require('./gate_registry/shared_rows_1.js');
 require('./gate_registry/shared_rows_2.js');
 require('./gate_registry/shared_rows_3.js');
