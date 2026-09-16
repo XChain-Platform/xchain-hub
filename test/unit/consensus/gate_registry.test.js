@@ -208,8 +208,8 @@ describe('src/consensus/gate_registry.js: the readers', function () {
     it('judges activeAt by the unit, the coin key before the network key, and fails closed', function () {
         const bridge = 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION';
         expect(registry.activeAt(bridge, 'regtest', 'BTC', 0, 0), 'regtest at genesis').to.equal(true);
-        expect(registry.activeAt(bridge, 'testnet', 'BTC', 9999999998, 0), 'BTC:testnet below UNARMED').to.equal(false);
-        expect(registry.activeAt(bridge, 'testnet', 'BTC', 9999999999, 0), 'BTC:testnet at UNARMED').to.equal(true);
+        expect(registry.activeAt(bridge, 'mainnet', 'BTC', 9999999998, 0), 'BTC:mainnet below UNARMED').to.equal(false);
+        expect(registry.activeAt(bridge, 'mainnet', 'BTC', 9999999999, 0), 'BTC:mainnet at UNARMED').to.equal(true);
         expect(registry.activeAt(bridge, 'devnet', 'BTC', 9999999999, 0), 'an unknown network').to.equal(false);
         expect(registry.activeAt(bridge, 'regtest', null, 'abc', 0), 'an unparseable height').to.equal(false);
         const rollcall = 'rollcall_activation.ROLLCALL_ACTIVATION';
@@ -240,6 +240,19 @@ describe('src/consensus/gate_registry.js: the readers', function () {
             ['RegistryMissError', 'UNARMED', 'UNPINNED', 'activeAt', 'copy', 'get', 'has', 'keys', 'rows']);
         expect(registry.UNARMED).to.equal(9999999999);
         expect(registry.UNPINNED).to.equal(null);
+    });
+});
+
+describe('src/consensus/gate_registry.js: the readers on an armed testnet slot', function () {
+    // BTC:testnet has been armed since the v0.19.0 cut: the coin key wins over the bare
+    // testnet fallback, which is still the sentinel, so an unlisted coin stays dark.
+    it('judges activeAt by the coin key at and below its sized height, and reads the dark fallback for an unlisted coin', function () {
+        const bridge = 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION';
+        const btcTestnet = registry.get(bridge)['BTC:testnet'];
+        expect(btcTestnet, 'BTC:testnet is a sized height').to.be.a('number').below(9999999999);
+        expect(registry.activeAt(bridge, 'testnet', 'BTC', btcTestnet - 1, 0), 'BTC:testnet one below its height').to.equal(false);
+        expect(registry.activeAt(bridge, 'testnet', 'BTC', btcTestnet, 0), 'BTC:testnet at its height').to.equal(true);
+        expect(registry.activeAt(bridge, 'testnet', 'BCH', btcTestnet, 0), 'an unlisted testnet coin reads the dark fallback').to.equal(false);
     });
 });
 
