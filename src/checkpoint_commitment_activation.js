@@ -48,11 +48,8 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height, interpreted as the BTC-anchored snapshot_block
-// carried by the checkpoint/ANCHOR canonical (NOT the local processing height), so
-// every chain + the hub flip the signed shape on the same anchor.
 const CHECKPOINT_COMMITMENT_ACTIVATION = copy('checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION');
 
 // Whether the checkpoint/ANCHOR commits the light-client roots for a checkpoint

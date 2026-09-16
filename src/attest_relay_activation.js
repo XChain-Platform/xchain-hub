@@ -55,11 +55,8 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height, interpreted as the BTC-anchored SNAPSHOT_BLOCK
-// carried by the relay canonical (NOT the local processing height), so BTC, LTC,
-// DOGE and the hub all flip the relay legs on one anchor.
 const ATTEST_RELAY_ACTIVATION = copy('attest_relay_activation.ATTEST_RELAY_ACTIVATION');
 
 // Whether the ATTEST relay legs are accepted for a relay whose BTC-anchored

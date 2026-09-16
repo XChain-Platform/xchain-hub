@@ -40,11 +40,8 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height, interpreted as the BTC-anchored snapshot_block
-// carried by the XMATCH canonical (NOT the local processing height), so every
-// chain + the hub flip the match format on the same anchor.
 const CROSS_CHAIN_ROYALTY_ACTIVATION = copy('cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION');
 
 // Whether the XMATCH canonical carries the royalty payout legs for a match whose

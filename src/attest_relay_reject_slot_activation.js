@@ -83,10 +83,8 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation, interpreted against the LANDING block's consensus
-// timestamp (data['BLOCK_TIME']) on the home chain.
 const ATTEST_RELAY_REJECT_SLOT_ACTIVATION = copy('attest_relay_reject_slot_activation.ATTEST_RELAY_REJECT_SLOT_ACTIVATION');
 
 // Whether a refused ATTEST v3 withholds its row for a block whose consensus

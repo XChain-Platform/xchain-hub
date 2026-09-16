@@ -13,13 +13,14 @@
  **********************************************************************
  * test/unit/consensus/gate_registry.test.js
  *
- * src/consensus/gate_registry.js: the hub's activation registry. What is
- * pinned here is value neutrality at the conversion: every table a converted
- * carrier exports is exactly the registry row of the same key, every value
- * the rules digest names is a row, a miss throws naming the key instead of
- * reading null, get() hands out frozen rows while copy() hands out mutable
- * ones, and the venue lever arms the regtest entries from the environment
- * with the carriers' own grammar.
+ * src/consensus/gate_registry.js and the files under gate_registry/: the
+ * hub's activation registry. What is pinned here is value neutrality at the
+ * conversion: every table a converted carrier exports is exactly the registry
+ * row of the same key, every value the rules digest names is a row, a miss
+ * throws naming the key instead of reading null, get() hands out frozen rows
+ * while copy() hands out mutable ones, the venue's regtest arming is applied
+ * once at registration, the block lives in the part files and nowhere else,
+ * and every part file is a byte twin of the indexer's.
  *
  ********************************************************************/
 
@@ -31,8 +32,19 @@ const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
+const { purgeRegistry } = require('./helpers/purge_registry.js');
 
-const REGISTRY_PATH = path.resolve(__dirname, '../../../src/consensus/gate_registry.js');
+const SRC          = path.resolve(__dirname, '../../../src');
+const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
+const PARTS_DIR    = path.join(SRC, 'consensus', 'gate_registry');
+const PARTS        = ['shared_rows_1.js', 'shared_rows_2.js', 'shared_rows_3.js', 'shared_rows_4.js', 'shared_rows_5.js'];
+// The files under gate_registry/ that are byte twins of the indexer's
+// src/protocol_changes/ files of the same name (core.js is the consumer core,
+// authored here, so it is the one file with no indexer twin).
+const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
+const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
+const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
+const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // Every converted carrier, by stem: the 12 byte twins, the masked twin, the 5 value
 // twins and the 3 carriers under names that are not _activation.
@@ -55,10 +67,15 @@ function same(a, b) {
     return crd.canonical(a) === crd.canonical(b);
 }
 
-function withEnv(name, value, fn) {
+// A fresh registry booted under `env` (one variable set, or cleared when the
+// value is undefined), read through `fn`, with the cache and the environment
+// put back exactly as they were.
+function bootedWith(name, value, fn) {
     const saved = process.env[name];
     if (value === undefined) delete process.env[name]; else process.env[name] = value;
-    try { return fn(); } finally {
+    const restore = purgeRegistry();
+    try { return fn(require('../../../src/consensus/gate_registry.js')); } finally {
+        restore();
         if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
     }
 }
@@ -66,6 +83,7 @@ function withEnv(name, value, fn) {
 describe('src/consensus/gate_registry.js: the rows', function () {
 
     it('holds a row for every non-function export of every converted carrier, and nothing else of theirs', function () {
+        this.timeout(10000);   // the first require of 21 carriers, mathjs included
         const missing = [];
         const differing = [];
         for (const stem of CONVERTED) {
@@ -104,20 +122,50 @@ describe('src/consensus/gate_registry.js: the rows', function () {
         for (const k of keys) expect(k).to.match(/^[A-Za-z0-9_/-]+(\.[A-Za-z0-9_]+)+$/);
         expect(registry.rows().map(([k]) => k)).to.deep.equal(keys);
     });
+});
 
-    it('carries the SHARED block between its two markers, once each', function () {
-        const text = fs.readFileSync(REGISTRY_PATH, 'utf8');
-        const begin = text.split('\n').filter((l) => l === '// SHARED-GATES BEGIN').length;
-        const end   = text.split('\n').filter((l) => l === '// SHARED-GATES END').length;
-        expect([begin, end]).to.deep.equal([1, 1]);
-        expect(text.indexOf('// SHARED-GATES BEGIN')).to.be.below(text.indexOf('// SHARED-GATES END'));
+describe('src/consensus/gate_registry.js: the layout', function () {
+
+    it('keeps the SHARED block in the five part files, one marker pair each, and none in the entry', function () {
+        const markers = (text) => [
+            text.split('\n').filter((l) => l === '// SHARED-GATES BEGIN').length,
+            text.split('\n').filter((l) => l === '// SHARED-GATES END').length,
+        ];
+        expect(markers(fs.readFileSync(ENTRY_PATH, 'utf8')), 'the entry carries no block of its own').to.deep.equal([0, 0]);
+        for (const part of PARTS) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            expect(markers(text), part).to.deep.equal([1, 1]);
+            expect(text.indexOf('// SHARED-GATES BEGIN'), part).to.be.below(text.indexOf('// SHARED-GATES END'));
+            // A part is data: its one require is the queue beside it, nothing else.
+            const requires = text.match(/require\([^)]*\)/g) || [];
+            expect(requires, part + ' requires').to.deep.equal(["require('./shared_rows.js')"]);
+        }
+    });
+
+    it('registers every queued row: the part files name exactly the keys the registry holds', function () {
+        const queued = [];
+        for (const part of PARTS) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            for (const m of text.matchAll(/^addGate\('([^']+)'/gm)) queued.push(m[1]);
+        }
+        expect(queued).to.deep.equal(registry.keys());
+    });
+
+    it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
+        if (!fs.existsSync(path.join(INDEXER_PARTS, 'shared_rows_1.js'))) {
+            if (STRICT) expect.fail('xchain-indexer sibling at ' + INDEXER_PARTS + ' carries no registry part files (set XCHAIN_INDEXER_DIR at a converted checkout)');
+            this.skip();
+            return;
+        }
+        const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
+        expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });
 });
 
 describe('src/consensus/gate_registry.js: the readers', function () {
 
-    it('throws a RegistryMissError naming the key on a miss, from get, copy and rows alike', function () {
-        for (const fn of [registry.get, registry.copy]) {
+    it('throws a RegistryMissError naming the key on a miss, from get, copy and activeAt alike', function () {
+        for (const fn of [registry.get, registry.copy, (k) => registry.activeAt(k, 'regtest', null, 0, 0)]) {
             expect(() => fn('no_such_module.NO_SUCH_EXPORT'))
                 .to.throw(registry.RegistryMissError, 'no_such_module.NO_SUCH_EXPORT');
         }
@@ -136,63 +184,119 @@ describe('src/consensus/gate_registry.js: the readers', function () {
         expect(registry.get(key).regtest, 'a copy edited in place must not reach the registry').to.equal(frozen.regtest);
     });
 
-    it('exports no way to add a row after load', function () {
-        expect(registry.addGate).to.equal(undefined);
+    it('judges activeAt by the unit, the coin key before the network key, and fails closed', function () {
+        const bridge = 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION';
+        expect(registry.activeAt(bridge, 'regtest', 'BTC', 0, 0), 'regtest at genesis').to.equal(true);
+        expect(registry.activeAt(bridge, 'testnet', 'BTC', 9999999998, 0), 'BTC:testnet below UNARMED').to.equal(false);
+        expect(registry.activeAt(bridge, 'testnet', 'BTC', 9999999999, 0), 'BTC:testnet at UNARMED').to.equal(true);
+        expect(registry.activeAt(bridge, 'devnet', 'BTC', 9999999999, 0), 'an unknown network').to.equal(false);
+        expect(registry.activeAt(bridge, 'regtest', null, 'abc', 0), 'an unparseable height').to.equal(false);
+        const rollcall = 'rollcall_activation.ROLLCALL_ACTIVATION';
+        expect(registry.activeAt(rollcall, 'regtest', null, 0, 0), 'UNPINNED never arms, 0 >= null is a trap').to.equal(false);
+        const time = 'price_scale_activation.PRICE_SCALE_ACTIVATION';
+        expect(registry.activeAt(time, 'mainnet', null, 0, -1), 'a time row reads the time, not the height').to.equal(false);
+        expect(registry.activeAt(time, 'mainnet', null, -1, 0)).to.equal(true);
+        expect(() => registry.activeAt('anchor_reward_activation.ANCHOR_REWARD_AMOUNT', 'mainnet', null, 0, 0))
+            .to.throw('unsupported unit constant');
+    });
+
+    it('refuses at registration what the fingerprint could not serialise: a function, a Date, a bad threshold, a duplicate', function () {
+        const core = require('../../../src/consensus/gate_registry/core.js');
+        const fresh = core.createRegistry();
+        fresh.addGate('scratch.OK', 'height', { mainnet: 1, regtest: core.UNPINNED });
+        expect(() => fresh.addGate('scratch.OK', 'height', { mainnet: 1 })).to.throw('duplicate key');
+        expect(() => fresh.addGate('scratch.FN', 'constant', { f: function () {} })).to.throw('refused function');
+        expect(() => fresh.addGate('scratch.DATE', 'constant', new Date(0))).to.throw('refused class instance');
+        expect(() => fresh.addGate('scratch.NAN', 'constant', [NaN])).to.throw('refused non-finite number');
+        expect(() => fresh.addGate('scratch.BAD', 'height', { mainnet: 'soon' })).to.throw('must be a finite number or UNPINNED');
+        expect(() => fresh.addGate('scratch.UNIT', 'era', {})).to.throw('unit must be one of');
+        expect(() => fresh.addGate('no dots', 'constant', 1)).to.throw('key grammar');
+        expect(fresh.keys()).to.deep.equal(['scratch.OK']);
+    });
+
+    it('exports the readers, the two sentinels and the error, and no way to add a row after load', function () {
         expect(Object.keys(registry).sort()).to.deep.equal(
-            ['RegistryMissError', 'UNARMED', 'UNPINNED', 'addGate', 'copy', 'get', 'has', 'keys', 'rows']);
+            ['RegistryMissError', 'UNARMED', 'UNPINNED', 'activeAt', 'copy', 'get', 'has', 'keys', 'rows']);
         expect(registry.UNARMED).to.equal(9999999999);
         expect(registry.UNPINNED).to.equal(null);
     });
 });
 
-describe('src/consensus/gate_registry.js: the venue lever', function () {
+describe('src/consensus/gate_registry.js: regtest arming at registration', function () {
 
-    const ROLLCALL = 'rollcall_activation.ROLLCALL_ACTIVATION';
+    const ROLLCALL  = 'rollcall_activation.ROLLCALL_ACTIVATION';
     const ADMISSION = 'mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION';
-    const BARRIER = 'anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION';
+    const BARRIER   = 'anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION';
 
     it('keeps regtest UNPINNED when the variable is unset, off or malformed', function () {
+        const heard = [];
+        const listen = (w) => { if (w.name === 'RegtestArmingWarning') heard.push(w.message); };
+        process.on('warning', listen);
         for (const v of [undefined, '', 'off', 'inert', 'no', 'later']) {
-            withEnv('XC_ROLLCALL_REGTEST_ACTIVATION', v, () => {
-                expect(registry.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v)).to.equal(null);
+            bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', v, (fresh) => {
+                expect(fresh.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v)).to.equal(null);
             });
         }
+        // The refused value said so as a process warning, the one channel a
+        // registry that depends on no logger has; the accepted ones were silent.
+        // The event fires on a later tick, so the check waits for it before the
+        // listener goes.
+        return new Promise((resolve) => setImmediate(resolve)).then(() => {
+            process.removeListener('warning', listen);
+            expect(heard, 'exactly one warning, for the malformed value').to.have.lengthOf(1);
+            expect(heard[0]).to.match(/XC_ROLLCALL_REGTEST_ACTIVATION="later"/);
+        });
     });
 
     it('arms regtest at the documented height on the armed words and at a given height on an integer', function () {
         for (const v of ['armed', 'GENESIS', ' on ', 'true', 'yes']) {
-            withEnv('XC_ROLLCALL_REGTEST_ACTIVATION', v, () => {
-                expect(registry.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v))
-                    .to.equal(registry.get('rollcall_activation.ROLLCALL_REGTEST_ARMED_HEIGHT'));
+            bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', v, (fresh) => {
+                expect(fresh.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v))
+                    .to.equal(fresh.get('rollcall_activation.ROLLCALL_REGTEST_ARMED_HEIGHT'));
             });
         }
-        withEnv('XC_ROLLCALL_REGTEST_ACTIVATION', '150', () => {
-            expect(registry.get(ROLLCALL).regtest).to.equal(150);
-            expect(registry.get(ROLLCALL).mainnet, 'the lever must not reach the held networks').to.equal(0);
-            expect(registry.get(ROLLCALL).testnet).to.equal(151200);
+        bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', '150', (fresh) => {
+            expect(fresh.get(ROLLCALL).regtest).to.equal(150);
+            expect(fresh.get(ROLLCALL).mainnet, 'the lever must not reach the held networks').to.equal(0);
+            expect(fresh.get(ROLLCALL).testnet).to.equal(151200);
+            expect(fresh.activeAt(ROLLCALL, 'regtest', null, 150, 0), 'activeAt judges the armed row').to.equal(true);
+            expect(fresh.activeAt(ROLLCALL, 'regtest', null, 149, 0)).to.equal(false);
         });
     });
 
     it('arms every regtest key of the admission family, the barrier included, from the one admission variable', function () {
-        withEnv('XC_MIRROR_ADMISSION_ACTIVATION', '150', () => {
-            const producer = registry.get(ADMISSION);
+        bootedWith('XC_MIRROR_ADMISSION_ACTIVATION', '150', (fresh) => {
+            const producer = fresh.get(ADMISSION);
             for (const k of ['BTC:regtest', 'LTC:regtest', 'DOGE:regtest']) expect(producer[k], k).to.equal(150);
             expect(producer['BTC:testnet']).to.equal(null);
-            expect(registry.copy(BARRIER).regtest).to.equal(150);
-            expect(registry.get(ROLLCALL).regtest, 'the roll-call lever is a different variable').to.equal(null);
+            expect(fresh.copy(BARRIER).regtest).to.equal(150);
+            expect(fresh.get(ROLLCALL).regtest, 'the roll-call lever is a different variable').to.equal(null);
         });
     });
+});
 
-    it('reads the variable at each read, so a carrier re-required under a new environment sees it', function () {
-        const id = require.resolve('../../../src/rollcall_gates_activation.js');
-        const saved = require.cache[id];
+describe('src/consensus/gate_registry.js: the arming is read once', function () {
+
+    const ROLLCALL = 'rollcall_activation.ROLLCALL_ACTIVATION';
+
+    it('keeps the loaded registry\'s arming when the environment moves under a running process', function () {
+        const before = registry.get(ROLLCALL).regtest;
+        const saved = process.env.XC_ROLLCALL_REGTEST_ACTIVATION;
+        process.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed';
         try {
-            withEnv('XC_ROLLCALL_GATES_REGTEST_ACTIVATION', 'armed', () => {
+            expect(registry.get(ROLLCALL).regtest, 'an activation height that can change under a running process is not one').to.equal(before);
+            const id = require.resolve('../../../src/rollcall_gates_activation.js');
+            const cached = require.cache[id];
+            try {
                 delete require.cache[id];
-                expect(require('../../../src/rollcall_gates_activation.js').ROLLCALL_GATES_ACTIVATION.regtest).to.equal(0);
-            });
+                expect(require('../../../src/rollcall_gates_activation.js').ROLLCALL_GATES_ACTIVATION.regtest,
+                    'a carrier re-required alone reads the registry it was booted with').to.equal(registry.get('rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION').regtest);
+            } finally {
+                if (cached) require.cache[id] = cached; else delete require.cache[id];
+            }
         } finally {
-            if (saved) require.cache[id] = saved; else delete require.cache[id];
+            if (saved === undefined) delete process.env.XC_ROLLCALL_REGTEST_ACTIVATION;
+            else process.env.XC_ROLLCALL_REGTEST_ACTIVATION = saved;
         }
     });
 });

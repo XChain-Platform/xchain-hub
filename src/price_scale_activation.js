@@ -86,22 +86,12 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Decimal-side bound in force at/above the gate. The producers' bcformat width.
 const PRICE_SCALE_MAX_DECIMALS = copy('price_scale_activation.PRICE_SCALE_MAX_DECIMALS');
 
-// Per-network activation TIME, keyed on the action's own block time.
-//
-// ARMED at genesis on every network, mainnet by the 2026-09-09 ruling on the measurement
-// the header records (0 PRICE actions ever indexed on any mainnet chain).
 const PRICE_SCALE_ACTIVATION = copy('price_scale_activation.PRICE_SCALE_ACTIVATION');
 
-// The two price-value matchers. Anchored and without the /g flag so .test()
-// carries no lastIndex state between calls.
-//
-// LEGACY is byte-for-byte the pattern both v0 ingest sites carry today; it is
-// what keeps a below-gate replay identical, so it is never "tidied".
 const PRICE_VALUE_RE_LEGACY = copy('price_scale_activation.PRICE_VALUE_RE_LEGACY');
 const PRICE_VALUE_RE_CANONICAL = copy('price_scale_activation.PRICE_VALUE_RE_CANONICAL');
 

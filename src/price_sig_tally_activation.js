@@ -80,31 +80,8 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js). Keyed on the round's BTC-anchored
-// BTC_BLOCK_HEIGHT, NOT the landing chain's local height, so the hub and the BTC,
-// LTC and DOGE indexers all flip on the same anchor.
-//
-// mainnet is ARMED to 963000, the one BTC-height boundary a whole family of
-// cross-chain-verdict gates now shares (retraction signing, archive reward,
-// attest relay and the hub's governance snapshot), so operators reason about
-// one boundary rather than five. That cohort was RE-PINNED 2026-08-12 off an
-// earlier 969500 pin: 969500 was derived alongside a TIME anchor that has since
-// been repinned twice and now sits at 1786060800 (2026-08-07), which left the
-// height half ~8 weeks behind the time half of the same ratified flag-day set.
-// 963000 is the pre-freeze train boundary already armed for BTC:mainnet in stateHash.js,
-// caret_ref_strict_activation.js and list_edit_resolution_activation.js (tip
-// 959,853 on 2026-07-27 at ~144 blocks/day + 21 days), so this reuses a ratified
-// boundary rather than minting a new one. Deliberately NOT the nearer 961000
-// anchor, whose train shipped 2026-07-23 and whose BTC anchor (~2026-08-04) has
-// already passed: a height in the past is not a flag day at all. 963000 leaves
-// the usual "deploy every consumer before this era" runway.
-//
-// testnet/regtest activate at genesis (same convention as
-// STAKE_WEIGHTED_QUORUM_ACTIVATION and ATTEST_ADMISSION_ACTIVATION, which are
-// also verdict-changing): the test venues run the corrected tally from block 0.
 const PRICE_SIG_TALLY_ACTIVATION = copy('price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION');
 
 // Whether the corrected verify-then-mark tally is in effect for a round whose

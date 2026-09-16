@@ -1,4 +1,7 @@
 'use strict';
+
+const { get, copy, activeAt } = require('./consensus/gate_registry');
+
 /*
  * mirror_admission_activation.js - admission by height for the mirror barrier family.
  *
@@ -34,28 +37,14 @@
  * ahead is height B like any other.
  */
 
-const { get, copy } = require('./consensus/gate_registry');
-
 // ---------------------------------------------------------------------------
 // Margins
 // ---------------------------------------------------------------------------
 
-// How far ahead of the producer's observed admission tip a row is stamped, in BLOCKS of each
-// chain in its map. Not a new number: producers already size their forward margin as 4 blocks
-// of the gating chain and then CONVERT it to seconds. On the admission axis the conversion is
-// deleted, which is why an unknown chain needs no nominal block interval here at all.
 const ADMIT_MARGIN_BLOCKS = get('mirror_admission_activation.ADMIT_MARGIN_BLOCKS');
 
-// A row may never be admissible at a block that already exists, or a producer could backdate
-// a row into a block its peers have already committed.
 const ADMIT_MIN_FUTURE_BLOCKS = copy('mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS');
 
-// The follower's upper bound, PER CHAIN, sized so each chain's height window spans the same
-// 3600 s the existing absolute effective_time ceiling already allows: ceil(3600 / interval).
-//
-// A flat block count here would be a silent tightening. Six blocks is an hour on BTC but six
-// minutes on DOGE, so a flat [tip + 1, tip + 6] would collapse clock-skew tolerance from
-// 3600 s to 360 s on DOGE and refuse honest rows between hubs whose tips differ by three blocks.
 const ADMIT_MAX_FUTURE_BLOCKS = get('mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS');
 
 // ---------------------------------------------------------------------------
@@ -94,23 +83,6 @@ function resolveMirrorAdmissionRegtest(env){
     return null;
 }
 
-/*
- * TWO maps, one module, with an ordering rule that is the whole point: every PRODUCER height is
- * sized strictly BELOW its CONSUMER height for the same key, so no row is ever produced legacy
- * and read modern. Get that backwards and a consumer above its height reads an admission column
- * the producer below its own height never wrote, and binds nothing.
- *
- * Keyed by (coin, network), not by network alone. A single per-network height cannot arm a
- * family that binds on every chain: one number is an LTC height on an LTC indexer and a BTC
- * height on a BTC indexer, so the two legs of one cross-chain match would cross the flag day at
- * unrelated instants. The 'COIN:network' key shape is established precedent.
- *
- * Mainnet is null under the 2026-08-29 write hold. Testnet is sized at the release cut from the
- * measured tip plus the roll window plus slack, per key. The v7 HUB_SCHEMA_VERSION roll
- * completes BEFORE any network's activation height: the heights map rides frames carrying no
- * schema_version, so a v7 indexer above the activation against a v6 hub would see no heights at
- * all and defer forever under the fail-closed rule.
- */
 const MIRROR_ADMISSION_ACTIVATION = get('mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION');
 
 const MIRROR_ADMISSION_CONSUMER_ACTIVATION = get('mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION');
@@ -312,13 +284,8 @@ function isRowReadableAt(admitBlock, blockHeight, effectiveTime, blockTime){
  * how the row was read.
  */
 
-// A chain code is a closed vocabulary: upper-case letters and digits, nothing else. The
-// injectivity argument rests on that, so the check lives here and not only in a test.
 const CHAIN_CODE_RE = copy('mirror_admission_activation.CHAIN_CODE_RE');
 
-// Canonical base-10 spelling of a non-negative integer: digits only, no sign, no leading
-// zeros. The rule the hub's lib/canonical_int.js applies to its other signed integers,
-// restricted to non-negative because a height never is.
 const CANONICAL_HEIGHT_RE = copy('mirror_admission_activation.CANONICAL_HEIGHT_RE');
 
 /**
@@ -446,15 +413,6 @@ function admissionCanonicalValue(label, network, eraBlock, map){
 // The mirror columns a stored map is read back from
 // ---------------------------------------------------------------------------
 
-// One nullable BIGINT UNSIGNED column per chain the federation serves (C28), spelled
-// `admit_block_<code lower-cased>` in every mirror table's DDL. The hub writes them at
-// finalization and every mirror client reads them back to rebuild the signed field, so the
-// list lives in the twin rather than on one side: a chain the hub writes and an indexer does
-// not read back is a row every indexer refuses (the rebuilt field misses a chain and no
-// signature verifies), fail-closed but still an outage. Adding a chain adds it here and in
-// the mirror .sql twins; it does NOT make rows signed before that chain existed admissible
-// on it (C38), which is why the map is read from the columns actually set and never from
-// this list.
 const ADMIT_COLUMN_CHAINS = get('mirror_admission_activation.ADMIT_COLUMN_CHAINS');
 
 /**

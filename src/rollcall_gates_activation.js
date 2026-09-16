@@ -6,9 +6,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
- * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available -
- * contact legal@dankest.llc.
+ * General Public License v3.0 or later; see LICENSE.md.
  *
  **********************************************************************
  *
@@ -45,7 +43,7 @@
  * still drive the below-height (v0) behaviour as its control.
  *
  * LOCAL COPY of the canonical map in xchain-documentation/protocol/constants.js
- * and the value twin of xchain-indexer/src/rollcall_gates_activation.js. The
+ * and the value twin of xchain-hub/src/rollcall_gates_activation.js. The
  * mainnet and testnet heights are parity-tested; regtest is env-derived and is
  * not.
  *
@@ -53,13 +51,10 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// The documented regtest arming height: genesis, a multiple of the 30-block
-// regtest interval, so epoch 0 is a real v1 epoch.
 const ROLLCALL_GATES_REGTEST_ARMED_HEIGHT = copy('rollcall_gates_activation.ROLLCALL_GATES_REGTEST_ARMED_HEIGHT');
 
-// The one environment variable this module reads, and only ever for regtest.
 const ROLLCALL_GATES_REGTEST_ENV = copy('rollcall_gates_activation.ROLLCALL_GATES_REGTEST_ENV');
 
 // Same grammar as rollcall_activation.resolveRegtestActivation, read ONCE at
@@ -82,8 +77,6 @@ function resolveRegtestGatesActivation(env){
     return null;
 }
 
-// Per-network EPOCH height at/above which ROLLCALL is published as v1 with the
-// GATES field and the epoch close records each signer's list.
 const ROLLCALL_GATES_ACTIVATION = copy('rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION');
 
 // True when the epoch at `epochHeight` publishes ROLLCALL v1 and records gates.

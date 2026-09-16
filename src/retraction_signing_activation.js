@@ -36,9 +36,8 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation, interpreted as a BTC-anchored snapshot_block era.
 const RETRACTION_SIGNING_ACTIVATION = copy('retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION');
 
 // Whether quorum-class retraction broadcasts must be co-signed for an era at

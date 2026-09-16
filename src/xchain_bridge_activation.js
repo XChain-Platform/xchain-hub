@@ -29,32 +29,8 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// XCHAIN_BRIDGE_ACTIVATION: the height on the chain being parsed at/above which XBRIDGE is
-// legal. Below it a broadcast v0 or v1 is 'invalid: XBRIDGE before activation' (the
-// per-feature shape anchor.js uses; the central 'invalid: ACTION is not yet activated' only
-// fires on software that predates the action) and no v2 is ever injected, so pre-activation
-// block hashes are unchanged on every chain.
-//
-// Keyed on the chain's OWN block_index, never on a transfer's snapshot_block: the row being
-// judged is the action mined here. The hub reads the same map for the chain a leg was mined
-// on, and signs nothing for a chain that has not reached its own height.
-//
-// KEYED '<COIN>:<network>', with the bare network key as the fallback (the shape
-// stake_key_reuse_activation.js already uses one map over). One testnet number cannot serve
-// three chains: the bridge arms on TBTC, TLTC and TDOGE, whose tips differ by orders of
-// magnitude (about 152,110 / 4,884,193 / 67,889,993 measured 2026-09-12), so a single height
-// is either already passed on two of them at boot or unreachable on the third. A coin with
-// no entry of its own inherits the bare network key, which leaves an unlisted chain inert
-// rather than undecided.
-//
-// Mainnet is the house sentinel 9999999999 on every key: milestone 1 is a hub-trusted mint
-// (spec section 12), and nothing arms on mainnet before the D2 checkpoint cross-check lands.
-// Testnet holds at the same sentinel on every key: the train that arms it sizes one dated
-// instant PER CHAIN, strictly above that chain's own deploy tip, and a height written here is
-// the operator's act at that train, never a build's. Regtest is 0 and stays bare, because one
-// regtest number fits every chain and the e2e rail exercises the armed rule from genesis.
 const XCHAIN_BRIDGE_ACTIVATION = copy('xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION');
 
 // Resolve the per-chain threshold: the '<COIN>:<network>' key when the map declares one,

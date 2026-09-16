@@ -72,27 +72,10 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// The reorg-depth buffer every party in a federation must resolve capability
-// snapshots at. 6 = the BTC confirmation depth the platform already treats as
-// buried (XCHAIN_CONFIRMATIONS_BTC). CONSENSUS-CRITICAL: the hub subtracts this
-// before every snapshot lookup and refuses to boot on mainnet/testnet when a local
-// override diverges (CapabilitySnapshot._resolveReorgBuffer), so a verifier that
-// buries by a different depth resolves a different set than the signer.
 const CANONICAL_REORG_BUFFER = copy('snapshot_reorg_buffer.CANONICAL_REORG_BUFFER');
 
-// Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js, kept equal by the cross-service
-// regression suite). Keyed on the BTC-anchored declared snapshot_block.
-//
-// Arming this changes acceptance itself, so a one-sided or partially-rolled-out arm would
-// fork the fleet rather than fix it, and it re-reads every checkpoint already signed and
-// anchored under the current reading. There is no such checkpoint on any network: mainnet
-// was ruled at genesis on 2026-09-09 after measuring 0 validators, 0 stakes and 0
-// quorum-signed artifacts on every mainnet chain, so burying reinterprets nothing there and
-// the from-genesis OLD-vs-ON replay is the witness. Regtest is active from genesis (no
-// history to preserve; the regtest suites exercise the buried resolution from block 0).
 const SNAPSHOT_BURIAL_ACTIVATION = copy('snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION');
 
 // Whether a verifier must bury the declared snapshot_block before re-deriving the

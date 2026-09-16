@@ -43,15 +43,10 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js, kept equal by the cross-service
-// regression suite). Keyed on the BTC-anchored snapshot_block, NOT the local
-// processing height, so every chain + the hub flip on the same anchor.
 const EQUIV_HEADER_ACTIVATION = copy('equivocation_header.EQUIV_HEADER_ACTIVATION');
 
-// Fixed per-engine tag (spec §4.1.1). One slashable canonical family per engine.
 const ENGINE_TAGS = copy('equivocation_header.ENGINE_TAGS');
 
 // Whether the EQUIV header is in effect for a settlement whose BTC-anchored snapshot

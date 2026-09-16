@@ -46,19 +46,27 @@ function registerBrokenCarrierTests() {
     describe('a missing row or a broken carrier is never an absent gate', function () {
 
         const os = require('os');
-        const MODULE_SRC   = path.resolve(__dirname, '../../../src/consensus_rules_digest.js');
-        const REGISTRY_SRC = path.resolve(__dirname, '../../../src/consensus/gate_registry.js');
+        const SRC          = path.resolve(__dirname, '../../../src');
+        const MODULE_SRC   = path.join(SRC, 'consensus_rules_digest.js');
+        const REGISTRY_SRC = path.join(SRC, 'consensus', 'gate_registry.js');
+        const PARTS_SRC    = path.join(SRC, 'consensus', 'gate_registry');
 
         // A standalone tree: the module under test, a copy of the registry it reads its
-        // values from, and a stub for every carrier it names (a function under every name
-        // that is a function on the real carrier, since only those are read from the
-        // carrier). __dirname is what the loader resolves against, so the cases have to own
-        // the directory in order to delete a row or break a carrier, which no checkout may do.
+        // values from (the entry, the config it reads the venue's environment through,
+        // and the part files that hold the rows), and a stub for every carrier it names
+        // (a function under every name that is a function on the real carrier, since only
+        // those are read from the carrier). __dirname is what the loader resolves against,
+        // so the cases have to own the directory in order to delete a row or break a
+        // carrier, which no checkout may do.
         function scratchTree(mutate) {
             const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-carrier-'));
             fs.copyFileSync(MODULE_SRC, path.join(dir, 'consensus_rules_digest.js'));
-            fs.mkdirSync(path.join(dir, 'consensus'));
+            fs.copyFileSync(path.join(SRC, 'config.js'), path.join(dir, 'config.js'));
+            fs.mkdirSync(path.join(dir, 'consensus', 'gate_registry'), { recursive: true });
             fs.copyFileSync(REGISTRY_SRC, path.join(dir, 'consensus', 'gate_registry.js'));
+            for (const part of fs.readdirSync(PARTS_SRC)) {
+                fs.copyFileSync(path.join(PARTS_SRC, part), path.join(dir, 'consensus', 'gate_registry', part));
+            }
             const byModule = new Map();
             for (const [mod, names] of crd.SHARED_GATES) {
                 if (!byModule.has(mod)) byModule.set(mod, []);
@@ -74,14 +82,17 @@ function registerBrokenCarrierTests() {
             return require(path.join(dir, 'consensus_rules_digest.js'));
         }
 
-        // Cut one addGate() statement out of the scratch registry, by key.
+        // Cut one addGate() statement out of the scratch registry, by key, from whichever
+        // part file carries it.
         function deleteRow(dir, key) {
-            const reg = path.join(dir, 'consensus', 'gate_registry.js');
-            const text = fs.readFileSync(reg, 'utf8');
+            const parts = path.join(dir, 'consensus', 'gate_registry');
+            const carrying = fs.readdirSync(parts).map(f => path.join(parts, f))
+                .filter(f => fs.readFileSync(f, 'utf8').includes("addGate('" + key + "'"));
+            expect(carrying, 'exactly one scratch part file carries ' + key).to.have.lengthOf(1);
+            const text = fs.readFileSync(carrying[0], 'utf8');
             const at = text.indexOf("addGate('" + key + "'");
-            expect(at, 'the scratch registry carries ' + key).to.be.above(-1);
             const stop = text.indexOf(');\n', at) + 3;
-            fs.writeFileSync(reg, text.slice(0, at) + text.slice(stop));
+            fs.writeFileSync(carrying[0], text.slice(0, at) + text.slice(stop));
         }
 
         it('digests the whole scratch tree to the shipped digest, so the cases below start green', function () {

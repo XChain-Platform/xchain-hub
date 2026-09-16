@@ -10,8 +10,7 @@
  *
  **********************************************************************
  *
- * ATTEST response mirror activation (the ATTEST response mirror
- * design).
+ * ATTEST response mirror activation (the ATTEST response-mirror design).
  *
  * WHAT FLIPS AT THIS HEIGHT. Below it an attestation costs TWO on-chain
  * transactions: the v0 request rides inside the EXECUTE the user already paid
@@ -62,10 +61,8 @@
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
-// Per-network activation height (LOCAL COPY, parity-tested). Compared against
-// the ATTEST v0 request's own BTC block_index (the v3's, for a relayed request).
 const ATTEST_RESPONSE_MIRROR_ACTIVATION = copy('attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION');
 
 // Networks already reported by the guard in isResponseMirrorActive, so a per-request

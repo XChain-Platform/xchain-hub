@@ -101,6 +101,7 @@ const FROZEN_GLOBS = [
     { glob: 'src/stake_weighted_quorum.js', why: 'a SHARED_GATES carrier under a name that is not _activation' },
     { glob: 'src/consensus_rules_digest.js', why: 'the module that computes the requires' },
     { glob: 'src/consensus/gate_registry.js', why: 'the registry every carrier, the digest and the bridge engine require by this one literal path' },
+    { glob: 'src/consensus/gate_registry/**', why: 'the registry core and the SHARED block parts, byte twins the entry requires by literal path' },
     { glob: 'src/coins/**',               why: 'byte-vendored to six to ten repos by sync-coins.sh' },
     { glob: 'src/observability/**',       why: 'byte-vendored to six to ten repos by sync-observability.sh' },
     { glob: 'src/sql/**',                 why: 'read by path from sibling conformance suites' },

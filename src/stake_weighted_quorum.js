@@ -32,14 +32,10 @@
  *
  ********************************************************************/
 
-const { copy } = require('./consensus/gate_registry');
+const { get, copy, activeAt } = require('./consensus/gate_registry');
 
 const mathjs = require('mathjs');
 
-// Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js, kept equal by the cross-service
-// regression suite). Keyed on the BTC-anchored snapshot_block, NOT each chain's
-// local height, so every chain + the hub flip on the same anchor.
 const STAKE_WEIGHTED_QUORUM_ACTIVATION = copy('stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION');
 
 // Whether stake-weighted quorum is in effect for a round whose BTC-anchored
