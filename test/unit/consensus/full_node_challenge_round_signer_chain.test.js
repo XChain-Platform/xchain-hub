@@ -57,7 +57,7 @@ function loadTemplate(spies) {
     };
     if (id === 'xchain-sdk') return {
       XChainSDK: function () {
-        this._requireEncoder = () => spies.encoder;
+        this.requireEncoder = () => spies.encoder;
         this.wallet = spies.wallet;
       }
     };

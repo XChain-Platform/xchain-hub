@@ -52,7 +52,7 @@ function loadSigner(encoder, wallet) {
         if (id === 'path')      return path;
         if (id === 'dotenv')    return { config: () => ({ parsed: {} }) };
         if (id === 'xchain-sdk') return { XChainSDK: function () {
-            this._requireEncoder = () => encoder;
+            this.requireEncoder = () => encoder;
             this.wallet = wallet;
         } };
         throw new Error('unexpected require in the reference signer: ' + id);

@@ -78,7 +78,7 @@ module.exports = {
     // a ready payload). The returned txid is the PHASE-2 (reveal) txid when
     // two-phase encoding is used. That is the transaction indexers decode.
     async broadcast(payload) {
-        const encoder = sdk._requireEncoder();
+        const encoder = sdk.requireEncoder();
 
         const txParams = { data: payload, pubkey: ADDRESS, change: ADDRESS, encoding: 'P2SH' };
         if (FEE_PER_KB !== undefined) txParams.feePerKb = FEE_PER_KB;
