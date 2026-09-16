@@ -65,8 +65,9 @@ it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare
             TOKEN_POLICY_INHERITANCE_ACTIVATION:
                 require('../../../src/token_policy_activation.js').TOKEN_POLICY_INHERITANCE_ACTIVATION
         };
-        // Sized 2026-09-16 at the v0.19.0 cut from each chain's own tip and measured cadence.
-        const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152795, 'LTC:testnet': 4887694, 'DOGE:testnet': 67900889 };
+        // Sized 2026-09-16 at the v0.19.0 cut (re-cut 16:33Z after the chain overran the first
+        // sizing) from each chain's own tip and measured cadence.
+        const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'DOGE:testnet': 67902062 };
         for (const [name, map] of Object.entries(maps)) {
             let checked = 0;
             for (const key of Object.keys(map)) {
