@@ -12,6 +12,7 @@
 
 const { expect } = require('chai');
 const fs   = require('fs');
+const os   = require('os');
 const path = require('path');
 const crd  = require('../../../src/consensus_rules_digest.js');
 const PeerManager = require('../../../src/peers/manager.js');
@@ -35,66 +36,64 @@ function registerDigestBasics() {
     });
 }
 
+// A carrier this build LACKS and a carrier that is here and will not load are two
+// different facts, and only the first of them has a digest. src/stake_weighted_
+// quorum.js requires mathjs, so a checkout without node_modules reports 87637dfa
+// rather than 26ba9cce unless the second case refuses, and two revisions measured
+// that way agree with each other while agreeing with no real build. The indexer copy
+// carries the same pair of cases, so a one-sided revert cannot pass by running only
+// the other repo's suite.
+const CARRIER_SRC          = path.resolve(__dirname, '../../../src');
+const CARRIER_MODULE_SRC   = path.join(CARRIER_SRC, 'consensus_rules_digest.js');
+const CARRIER_REGISTRY_SRC = path.join(CARRIER_SRC, 'consensus', 'gate_registry.js');
+const CARRIER_PARTS_SRC    = path.join(CARRIER_SRC, 'consensus', 'gate_registry');
+
+// A standalone tree: the module under test, a copy of the registry it reads its
+// values from (the entry, the config it reads the venue's environment through,
+// and the part files that hold the rows), and a stub for every carrier it names
+// (a function under every name that is a function on the real carrier, since only
+// those are read from the carrier). __dirname is what the loader resolves against,
+// so the cases have to own the directory in order to delete a row or break a
+// carrier, which no checkout may do.
+function scratchTree(mutate) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-carrier-'));
+    fs.copyFileSync(CARRIER_MODULE_SRC, path.join(dir, 'consensus_rules_digest.js'));
+    fs.copyFileSync(path.join(CARRIER_SRC, 'config.js'), path.join(dir, 'config.js'));
+    fs.mkdirSync(path.join(dir, 'consensus', 'gate_registry'), { recursive: true });
+    fs.copyFileSync(CARRIER_REGISTRY_SRC, path.join(dir, 'consensus', 'gate_registry.js'));
+    for (const part of fs.readdirSync(CARRIER_PARTS_SRC)) {
+        fs.copyFileSync(path.join(CARRIER_PARTS_SRC, part), path.join(dir, 'consensus', 'gate_registry', part));
+    }
+    const byModule = new Map();
+    for (const [mod, names] of crd.SHARED_GATES) {
+        if (!byModule.has(mod)) byModule.set(mod, []);
+        byModule.get(mod).push(...names);
+    }
+    for (const [mod, names] of byModule) {
+        const real = require('../../../src/' + mod + '.js');
+        const body = names.map(n => 'exports.' + n + ' = '
+            + (typeof real[n] === 'function' ? 'function () {};' : '{ regtest: 0 };')).join('\n');
+        fs.writeFileSync(path.join(dir, mod + '.js'), body + '\n');
+    }
+    mutate(dir);
+    return require(path.join(dir, 'consensus_rules_digest.js'));
+}
+
+// Cut one addGate() statement out of the scratch registry, by key, from whichever
+// part file carries it.
+function deleteRow(dir, key) {
+    const parts = path.join(dir, 'consensus', 'gate_registry');
+    const carrying = fs.readdirSync(parts).map(f => path.join(parts, f))
+        .filter(f => fs.readFileSync(f, 'utf8').includes("addGate('" + key + "'"));
+    expect(carrying, 'exactly one scratch part file carries ' + key).to.have.lengthOf(1);
+    const text = fs.readFileSync(carrying[0], 'utf8');
+    const at = text.indexOf("addGate('" + key + "'");
+    const stop = text.indexOf(');\n', at) + 3;
+    fs.writeFileSync(carrying[0], text.slice(0, at) + text.slice(stop));
+}
+
 function registerBrokenCarrierTests() {
-    // A carrier this build LACKS and a carrier that is here and will not load are two
-    // different facts, and only the first of them has a digest. src/stake_weighted_
-    // quorum.js requires mathjs, so a checkout without node_modules reports 87637dfa
-    // rather than 26ba9cce unless the second case refuses, and two revisions measured
-    // that way agree with each other while agreeing with no real build. The indexer copy
-    // carries the same pair of cases, so a one-sided revert cannot pass by running only
-    // the other repo's suite.
     describe('a missing row or a broken carrier is never an absent gate', function () {
-
-        const os = require('os');
-        const SRC          = path.resolve(__dirname, '../../../src');
-        const MODULE_SRC   = path.join(SRC, 'consensus_rules_digest.js');
-        const REGISTRY_SRC = path.join(SRC, 'consensus', 'gate_registry.js');
-        const PARTS_SRC    = path.join(SRC, 'consensus', 'gate_registry');
-
-        // A standalone tree: the module under test, a copy of the registry it reads its
-        // values from (the entry, the config it reads the venue's environment through,
-        // and the part files that hold the rows), and a stub for every carrier it names
-        // (a function under every name that is a function on the real carrier, since only
-        // those are read from the carrier). __dirname is what the loader resolves against,
-        // so the cases have to own the directory in order to delete a row or break a
-        // carrier, which no checkout may do.
-        function scratchTree(mutate) {
-            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-carrier-'));
-            fs.copyFileSync(MODULE_SRC, path.join(dir, 'consensus_rules_digest.js'));
-            fs.copyFileSync(path.join(SRC, 'config.js'), path.join(dir, 'config.js'));
-            fs.mkdirSync(path.join(dir, 'consensus', 'gate_registry'), { recursive: true });
-            fs.copyFileSync(REGISTRY_SRC, path.join(dir, 'consensus', 'gate_registry.js'));
-            for (const part of fs.readdirSync(PARTS_SRC)) {
-                fs.copyFileSync(path.join(PARTS_SRC, part), path.join(dir, 'consensus', 'gate_registry', part));
-            }
-            const byModule = new Map();
-            for (const [mod, names] of crd.SHARED_GATES) {
-                if (!byModule.has(mod)) byModule.set(mod, []);
-                byModule.get(mod).push(...names);
-            }
-            for (const [mod, names] of byModule) {
-                const real = require('../../../src/' + mod + '.js');
-                const body = names.map(n => 'exports.' + n + ' = '
-                    + (typeof real[n] === 'function' ? 'function () {};' : '{ regtest: 0 };')).join('\n');
-                fs.writeFileSync(path.join(dir, mod + '.js'), body + '\n');
-            }
-            mutate(dir);
-            return require(path.join(dir, 'consensus_rules_digest.js'));
-        }
-
-        // Cut one addGate() statement out of the scratch registry, by key, from whichever
-        // part file carries it.
-        function deleteRow(dir, key) {
-            const parts = path.join(dir, 'consensus', 'gate_registry');
-            const carrying = fs.readdirSync(parts).map(f => path.join(parts, f))
-                .filter(f => fs.readFileSync(f, 'utf8').includes("addGate('" + key + "'"));
-            expect(carrying, 'exactly one scratch part file carries ' + key).to.have.lengthOf(1);
-            const text = fs.readFileSync(carrying[0], 'utf8');
-            const at = text.indexOf("addGate('" + key + "'");
-            const stop = text.indexOf(');\n', at) + 3;
-            fs.writeFileSync(carrying[0], text.slice(0, at) + text.slice(stop));
-        }
-
         it('digests the whole scratch tree to the shipped digest, so the cases below start green', function () {
             expect(scratchTree(() => {}).computeConsensusRulesDigest().digest)
                 .to.equal(crd.computeConsensusRulesDigest().digest);
