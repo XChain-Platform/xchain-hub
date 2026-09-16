@@ -41,21 +41,19 @@ const PROBE_BLOCKS = [0, 1, 499, 500, 9999999998, 9999999999, 10000000000, -1, '
 const PROBE_NETS   = ['regtest', 'testnet', 'mainnet', 'nonsense-net', undefined];
 const PROBE_COINS  = ['BTC', 'LTC', 'DOGE', undefined];
 
-describe('cross-chain bridge engine activation resolution', function () {
+// Named helper steps for the resolution suite below, kept under the function-line
+// limit: each step is its own named function registering its `it()` calls, called
+// from a short describe body.
+let engine;
 
-    let engine;
-
-    before(function () {
-        // A bare hub is enough: the constructor wires fields and two consensus
-        // channels, and resolves the gates once, without polling or gossiping.
-        engine = new CrossChainBridgeEngine(BARE_HUB);
-    });
-
+function itNamesAllGatesByRegistryKey() {
     it('names all three gates by their registry keys, and each has a row', function () {
         expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy']);
         for (const [, regKey] of GATES) expect(registry.has(regKey), regKey + ' has no registry row').to.equal(true);
     });
+}
 
+function itResolvesEachGateAsActiveAtOverTheRow() {
     for (const [key, regKey] of GATES) {
         it('resolves ' + regKey + ' from the engine as activeAt over the row', function () {
             expect(typeof engine.activation[key],
@@ -69,7 +67,9 @@ describe('cross-chain bridge engine activation resolution', function () {
             }
         });
     }
+}
 
+function itHandsTheCoinToTheRegistryAheadOfTheBareKey() {
     it('hands the coin to the registry, so the coin-keyed slot is read ahead of the bare network key', function () {
         // Every shipped slot of the bridge row holds the same value under its coin key
         // and its bare key, so only the call itself can show the coin reaching the
@@ -92,7 +92,9 @@ describe('cross-chain bridge engine activation resolution', function () {
             expect(engine.activation.bridge(9999999998, 'mainnet', coin)).to.equal(false);
         }
     });
+}
 
+function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
     it('holds every mainnet and testnet slot of all three gates unarmed', function () {
         for (const [key, regKey] of GATES) {
             const row = registry.get(regKey);
@@ -104,6 +106,20 @@ describe('cross-chain bridge engine activation resolution', function () {
                 expect(engine.activation[key](9999999998, net, 'BTC'), regKey + ' ' + net).to.equal(false);
         }
     });
+}
+
+describe('cross-chain bridge engine activation resolution', function () {
+
+    before(function () {
+        // A bare hub is enough: the constructor wires fields and two consensus
+        // channels, and resolves the gates once, without polling or gossiping.
+        engine = new CrossChainBridgeEngine(BARE_HUB);
+    });
+
+    itNamesAllGatesByRegistryKey();
+    itResolvesEachGateAsActiveAtOverTheRow();
+    itHandsTheCoinToTheRegistryAheadOfTheBareKey();
+    itHoldsEveryMainnetAndTestnetSlotUnarmed();
 });
 
 describe('cross-chain bridge engine activation resolution: a registry miss', function () {
