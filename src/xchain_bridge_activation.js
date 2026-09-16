@@ -29,6 +29,8 @@
 
 'use strict';
 
+const { copy } = require('./consensus/gate_registry');
+
 // XCHAIN_BRIDGE_ACTIVATION: the height on the chain being parsed at/above which XBRIDGE is
 // legal. Below it a broadcast v0 or v1 is 'invalid: XBRIDGE before activation' (the
 // per-feature shape anchor.js uses; the central 'invalid: ACTION is not yet activated' only
@@ -53,17 +55,7 @@
 // instant PER CHAIN, strictly above that chain's own deploy tip, and a height written here is
 // the operator's act at that train, never a build's. Regtest is 0 and stays bare, because one
 // regtest number fits every chain and the e2e rail exercises the armed rule from genesis.
-const XCHAIN_BRIDGE_ACTIVATION = {
-    'BTC:mainnet':  9999999999,
-    'LTC:mainnet':  9999999999,
-    'DOGE:mainnet': 9999999999,
-    mainnet:        9999999999,   // fallback for a coin with no entry above
-    'BTC:testnet':  9999999999,   // the arming train sizes this at the measured TBTC tip
-    'LTC:testnet':  9999999999,   // the arming train sizes this at the measured TLTC tip
-    'DOGE:testnet': 9999999999,   // the arming train sizes this at the measured TDOGE tip
-    testnet:        9999999999,   // fallback: a testnet coin with no entry above stays dark
-    regtest:        0,            // genesis-active so the e2e rail exercises the armed rule
-};
+const XCHAIN_BRIDGE_ACTIVATION = copy('xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION');
 
 // Resolve the per-chain threshold: the '<COIN>:<network>' key when the map declares one,
 // otherwise the bare network key. An unknown network resolves to undefined, which reads as

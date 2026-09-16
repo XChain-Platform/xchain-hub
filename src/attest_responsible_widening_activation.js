@@ -70,6 +70,8 @@
 
 'use strict';
 
+const { copy } = require('./consensus/gate_registry');
+
 // The stage-2 selector. Required at the top: this module never feeds that one.
 const zc = require('./attest_zero_conf_activation.js');
 
@@ -79,11 +81,7 @@ const zc = require('./attest_zero_conf_activation.js');
 // round that has already failed to finalize, and 0 attestations have ever been recorded on
 // any mainnet chain (measured 2026-09-09), so no admitted request is reinterpreted; the
 // from-genesis OLD-vs-ON replay per chain is the witness.
-const ATTEST_RESPONSIBLE_WIDENING_ACTIVATION = {
-    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 attestations, measured 2026-09-09)
-    testnet: 150780,      // ARMED 2026-09-02. Tip was 150760 at 17:08Z running 20 min/block, so ~20 blocks (~6.5h). Sized to OUR fleet's deploy wave, not to the community's, and the SAFETY comes from deploy ORDER rather than from this margin: only an upgraded hub can PRODUCE a widened ATTEST v1, so indexers upgraded before hubs leaves no divergence window even if the height arrives mid-deploy.
-    regtest: 0,           // ARMED at genesis so the e2e venue exercises the ladder
-};
+const ATTEST_RESPONSIBLE_WIDENING_ACTIVATION = copy('attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION');
 
 // The ladder's own constants (LOCAL COPY, parity-tested).
 //
@@ -106,10 +104,7 @@ const ATTEST_RESPONSIBLE_WIDENING_ACTIVATION = {
 // maxSlots 2 bounds how far the pool can grow: enough to absorb two dead members of a set, small
 // enough that the deterministic assignment stays the dominant property. The first segment is
 // always the unwidened set, so a healthy round never sees a widened set at all.
-const ATTEST_RESPONSIBLE_WIDENING = {
-    confirmations: 3,
-    maxSlots:      2,
-};
+const ATTEST_RESPONSIBLE_WIDENING = copy('attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING');
 
 // STAGE 2, selected by ATTEST_ZERO_CONF_ACTIVATION on the request block (LOCAL COPY,
 // parity-tested). Two things change and one does not:
@@ -128,11 +123,7 @@ const ATTEST_RESPONSIBLE_WIDENING = {
 //
 //   maxSlots 2 is kept, so the set can reach redundancy + 3: headroom plus two ladder
 //   steps for two dead members.
-const ATTEST_RESPONSIBLE_WIDENING_V2 = {
-    startOffset: 0,
-    headroom:    1,
-    maxSlots:    2,
-};
+const ATTEST_RESPONSIBLE_WIDENING_V2 = copy('attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2');
 
 // Extra responsible slots at `atBlock` for a request admitted at `requestBlock` with
 // deadline `deadlineBlock`. Returns 0 (the legacy fixed-REDUNDANCY set, byte for byte)

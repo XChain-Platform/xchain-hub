@@ -80,6 +80,8 @@
 
 'use strict';
 
+const { copy } = require('./consensus/gate_registry');
+
 // Per-network activation height (LOCAL COPY of the canonical map in
 // xchain-documentation/protocol/constants.js). Keyed on the round's BTC-anchored
 // BTC_BLOCK_HEIGHT, NOT the landing chain's local height, so the hub and the BTC,
@@ -103,11 +105,7 @@
 // testnet/regtest activate at genesis (same convention as
 // STAKE_WEIGHTED_QUORUM_ACTIVATION and ATTEST_ADMISSION_ACTIVATION, which are
 // also verdict-changing): the test venues run the corrected tally from block 0.
-const PRICE_SIG_TALLY_ACTIVATION = {
-    mainnet: 963000,      // ARMED, RE-PINNED 2026-08-12 off 969500 onto the shared pre-freeze train boundary; deploy ALL indexers + hubs before this height
-    testnet: 0,
-    regtest: 0,
-};
+const PRICE_SIG_TALLY_ACTIVATION = copy('price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION');
 
 // Whether the corrected verify-then-mark tally is in effect for a round whose
 // signed BTC anchor is `btcBlockHeight` on `network`. Below it -> the legacy

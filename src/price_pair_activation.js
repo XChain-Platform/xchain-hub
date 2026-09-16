@@ -53,9 +53,11 @@
 
 'use strict';
 
+const { copy } = require('./consensus/gate_registry');
+
 // Ticker-side bounds either side of the gate (LOCAL COPY, see header).
-const PRICE_PAIR_TICKER_MAX_LEGACY = 5;
-const PRICE_PAIR_TICKER_MAX_WIDE   = 6;
+const PRICE_PAIR_TICKER_MAX_LEGACY = copy('price_pair_activation.PRICE_PAIR_TICKER_MAX_LEGACY');
+const PRICE_PAIR_TICKER_MAX_WIDE = copy('price_pair_activation.PRICE_PAIR_TICKER_MAX_WIDE');
 
 // Per-network activation TIME (LOCAL COPY of the canonical map in
 // xchain-documentation/protocol/constants.js). Keyed on the action's own block time.
@@ -66,16 +68,12 @@ const PRICE_PAIR_TICKER_MAX_WIDE   = 6;
 // rather than at a launch instant is what keeps LTC/DOGE native-coin fees payable from the
 // first mainnet block that carries one; the contract-era stamp 1786060800 (2026-08-07)
 // would have left them unpayable up to that instant.
-const PRICE_PAIR_WIDEN_ACTIVATION = {
-    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 PRICE actions, measured 2026-09-09)
-    testnet: 0,
-    regtest: 0,
-};
+const PRICE_PAIR_WIDEN_ACTIVATION = copy('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION');
 
 // Pre-built per-bound matchers. Anchored, uppercase-only, and without the /g flag
 // so .test() carries no lastIndex state between calls.
-const PRICE_PAIR_RE_LEGACY = new RegExp('^[A-Z]{3,' + PRICE_PAIR_TICKER_MAX_LEGACY + '}\\/[A-Z]{3,5}$');
-const PRICE_PAIR_RE_WIDE   = new RegExp('^[A-Z]{3,' + PRICE_PAIR_TICKER_MAX_WIDE   + '}\\/[A-Z]{3,5}$');
+const PRICE_PAIR_RE_LEGACY = copy('price_pair_activation.PRICE_PAIR_RE_LEGACY');
+const PRICE_PAIR_RE_WIDE = copy('price_pair_activation.PRICE_PAIR_RE_WIDE');
 
 // Whether the widened ticker bound is in effect for an action at `blockTime` on
 // `network`.

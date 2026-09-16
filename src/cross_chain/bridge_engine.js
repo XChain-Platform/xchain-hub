@@ -51,6 +51,7 @@ const EventEmitter = require('events');
 const path         = require('path');
 const axios        = require('axios');
 
+const registry               = require('../consensus/gate_registry');
 const eq                     = require('../equivocation_header.js');
 const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
@@ -68,26 +69,30 @@ const persistPart      = require('./bridge/persist.js');
 const invariantPart    = require('./bridge/invariant.js');
 const plumbingPart     = require('./bridge/plumbing.js');
 
-// Activation gates. The canonical maps are xchain-indexer/src/xchain_bridge_activation.js,
-// token_bridge_activation.js and token_policy_activation.js, mirrored into
-// xchain-documentation/protocol/constants.js and held equal by the indexer's
-// activationConstantsParity test. The hub reads a VENDORED twin one directory up, at the top
-// of src/ beside its other *_activation.js copies, exactly as it does for checkpoint_commitment
-// and the attest gates, because a second hand-written copy of a flag day is a fork waiting to happen.
+// Activation gates. The tables are rows of the activation registry (the SHARED block in
+// src/consensus/gate_registry.js, a byte twin of the indexer's), and the predicates that
+// read them live in the VENDORED carriers one directory up, at the top of src/ beside the
+// hub's other *_activation.js copies, exactly as for checkpoint_commitment and the attest
+// gates, because a second hand-written copy of a flag day is a fork waiting to happen.
 //
-// A twin that is missing or unreadable is not an error here: every load below returns null
-// and the engine FAILS CLOSED, idling instead of polling a chain whose flag day it cannot
-// read. That is the correct posture in both directions, because an engine that polled
-// without a gate would sign rows on a network where the activation has not been reached.
-function loadActivation(moduleName, predicate){
-    try {
-        // eslint-disable-next-line global-require
-        let mod = require(path.join(__dirname, '..', moduleName + '.js'));
-        let fn  = mod && mod[predicate];
-        return (typeof fn === 'function') ? fn : null;
-    } catch(e){
-        return null;
+// A miss is a build defect, not a network state, and THROWS here at construction naming
+// the registry key: a row the registry lacks, a carrier that is not where the computed
+// require looks, or a carrier that exports no such predicate. A null returned here instead
+// idled the engine with no error, no failing round and no wire field naming it, which is
+// fail-closed for the wrong reason. Fail-closed stays where it belongs: in the predicates,
+// which answer false below the height, so an engine on a network whose activation has not
+// been reached still idles and never signs a row there.
+function loadActivation(moduleName, exportName, predicate){
+    const key = moduleName + '.' + exportName;
+    registry.get(key);
+    // eslint-disable-next-line global-require
+    const mod = require(path.join(__dirname, '..', moduleName + '.js'));
+    const fn  = mod && mod[predicate];
+    if (typeof fn !== 'function') {
+        throw new Error('bridge activation ' + key + ' resolved, but src/' + moduleName + '.js exports no '
+            + predicate + ' predicate, so the engine cannot judge the flag day');
     }
+    return fn;
 }
 
 class CrossChainBridgeEngine extends EventEmitter {
@@ -133,9 +138,9 @@ class CrossChainBridgeEngine extends EventEmitter {
         // Activation predicates, resolved once. Replaceable on the instance so a test can
         // drive the armed path without vendoring a flag day into src/.
         this.activation = {
-            bridge: loadActivation('xchain_bridge_activation', 'isXchainBridgeActive'),
-            token:  loadActivation('token_bridge_activation',  'isTokenBridgeActive'),
-            policy: loadActivation('token_policy_activation',  'isTokenPolicyInheritanceActive')
+            bridge: loadActivation('xchain_bridge_activation', 'XCHAIN_BRIDGE_ACTIVATION',           'isXchainBridgeActive'),
+            token:  loadActivation('token_bridge_activation',  'TOKEN_BRIDGE_ACTIVATION',            'isTokenBridgeActive'),
+            policy: loadActivation('token_policy_activation',  'TOKEN_POLICY_INHERITANCE_ACTIVATION', 'isTokenPolicyInheritanceActive')
         };
         this._idleLogged = {};
 

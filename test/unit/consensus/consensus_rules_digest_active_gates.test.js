@@ -18,6 +18,21 @@ const PeerManager = require('../../../src/peers/manager.js');
 const ValidatorIdentity = require('../../../src/validators/identity.js');
 
 const INDEXER_COPY = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus_rules_digest.js');
+
+// The digest reads every gate VALUE from the registry, so a case that needs one map to
+// read differently swaps the registry's cached module for one whose get() answers that
+// key with `table`; the carriers themselves are never touched. Returns the restorer.
+function stubRegistryRow(key, table) {
+    const REG  = require.resolve('../../../src/consensus/gate_registry.js');
+    const real = require.cache[REG];
+    const stub = Object.create(Object.getPrototypeOf(real));
+    Object.assign(stub, real);
+    stub.exports = Object.assign({}, real.exports, {
+        get: (k) => (k === key ? Object.freeze(Object.assign({}, table)) : real.exports.get(k)),
+    });
+    require.cache[REG] = stub;
+    return () => { require.cache[REG] = real; };
+}
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
@@ -122,17 +137,11 @@ function registerSentinelGateTest() {
     // whichever map happened to be unarmed. PRICE_PAIR_WIDEN_ACTIVATION, the last live
     // example before the arm, is the map stubbed here.
     it('excludes a far-future sentinel height, however high the chain climbs', function () {
-        const GATE    = require.resolve('../../../src/price_pair_activation.js');
         const CRD     = require.resolve('../../../src/consensus_rules_digest.js');
-        const real    = require.cache[GATE];
         const realCrd = require.cache[CRD];
+        const restore = stubRegistryRow('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION',
+            { mainnet: crd.FAR_FUTURE_HEIGHT_SENTINEL, testnet: 0, regtest: 0 });
         try {
-            const stub = Object.create(Object.getPrototypeOf(real));
-            Object.assign(stub, real);
-            stub.exports = Object.assign({}, real.exports, {
-                PRICE_PAIR_WIDEN_ACTIVATION: { mainnet: crd.FAR_FUTURE_HEIGHT_SENTINEL, testnet: 0, regtest: 0 },
-            });
-            require.cache[GATE] = stub;
             delete require.cache[CRD];                       // clears the module-level value cache
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.activeGatesAt(fresh.FAR_FUTURE_HEIGHT_SENTINEL, 'mainnet'))
@@ -141,7 +150,7 @@ function registerSentinelGateTest() {
             expect(fresh.activeGatesAt(0, 'testnet'))
                 .to.include('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION');
         } finally {
-            require.cache[GATE] = real;
+            restore();
             require.cache[CRD]  = realCrd;
         }
     });
@@ -198,22 +207,15 @@ function registerCoinKeyedGateTest() {
             expect(crd.activeGatesAt(0, 'regtest', coin)).to.include(KEY);
             expect(crd.activeGatesAt(crd.FAR_FUTURE_HEIGHT_SENTINEL, 'testnet', coin)).to.not.include(KEY);
         }
-        const GATE    = require.resolve('../../../src/xchain_bridge_activation.js');
         const CRD     = require.resolve('../../../src/consensus_rules_digest.js');
-        const real    = require.cache[GATE];
         const realCrd = require.cache[CRD];
+        const restore = stubRegistryRow(KEY, {
+            'BTC:testnet':  100,
+            'DOGE:testnet': 5000000,
+            testnet:        crd.FAR_FUTURE_HEIGHT_SENTINEL,
+            regtest:        0,
+        });
         try {
-            const stub = Object.create(Object.getPrototypeOf(real));
-            Object.assign(stub, real);
-            stub.exports = Object.assign({}, real.exports, {
-                XCHAIN_BRIDGE_ACTIVATION: {
-                    'BTC:testnet':  100,
-                    'DOGE:testnet': 5000000,
-                    testnet:        crd.FAR_FUTURE_HEIGHT_SENTINEL,
-                    regtest:        0,
-                },
-            });
-            require.cache[GATE] = stub;
             delete require.cache[CRD];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.activeGatesAt(150, 'testnet', 'BTC')).to.include(KEY);
@@ -225,7 +227,7 @@ function registerCoinKeyedGateTest() {
             expect(fresh.activeGatesAt(150, 'testnet')).to.include(KEY);
             expect(fresh.activeGatesAt(99, 'testnet')).to.not.include(KEY);
         } finally {
-            require.cache[GATE] = real;
+            restore();
             require.cache[CRD]  = realCrd;
         }
     });

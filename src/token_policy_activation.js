@@ -29,6 +29,8 @@
 
 'use strict';
 
+const { copy } = require('./consensus/gate_registry');
+
 // TOKEN_POLICY_INHERITANCE_ACTIVATION: the height (per network) on the chain being
 // parsed at/above which policy inheritance is in effect. Keyed on the chain's OWN
 // block_index, never on a snapshot's snapshot_block or origin_block, because what it
@@ -58,11 +60,7 @@
 //     resolves a list AS OF origin_block through getListAtBlock, which walks the edit
 //     chain; below that gate the legacy create-index read runs and the membership the
 //     federation signs would not be the membership the chain actually held.
-const TOKEN_POLICY_INHERITANCE_ACTIVATION = {
-    mainnet: 9999999999,
-    testnet: 9999999999,
-    regtest: 0,
-};
+const TOKEN_POLICY_INHERITANCE_ACTIVATION = copy('token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION');
 
 // Is policy inheritance in effect at height `blockIndex` on `network`? A non-numeric
 // height or an unknown network fails closed (false): the milestone-1 refusals then

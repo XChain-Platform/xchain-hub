@@ -3,7 +3,7 @@
   "entries": {
     "anchor_reward_activation": {
       "path": "src/anchor_reward_activation.js",
-      "hash": "86111420cc854b916e6903af02154ff4abe62b2265adf7ff3c0f069b786354c6",
+      "hash": "5fd92b92e92d2b8c8745049238c1dab8fbd9ad898ad2ea9e629697f587dbde8c",
       "twins": [
         "xchain-indexer"
       ]
@@ -15,34 +15,34 @@
     },
     "attest_relay_activation": {
       "path": "src/attest_relay_activation.js",
-      "hash": "57e4412c8e0b30b226f4b3952528104a7d8d8f9fea9eeb2e151745731e33d380",
+      "hash": "65a0c254d03b976039f0eea45829bd98c37b7166d4ddc2688802cc494455969e",
       "twins": [
         "xchain-indexer"
       ]
     },
     "attest_relay_reject_slot_activation": {
       "path": "src/attest_relay_reject_slot_activation.js",
-      "hash": "c187651efa1ac6d4904a66c7eafcceb62a402a4914829960eb4159583e411f7f",
+      "hash": "c58b1f865c40c5ea2baa88896b9849445443702f667c6a0bdf3ee14176efce86",
       "twins": []
     },
     "attest_response_mirror_activation": {
       "path": "src/attest_response_mirror_activation.js",
-      "hash": "3fcee694c8f8698eb4ad8b20f17c8b9385887c3bdf8f51c6bc3fb5c3c2d7c979",
+      "hash": "8a1b9e85779dc542588ac35c17631087e112c61b073e0172e0b8efec283e8cd7",
       "twins": []
     },
     "attest_responsible_widening_activation": {
       "path": "src/attest_responsible_widening_activation.js",
-      "hash": "79b0109f2ad52ef5507a055d8d96c2321b80533d26b8649e08ced99cffccaf4f",
+      "hash": "c25e8275ab398ec3d5d6e09d21e403048929be3a00ce0c2890109080c56f4de4",
       "twins": []
     },
     "attest_zero_conf_activation": {
       "path": "src/attest_zero_conf_activation.js",
-      "hash": "cacef9b3fafa66a9e3234608fbfdf6e1caf561abaebd8563e6f6cd95e7e7de15",
+      "hash": "9cde9f72bbca2299b778a633286af18e702e2fd233f5e730623bdba91d45c606",
       "twins": []
     },
     "checkpoint_commitment_activation": {
       "path": "src/checkpoint_commitment_activation.js",
-      "hash": "b145c3bff9dece6741a8b24a2979a02607c1daf83f98383d4fe29b99170b574c",
+      "hash": "58ec9762c0d917992c635cc90666520fcee9c31e18e0b010b860930c214a4719",
       "twins": [
         "xchain-indexer",
         "xchain-sync"
@@ -50,19 +50,19 @@
     },
     "consensus_rules_digest": {
       "path": "src/consensus_rules_digest.js",
-      "hash": "b598ebd8b2ff03b1047ef84833993d6402ebbb7eb42555e3ea08443d1c0ec885",
+      "hash": "194eb2ac5f79b28b9a9df1f65c117fe8b03704f7ece8ef8e2e125b14e0356d1c",
       "twins": [
         "xchain-indexer"
       ]
     },
     "cross_chain_royalty_activation": {
       "path": "src/cross_chain_royalty_activation.js",
-      "hash": "b1ab31073b7f65685a35c92bfaa9fe7f4d567b35e9ff8f57bf8de6a11e6d9ee3",
+      "hash": "3078852f2d53487be33a6d8fad314b0574f08c33e525fa59fa38494231ebed8b",
       "twins": []
     },
     "equivocation_header": {
       "path": "src/equivocation_header.js",
-      "hash": "d14b27eda669b5429c97cc2fc212c0fee5dea8f2bd14797deb3a272be9b3cdc9",
+      "hash": "360228d4054bd2d30d69669be487dc740083ae480283cf007c79238f881ede21",
       "twins": []
     },
     "lib/fullnode_activation": {
@@ -72,7 +72,7 @@
     },
     "mirror_admission_activation": {
       "path": "src/mirror_admission_activation.js",
-      "hash": "93a04fe0769c9a972e5728b47228153c1caef1967faf20a8fff3b94523b02bd6",
+      "hash": "b027b2494d414c1e0127b0f5bba8d25eb9d2a8649ef71b70115f9e569f46dcae",
       "twins": []
     },
     "oracle_clamp_reference_activation": {
@@ -82,69 +82,69 @@
     },
     "price_pair_activation": {
       "path": "src/price_pair_activation.js",
-      "hash": "dc60249620f6e4ce79d856c5e089b03280d404e87912d9e88eac121bfeba8c1f",
+      "hash": "da12f75b712bcaacd9e2192a30af5d14c004edeb9bb40ebe054db6bfcd898edb",
       "twins": [
         "xchain-indexer"
       ]
     },
     "price_scale_activation": {
       "path": "src/price_scale_activation.js",
-      "hash": "c4c7797cbf8b30fbcc2a299383677e451e1602ac2a15c24a012cb15df624365a",
+      "hash": "c503e75d9b8ca187567d4521fe0cf4e08050531ea52f16370d54cacb815b0764",
       "twins": []
     },
     "price_sig_tally_activation": {
       "path": "src/price_sig_tally_activation.js",
-      "hash": "93e63cf9a7a257be98a7d00b19f883322b2a99b7eba31e4baf8bf5765ea8cd80",
+      "hash": "ac3d72219653c9f1eea069c486e482fda31180bf0b94c0249d6e04f0bf0ad362",
       "twins": [
         "xchain-indexer"
       ]
     },
     "retraction_signing_activation": {
       "path": "src/retraction_signing_activation.js",
-      "hash": "0acdcf181b8be769110e0714410e1e7c5f1d1ac4630585849fc07367422e1259",
+      "hash": "7f2b052eb4152296e4d57dcad9e653d906fca436486eefcb36f997caf4a02356",
       "twins": [
         "xchain-indexer"
       ]
     },
     "rollcall_activation": {
       "path": "src/rollcall_activation.js",
-      "hash": "6911a21e0db24ad19873e48c5c32d2454451cbf43f30ee250896f8459f6390b7",
+      "hash": "ac7530524f397f8db5f8bf3a7fe2d7419f06a5f3a0a28d2082b905a9c87c632e",
       "twins": []
     },
     "rollcall_gates_activation": {
       "path": "src/rollcall_gates_activation.js",
-      "hash": "7c104d6d1dedc04b072e681c36aba56fa4ce7dde92a728573b73e2636ec4ee6f",
+      "hash": "a9988d901405bbe4e0b08534c15a385572e48234b15ef9b19671ae1817940f2e",
       "twins": []
     },
     "snapshot_reorg_buffer": {
       "path": "src/snapshot_reorg_buffer.js",
-      "hash": "5f493b9e43175503529876c05143ec064ab3a6e9b6e176cb5e91e828ad71104c",
+      "hash": "a5c659a82dc75ce0538088138c6c613b98f109eeff2e74de2e6ccda60e92b68d",
       "twins": [
         "xchain-indexer"
       ]
     },
     "stake_weighted_quorum": {
       "path": "src/stake_weighted_quorum.js",
-      "hash": "da0af9b4eb48cb18657250bdee8bd86f59108af39a599530a89f6c100c44fd80",
+      "hash": "219adf19442c198f5e9a3db0a887ce21691fc18f75276ff0e8aba6b19663e62f",
       "twins": []
     },
     "token_bridge_activation": {
       "path": "src/token_bridge_activation.js",
-      "hash": "42af166a8f6887fb527a44db2d5cf5993214ac8f6d93522f16f0939c71c61ce9",
+      "hash": "83656164e5f438eeea45cdb31b046f01657aef95e9170016d6a5a2da96db693f",
       "twins": [
         "xchain-indexer"
       ]
     },
     "token_policy_activation": {
       "path": "src/token_policy_activation.js",
-      "hash": "088c6ac6db5e4884c590426c8357c75eebd082b22070bc8d956a6168373bfaef",
+      "hash": "04cb89578bfbfbcec5e05cde39ee7e1abc70009914f70ed95d17406e80bca8d5",
       "twins": [
         "xchain-indexer"
       ]
     },
     "xchain_bridge_activation": {
       "path": "src/xchain_bridge_activation.js",
-      "hash": "dd477c70e57afe302942baa4575b1304f5a96e9f4b8266c1406569ce3ff98e68",
+      "hash": "ac151b6c1339db1c598360c6ad2772dd775fea07a36a6e9eb8213d817a850741",
       "twins": [
         "xchain-indexer"
       ]
@@ -337,6 +337,160 @@
       "to": "6dd494f56656b1f6778be18f32f12ae03a2f1d3ba26a6b97fbe56fdee280ec19",
       "reason": "activation-registry row 27: initial carrier logic pin",
       "date": "2026-09-15"
+    },
+    {
+      "id": "anchor_reward_activation",
+      "from": "86111420cc854b916e6903af02154ff4abe62b2265adf7ff3c0f069b786354c6",
+      "to": "5fd92b92e92d2b8c8745049238c1dab8fbd9ad898ad2ea9e629697f587dbde8c",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "attest_relay_activation",
+      "from": "57e4412c8e0b30b226f4b3952528104a7d8d8f9fea9eeb2e151745731e33d380",
+      "to": "65a0c254d03b976039f0eea45829bd98c37b7166d4ddc2688802cc494455969e",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "attest_relay_reject_slot_activation",
+      "from": "c187651efa1ac6d4904a66c7eafcceb62a402a4914829960eb4159583e411f7f",
+      "to": "c58b1f865c40c5ea2baa88896b9849445443702f667c6a0bdf3ee14176efce86",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "attest_response_mirror_activation",
+      "from": "3fcee694c8f8698eb4ad8b20f17c8b9385887c3bdf8f51c6bc3fb5c3c2d7c979",
+      "to": "8a1b9e85779dc542588ac35c17631087e112c61b073e0172e0b8efec283e8cd7",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "attest_responsible_widening_activation",
+      "from": "79b0109f2ad52ef5507a055d8d96c2321b80533d26b8649e08ced99cffccaf4f",
+      "to": "c25e8275ab398ec3d5d6e09d21e403048929be3a00ce0c2890109080c56f4de4",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "attest_zero_conf_activation",
+      "from": "cacef9b3fafa66a9e3234608fbfdf6e1caf561abaebd8563e6f6cd95e7e7de15",
+      "to": "9cde9f72bbca2299b778a633286af18e702e2fd233f5e730623bdba91d45c606",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "checkpoint_commitment_activation",
+      "from": "b145c3bff9dece6741a8b24a2979a02607c1daf83f98383d4fe29b99170b574c",
+      "to": "58ec9762c0d917992c635cc90666520fcee9c31e18e0b010b860930c214a4719",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "consensus_rules_digest",
+      "from": "b598ebd8b2ff03b1047ef84833993d6402ebbb7eb42555e3ea08443d1c0ec885",
+      "to": "194eb2ac5f79b28b9a9df1f65c117fe8b03704f7ece8ef8e2e125b14e0356d1c",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "cross_chain_royalty_activation",
+      "from": "b1ab31073b7f65685a35c92bfaa9fe7f4d567b35e9ff8f57bf8de6a11e6d9ee3",
+      "to": "3078852f2d53487be33a6d8fad314b0574f08c33e525fa59fa38494231ebed8b",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "equivocation_header",
+      "from": "d14b27eda669b5429c97cc2fc212c0fee5dea8f2bd14797deb3a272be9b3cdc9",
+      "to": "360228d4054bd2d30d69669be487dc740083ae480283cf007c79238f881ede21",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "mirror_admission_activation",
+      "from": "93a04fe0769c9a972e5728b47228153c1caef1967faf20a8fff3b94523b02bd6",
+      "to": "b027b2494d414c1e0127b0f5bba8d25eb9d2a8649ef71b70115f9e569f46dcae",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "price_pair_activation",
+      "from": "dc60249620f6e4ce79d856c5e089b03280d404e87912d9e88eac121bfeba8c1f",
+      "to": "da12f75b712bcaacd9e2192a30af5d14c004edeb9bb40ebe054db6bfcd898edb",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "price_scale_activation",
+      "from": "c4c7797cbf8b30fbcc2a299383677e451e1602ac2a15c24a012cb15df624365a",
+      "to": "c503e75d9b8ca187567d4521fe0cf4e08050531ea52f16370d54cacb815b0764",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "price_sig_tally_activation",
+      "from": "93e63cf9a7a257be98a7d00b19f883322b2a99b7eba31e4baf8bf5765ea8cd80",
+      "to": "ac3d72219653c9f1eea069c486e482fda31180bf0b94c0249d6e04f0bf0ad362",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "retraction_signing_activation",
+      "from": "0acdcf181b8be769110e0714410e1e7c5f1d1ac4630585849fc07367422e1259",
+      "to": "7f2b052eb4152296e4d57dcad9e653d906fca436486eefcb36f997caf4a02356",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "rollcall_activation",
+      "from": "6911a21e0db24ad19873e48c5c32d2454451cbf43f30ee250896f8459f6390b7",
+      "to": "ac7530524f397f8db5f8bf3a7fe2d7419f06a5f3a0a28d2082b905a9c87c632e",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "rollcall_gates_activation",
+      "from": "7c104d6d1dedc04b072e681c36aba56fa4ce7dde92a728573b73e2636ec4ee6f",
+      "to": "a9988d901405bbe4e0b08534c15a385572e48234b15ef9b19671ae1817940f2e",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "snapshot_reorg_buffer",
+      "from": "5f493b9e43175503529876c05143ec064ab3a6e9b6e176cb5e91e828ad71104c",
+      "to": "a5c659a82dc75ce0538088138c6c613b98f109eeff2e74de2e6ccda60e92b68d",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "stake_weighted_quorum",
+      "from": "da0af9b4eb48cb18657250bdee8bd86f59108af39a599530a89f6c100c44fd80",
+      "to": "219adf19442c198f5e9a3db0a887ce21691fc18f75276ff0e8aba6b19663e62f",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "token_bridge_activation",
+      "from": "42af166a8f6887fb527a44db2d5cf5993214ac8f6d93522f16f0939c71c61ce9",
+      "to": "83656164e5f438eeea45cdb31b046f01657aef95e9170016d6a5a2da96db693f",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "token_policy_activation",
+      "from": "088c6ac6db5e4884c590426c8357c75eebd082b22070bc8d956a6168373bfaef",
+      "to": "04cb89578bfbfbcec5e05cde39ee7e1abc70009914f70ed95d17406e80bca8d5",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
+    },
+    {
+      "id": "xchain_bridge_activation",
+      "from": "dd477c70e57afe302942baa4575b1304f5a96e9f4b8266c1406569ce3ff98e68",
+      "to": "ac151b6c1339db1c598360c6ad2772dd775fea07a36a6e9eb8213d817a850741",
+      "reason": "registry conversion (rows 12, 13, 14)",
+      "date": "2026-09-16"
     }
   ]
 }

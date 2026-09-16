@@ -43,51 +43,74 @@ function registerBrokenCarrierTests() {
     // that way agree with each other while agreeing with no real build. The indexer copy
     // carries the same pair of cases, so a one-sided revert cannot pass by running only
     // the other repo's suite.
-    describe('a broken carrier is not an absent one', function () {
+    describe('a missing row or a broken carrier is never an absent gate', function () {
 
         const os = require('os');
-        const MODULE_SRC = path.resolve(__dirname, '../../../src/consensus_rules_digest.js');
+        const MODULE_SRC   = path.resolve(__dirname, '../../../src/consensus_rules_digest.js');
+        const REGISTRY_SRC = path.resolve(__dirname, '../../../src/consensus/gate_registry.js');
 
-        // A standalone tree: the module under test plus a stub for every carrier it
-        // names. __dirname is what the loader resolves against, so the cases have to own
-        // the directory in order to delete and break carriers, which no checkout may do.
+        // A standalone tree: the module under test, a copy of the registry it reads its
+        // values from, and a stub for every carrier it names (a function under every name
+        // that is a function on the real carrier, since only those are read from the
+        // carrier). __dirname is what the loader resolves against, so the cases have to own
+        // the directory in order to delete a row or break a carrier, which no checkout may do.
         function scratchTree(mutate) {
             const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-carrier-'));
             fs.copyFileSync(MODULE_SRC, path.join(dir, 'consensus_rules_digest.js'));
+            fs.mkdirSync(path.join(dir, 'consensus'));
+            fs.copyFileSync(REGISTRY_SRC, path.join(dir, 'consensus', 'gate_registry.js'));
             const byModule = new Map();
             for (const [mod, names] of crd.SHARED_GATES) {
                 if (!byModule.has(mod)) byModule.set(mod, []);
                 byModule.get(mod).push(...names);
             }
             for (const [mod, names] of byModule) {
-                const body = names.map(n => 'exports.' + n + ' = { regtest: 0 };').join('\n');
+                const real = require('../../../src/' + mod + '.js');
+                const body = names.map(n => 'exports.' + n + ' = '
+                    + (typeof real[n] === 'function' ? 'function () {};' : '{ regtest: 0 };')).join('\n');
                 fs.writeFileSync(path.join(dir, mod + '.js'), body + '\n');
             }
             mutate(dir);
             return require(path.join(dir, 'consensus_rules_digest.js'));
         }
 
-        it('digests an absent carrier FILE as the absent sentinel and does not throw', function () {
-            const victim = 'cross_chain_royalty_activation';
-            const mod = scratchTree(dir => fs.unlinkSync(path.join(dir, victim + '.js')));
-            expect(mod.computeConsensusRulesDigest().gates[victim + '.CROSS_CHAIN_ROYALTY_ACTIVATION'])
-                .to.equal(crd.ABSENT);
-            // Absent is a real protocol state, so it must still produce a digest, and one
-            // that differs from the same tree with the carrier present.
-            const whole = scratchTree(() => {});
-            expect(mod.computeConsensusRulesDigest().digest)
-                .to.not.equal(whole.computeConsensusRulesDigest().digest);
+        // Cut one addGate() statement out of the scratch registry, by key.
+        function deleteRow(dir, key) {
+            const reg = path.join(dir, 'consensus', 'gate_registry.js');
+            const text = fs.readFileSync(reg, 'utf8');
+            const at = text.indexOf("addGate('" + key + "'");
+            expect(at, 'the scratch registry carries ' + key).to.be.above(-1);
+            const stop = text.indexOf(');\n', at) + 3;
+            fs.writeFileSync(reg, text.slice(0, at) + text.slice(stop));
+        }
+
+        it('digests the whole scratch tree to the shipped digest, so the cases below start green', function () {
+            expect(scratchTree(() => {}).computeConsensusRulesDigest().digest)
+                .to.equal(crd.computeConsensusRulesDigest().digest);
+        });
+
+        it('THROWS naming the key when a registry row is missing, instead of digesting it as absent', function () {
+            const victim = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
+            const mod = scratchTree(dir => deleteRow(dir, victim));
+            expect(() => mod.computeConsensusRulesDigest()).to.throw(victim);
+            // The signed GATES field reads the same loader, so a missing row must take it
+            // down too rather than publish a silently shortened gate list.
+            expect(() => mod.knownGateKeys()).to.throw(victim);
+            expect(() => mod.activeGatesAt(0, 'regtest')).to.throw(victim);
+        });
+
+        it('THROWS naming the key when the carrier of a function-valued gate is gone', function () {
+            const mod = scratchTree(dir => fs.unlinkSync(path.join(dir, 'mirror_admission_activation.js')));
+            expect(() => mod.computeConsensusRulesDigest()).to.throw('mirror_admission_activation.encodeAdmitBlocks');
         });
 
         it('REFUSES when a carrier is present and fails to load, naming it and the cause', function () {
-            const victim = 'stake_weighted_quorum';
+            const victim = 'mirror_admission_activation';
             const mod = scratchTree(dir => fs.writeFileSync(path.join(dir, victim + '.js'),
                 "require('a-dependency-that-is-not-installed');\n"));
             expect(() => mod.computeConsensusRulesDigest())
                 .to.throw(Error).and.to.satisfy((e) => e.message.includes(victim)
                     && e.message.includes('a-dependency-that-is-not-installed'));
-            // The signed GATES field reads the same loader, so a broken carrier must take
-            // it down too rather than publish a silently shortened gate list.
             expect(() => mod.knownGateKeys()).to.throw(victim);
             expect(() => mod.activeGatesAt(0, 'regtest')).to.throw(victim);
         });

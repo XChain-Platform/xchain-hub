@@ -15,26 +15,31 @@
  * not.
  *
  * WHY A CHECK AND NOT A CONVENTION, and this is the only reason it exists. A set
- * of modules in this repo is resolved by a path this build COMPUTES at runtime,
- * inside a try/catch that swallows the failure:
+ * of modules in this repo is resolved by a path this build COMPUTES at runtime:
  *
- *   src/consensus_rules_digest.js:152  require('./' + mod + '.js'), catch -> the
- *                                      ABSENT sentinel. Move a gate carrier into
- *                                      a subdirectory and the digest is computed
- *                                      over a map in which every gate reads
- *                                      absent, while the SIGNED wire field,
- *                                      knownGateKeys().join(','), is byte for
- *                                      byte what every peer publishes. A rules
- *                                      fork that no wire field names.
- *   src/cross_chain/bridge_engine.js:117  require(path.join(__dirname, '..',
- *                                      moduleName + '.js')), catch -> null. The
- *                                      engine then idles, by design and correctly,
- *                                      but for the wrong reason, and only the
- *                                      bridge activation resolve test notices.
+ *   src/consensus_rules_digest.js  loadGateModule: path.join(__dirname, mod + '.js'),
+ *                                  asked for the SHARED_GATES names that are
+ *                                  FUNCTIONS on their carrier (a registry holds
+ *                                  values). The gate VALUES are registry rows
+ *                                  keyed by name, so a moved carrier no longer
+ *                                  reads ABSENT: since the registry conversion a
+ *                                  miss THROWS at boot. Before it, the digest was
+ *                                  computed over a map in which every gate read
+ *                                  absent while the SIGNED wire field,
+ *                                  knownGateKeys().join(','), stayed byte for
+ *                                  byte what every peer publishes: a rules fork
+ *                                  that no wire field names.
+ *   src/cross_chain/bridge_engine.js  loadActivation: the table as a registry row,
+ *                                  then require(path.join(__dirname, '..',
+ *                                  moduleName + '.js')) for the predicate. A miss
+ *                                  throws at construction; it used to return null
+ *                                  and idle the engine, by design and correctly,
+ *                                  but for the wrong reason.
  *
- * Neither failure throws, neither fails a suite and neither changes a published
- * number. A restructure cannot be trusted to remember that; it can be made to
- * run this.
+ * A boot that throws is better than a digest that lies, and this check is better
+ * than either: it refuses the move at the gate, before any process boots on it.
+ * A restructure cannot be trusted to remember the computed paths; it can be made
+ * to run this.
  *
  * THE FOUR HALVES OF THE ANSWER, because no single one of them is enough:
  *
@@ -95,6 +100,7 @@ const FROZEN_GLOBS = [
     { glob: 'src/snapshot_reorg_buffer.js', why: 'a SHARED_GATES carrier under a name that is not _activation' },
     { glob: 'src/stake_weighted_quorum.js', why: 'a SHARED_GATES carrier under a name that is not _activation' },
     { glob: 'src/consensus_rules_digest.js', why: 'the module that computes the requires' },
+    { glob: 'src/consensus/gate_registry.js', why: 'the registry every carrier, the digest and the bridge engine require by this one literal path' },
     { glob: 'src/coins/**',               why: 'byte-vendored to six to ten repos by sync-coins.sh' },
     { glob: 'src/observability/**',       why: 'byte-vendored to six to ten repos by sync-observability.sh' },
     { glob: 'src/sql/**',                 why: 'read by path from sibling conformance suites' },
@@ -189,7 +195,10 @@ function sharedGateModules() {
 
 /**
  * The bridge engine's activation basenames, read out of its loadActivation calls
- * for the same reason the gate list is read out of SHARED_GATES.
+ * for the same reason the gate list is read out of SHARED_GATES. A call names the
+ * carrier first, then the registry row it reads and the predicate it takes from
+ * the carrier, so the basename is the first quoted argument in either the current
+ * three-argument shape or the older two-argument one.
  *
  * @returns {string[]}
  */
@@ -197,7 +206,7 @@ function bridgeGateModules() {
     const abs = path.join(REPO_ROOT, 'src/cross_chain/bridge_engine.js');
     if (!fs.existsSync(abs)) return [];
     const src = fs.readFileSync(abs, 'utf8');
-    return Array.from(new Set(Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g)).map((m) => m[1])));
+    return Array.from(new Set(Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'(?:\s*,\s*'[^']+'){1,2}\s*\)/g)).map((m) => m[1])));
 }
 
 /**

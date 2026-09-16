@@ -38,20 +38,18 @@
  *
  ********************************************************************/
 
+const { get, copy } = require('./consensus/gate_registry');
+
 // Per-network activation height, interpreted as the BTC-anchored snapshot_block
 // carried by the ANCHOR canonical (NOT the local processing height), so every chain
 // + the hub flip the reward-derivation path on the same anchor.
-const ANCHOR_REWARD_ACTIVATION = {
-    mainnet: 961000,      // ARMED 2026-07-07: BTC anchor ~2026-08-04; deploy hub + ALL indexers before this height
-    testnet: 0,
-    regtest: 0,
-};
+const ANCHOR_REWARD_ACTIVATION = copy('anchor_reward_activation.ANCHOR_REWARD_ACTIVATION');
 
 // The frozen validator anchor-publish reward. This is a CONSENSUS CONSTANT: the hub
 // signs it into the XANCPUB attestation and the indexer re-derives it, never from
 // the wire. Changing it is itself a flag-day. Kept equal to the hub's historical
 // default (ANCHOR_REWARD_PER_PUBLISH = '10.00000000').
-const ANCHOR_REWARD_AMOUNT = '10.00000000';
+const ANCHOR_REWARD_AMOUNT = copy('anchor_reward_activation.ANCHOR_REWARD_AMOUNT');
 
 // Whether anchor rewards are DERIVED from chain (vs pushed) for an ANCHOR whose
 // BTC-anchored snapshot is at `snapshotBlock` on `network`. Below the threshold ->
@@ -76,16 +74,12 @@ function isAnchorRewardActive(snapshotBlock, network){
 // insider-with-key forge surface the per-chain flag-day left open. Below the
 // threshold the legacy tail-less archive wire and the push path stand, and a
 // publisher-bearing archive head is rejected.
-const ARCHIVE_REWARD_ACTIVATION = {
-    mainnet: 963000,      // ARMED 2026-07-16, RE-PINNED 2026-08-12 off block 969500 onto the mainnet pre-freeze deploy-train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this height
-    testnet: 0,
-    regtest: 0,
-};
+const ARCHIVE_REWARD_ACTIVATION = copy('anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION');
 
 // The frozen archive-publish reward, signed into the archive XANCPUB attestation and
 // re-derived by the indexer, never from the wire. Kept equal to the hub's historical
 // default (ANCHOR_REWARD_PER_PUBLISH = '10.00000000'). Changing it is itself a flag-day.
-const ARCHIVE_REWARD_AMOUNT = '10.00000000';
+const ARCHIVE_REWARD_AMOUNT = copy('anchor_reward_activation.ARCHIVE_REWARD_AMOUNT');
 
 // Whether the anchor_archive reward is DERIVED from chain (vs pushed) for an archive
 // anchor whose BTC-anchored snapshot is at `snapshotBlock` on `network`. Below the
@@ -245,11 +239,7 @@ function isArchiveRewardActive(snapshotBlock, network){
 // ledger one: on a BTC indexer the derive columns arrive with the build (see the
 // pre-arming note above), so what to check before an anchor is which build each
 // host runs, not which rows its schema_migrations happens to hold.
-const ANCHOR_REWARD_DERIVE_ACTIVATION = {
-    mainnet: 0,           // ARMED at genesis by the 2026-09-09 ruling: identity on the indexed mainnet history (0 anchor reward attestations, 0 validator_rewards rows, measured 2026-09-09)
-    testnet: 0,           // ARMED at genesis 2026-08-14 per the 2026-08-11 operator ruling; see the testnet note above
-    regtest: 0,
-};
+const ANCHOR_REWARD_DERIVE_ACTIVATION = copy('anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION');
 
 // Whether anchor/archive reward derivation has RELOCATED to the BTC indexer for a reward tuple
 // whose BTC-anchored snapshot is at `snapshotBlock` on `network`. Below the threshold (or an
@@ -284,7 +274,7 @@ function isAnchorRewardDeriveActive(snapshotBlock, network){
 // identical set at the identical height or does not advance at all. Changing this value
 // moves the block a reward materializes at, so it is a hashed value: it is frozen with the
 // activation map above and a change needs its own flag-day.
-const ANCHOR_REWARD_MIRROR_MATURITY = 144;   // ~24h of BTC blocks
+const ANCHOR_REWARD_MIRROR_MATURITY = copy('anchor_reward_activation.ANCHOR_REWARD_MIRROR_MATURITY');   // ~24h of BTC blocks
 
 // The DOGE burial depth deriveAnchorRewards() requires before it will mint a mirrored
 // attestation's reward. Frozen HERE, beside the maturity watermark and the activation map,
@@ -307,7 +297,7 @@ const ANCHOR_REWARD_MIRROR_MATURITY = 144;   // ~24h of BTC blocks
 // test/unit/anchorRewardDerive.test.js fails if the two ever part. Changing it moves the
 // block a reward materializes at, so it is frozen with the activation map above and a
 // change needs its own flag-day.
-const ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS = 60;   // DOGE confirmations, ~1h
+const ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS = copy('anchor_reward_activation.ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS');   // DOGE confirmations, ~1h
 
 // The BTC block at which a mirrored attestation row whose XANCPUB signing set was resolved
 // at `snapshotBlock` becomes derivable. Returns null for an unparseable height so callers
@@ -389,7 +379,7 @@ const { resolveMirrorAdmissionRegtest } = require('./mirror_admission_activation
 // falls back to today's wait through the min(), which is the right way for a fail-closed
 // gate to fail. Changing this value moves the block a barrier opens at, so it is frozen with
 // the activation map below and a change needs its own flag-day.
-const ANCHOR_ATTEST_ARRIVAL_MARGIN_S = 64800;   // 18 h
+const ANCHOR_ATTEST_ARRIVAL_MARGIN_S = copy('anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S');   // 18 h
 
 // Per NETWORK, not per (coin, network), because this member is BTC-only by its call-site
 // guard and a second key would be dead weight. Nothing hashed moves across this height: two
@@ -397,11 +387,7 @@ const ANCHOR_ATTEST_ARRIVAL_MARGIN_S = 64800;   // 18 h
 // WHEN they get there. The height exists because a rolling deploy would otherwise leave the
 // early-opening node alone in carrying a weaker completeness guarantee, and one map removes
 // that window.
-const ANCHOR_ATTEST_BARRIER_ACTIVATION = Object.freeze({
-    mainnet: null,        // INERT under the 2026-08-29 mainnet write hold
-    testnet: null,        // SIZED AT THE CUT from the measured tip plus the roll window
-    regtest: resolveMirrorAdmissionRegtest(process.env),   // shares the family's arming seam so one venue lever arms both
-});
+const ANCHOR_ATTEST_BARRIER_ACTIVATION = get('anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION');
 
 /**
  * Whether the maturity-horizon barrier is ARMED for `network` at BTC height `height`.
