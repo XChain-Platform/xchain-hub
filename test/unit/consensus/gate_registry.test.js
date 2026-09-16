@@ -21,7 +21,8 @@
  * while copy() hands out mutable ones, the venue's regtest arming is applied
  * when a row is read (D78: the environment as it stands at that moment, with
  * no registry purge), the block lives in the part files and nowhere else,
- * and every part file is a byte twin of the indexer's.
+ * and every block part file is a byte twin of the indexer's, while the one
+ * hub-only part carries no block marker and is twinned nowhere.
  *
  ********************************************************************/
 
@@ -38,6 +39,9 @@ const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
 const PARTS_DIR    = path.join(SRC, 'consensus', 'gate_registry');
 const PARTS        = ['shared_rows_1.js', 'shared_rows_2.js', 'shared_rows_3.js', 'shared_rows_4.js', 'shared_rows_5.js'];
+// The rows this hub alone judges, queued after the block; not a twin, so it
+// carries no SHARED-GATES markers and is graded apart from PARTS.
+const HUB_PARTS    = ['hub_rows.js'];
 // The files under gate_registry/ that are byte twins of the indexer's
 // src/protocol_changes/ files of the same name (core.js is the consumer core,
 // authored here, so it is the one file with no indexer twin).
@@ -149,9 +153,19 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
     });
 
+    it('keeps the hub-only rows outside the SHARED block: no markers, the same data-only shape', function () {
+        for (const part of HUB_PARTS) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            expect(text.split('\n').filter((l) => /^\/\/ SHARED-GATES (BEGIN|END)$/.test(l)), part + ' markers').to.deep.equal([]);
+            const requires = text.match(/require\([^)]*\)/g) || [];
+            expect(requires, part + ' requires').to.deep.equal(["require('./shared_rows.js')"]);
+            expect(text, part + ' holds at least one row').to.match(/^addGate\('/m);
+        }
+    });
+
     it('registers every queued row: the part files name exactly the keys the registry holds', function () {
         const queued = [];
-        for (const part of PARTS) {
+        for (const part of PARTS.concat(HUB_PARTS)) {
             const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
             for (const m of text.matchAll(/^addGate\('([^']+)'/gm)) queued.push(m[1]);
         }
