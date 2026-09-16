@@ -66,7 +66,7 @@ const SpendAudit = require('./llm/spend');
 const MetaGates = require('./llm/meta_gates');
 const JudgeAgreement = require('./llm/agree');
 const { parseEnvelope, resolveFetchModel, responseBody } = require('./llm/envelope');
-const { _httpStatusError, isTransientStatus, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
+const { httpStatusError, isTransientStatus, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
 const { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn } = require('./llm/transports');
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
@@ -344,10 +344,10 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                 let str = Buffer.concat(chunks).toString('utf8');
                 try {
                     let json = JSON.parse(str);
-                    // Status first, body shape second: see _httpStatusError. The
+                    // Status first, body shape second: see httpStatusError. The
                     // shape check below still runs for a 2xx carrying an error
                     // envelope, which vendors do return.
-                    let statusErr = _httpStatusError(res, 'Anthropic API', json, str);
+                    let statusErr = httpStatusError(res, 'Anthropic API', json, str);
                     if (statusErr) { safeReject(statusErr); return; }
                     if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);

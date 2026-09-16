@@ -52,7 +52,7 @@ function isTransientStatus(status) {
 // Returns an error to reject with, or null when the status is a real 2xx. 3xx counts
 // as failure too: https.request does not follow redirects, so a 3xx body is not a
 // completion either.
-function _httpStatusError(res, vendorLabel, json, str) {
+function httpStatusError(res, vendorLabel, json, str) {
     if (res.statusCode >= 200 && res.statusCode < 300) return null;
     let detail = (json && json.error && json.error.message) ? json.error.message
                : (json && typeof json.message === 'string') ? json.message
@@ -133,10 +133,10 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
                 let str = Buffer.concat(chunks).toString('utf8');
                 try {
                     let json = JSON.parse(str);
-                    // Status first, body shape second: see _httpStatusError. Same
+                    // Status first, body shape second: see httpStatusError. Same
                     // rule as the Claude API branch, since this was the same mistake
                     // written twice.
-                    let statusErr = _httpStatusError(res, 'OpenAI API', json, str);
+                    let statusErr = httpStatusError(res, 'OpenAI API', json, str);
                     if (statusErr) { safeReject(statusErr); return; }
                     if (json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
@@ -166,4 +166,4 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
     });
 }
 
-module.exports = { isTransientStatus, _httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };
+module.exports = { isTransientStatus, httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };
