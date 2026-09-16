@@ -86,6 +86,27 @@
 // refusing to apply row". This hub rolls FIRST and stamps 6, then every indexer
 // and the explorer roll back to back behind it (regtest measured about 2.5
 // minutes per indexer image for that window).
-const HUB_SCHEMA_VERSION = 6;
+//
+// v7: seven mirror tables gained the admission-height columns this hub stamps
+// from its own per-chain tips in the admission era: attestation_responses
+// .admit_block_btc, the admit_block_btc/ltc/doge triple on cross_chain_matches,
+// cross_chain_calls, bridge_transfers, policy_snapshots and price_snapshots,
+// and the unsigned oracle_prices.admit_block. Every reader above its consumer
+// activation admits a mirrored row by height instead of by clock and rebuilds
+// the signed admission map from those columns before it applies the row, so
+// a reader that lacks them does not merely miss a field: it can verify no era
+// row at all, while a stream that omits the columns is exactly the shape a v6
+// reader would apply without noticing. A stale reader must reject this stream
+// until it has applied the 2026-09-16-admission-height migration.
+//
+// v7 ROLL (2026-09-16): the strict-equality halt window is unavoidable again,
+// so the v6 order stands: this hub rolls FIRST and stamps 7, then every indexer
+// and the explorer roll back to back behind it. One bound is new: the whole v7
+// roll completes BELOW every network's mirror-admission activation height
+// (C17). The heights watermark rides frames that carry no schema_version, so a
+// v7 reader above the activation against a v6 hub would see no heights and
+// defer forever under the fail-closed rule, while below the activation the
+// same mismatched pair only parks the mirror for the roll window.
+const HUB_SCHEMA_VERSION = 7;
 
 module.exports = { HUB_SCHEMA_VERSION };

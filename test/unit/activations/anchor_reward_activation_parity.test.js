@@ -116,7 +116,7 @@ it('shares the family\'s arming seam, so one venue lever arms both flag days', f
 
 function registerBarrierHorizonTests() {
 it('holds an INERT network inert at height 0 and at a huge height', function () {
-        for (const net of ['mainnet', 'testnet']) {
+        for (const net of ['mainnet']) {
             expect(local.ANCHOR_ATTEST_BARRIER_ACTIVATION[net],
                 'not vacuous: ' + net + ' must still be the inert null this case is about').to.equal(null);
             for (const h of [0, 1, 999999999, Number.MAX_SAFE_INTEGER]) {

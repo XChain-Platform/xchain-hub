@@ -96,7 +96,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('94fde4ed0286cf609098631af5673d2b93abd991ff6bcf17698a26591d3384b7',
+                .to.equal('9976904c51f870be0dd21287887a81e21bac80b79f47d0ee7a4ed9a5e5743375',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
