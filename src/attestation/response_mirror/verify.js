@@ -24,8 +24,8 @@
 'use strict';
 
 const crypto = require('crypto');
-const swq    = require('../../stake_weighted_quorum.js');
-const wid    = require('../../attest_responsible_widening_activation.js');
+const swq    = require('../../consensus/stake_weighted_quorum.js');
+const wid    = require('../../consensus/gates/attest_responsible_widening_gate.js');
 const ah     = require('../../lib/admission_height.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { ATTEST_RESPONSE_BODY_MAX_BYTES } = require('../attest_response_body_cap.js');

@@ -1,26 +1,28 @@
-// Boundary coverage for the two consensus flag-day gates
-// checkpoint_commitment_activation.js and
-// retraction_signing_activation.js. Both gate a change to a SIGNED consensus
-// preimage, so their threshold arithmetic and fail-closed handling of
+// Boundary coverage for the two consensus flag-day gates checkpoint_commitment
+// and retraction_signing, registry rows since W5 that every caller judges with
+// the registry's own activeAt by literal key. Both gate a change to a SIGNED
+// consensus preimage, so the threshold arithmetic and fail-closed handling of
 // malformed input decide whether federation quorum verification forks. This
 // exercises the edges: exactly at the height, one below, zero/negative,
 // non-numeric input, and an unknown network (which must be off, never on).
 
 const assert = require('assert');
-const {
-    CHECKPOINT_COMMITMENT_ACTIVATION, isCheckpointCommitmentActive,
-} = require('../../src/checkpoint_commitment_activation.js');
-const {
-    RETRACTION_SIGNING_ACTIVATION, isRetractionSigningActive,
-} = require('../../src/retraction_signing_activation.js');
+const registry = require('../../src/consensus/gate_registry');
+
+const CHECKPOINT_COMMITMENT_KEY = 'checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION';
+const RETRACTION_SIGNING_KEY    = 'retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION';
+
+// The predicate shape the callers use: the row's BTC-anchored snapshot block on
+// the height plane, judged for one network.
+const predicateFor = (key) => (snapshotBlock, network) => registry.activeAt(key, network, null, snapshotBlock, null);
 
 // Fourth tuple element: the expected testnet threshold. checkpoint_commitment
 // arms testnet at 146000 (the SPV root suffix must not be signed before every
 // chain is past its STATE_COMMITMENT height, else the hub refuses to sign
 // every testnet checkpoint); retraction_signing stays genesis (0).
 const cases = [
-    ['checkpoint_commitment', isCheckpointCommitmentActive, CHECKPOINT_COMMITMENT_ACTIVATION, 146000],
-    ['retraction_signing', isRetractionSigningActive, RETRACTION_SIGNING_ACTIVATION, 0],
+    ['checkpoint_commitment', predicateFor(CHECKPOINT_COMMITMENT_KEY), registry.get(CHECKPOINT_COMMITMENT_KEY), 146000],
+    ['retraction_signing', predicateFor(RETRACTION_SIGNING_KEY), registry.get(RETRACTION_SIGNING_KEY), 0],
 ];
 
 for (const [name, isActive, MAP, testnetThreshold] of cases) {

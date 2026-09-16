@@ -60,20 +60,31 @@
  * an indexer still on the old build strands a request a new one binds. Regtest
  * is 0 so the e2e mirror venue exercises the flip from genesis.
  *
- * LOCAL COPY of the canonical map in xchain-documentation/protocol/constants.js
- * and the value twin of xchain-indexer/src/attest_zero_conf_activation.js; kept
- * value-identical by the activation-constants parity suite. A one-sided edit
- * forks the responsible set and the binding block at the flag day.
+ * THE MAP IS A REGISTRY ROW (attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION
+ * in the SHARED block, a byte twin of the indexer's), so the indexer and the hub
+ * read one value and a one-sided edit cannot fork the responsible set or the
+ * binding block at the flag day. This module is HUB-OWNED, not a twin: the
+ * indexer reads the row by key at its call site, while the hub keeps the
+ * predicate and the boot-time ordering assertion below, which only a hub needs.
+ * It lives beside its first requirer (AttestationRound) by the first-requirer
+ * rule (W5, D106).
  *
  ********************************************************************/
 
 'use strict';
 
-const { copy } = require('./consensus/gate_registry');
+// Read through the module object so a test can take the mirror row away for one
+// call (the ordering cases below) without touching the block.
+const gateRegistry = require('../consensus/gate_registry');
+const { ATTEST_RESPONSIBLE_WIDENING_ACTIVATION } = require('../consensus/gates/attest_responsible_widening_gate.js');
 
-// Per-network activation height (LOCAL COPY, parity-tested). Compared against
+// Per-network activation height, a copy of the registry row. Compared against
 // the ATTEST v0 request's own BTC block_index.
-const ATTEST_ZERO_CONF_ACTIVATION = copy('attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION');
+const ATTEST_ZERO_CONF_ACTIVATION = gateRegistry.copy('attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION');
+
+// The mirror flag day it must sit at or above. Its predicate module retired at W5;
+// the ordering assertion reads the row by its literal key.
+const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 
 // Networks already reported by the guard in isZeroConfActive, so a per-request
 // per-block path says it once rather than once per row.
@@ -107,14 +118,15 @@ function isZeroConfActive(requestBlock, network){
 // regtest and standalone, and a loud one-off bypass for a coordinated fleet-wide
 // change. Called once from the AttestationRound constructor.
 //
-// Requires lazily: the widening module requires this one for the V2 switch, so a
-// top-level require here would be a cycle.
+// The widening gate no longer requires this module (its V2 switch reads the
+// zero-conf row through the registry since W5), so requiring it at the top is
+// no longer a cycle.
 function assertZeroConfOrdering(network){
     let net = String(network || '');
     let zc  = ATTEST_ZERO_CONF_ACTIVATION[net];
     if(zc === null || zc === undefined) return;   // unratified here: nothing to order
-    let mirror   = require('./attest_response_mirror_activation.js').ATTEST_RESPONSE_MIRROR_ACTIVATION[net];
-    let widening = require('./attest_responsible_widening_activation.js').ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[net];
+    let mirror   = gateRegistry.get(ATTEST_RESPONSE_MIRROR_KEY)[net];
+    let widening = ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[net];
     let problem = null;
     if(mirror === null || mirror === undefined)
         problem = 'ATTEST_RESPONSE_MIRROR_ACTIVATION is unratified there, so a legacy-era round could run at 0 confirmations and burn its broadcast fee against a reorged request';

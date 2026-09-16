@@ -17,8 +17,8 @@
 // carry DISTINCT equivocation keys. Otherwise an honest validator that signs both is
 // falsely slashable (R-4). A mismatch here forks the chain.
 const { expect } = require('chai');
-const eq   = require('../../../src/equivocation_header.js');
-const ckpt = require('../../../src/checkpoint_commitment_activation.js');
+const eq   = require('../../../src/consensus/equivocation_header.js');
+const gateRegistry = require('../../../src/consensus/gate_registry');   // the checkpoint flag day is a row (W5)
 const SCE  = require('../../../src/anchor/checkpoint_engine.js');
 const SAP  = require('../../../src/anchor/publisher.js');
 // The frozen ANCHOR v0 wire vector, vendored byte-identically from
@@ -223,7 +223,7 @@ function registerAnchorVectorTests() {
                 // at/above CHECKPOINT_COMMITMENT for the header network, which is the only
                 // reason the hub's presence-and-flag-day gate and the indexer's
                 // unconditional v0 suffix can agree.
-                expect(ckpt.isCheckpointCommitmentActive(sec.snapshot_block, parsed.network),
+                expect(gateRegistry.activeAt('checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION', parsed.network, null, sec.snapshot_block, null),
                     src.chain + ' section sits below CHECKPOINT_COMMITMENT, which no v0 section may do')
                     .to.equal(true);
                 const hub = SCE.canonicalCheckpoint(sec);

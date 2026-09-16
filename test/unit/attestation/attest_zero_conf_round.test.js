@@ -22,7 +22,7 @@ const proxyquire = require('proxyquire');
 const EventEmitter = require('events');
 const { DB_METHODS } = require('../../helpers/mockHub');
 
-const zcMod = require('../../../src/attest_zero_conf_activation.js');
+const zcMod = require('../../../src/attestation/attest_zero_conf_gate.js');
 
 const MY_PUBKEY = 'aa'.repeat(32);
 

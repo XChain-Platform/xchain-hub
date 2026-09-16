@@ -32,7 +32,7 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const eq                = require('../equivocation_header.js');
+const eq                = require('../consensus/equivocation_header.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const ah                = require('../lib/admission_height.js');
 const { positiveIntConfig } = require('../lib/config_int.js');

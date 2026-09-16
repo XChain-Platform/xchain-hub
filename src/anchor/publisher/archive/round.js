@@ -24,7 +24,7 @@
 const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
-const swq = require('../../../stake_weighted_quorum.js');
+const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { XANC_SIGN_REQ } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();

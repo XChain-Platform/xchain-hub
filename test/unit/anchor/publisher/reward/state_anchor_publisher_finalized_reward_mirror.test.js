@@ -18,7 +18,7 @@
 
 const { expect }            = require('chai');
 const { waitUntil }         = require('../../../../helpers/waitUntil');
-const arMod                 = require('../../../../../src/anchor_reward_activation.js');
+const arMod                 = require('../../../../../src/consensus/gates/anchor_reward_gate.js');
 const { CP_ROW, matchRow, buildMesh, archiveLeader, startAll, flushAll, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
 
 describe('StateAnchorPublisher', function () {

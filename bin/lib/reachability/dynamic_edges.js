@@ -31,34 +31,19 @@ const { REQUIRE_LITERAL, resolveRequire } = require('./resolve.js');
 const DYNAMIC_EDGES = [
     {
         from: 'src/consensus_rules_digest.js',
-        // loadGateValues requires './<module>.js' for every SHARED_GATES row, so
-        // the gate carriers are held by the digest and not by any literal. The
-        // list is read from the module rather than restated, because a restated
-        // copy is a second registry that drifts.
+        // loadGateValue falls back to './consensus/gates/<stem>_gate.js' for a
+        // SHARED_GATES name that is a function on its carrier (the registry holds
+        // values), building the path from the row's module name with the
+        // _activation stem spelled _gate (W5). The list is read from the module
+        // rather than restated, because a restated copy is a second registry that
+        // drifts; a stem with no logic module left resolves to nothing and drops out.
+        // The bridge engine's computed require retired in the same wave: it reads
+        // its three gates from the registry by literal key, so it has no edge here.
         toList: () => {
             const { SHARED_GATES } = require(path.join(getRepoRoot(), 'src/consensus_rules_digest.js'));
-            return SHARED_GATES.map(([mod]) => `src/${mod}.js`);
+            return SHARED_GATES.map(([mod]) => `src/consensus/gates/${mod.replace(/_activation$/, '_gate')}.js`);
         },
-        why: 'the consensus-rules digest requires every SHARED_GATES module by computed path',
-    },
-    {
-        from: 'src/cross_chain/bridge_engine.js',
-        // loadActivation(name, predicate) requires src/<name>.js from the engine's
-        // feature directory inside a try/catch that returns null, and the
-        // constructor calls it for three gates. Read out
-        // of the call sites rather than restated, so a fourth gate added tomorrow
-        // is an edge this tool already knows about. A missed move here is the
-        // quietest failure in the repo: the engine idles and nothing throws.
-        toList: () => {
-            const src = fs.readFileSync(path.join(getRepoRoot(), 'src/cross_chain/bridge_engine.js'), 'utf8');
-            const rows = Array.from(src.matchAll(/loadActivation\(\s*'([^']+)'/g))
-                .map((m) => `src/${m[1]}.js`);
-            if (!rows.length) {
-                throw new Error('src/cross_chain/bridge_engine.js declares no loadActivation call: the bridge edge is stale');
-            }
-            return rows;
-        },
-        why: 'the cross-chain bridge engine requires each of its three activation gates by computed path',
+        why: 'the consensus-rules digest requires a function-valued SHARED_GATES carrier by computed path under src/consensus/gates/',
     },
     {
         from: 'src/validators/provider_registry.js',

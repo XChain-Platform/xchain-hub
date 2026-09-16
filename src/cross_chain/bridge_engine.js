@@ -48,11 +48,10 @@
  ********************************************************************/
 
 const EventEmitter = require('events');
-const path         = require('path');
 const axios        = require('axios');
 
 const registry               = require('../consensus/gate_registry');
-const eq                     = require('../equivocation_header.js');
+const eq                     = require('../consensus/equivocation_header.js');
 const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const coins                  = require('../coins');
@@ -70,29 +69,30 @@ const invariantPart    = require('./bridge/invariant.js');
 const plumbingPart     = require('./bridge/plumbing.js');
 
 // Activation gates. The tables are rows of the activation registry (the SHARED block in
-// src/consensus/gate_registry.js, a byte twin of the indexer's), and the predicates that
-// read them live in the VENDORED carriers one directory up, at the top of src/ beside the
-// hub's other *_activation.js copies, exactly as for checkpoint_commitment and the attest
-// gates, because a second hand-written copy of a flag day is a fork waiting to happen.
+// src/consensus/gate_registry.js, a byte twin of the indexer's), read by their literal
+// keys; the predicate is the registry's own activeAt over the row (W5: the predicate-only
+// twin modules that once carried these three retired), so a second hand-written copy of
+// a flag day cannot fork the fleet.
 //
 // A miss is a build defect, not a network state, and THROWS here at construction naming
-// the registry key: a row the registry lacks, a carrier that is not where the computed
-// require looks, or a carrier that exports no such predicate. A null returned here instead
-// idled the engine with no error, no failing round and no wire field naming it, which is
-// fail-closed for the wrong reason. Fail-closed stays where it belongs: in the predicates,
-// which answer false below the height, so an engine on a network whose activation has not
-// been reached still idles and never signs a row there.
-function loadActivation(moduleName, exportName, predicate){
-    const key = moduleName + '.' + exportName;
+// the registry key. A null returned here instead idled the engine with no error, no
+// failing round and no wire field naming it, which is fail-closed for the wrong reason.
+// Fail-closed stays where it belongs: in the predicate, which answers false below the
+// height (and for a null or unknown network), so an engine on a network whose activation
+// has not been reached still idles and never signs a row there.
+const BRIDGE_GATE_KEYS = {
+    bridge: 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION',
+    token:  'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
+    policy: 'token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION'
+};
+
+// The predicate shape every bridge part calls through gateActive: (block, network, coin).
+// Only the bridge map is keyed '<COIN>:<network>' today; the registry's own resolution
+// order (coin-keyed entry first, then the bare network) is the one the retired
+// predicates used, and it ignores the coin for a map that has no such key.
+function loadActivation(key){
     registry.get(key);
-    // eslint-disable-next-line global-require
-    const mod = require(path.join(__dirname, '..', moduleName + '.js'));
-    const fn  = mod && mod[predicate];
-    if (typeof fn !== 'function') {
-        throw new Error('bridge activation ' + key + ' resolved, but src/' + moduleName + '.js exports no '
-            + predicate + ' predicate, so the engine cannot judge the flag day');
-    }
-    return fn;
+    return (block, network, coin) => registry.activeAt(key, network, coin, block, null);
 }
 
 class CrossChainBridgeEngine extends EventEmitter {
@@ -138,9 +138,9 @@ class CrossChainBridgeEngine extends EventEmitter {
         // Activation predicates, resolved once. Replaceable on the instance so a test can
         // drive the armed path without vendoring a flag day into src/.
         this.activation = {
-            bridge: loadActivation('xchain_bridge_activation', 'XCHAIN_BRIDGE_ACTIVATION',           'isXchainBridgeActive'),
-            token:  loadActivation('token_bridge_activation',  'TOKEN_BRIDGE_ACTIVATION',            'isTokenBridgeActive'),
-            policy: loadActivation('token_policy_activation',  'TOKEN_POLICY_INHERITANCE_ACTIVATION', 'isTokenPolicyInheritanceActive')
+            bridge: loadActivation(BRIDGE_GATE_KEYS.bridge),
+            token:  loadActivation(BRIDGE_GATE_KEYS.token),
+            policy: loadActivation(BRIDGE_GATE_KEYS.policy)
         };
         this._idleLogged = {};
 
@@ -323,5 +323,8 @@ class CrossChainBridgeEngine extends EventEmitter {
 installParts(CrossChainBridgeEngine.prototype, [
     transferPollPart, policyPollPart, validatePart, persistPart, invariantPart, plumbingPart
 ]);
+
+// The keys the engine judges, for the guards and tests that prove each one has a row.
+CrossChainBridgeEngine.BRIDGE_GATE_KEYS = BRIDGE_GATE_KEYS;
 
 module.exports = CrossChainBridgeEngine;

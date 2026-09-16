@@ -117,7 +117,7 @@ function registerSplitSuitePart1() {
 }
 function registerSplitSuitePart2() {
   describe('truncated-snapshot fail-closed (XCHK-TRUNC-1)', function () {
-    const swq = require('../../../../src/stake_weighted_quorum');
+    const swq = require('../../../../src/consensus/stake_weighted_quorum');
     function makeEngine(snapshotResult) {
       let eng = new StateCheckpointEngine({
         db: {

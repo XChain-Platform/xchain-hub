@@ -22,8 +22,8 @@
  ********************************************************************/
 
 const { PRICE_MAX } = require('../../constants.js');
-const pricePair         = require('../../price_pair_activation.js');
-const priceScale        = require('../../price_scale_activation.js');
+const pricePair         = require('../../consensus/gates/price_pair_gate.js');
+const priceScale        = require('../../consensus/gates/price_scale_gate.js');
 
 // The round header: the fields that anchor the signed payload and the stored row.
 // Returns { reason } for a refusal, or the parsed values the rest of the path reads.
@@ -71,7 +71,7 @@ function validateRoundFields(sourceChain, roundData) {
 // indexer's PRICE v0 parser) so the canonical payload reconstruction
 // below is byte-exact with what the validators signed.
 //
-// The pair-name bound is flag-day gated (price_pair_activation.js,
+// The pair-name bound is flag-day gated (price_pair_gate.js,
 // vendored byte-identically from the indexer): below it the ticker side caps
 // at 5 characters and the 6-character XCHAIN/USD pair is unrepresentable;
 // at/above it, 6 is accepted. UNARMED on mainnet today.
@@ -88,7 +88,7 @@ function validateRoundFields(sourceChain, roundData) {
 function validateRoundPairs(roundData, timestamp) {
     let pairPattern = pricePair.pricePairPattern(timestamp, this.hub && this.hub.network);
 
-    // The price-value flag day (price_scale_activation.js, vendored byte-identically
+    // The price-value flag day (price_scale_gate.js, vendored byte-identically
     // from the indexer) rides the SAME key as the pair bound above, so the hub can
     // never grade a price under a rule the chain is not yet applying. At/above it a
     // price is canonical: no leading zeros, at most 8 decimals, which is what every

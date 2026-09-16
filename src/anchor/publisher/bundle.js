@@ -21,7 +21,7 @@
 
 'use strict';
 
-const ar = require('../../anchor_reward_activation.js');
+const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { ANCHOR_BUNDLE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

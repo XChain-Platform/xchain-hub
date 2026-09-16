@@ -23,7 +23,7 @@
 'use strict';
 
 const ValidatorIdentity = require('../../validators/identity.js');
-const swq               = require('../../stake_weighted_quorum.js');
+const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { ORACLE_COMMIT } = require('./constants.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');

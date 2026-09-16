@@ -24,7 +24,7 @@ const {
 } = require('chai');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity = require('../../../../../src/validators/identity');
-const swq = require('../../../../../src/stake_weighted_quorum');
+const swq = require('../../../../../src/consensus/stake_weighted_quorum');
 const {
   DB_METHODS
 } = require('../../../../helpers/mockHub.js');

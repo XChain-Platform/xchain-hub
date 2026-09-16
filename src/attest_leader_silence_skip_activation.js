@@ -74,7 +74,7 @@
  * HUB-ONLY, AND DELIBERATELY NOT VENDORED. Leadership decides which hub runs
  * agree() and broadcasts first; it never decides who may SIGN, which is the only
  * attestation property an indexer recomputes (that one is gated by
- * attest_responsible_widening_activation.js and IS a twin). So there is no
+ * attest_responsible_widening_gate.js and IS a twin). So there is no
  * indexer copy to keep value-identical, and this map is not a member of
  * consensus_rules_digest.js's SHARED_GATES, which is the hub/indexer
  * INTERSECTION: a hub-only entry there would report ABSENT on every indexer and

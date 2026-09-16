@@ -33,7 +33,7 @@
 const assert          = require('assert');
 const OracleConsensus = require('../../../../src/oracle/consensus.js');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-const eq              = require('../../../../src/equivocation_header.js');
+const eq              = require('../../../../src/consensus/equivocation_header.js');
 
 const ANCHOR = 912345;   // equals the last round's own anchor, per the wire format
 const FIRST  = 1039;

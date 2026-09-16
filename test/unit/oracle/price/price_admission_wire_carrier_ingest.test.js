@@ -61,7 +61,7 @@ const NETWORK   = 'regtest';
 // hub's admission seam and directly, for the coin-keyed producer predicate), so all three
 // have to be purged together or the class keeps an inert copy.
 const ARMED_MODULES = [
-    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/consensus/gates/mirror_admission_gate.js',
     '../../../../src/lib/admission_height.js',
     '../../../../src/oracle/price_aggregator.js',
     '../../../../src/oracle/batch_signer.js',
@@ -82,7 +82,7 @@ function armTwins(atHeight) {
     const OracleBatchSigner = require('../../../../src/oracle/batch_signer.js');
     const OraclePublisher  = require('../../../../src/oracle/publisher.js');
     const OracleConsensus  = require('../../../../src/oracle/consensus.js');
-    const act              = require('../../../../src/mirror_admission_activation.js');
+    const act              = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 
     // Put the process back exactly as it was found; the classes captured above keep the
     // armed modules they closed over, so arming is scoped to this file.

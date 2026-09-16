@@ -9,11 +9,11 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const eq = require('../../../src/equivocation_header.js');
+const eq = require('../../../src/consensus/equivocation_header.js');
 
 // CONSENSUS-CRITICAL: the EQUIV header (WI-2 bump 2) is prefixed onto every signed
 // consensus canonical at/above the flag-day. The indexer keeps a byte-equivalent
-// copy (xchain-indexer/src/equivocation_header.js); the client verifiers (xchain-sdk,
+// copy (xchain-indexer/src/consensus/equivocation_header.js); the client verifiers (xchain-sdk,
 // xchain-explorer) will keep gated copies too. The cross-service regression suite
 // asserts every copy's activation map equals the canonical in
 // xchain-documentation/protocol/constants.js (a drift flips the header on different

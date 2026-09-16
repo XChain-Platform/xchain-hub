@@ -36,7 +36,7 @@ const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const { createMockHub } = require('../../../helpers/mockHub');
-const eq                = require('../../../../src/equivocation_header.js');
+const eq                = require('../../../../src/consensus/equivocation_header.js');
 // The regtest producer activation this suite arms, keyed on the ROUND's own BTC anchor. One
 // armed process therefore drives both eras: a round below this height is a pre-activation round and
 // a round at or above it is an admission-era round. 799000 is the anchor the price ingest
@@ -44,13 +44,13 @@ const eq                = require('../../../../src/equivocation_header.js');
 const ADMIT_AT  = 799000;
 const LEGACY_AT = ADMIT_AT - 1;
 const HUB_MODULES = [
-    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/consensus/gates/mirror_admission_gate.js',
     '../../../../src/lib/admission_height.js',
     '../../../../src/oracle/consensus.js',
     '../../../../src/oracle/price_aggregator.js'
 ];
 const INDEXER_MODULES = [
-    '../../../../../xchain-indexer/src/mirror_admission_activation.js',
+    '../../../../../xchain-indexer/src/consensus/gates/mirror_admission_gate.js',
     '../../../../../xchain-indexer/src/consensus/ed25519.js'
 ];
 const ROUND   = 5;
@@ -89,7 +89,7 @@ function armTwins() {
 
     const OracleConsensus = require('../../../../src/oracle/consensus.js');
     const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-    const act             = require('../../../../src/mirror_admission_activation.js');
+    const act             = require('../../../../src/consensus/gates/mirror_admission_gate.js');
     const indexer         = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
 
     // Put the process back exactly as it was found. The instances built below keep the

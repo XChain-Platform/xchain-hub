@@ -84,8 +84,8 @@ const axios = require('axios');
 
 const EncoderClient              = require('../peers/encoder_client.js');
 const SpendGuard                 = require('../lib/spend_guard.js');
-const rca                        = require('../rollcall_activation.js');
-const rga                        = require('../rollcall_gates_activation.js');
+const rca                        = require('../consensus/gates/rollcall_gate.js');
+const rga                        = require('../consensus/gates/rollcall_gates_gate.js');
 const { knownGateKeys }          = require('../consensus_rules_digest.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
@@ -106,7 +106,7 @@ const { MAX_PAIRS_PER_ACTION, ACTION_DATA_CEILING, BYTES_PER_PAIR, XROLLCALL_SIG
 
 // Per-network defaults for the three publish tunables. These are hub POLICY, not
 // consensus: no §3.3/§3.4 chain rule reads any of them, which is why they live
-// here and in CONFIGURATION.md rather than in rollcall_activation.js beside the
+// here and in CONFIGURATION.md rather than in rollcall_gate.js beside the
 // values that decide what the ledger says.
 //
 // The ordering PUBLISH_DELAY < SELF_PUBLISH < ACCEPT_WINDOW - 24 is the part
@@ -144,7 +144,7 @@ class RollcallRound {
         this.network            = (hub && hub.network) || cfg.HUB_NETWORK || '';
 
         // CONSENSUS constants come from the byte-identical twin of the indexer's
-        // rollcall_activation.js and have no env surface at all. Reading any of
+        // rollcall_gate.js and have no env surface at all. Reading any of
         // them from the environment would let one hub sign for epochs another
         // hub does not believe exist.
         this.interval     = rca.ROLLCALL_INTERVAL_BLOCKS[this.network];

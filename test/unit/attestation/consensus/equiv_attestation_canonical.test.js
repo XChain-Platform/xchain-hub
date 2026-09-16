@@ -17,7 +17,7 @@
 // from request_id, NOT in the content) + network, so both sides flip identically.
 const { expect } = require('chai');
 const crypto = require('crypto');
-const eq  = require('../../../../src/equivocation_header.js');
+const eq  = require('../../../../src/consensus/equivocation_header.js');
 const AttestationConsensus = require('../../../../src/attestation/consensus.js');
 
 function mockHub(network){

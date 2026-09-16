@@ -108,7 +108,7 @@ module.exports = {
     },
 
     // Slot indices are recomputed from pubkeys on every call: the responsible
-    // set can widen mid-request (attest_responsible_widening_activation.js), so
+    // set can widen mid-request (attest_responsible_widening_gate.js), so
     // a slot NUMBER is not stable across polls while the pubkey in it is.
     silentLeaderSlots(rec, responsible){
         let s = new Set();

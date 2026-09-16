@@ -163,3 +163,51 @@ describe('bin/consensus-identity.js', function () {
         });
     });
 });
+
+// The exit code is the contract the seam's identity re-read relies on: a digest that
+// cannot be computed must read as a failure to a shell, never as a passing run with
+// an error line above it. Driven through the real CLI on a scratch tree whose
+// admission carrier is gone, which is exactly the W5 sequencing hole (the digest
+// twin lands before the gate file) an operator would hit.
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    describe('the exit code', () => {
+        const fs = require('fs');
+        const os = require('os');
+        const { spawnSync } = require('child_process');
+        const REPO_ROOT = path.resolve(__dirname, '../..');
+
+        function scratchHub() {
+            const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'consensus-identity-'));
+            for (const rel of ['src', 'bin']) fs.cpSync(path.join(REPO_ROOT, rel), path.join(dir, rel), { recursive: true });
+            fs.copyFileSync(path.join(REPO_ROOT, 'package.json'), path.join(dir, 'package.json'));
+            fs.symlinkSync(path.join(REPO_ROOT, 'node_modules'), path.join(dir, 'node_modules'));
+            return dir;
+        }
+
+        function run(root, args) {
+            return spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin/consensus-identity.js'), '--root', root, ...args],
+                { encoding: 'utf8' });
+        }
+
+        it('exits non-zero, naming the key, when the digest cannot be computed', () => {
+            const root = scratchHub();
+            fs.unlinkSync(path.join(root, 'src/consensus/gates/mirror_admission_gate.js'));
+            for (const args of [['--json'], ['--compare', path.join(REPO_ROOT, 'bin/pins/at1-consensus-identity.json')], ['--json', '--assert-no-absent']]) {
+                const r = run(root, args);
+                assert.notStrictEqual(r.status, 0, `${args.join(' ')} read as a passing run with the digest uncomputable`);
+                assert.strictEqual(r.status, 2, `${args.join(' ')}: a thrown digest is the exit-2 contract, got ${r.status}`);
+                assert.ok(/mirror_admission_activation\.encodeAdmitBlocks/.test(r.stderr),
+                    `${args.join(' ')} must name the gate on stderr; got: ${r.stderr}`);
+                assert.strictEqual(r.stdout, '', `${args.join(' ')} printed an identity it could not compute`);
+            }
+        });
+
+        it('exits 0 on the same scratch tree with the carrier in place', () => {
+            const r = run(scratchHub(), ['--json']);
+            assert.strictEqual(r.status, 0, r.stderr);
+            assert.strictEqual(JSON.parse(r.stdout).absent_gates.length, 0);
+        });
+    });
+});

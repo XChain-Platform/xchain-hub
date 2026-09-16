@@ -14,7 +14,7 @@ const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../../../../src/oracle/consensus');
-const swq              = require('../../../../../src/stake_weighted_quorum.js');
+const swq              = require('../../../../../src/consensus/stake_weighted_quorum.js');
 const { createMockHub }       = require('../../../../helpers/mockHub');
 const { waitUntil }           = require('../../../../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,

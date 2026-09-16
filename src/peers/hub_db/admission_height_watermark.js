@@ -22,7 +22,7 @@
 
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../../lib/admission_height.js');
-const { admitMarginBlocks } = require('../../mirror_admission_activation.js');
+const { admitMarginBlocks } = require('../../consensus/gates/mirror_admission_gate.js');
 const hubConfig = require('../../config');
 
 // ---------------------------------------------------------------------------

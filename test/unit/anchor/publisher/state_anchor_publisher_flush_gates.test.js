@@ -103,7 +103,7 @@ function registerNetworkScopedSelection() {
         // configuring a regtest network would otherwise flip weighted quorum on and
         // pull in getWeightSnapshot wiring the mesh hub does not provide. Pin the
         // regtest activation dormant so the flow uses the legacy count path.
-        const swqMod = require('../../../../src/stake_weighted_quorum.js');
+        const swqMod = require('../../../../src/consensus/stake_weighted_quorum.js');
         let savedSwqRegtest;
         beforeEach(function () {
             savedSwqRegtest = swqMod.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest;

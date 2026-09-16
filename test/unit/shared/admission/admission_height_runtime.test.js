@@ -3,7 +3,7 @@
 const { expect } = require('chai');
 
 const ERA_MODULES = [
-    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/consensus/gates/mirror_admission_gate.js',
     '../../../../src/lib/admission_height.js',
     '../../../../src/cross_chain/dex_engine.js',
     '../../../../src/cross_chain/bridge_engine.js'
@@ -56,7 +56,7 @@ function withAdmissionActivation(height){
 
     const out = {
         ah:     require('../../../../src/lib/admission_height.js'),
-        act:    require('../../../../src/mirror_admission_activation.js'),
+        act:    require('../../../../src/consensus/gates/mirror_admission_gate.js'),
         DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype.canonicalMatch,
         BRIDGE: require('../../../../src/cross_chain/bridge_engine.js').prototype.canonicalMatch,
         restore(){

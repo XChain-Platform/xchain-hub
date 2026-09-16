@@ -24,7 +24,7 @@
  *
  * This module is the hub-side producer of that map. The consensus CONSTANTS, the
  * activation predicates AND the canonical encoder live in
- * mirror_admission_activation.js, the byte-identical twin shared with the indexer and
+ * mirror_admission_gate.js, the byte-identical twin shared with the indexer and
  * the explorer; nothing here is re-derived from them and nothing here is duplicated
  * into them, because this file carries hub-only knowledge (the read sets, the mirror
  * columns, the refusal policy) that the vendored client must not grow a dependency on.
@@ -67,7 +67,7 @@ const {
     admissionCanonicalValue,
     ADMIT_COLUMN_CHAINS,
     columnsAdmitBlocks,
-} = require('../mirror_admission_activation.js');
+} = require('../consensus/gates/mirror_admission_gate.js');
 // The read-set TABLE is data with no dependency, kept in its own part; the functions that
 // read it stay here beside the twin they encode through.
 const { ADMISSION_READ_SETS } = require('./admission_height/read_sets.js');

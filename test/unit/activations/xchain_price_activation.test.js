@@ -33,7 +33,7 @@ const {
     roundStartSeconds,
     widenPrecedesComposition,
 } = require('../../../src/xchain_price_activation.js');
-const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../src/price_pair_activation.js');
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../src/consensus/gates/price_pair_gate.js');
 
 describe('XCHAIN/USD composition gate @regression', function () {
 
@@ -122,7 +122,7 @@ function registerActivationPredicateTests() {
         it('fails CLOSED on empty-ish times that Number() would turn into 0', function () {
             // The trap this guard exists for: on a genesis-on network a threshold of 0
             // means Number(null) === 0 reads as ACTIVE, so a missing time would silently
-            // compose the pair. Same trap price_pair_activation.js documents.
+            // compose the pair. Same trap price_pair_gate.js documents.
             for (const bad of [null, undefined, '', false, true, NaN, 'soon']) {
                 expect(isXchainPriceActive(bad, 'regtest'), String(bad)).to.equal(false);
             }

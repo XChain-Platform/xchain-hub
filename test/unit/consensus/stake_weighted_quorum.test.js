@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const swq = require('../../../src/stake_weighted_quorum.js');
+const swq = require('../../../src/consensus/stake_weighted_quorum.js');
 
 // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
 // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
@@ -22,7 +22,7 @@ const V = [
 
 // CONSENSUS-CRITICAL: this predicate decides every cross-chain settlement under
 // STAKE_WEIGHTED_QUORUM. The indexer keeps a byte-equivalent copy
-// (xchain-indexer/src/stake_weighted_quorum.js): the cross-service regression
+// (xchain-indexer/src/consensus/stake_weighted_quorum.js): the cross-service regression
 // suite asserts they agree.
 describe('stake_weighted_quorum', function () {
 

@@ -19,9 +19,9 @@
 const { expect }            = require('chai');
 const StateAnchorPublisher  = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity     = require('../../../../../src/validators/identity');
-const eq                    = require('../../../../../src/equivocation_header.js');
+const eq                    = require('../../../../../src/consensus/equivocation_header.js');
 const { waitUntil }         = require('../../../../helpers/waitUntil');
-const arMod                 = require('../../../../../src/anchor_reward_activation.js');
+const arMod                 = require('../../../../../src/consensus/gates/anchor_reward_gate.js');
 const { DB_METHODS }        = require('../../../../helpers/mockHub.js');
 const { CP_ROW, buildMesh, startAll, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
 

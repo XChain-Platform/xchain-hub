@@ -24,7 +24,7 @@
 'use strict';
 const crypto = require('crypto');
 const bc     = require('../../bcmath.js');
-const wid    = require('../../attest_responsible_widening_activation.js');
+const wid    = require('../../consensus/gates/attest_responsible_widening_gate.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -121,7 +121,7 @@ module.exports = {
     // the floor rides the STAKE_WEIGHTED_QUORUM anchor instead of minting its own
     // flag-day height. Below the gate the capability threshold stays the only bar.
     // `widen` is the liveness ladder's extra slot count for the current chain height
-    // (attest_responsible_widening_activation.js), 0 below its flag-day and on an unratified
+    // (attest_responsible_widening_gate.js), 0 below its flag-day and on an unratified
     // network, where this routine is byte-for-byte its pre-widening self.
     computeResponsibleSet(validators, requestId, redundancy, weighted, minStake, widen){
         if(weighted)

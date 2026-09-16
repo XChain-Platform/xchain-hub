@@ -15,7 +15,7 @@ const sinon           = require('sinon');
 const { expect }      = require('chai');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator');
 const OracleConsensus = require('../../../../src/oracle/consensus');
-const swq             = require('../../../../src/stake_weighted_quorum.js');
+const swq             = require('../../../../src/consensus/stake_weighted_quorum.js');
 const { createMockHub } = require('../../../helpers/mockHub');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 

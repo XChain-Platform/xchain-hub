@@ -19,13 +19,20 @@
 // ---------------------------------------------------------------------------
 
 const { expect } = require('chai');
+const sinon = require('sinon');
 const fs   = require('fs');
 const path = require('path');
 
-const local          = require('../../../src/attest_zero_conf_activation.js');
-const localWidening  = require('../../../src/attest_responsible_widening_activation.js');
-const localMirror    = require('../../../src/attest_response_mirror_activation.js');
-const localGates     = require('../../../src/rollcall_gates_activation.js');
+// The hub-owned gate (W5, D106): predicate and ordering assertion over the
+// registry row. The mirror map has no module since W5 in either repo; it is the
+// registry row itself, read here through each repo's own registry.
+const local          = require('../../../src/attestation/attest_zero_conf_gate.js');
+const localWidening  = require('../../../src/consensus/gates/attest_responsible_widening_gate.js');
+const localRegistry  = require('../../../src/consensus/gate_registry');
+const localGates     = require('../../../src/consensus/gates/rollcall_gates_gate.js');
+
+const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
+const ZC_KEY     = 'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION';
 
 // Sibling checkout, same resolution convention as ConsensusPrimitiveConformance:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
@@ -35,10 +42,9 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
 const DOCS_DIR = process.env.XCHAIN_DOCS_DIR ||
     path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation');
 
-const INDEXER_ZC       = path.join(INDEXER_DIR, 'src', 'attest_zero_conf_activation.js');
-const INDEXER_WIDENING = path.join(INDEXER_DIR, 'src', 'attest_responsible_widening_activation.js');
-const INDEXER_MIRROR   = path.join(INDEXER_DIR, 'src', 'attest_response_mirror_activation.js');
-const INDEXER_GATES    = path.join(INDEXER_DIR, 'src', 'rollcall_gates_activation.js');
+const INDEXER_REGISTRY = path.join(INDEXER_DIR, 'src', 'consensus', 'gate_registry.js');
+const INDEXER_WIDENING = path.join(INDEXER_DIR, 'src', 'consensus', 'gates', 'attest_responsible_widening_gate.js');
+const INDEXER_GATES    = path.join(INDEXER_DIR, 'src', 'consensus', 'gates', 'rollcall_gates_gate.js');
 const CONSTANTS_PATH   = path.join(DOCS_DIR, 'protocol', 'constants.js');
 
 let idx = null, canon = null;
@@ -58,8 +64,8 @@ it('ATTEST_RESPONSIBLE_WIDENING_ACTIVATION is value-identical across hub, indexe
     });
 
     it('ATTEST_RESPONSE_MIRROR_ACTIVATION is value-identical across hub, indexer and canon', function () {
-        expect(localMirror.ATTEST_RESPONSE_MIRROR_ACTIVATION).to.deep.equal(idx.mirror.ATTEST_RESPONSE_MIRROR_ACTIVATION);
-        expect(localMirror.ATTEST_RESPONSE_MIRROR_ACTIVATION).to.deep.equal(canon.ATTEST_RESPONSE_MIRROR_ACTIVATION);
+        expect(localRegistry.get(MIRROR_KEY)).to.deep.equal(idx.registry.get(MIRROR_KEY));
+        expect(localRegistry.get(MIRROR_KEY)).to.deep.equal(canon.ATTEST_RESPONSE_MIRROR_ACTIVATION);
     });
 
     // Mainnet and testnet only (D30, §8): regtest is env-derived (D64), so it is
@@ -78,7 +84,7 @@ it('ATTEST_RESPONSIBLE_WIDENING_ACTIVATION is value-identical across hub, indexe
 
 function registerZeroConfParityCoreTests() {
 it('ATTEST_ZERO_CONF_ACTIVATION is value-identical across hub, indexer and canon', function () {
-        expect(local.ATTEST_ZERO_CONF_ACTIVATION).to.deep.equal(idx.zc.ATTEST_ZERO_CONF_ACTIVATION);
+        expect(local.ATTEST_ZERO_CONF_ACTIVATION).to.deep.equal(idx.registry.get(ZC_KEY));
         expect(local.ATTEST_ZERO_CONF_ACTIVATION).to.deep.equal(canon.ATTEST_ZERO_CONF_ACTIVATION);
     });
 
@@ -115,14 +121,18 @@ it('warns rather than throws on regtest for the identical violation shape', func
 
     it('throws when the mirror height is unratified but zero-conf is armed', function () {
         const zc = local.ATTEST_ZERO_CONF_ACTIVATION.testnet;
-        const mirror = localMirror.ATTEST_RESPONSE_MIRROR_ACTIVATION.testnet;
+        // The assertion reads the mirror row through the registry module object at
+        // call time, so the row is taken away for this one call by a stub on get().
+        const realGet = localRegistry.get;
+        const stub = sinon.stub(localRegistry, 'get').callsFake((key) =>
+            key === MIRROR_KEY ? Object.assign({}, realGet(key), { testnet: null }) : realGet(key));
         try {
             local.ATTEST_ZERO_CONF_ACTIVATION.testnet = 200000;
-            localMirror.ATTEST_RESPONSE_MIRROR_ACTIVATION.testnet = null;
             expect(() => local.assertZeroConfOrdering('testnet')).to.throw(/unratified/);
+            expect(stub.calledWith(MIRROR_KEY)).to.equal(true);
         } finally {
             local.ATTEST_ZERO_CONF_ACTIVATION.testnet = zc;
-            localMirror.ATTEST_RESPONSE_MIRROR_ACTIVATION.testnet = mirror;
+            stub.restore();
         }
     });
 
@@ -240,8 +250,8 @@ function registerZeroConfParitySuite() {
 describe('value-identity with the xchain-indexer twins and the documentation canon', function () {
 
         before(function () {
-            const indexerReady = fs.existsSync(INDEXER_ZC) && fs.existsSync(INDEXER_WIDENING) &&
-                fs.existsSync(INDEXER_MIRROR) && fs.existsSync(INDEXER_GATES);
+            const indexerReady = fs.existsSync(INDEXER_REGISTRY) && fs.existsSync(INDEXER_WIDENING) &&
+                fs.existsSync(INDEXER_GATES);
             const canonReady = fs.existsSync(CONSTANTS_PATH);
             if (!indexerReady || !canonReady) {
                 if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
@@ -251,9 +261,8 @@ describe('value-identity with the xchain-indexer twins and the documentation can
                 return;
             }
             idx = {
-                zc:       require(INDEXER_ZC),
+                registry: require(INDEXER_REGISTRY),
                 widening: require(INDEXER_WIDENING),
-                mirror:   require(INDEXER_MIRROR),
                 gates:    require(INDEXER_GATES)
             };
             canon = require(CONSTANTS_PATH);
@@ -280,9 +289,9 @@ describe('ATTEST zero-conf flip: hub copy value-identity @regression', function 
     registerZeroConfRequestGateSuite();
 
     // §3.2 a: the boot-time ordering assertion, on the CapabilitySnapshot
-    // resolveReorgBuffer pattern. assertZeroConfOrdering requires the mirror and
-    // widening modules LAZILY (inside the function, to break a require cycle), so a
-    // module-object mutation made before the call is what a lazy re-require would see:
-    // require() returns the SAME cached module object on every call in this process.
+    // resolveReorgBuffer pattern. assertZeroConfOrdering reads the widening map off
+    // the gate module it shares with this file (one cached object, so a mutation made
+    // before the call is what it sees) and the mirror row through the registry at
+    // call time (stubbed above for the unratified case).
     registerZeroConfOrderingSuite();
 });

@@ -24,7 +24,7 @@
 'use strict';
 
 const mathjs = require('mathjs');
-const { totalStake } = require('../../stake_weighted_quorum.js');
+const { totalStake } = require('../../consensus/stake_weighted_quorum.js');
 const { LEVELS, fmt, pct, normalizeSources, emptyResult, marginBands } = require('./levels.js');
 const { classifyMargin } = require('./margin.js');
 

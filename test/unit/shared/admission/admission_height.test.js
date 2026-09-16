@@ -19,12 +19,12 @@
 const { expect } = require('chai');
 
 const ah  = require('../../../../src/lib/admission_height.js');
-const act = require('../../../../src/mirror_admission_activation.js');
+const act = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 
 // ─── arming, because a DEFAULT run must drive BOTH eras ──────────────────────
 //
 // Every activation map in this train is deliberately inert, and the regtest key is the only
-// per-process arming seam the codebase has: mirror_admission_activation.js reads it from the
+// per-process arming seam the codebase has: mirror_admission_gate.js reads it from the
 // environment at MODULE LOAD, so setting process.env in a before() hook arms nothing. The
 // five most consensus-critical cases in this file skip in an unarmed process, and a bare
 // `this.skip()` behind an activation nobody arms is a case CI and every casual run never
@@ -37,7 +37,7 @@ const act = require('../../../../src/mirror_admission_activation.js');
 // asks for it, never to the process, so the rest of this file and the rest of the run still
 // see the tree they were written against.
 const ERA_MODULES = [
-    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/consensus/gates/mirror_admission_gate.js',
     '../../../../src/lib/admission_height.js',
     '../../../../src/cross_chain/dex_engine.js',
     '../../../../src/cross_chain/bridge_engine.js'
@@ -61,7 +61,7 @@ function withAdmissionActivation(height){
 
     const out = {
         ah:     require('../../../../src/lib/admission_height.js'),
-        act:    require('../../../../src/mirror_admission_activation.js'),
+        act:    require('../../../../src/consensus/gates/mirror_admission_gate.js'),
         // canonicalMatch reads nothing off `this`, so it is driven off the prototype rather
         // than through a constructed engine with a hub, a db and a consensus behind it.
         DEX:    require('../../../../src/cross_chain/dex_engine.js').prototype.canonicalMatch,

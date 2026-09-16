@@ -137,16 +137,22 @@ function shellReferences(text, lists) {
     return { found, dynamic };
 }
 
-// Requires whose target no string names (the digest's gate carriers, the bridge gates, the
-// providers). A missed move there is silent, so every spelling counts: './' + x, path.join over
-// __dirname, or a name bound to either; an unbound name is a site with no candidates.
+// Requires whose target no string names (the digest's gate carriers, the providers). A
+// missed move there is silent, so every spelling counts: './' + x, path.join over
+// __dirname, a name bound to either, or a name bound to a relative join that spells the
+// tail from a loop variable (the W5 digest loader: `const rel = path.join('consensus',
+// 'gates', mod.replace(/_activation$/, '_gate') + '.js'); path.join(__dirname, rel)`);
+// an unbound name is a site with no candidates.
 function computedRequireSites(text, dirRel) {
     const lists = collectLoopLists(text);
-    const sites = [...concatRequires(text), ...joinRequires(text), ...boundRequires(text)];
+    const derived = derivedBindings(text);
+    const sites = [...concatRequires(text), ...joinRequires(text), ...boundRequires(text)]
+        .map((site) => throughDerived(site, derived));
     return sites.sort((a, b) => a.index - b.index).map((site) => {
         const items = site.ident ? (loopVariableItems(text, lists, site.ident, site.index) || []) : [];
+        const spell = (item) => (site.replace ? item.replace(site.replace.re, site.replace.to) : item);
         const candidates = items
-            .map((item) => path.posix.normalize(path.posix.join(dirRel, ...site.segs, `${site.pre}${item}${site.post}`)))
+            .map((item) => path.posix.normalize(path.posix.join(dirRel, ...site.segs, `${site.pre}${spell(item)}${site.post}`)))
             .filter((p) => p.startsWith('src/'));
         return {
             index: site.index,
@@ -227,6 +233,42 @@ function boundRequires(text) {
         else out.push({ index: m.index, expression: m[0], segs: [], pre: '', ident: null, post: '' });
     }
     return out;
+}
+
+// `const NAME = path.join(<literal segments>, [literal +] IDENT[.replace(/re/, 'lit')] [+ literal])`
+// with no __dirname: a relative tail spelled from a variable, which a later
+// path.join(__dirname, NAME) or require(NAME) resolves through. The one transform
+// followed is a String.replace of a regex literal by a string literal, the W5
+// loader's `_activation` to `_gate` respelling; anything else keeps the name unresolved.
+function derivedBindings(text) {
+    const out = [];
+    const re = new RegExp('(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*path\\s*\\.\\s*(?:join|resolve)\\s*\\(\\s*'
+        + '((?:' + QUOTE + '[^\'"]*\\3\\s*,\\s*)*)'
+        + '(?:' + QUOTE + '([^\'"]*)\\4\\s*\\+\\s*)?([A-Za-z_$][\\w$]*)'
+        + '(?:\\s*\\.\\s*replace\\s*\\(\\s*\\/((?:[^\\/\\\\\\n]|\\\\.)+)\\/([a-z]*)\\s*,\\s*' + QUOTE + '([^\'"]*)\\9\\s*\\))?'
+        + '\\s*(?:\\+\\s*' + QUOTE + '([^\'"]*)\\11)?\\s*\\)', 'g');
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        out.push({
+            name: m[1], index: m.index, expression: m[0],
+            segs: literalSegments(m[2]), pre: m[5] || '', ident: m[6], post: m[12] || '',
+            replace: m[7] !== undefined ? { re: new RegExp(m[7], m[8] || ''), to: m[10] } : null,
+        });
+    }
+    return out;
+}
+
+// A site whose variable is a derived binding takes that binding's tail, segments and
+// transform in place of the variable, so the loop variable underneath is what the
+// candidates range over.
+function throughDerived(site, derived) {
+    if (!site.ident || site.segs.length || site.pre || site.post) return site;
+    const b = nearestBinding(derived, site.ident, site.index);
+    if (!b) return site;
+    return Object.assign({}, site, {
+        expression: `${b.expression.trim()} ... ${site.expression.trim()}`,
+        segs: b.segs, pre: b.pre, ident: b.ident, post: b.post, replace: b.replace,
+    });
 }
 
 function nearestBinding(bindings, name, index) {

@@ -21,7 +21,7 @@
  ********************************************************************/
 
 const axios  = require('axios');
-const ar     = require('../anchor_reward_activation.js');
+const ar     = require('../consensus/gates/anchor_reward_gate.js');
 const ark    = require('./anchor_reward_key.js');
 const bcmath = require('../bcmath.js');
 const hubConfig = require('../config');

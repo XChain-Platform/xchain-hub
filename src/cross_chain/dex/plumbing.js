@@ -20,7 +20,7 @@
  *
  ********************************************************************/
 
-const swq = require('../../stake_weighted_quorum.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
 
 module.exports = {
     // Resolve the qualifying validator set, normalized to { pubkey, source, weight, amount }.

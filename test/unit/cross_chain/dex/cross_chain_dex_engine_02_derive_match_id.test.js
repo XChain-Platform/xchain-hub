@@ -14,8 +14,10 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub, DB_METHODS } = require('../../../helpers/mockHub');
-const eq             = require('../../../../src/equivocation_header.js');
-const ccr            = require('../../../../src/cross_chain_royalty_activation.js');
+const eq             = require('../../../../src/consensus/equivocation_header.js');
+// The royalty flag day is a registry row read by literal key (W5).
+const gateRegistry   = require('../../../../src/consensus/gate_registry');
+const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large and the
 // first load on the Parallels share can exceed a 5s hook timeout).
@@ -213,7 +215,7 @@ function feature7canonicalMatchSampleRow() {
 function feature7canonicalMatchIndexerCanonical(m) {
   let raw = ['XMATCH', m.match_id, String(m.snapshot_block), m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr, m.b_chain, String(m.b_action_index), m.b_tick || '', String(m.b_amount), String(m.b_ownership), m.b_payout_addr, String(m.effective_time), m.network || '', m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'), m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
   // Royalty legs ride the signed match at/above CROSS_CHAIN_ROYALTY (regtest genesis).
-  if (ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network)) raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
+  if (gateRegistry.activeAt(CROSS_CHAIN_ROYALTY_KEY, m.network, null, m.snapshot_block, null)) raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
   if (eq.isEquivHeaderActive(m.snapshot_block, m.network)) return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, m.finalizing_view != null ? m.finalizing_view : 0, raw);
   return raw;
 }

@@ -76,7 +76,7 @@ function registerConfirmationFederationTests() {
         // anchor shallower than the fleet will ever mint.
         it('never resolves below the frozen anchor-reward mint depth on a floored network', () => {
             process.env.XCHAIN_CONFIRMATIONS_DOGE = '2';
-            const mintDepth = require('../../../src/anchor_reward_activation.js').ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS;
+            const mintDepth = require('../../../src/consensus/gates/anchor_reward_gate.js').ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS;
             expect(mintDepth).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
             for(const net of ['mainnet', 'testnet'])
                 expect(coins.resolveConfirmations({}, net).DOGE, net).to.be.at.least(mintDepth);

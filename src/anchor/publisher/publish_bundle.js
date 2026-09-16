@@ -23,7 +23,7 @@
 'use strict';
 
 const canonicalForms = require('./canonical_forms.js');
-const ar = require('../../anchor_reward_activation.js');
+const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

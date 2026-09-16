@@ -32,7 +32,7 @@
 // light.js) must bury by the SAME depth the signer buried by. A hub-local 6 and
 // a verifier-local 6 that drift apart resolve different validator sets for the
 // same declared height with nothing logged.
-const { CANONICAL_REORG_BUFFER } = require('../../snapshot_reorg_buffer.js');
+const { CANONICAL_REORG_BUFFER } = require('../../consensus/snapshot_reorg_buffer.js');
 const hubConfig = require('../../config');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

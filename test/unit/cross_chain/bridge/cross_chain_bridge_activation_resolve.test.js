@@ -11,14 +11,16 @@
 // contact legal@dankest.llc.
 
 // The bridge engine resolves its three flag-day gates at construction: the table as a
-// registry row, the predicate from the carrier at the top of src/ by a computed path.
-// A miss that returned null idled the engine with no error, no failing
-// round and no wire field naming it. The engine lives in a feature directory while the
-// carriers stay at the top of src/, so this suite constructs a real engine, checks that
-// each predicate is the one the top-level carrier exports, and checks that a registry
-// row the build lacks throws at construction naming the key instead of idling.
+// registry row read by its literal key, the predicate as the registry's own activeAt
+// over that row (W5: the predicate-only twin modules retired). A miss that returned
+// null idled the engine with no error, no failing round and no wire field naming it.
+// This suite constructs a real engine, checks that each predicate answers exactly what
+// the registry answers for the row (coin-keyed slot first, fail closed on what it
+// cannot read), that mainnet and testnet stay unarmed, and that a registry row the
+// build lacks throws at construction naming the key instead of idling.
 
 const { expect } = require('chai');
+const sinon = require('sinon');
 
 const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
 const registry               = require('../../../../src/consensus/gate_registry.js');
@@ -31,12 +33,13 @@ const BARE_HUB = {
     getIdentity:    () => null
 };
 
-// [activation key on the engine, carrier module under src/, exported predicate]
-const GATES = [
-    ['bridge', 'xchain_bridge_activation', 'isXchainBridgeActive'],
-    ['token',  'token_bridge_activation',  'isTokenBridgeActive'],
-    ['policy', 'token_policy_activation',  'isTokenPolicyInheritanceActive']
-];
+// [activation key on the engine, registry key]
+const GATES = Object.entries(CrossChainBridgeEngine.BRIDGE_GATE_KEYS);
+
+// Heights on both sides of every shipped threshold, plus what a predicate cannot read.
+const PROBE_BLOCKS = [0, 1, 499, 500, 9999999998, 9999999999, 10000000000, -1, 'not-a-number', null, undefined, NaN];
+const PROBE_NETS   = ['regtest', 'testnet', 'mainnet', 'nonsense-net', undefined];
+const PROBE_COINS  = ['BTC', 'LTC', 'DOGE', undefined];
 
 describe('cross-chain bridge engine activation resolution', function () {
 
@@ -48,17 +51,59 @@ describe('cross-chain bridge engine activation resolution', function () {
         engine = new CrossChainBridgeEngine(BARE_HUB);
     });
 
-    for (const [key, carrier, predicate] of GATES) {
-        it('resolves ' + carrier + ' (' + predicate + ') from the engine', function () {
+    it('names all three gates by their registry keys, and each has a row', function () {
+        expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy']);
+        for (const [, regKey] of GATES) expect(registry.has(regKey), regKey + ' has no registry row').to.equal(true);
+    });
+
+    for (const [key, regKey] of GATES) {
+        it('resolves ' + regKey + ' from the engine as activeAt over the row', function () {
             expect(typeof engine.activation[key],
-                carrier + '.' + predicate + ' did not resolve from the bridge engine, so the bridge would idle silently')
+                regKey + ' did not resolve from the bridge engine, so the bridge would idle silently')
                 .to.equal('function');
-            // The same function the carrier exports, not a stand-in that merely has the type.
-            expect(engine.activation[key],
-                carrier + '.' + predicate + ' resolved to something other than src/' + carrier + '.js')
-                .to.equal(require('../../../../src/' + carrier + '.js')[predicate]);
+            // The predicate is the registry's answer for the row, on every probe, in the
+            // (block, network, coin) shape the bridge parts call it in.
+            for (const net of PROBE_NETS) for (const coin of PROBE_COINS) for (const block of PROBE_BLOCKS) {
+                expect(engine.activation[key](block, net, coin), regKey + ' at ' + [block, net, coin].join(','))
+                    .to.equal(registry.activeAt(regKey, net, coin, block, null));
+            }
         });
     }
+
+    it('hands the coin to the registry, so the coin-keyed slot is read ahead of the bare network key', function () {
+        // Every shipped slot of the bridge row holds the same value under its coin key
+        // and its bare key, so only the call itself can show the coin reaching the
+        // registry's resolution: the predicate is judged through activeAt's module
+        // property, which is what the spy replaces for one call per gate.
+        const spy = sinon.stub(registry, 'activeAt').returns(true);
+        try {
+            for (const [key, regKey] of GATES) {
+                expect(engine.activation[key](7, 'regtest', 'DOGE')).to.equal(true);
+                expect(spy.lastCall.args, regKey).to.deep.equal([regKey, 'regtest', 'DOGE', 7, null]);
+            }
+        } finally { spy.restore(); }
+        const row = registry.get(GATES.find(([k]) => k === 'bridge')[1]);
+        expect(row['regtest']).to.equal(0);
+        expect(engine.activation.bridge(0, 'regtest', 'DOGE')).to.equal(true);
+        // Every coin-keyed mainnet slot is unarmed, so the coin resolution must not fall
+        // through to a bare key it would otherwise read.
+        for (const coin of ['BTC', 'LTC', 'DOGE']) {
+            expect(row[coin + ':mainnet'], coin + ':mainnet slot').to.equal(9999999999);
+            expect(engine.activation.bridge(9999999998, 'mainnet', coin)).to.equal(false);
+        }
+    });
+
+    it('holds every mainnet and testnet slot of all three gates unarmed', function () {
+        for (const [key, regKey] of GATES) {
+            const row = registry.get(regKey);
+            for (const slot of Object.keys(row)) {
+                if (!/mainnet$|testnet$/.test(slot)) continue;
+                expect(row[slot], regKey + ' ' + slot).to.equal(9999999999);
+            }
+            for (const net of ['mainnet', 'testnet'])
+                expect(engine.activation[key](9999999998, net, 'BTC'), regKey + ' ' + net).to.equal(false);
+        }
+    });
 });
 
 describe('cross-chain bridge engine activation resolution: a registry miss', function () {

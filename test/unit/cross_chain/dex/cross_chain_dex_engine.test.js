@@ -14,8 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub, DB_METHODS } = require('../../../helpers/mockHub');
-const eq             = require('../../../../src/equivocation_header.js');
-const ccr            = require('../../../../src/cross_chain_royalty_activation.js');
+const eq             = require('../../../../src/consensus/equivocation_header.js');
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large and the
 // first load on the Parallels share can exceed a 5s hook timeout).

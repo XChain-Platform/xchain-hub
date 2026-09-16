@@ -22,7 +22,7 @@
 'use strict';
 
 const axios = require('axios');
-const swq   = require('../../stake_weighted_quorum.js');
+const swq   = require('../../consensus/stake_weighted_quorum.js');
 
 module.exports = {
 

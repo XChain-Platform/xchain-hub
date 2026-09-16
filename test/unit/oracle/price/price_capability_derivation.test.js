@@ -38,7 +38,7 @@ const sinon           = require('sinon');
 const proxyquire      = require('proxyquire');
 const { expect }      = require('chai');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator');
-const swq             = require('../../../../src/stake_weighted_quorum.js');
+const swq             = require('../../../../src/consensus/stake_weighted_quorum.js');
 const { createMockHub } = require('../../../helpers/mockHub');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
@@ -122,7 +122,7 @@ function indexerReadsWeights(targetDb, capability, snapshotBlock) {
 }
 
 // The verdict xchain-indexer actions/price.js reaches for a batch anchored at
-// `anchor`, signed by `signers`. src/stake_weighted_quorum.js is byte-identical in
+// `anchor`, signed by `signers`. src/consensus/stake_weighted_quorum.js is byte-identical in
 // the hub and the indexer (md5 825b15d71eb9972df6a3915e4e6a08b3 in both), so this is
 // the indexer's own arithmetic, not a re-implementation of it.
 function indexerVerdict(targetDb, anchor, signers, capability) {

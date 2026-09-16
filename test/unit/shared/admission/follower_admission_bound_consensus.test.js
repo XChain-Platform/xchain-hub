@@ -54,7 +54,7 @@ const OWN_DOGE = 5000000;
 const CALL_ID = 'c'.repeat(64);
 
 const ARMED_MODULES = [
-    '../../../../src/mirror_admission_activation.js',
+    '../../../../src/consensus/gates/mirror_admission_gate.js',
     '../../../../src/lib/admission_height.js',
     '../../../../src/cross_chain/dex_consensus.js',
     '../../../../src/cross_chain/call_engine.js'

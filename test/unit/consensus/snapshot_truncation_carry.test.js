@@ -9,7 +9,7 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
-const swq            = require('../../../src/stake_weighted_quorum.js');
+const swq            = require('../../../src/consensus/stake_weighted_quorum.js');
 const Consensus      = require('../../../src/consensus/pbft.js');
 const OracleConsensus = require('../../../src/oracle/consensus.js');
 

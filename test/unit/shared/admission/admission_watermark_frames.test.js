@@ -6,7 +6,7 @@ const proxyquire = require('proxyquire');
 
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
-const { admitMarginBlocks } = require('../../../../src/mirror_admission_activation.js');
+const { admitMarginBlocks } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 
 const WINDOWS = {
     XDEX_ROUND_MAX_LIFETIME_MS:           400000,

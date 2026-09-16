@@ -23,10 +23,13 @@
 
 const { PRICE_MAX } = require('../../constants.js');
 const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../../price_batch_compression.js');
-const pricePair         = require('../../price_pair_activation.js');
-const priceScale        = require('../../price_scale_activation.js');
-const priceSigTally     = require('../../price_sig_tally_activation.js');
-const swq               = require('../../stake_weighted_quorum.js');
+const pricePair         = require('../../consensus/gates/price_pair_gate.js');
+const priceScale        = require('../../consensus/gates/price_scale_gate.js');
+// The verify-first tally rule is a registry row read by literal key (W5), on the
+// batch's BTC anchor height.
+const gateRegistry      = require('../../consensus/gate_registry');
+const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
+const swq               = require('../../consensus/stake_weighted_quorum.js');
 
 // The declared round window: the batch shape, its DoS bound and the plausible-round
 // band. Returns { reason } for a refusal, or the window the rest of the path reads.
@@ -195,8 +198,8 @@ function refuseUnanchoredOrStraddlingBatch(btcBlockHeight, rounds) {
     // keeps the hub from storing rounds the chain rejected.
     let firstAnchor = rounds[0].btcBlockHeight;
     let lastAnchor  = rounds[rounds.length - 1].btcBlockHeight;
-    if (priceSigTally.isPriceSigTallyVerifyFirstActive(firstAnchor, network) !==
-        priceSigTally.isPriceSigTallyVerifyFirstActive(lastAnchor, network) ||
+    if (gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, network, null, firstAnchor, null) !==
+        gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, network, null, lastAnchor, null) ||
         swq.isStakeWeightedQuorumActive(firstAnchor, network) !==
         swq.isStakeWeightedQuorumActive(lastAnchor, network) ||
         this.admission.isAdmissionEra(network, firstAnchor) !== this.admission.isAdmissionEra(network, lastAnchor)) {

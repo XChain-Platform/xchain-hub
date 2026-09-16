@@ -20,7 +20,7 @@ const { waitUntil }      = require('../../../helpers/waitUntil');
 const { DB_METHODS }     = require('../../../helpers/mockHub');
 
 let rootSuiteConfig, rootSuiteDbStub, rootSuitePm, rootSuiteKeypair;
-const feature19messageSubscriberRosterRca = require('../../../../src/rollcall_activation.js');
+const feature19messageSubscriberRosterRca = require('../../../../src/consensus/gates/rollcall_gate.js');
 const feature19messageSubscriberRosterRollcallRound = require('../../../../src/rollcall/round.js');
 const feature19messageSubscriberRosterAttestationRelay = require('../../../../src/attestation/relay.js');
 const feature19messageSubscriberRosterCrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
@@ -78,10 +78,10 @@ async function feature19messageSubscriberRosterAttachListeners(target, count) {
 }
 
 // The roster for a regtest hub, computed in a child process so the arming
-// environment is the real one: rollcall_activation.js reads
+// environment is the real one: rollcall_gate.js reads
 // XC_ROLLCALL_REGTEST_ACTIVATION once, at require time, on purpose.
 // The roster for a regtest hub, computed in a child process so the arming
-// environment is the real one: rollcall_activation.js reads
+// environment is the real one: rollcall_gate.js reads
 // XC_ROLLCALL_REGTEST_ACTIVATION once, at require time, on purpose.
 function feature19messageSubscriberRosterRegtestRosterWith(armingValue) {
   const env = Object.assign({}, process.env);

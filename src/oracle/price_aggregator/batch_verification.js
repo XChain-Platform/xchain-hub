@@ -21,8 +21,11 @@
  ********************************************************************/
 
 const ValidatorIdentity = require('../../validators/identity.js');
-const priceSigTally     = require('../../price_sig_tally_activation.js');
-const swq               = require('../../stake_weighted_quorum.js');
+// The verify-first tally rule is a registry row read by literal key (W5), on the
+// batch's BTC anchor height.
+const gateRegistry      = require('../../consensus/gate_registry');
+const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
+const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -107,7 +110,7 @@ function verifyBatchSigs(sigs, snapshot, payload, btcBlockHeight, network) {
     let qualified    = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
     let seenPubkey   = new Set();
     let verifiedSigs = [];
-    let verifyFirst  = priceSigTally.isPriceSigTallyVerifyFirstActive(btcBlockHeight, network);
+    let verifyFirst  = gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, network, null, btcBlockHeight, null);
 
     for (let s of sigs) {
         if (seenPubkey.has(s.pubkey)) continue;        // duplicate pubkey counts once

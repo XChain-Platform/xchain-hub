@@ -111,12 +111,34 @@ describe('bin/sibling-reference-map.js', function () {
 
     describe('the computed requires', () => {
         it('names the gate carriers the rules digest loads without a literal', () => {
+            // The W5 loader spells the tail from the SHARED_GATES stem in a bound
+            // name (`rel`) before joining it under __dirname, so the site is resolved
+            // through that binding to src/consensus/gates/<stem>_gate.js per stem.
             const source = fs.readFileSync(path.resolve(__dirname, '../../src/consensus_rules_digest.js'), 'utf8');
             const sites = refs.computedRequireSites(source, 'src');
             assert.strictEqual(sites.length, 1, 'one site builds the whole gate list');
             assert.ok(sites[0].listCandidates.length >= 15,
                 `expected the resolved carrier list, got ${sites[0].listCandidates.length}`);
-            assert.ok(sites[0].listCandidates.includes('src/rollcall_activation.js'));
+            assert.ok(sites[0].listCandidates.includes('src/consensus/gates/rollcall_gate.js'));
+            assert.ok(sites[0].listCandidates.includes('src/consensus/gates/mirror_admission_gate.js'));
+            assert.ok(!sites[0].listCandidates.some((p) => /_activation\.js$/.test(p)),
+                'the loader spells _activation stems as _gate files; a candidate kept the stem: ' + sites[0].listCandidates.join(', '));
+        });
+
+        it('follows a relative join bound to a name, with its replace, into the __dirname join that loads it', () => {
+            const source = [
+                "const GATES = [['rollcall_activation', ['A']], ['xcall_activation', ['B']]];",
+                'function loadGateValue(mod, name){',
+                "    const rel = path.join('consensus', 'gates', mod.replace(/_activation$/, '_gate') + '.js');",
+                '    const file = path.join(__dirname, rel);',
+                '    return require(file)[name];',
+                '}',
+                'function loadAll(){ for (const [mod, names] of GATES) { for (const name of names) loadGateValue(mod, name); } }',
+            ].join('\n');
+            const sites = refs.computedRequireSites(source, 'src');
+            assert.strictEqual(sites.length, 1);
+            assert.strictEqual(sites[0].listVariable, 'mod');
+            assert.deepStrictEqual(sites[0].listCandidates, ['src/consensus/gates/rollcall_gate.js', 'src/consensus/gates/xcall_gate.js']);
         });
 
         it('sees a require of path.join over __dirname, resolved through the calls of its function', () => {
@@ -161,13 +183,13 @@ describe('bin/sibling-reference-map.js', function () {
             assert.strictEqual(refs.computedRequireSites(literal, 'src').length, 0);
         });
 
-        it('finds the bridge gates and the provider loader in this tree, each in its current spelling', () => {
+        it('finds no computed require in the bridge engine and one in the provider loader, in this tree', () => {
             const src = path.resolve(__dirname, '../../src');
             const read = (rel) => fs.readFileSync(path.join(src, rel), 'utf8');
+            // The engine reads its three gates from the registry by literal key since W5;
+            // a computed require coming back there is a site this sweep must see again.
             const bridge = refs.computedRequireSites(read('cross_chain/bridge_engine.js'), 'src/cross_chain');
-            assert.strictEqual(bridge.length, 1, 'one site loads every bridge gate');
-            assert.deepStrictEqual(bridge[0].listCandidates.slice().sort(),
-                ['src/token_bridge_activation.js', 'src/token_policy_activation.js', 'src/xchain_bridge_activation.js']);
+            assert.deepStrictEqual(bridge, [], 'the bridge engine builds no require at run time');
             assert.strictEqual(refs.computedRequireSites(read('validators/provider_registry.js'), 'src/validators').length, 1,
                 'the provider loader builds its path from an id read at run time');
         });

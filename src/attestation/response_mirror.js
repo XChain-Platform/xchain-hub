@@ -84,7 +84,9 @@
 // small value helpers. Everything else lives in named parts under ./response_mirror/
 // and is installed on the prototype below, so every require path and method name is
 // exactly what it was.
-const { isResponseMirrorActive } = require('../attest_response_mirror_activation.js');
+// The mirror flag day is a registry row read by literal key (W5), on the request's own block.
+const gateRegistry = require('../consensus/gate_registry');
+const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const build      = require('./response_mirror/build.js');
 const batch      = require('./response_mirror/batch.js');
 const retraction = require('./response_mirror/retraction.js');
@@ -133,7 +135,7 @@ class AttestationResponseMirror {
     // response's and never the chain tip, so the rule for a request is fixed the
     // moment it is admitted.
     isMirrorEra(requestBlock){
-        return isResponseMirrorActive(requestBlock, this.hub && this.hub.network);
+        return gateRegistry.activeAt(ATTEST_RESPONSE_MIRROR_KEY, this.hub && this.hub.network, null, requestBlock, null);
     }
 
     async start(){

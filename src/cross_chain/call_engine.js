@@ -59,7 +59,7 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const axios        = require('axios');
 
-const eq                     = require('../equivocation_header.js');
+const eq                     = require('../consensus/equivocation_header.js');
 const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const coins                  = require('../coins');

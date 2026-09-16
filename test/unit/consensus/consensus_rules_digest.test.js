@@ -52,14 +52,18 @@ const CARRIER_PARTS_SRC    = path.join(CARRIER_SRC, 'consensus', 'gate_registry'
 // values from (the entry, the config it reads the venue's environment through,
 // and the part files that hold the rows), and a stub for every carrier it names
 // (a function under every name that is a function on the real carrier, since only
-// those are read from the carrier). __dirname is what the loader resolves against,
-// so the cases have to own the directory in order to delete a row or break a
-// carrier, which no checkout may do.
+// those are read from the carrier). The stubs sit where the loader looks since W5,
+// consensus/gates/<stem>_gate.js; a SHARED_GATES module with no logic module left
+// (a W5-deleted predicate shim) gets a values-only stub the loader never opens.
+// __dirname is what the loader resolves against, so the cases have to own the
+// directory in order to delete a row or break a carrier, which no checkout may do.
+function carrierPath(mod) { return path.join('consensus', 'gates', mod.replace(/_activation$/, '_gate') + '.js'); }
 function scratchTree(mutate) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crd-carrier-'));
     fs.copyFileSync(CARRIER_MODULE_SRC, path.join(dir, 'consensus_rules_digest.js'));
     fs.copyFileSync(path.join(CARRIER_SRC, 'config.js'), path.join(dir, 'config.js'));
     fs.mkdirSync(path.join(dir, 'consensus', 'gate_registry'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'consensus', 'gates'), { recursive: true });
     fs.copyFileSync(CARRIER_REGISTRY_SRC, path.join(dir, 'consensus', 'gate_registry.js'));
     for (const part of fs.readdirSync(CARRIER_PARTS_SRC)) {
         fs.copyFileSync(path.join(CARRIER_PARTS_SRC, part), path.join(dir, 'consensus', 'gate_registry', part));
@@ -70,10 +74,11 @@ function scratchTree(mutate) {
         byModule.get(mod).push(...names);
     }
     for (const [mod, names] of byModule) {
-        const real = require('../../../src/' + mod + '.js');
+        const realPath = path.join(CARRIER_SRC, carrierPath(mod));
+        const real = fs.existsSync(realPath) ? require(realPath) : {};
         const body = names.map(n => 'exports.' + n + ' = '
             + (typeof real[n] === 'function' ? 'function () {};' : '{ regtest: 0 };')).join('\n');
-        fs.writeFileSync(path.join(dir, mod + '.js'), body + '\n');
+        fs.writeFileSync(path.join(dir, carrierPath(mod)), body + '\n');
     }
     mutate(dir);
     return require(path.join(dir, 'consensus_rules_digest.js'));
@@ -110,13 +115,13 @@ function registerBrokenCarrierTests() {
         });
 
         it('THROWS naming the key when the carrier of a function-valued gate is gone', function () {
-            const mod = scratchTree(dir => fs.unlinkSync(path.join(dir, 'mirror_admission_activation.js')));
+            const mod = scratchTree(dir => fs.unlinkSync(path.join(dir, carrierPath('mirror_admission_activation'))));
             expect(() => mod.computeConsensusRulesDigest()).to.throw('mirror_admission_activation.encodeAdmitBlocks');
         });
 
         it('REFUSES when a carrier is present and fails to load, naming it and the cause', function () {
             const victim = 'mirror_admission_activation';
-            const mod = scratchTree(dir => fs.writeFileSync(path.join(dir, victim + '.js'),
+            const mod = scratchTree(dir => fs.writeFileSync(path.join(dir, carrierPath(victim)),
                 "require('a-dependency-that-is-not-installed');\n"));
             expect(() => mod.computeConsensusRulesDigest())
                 .to.throw(Error).and.to.satisfy((e) => e.message.includes(victim)

@@ -16,8 +16,10 @@
 // stand-in that answers the publisher's query surface from plain arrays.
 
 const crypto         = require('crypto');
-const eq             = require('../../src/equivocation_header.js');
-const ccr            = require('../../src/cross_chain_royalty_activation.js');
+const eq             = require('../../src/consensus/equivocation_header.js');
+// The royalty flag day is a registry row read by literal key (W5).
+const gateRegistry   = require('../../src/consensus/gate_registry');
+const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const { DB_METHODS } = require('./mockHub.js');
 
 // An ANCHOR v0 section is root-bearing by construction (D8), so the base checkpoint
@@ -54,7 +56,7 @@ function matchCanonical(m) {
         m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
         m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
     // Royalty legs ride the signed match at/above CROSS_CHAIN_ROYALTY (regtest genesis).
-    if (ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network))
+    if (gateRegistry.activeAt(CROSS_CHAIN_ROYALTY_KEY, m.network, null, m.snapshot_block, null))
         raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
     // EQUIV active in regtest: TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
     if (eq.isEquivHeaderActive(m.snapshot_block, m.network))

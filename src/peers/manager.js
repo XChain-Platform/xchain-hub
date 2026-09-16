@@ -26,7 +26,7 @@ const hubConfig        = require('../config');
 const { positiveIntConfig } = require('../lib/config_int.js');
 // The roster below credits RollcallRound only where the engine would really start,
 // so it reads the engine's own activation source rather than a copy of it.
-const rollcallActivation = require('../rollcall_activation.js');
+const rollcallActivation = require('../consensus/gates/rollcall_gate.js');
 const PeerConnections = require('./gossip/connections.js');
 const PeerMessages    = require('./gossip/messages.js');
 const PeerInbound     = require('./gossip/inbound.js');

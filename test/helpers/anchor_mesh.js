@@ -21,7 +21,7 @@ const os                   = require('os');
 const path                 = require('path');
 const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/validators/identity');
-const arMod                = require('../../src/anchor_reward_activation.js');
+const arMod                = require('../../src/consensus/gates/anchor_reward_gate.js');
 const meshDb               = require('./anchor_mesh_db.js');
 
 const { CP_ROW, matchRow, matchCanonical, callCanonical, parseV7Sections, memDb } = meshDb;
@@ -217,7 +217,7 @@ function buildMesh(n, opts) {
     // RECORD's network (matching the indexer), and regtest activates
     // STAKE_WEIGHTED_QUORUM at block 0, so regtest records take the weighted path.
     // A count-path test passes network:'mainnet': with snapshot_block 100 below the
-    // mainnet SWQ activation (961000, per src/stake_weighted_quorum.js), the gate
+    // mainnet SWQ activation (961000, per src/consensus/stake_weighted_quorum.js), the gate
     // resolves to the legacy 2f+1 COUNT quorum these tests exercise (every other
     // snapshot-block-gated rule - EQUIV, checkpoint-commitment, royalty, the anchor/
     // archive reward flag-days - also activates at >=961000 on mainnet, so a block-100
