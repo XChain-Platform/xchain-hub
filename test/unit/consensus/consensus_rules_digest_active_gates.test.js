@@ -80,7 +80,7 @@ function registerPinnedDigestTest() {
     // the environment: a venue process launched armed has a different, equally correct digest,
     // and a pin that moved with a drill lever would be a test of the launcher. The pinned value
     // is the fleet's: every shipped process reads the unarmed maps.
-    it('digests to the pinned value, which moved when the admission encoder was registered', function () {
+    it('digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet', function () {
         // Every gate module, not just the admission one: the family's arming lever is shared,
         // so the anchor-attest gate resolves from the same variable and a cached copy of it
         // would keep a drill's heights in the digest after the variable was cleared.
@@ -93,8 +93,8 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('26ba9cce1936d6c38518489b35e3ceb558746ffb466cea90f65b39adf49b2036',
-                    'the consensus rules digest moved; a gate was added, removed or reordered');
+                .to.equal('d04b9bf0e6a2f25ff94f5d4ef770cfb756783c8c858a68cd33e1761e9c2e0891',
+                    'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
             if (env === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
@@ -202,10 +202,17 @@ function registerCoinKeyedGateTest() {
     it('resolves the coin-keyed bridge gate per coin, and network-wide from the earliest armed chain', function () {
         const KEY = 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION';
         expect(crd.knownGateKeys()).to.include(KEY);
-        // As shipped: regtest 0 on every chain, every other slot on the far-future sentinel.
+        // As shipped since the v0.19.0 cut: regtest 0 on every chain, mainnet on the far-future
+        // sentinel, and one sized testnet height per chain read from the map itself so this
+        // grades the resolver against whatever the train wrote.
+        const shipped = JSON.parse(crd.computeConsensusRulesDigest().gates[KEY]);
         for (const coin of ['BTC', 'LTC', 'DOGE']) {
             expect(crd.activeGatesAt(0, 'regtest', coin)).to.include(KEY);
-            expect(crd.activeGatesAt(crd.FAR_FUTURE_HEIGHT_SENTINEL, 'testnet', coin)).to.not.include(KEY);
+            expect(crd.activeGatesAt(crd.FAR_FUTURE_HEIGHT_SENTINEL, 'mainnet', coin)).to.not.include(KEY);
+            const h = shipped[coin + ':testnet'];
+            expect(h, coin + ':testnet is a sized height').to.be.a('number').below(crd.FAR_FUTURE_HEIGHT_SENTINEL);
+            expect(crd.activeGatesAt(h - 1, 'testnet', coin)).to.not.include(KEY);
+            expect(crd.activeGatesAt(h, 'testnet', coin)).to.include(KEY);
         }
         const CRD     = require.resolve('../../../src/consensus_rules_digest.js');
         const realCrd = require.cache[CRD];

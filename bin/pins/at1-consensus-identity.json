@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "26ba9cce1936d6c38518489b35e3ceb558746ffb466cea90f65b39adf49b2036",
+  "consensus_rules_digest": "d04b9bf0e6a2f25ff94f5d4ef770cfb756783c8c858a68cd33e1761e9c2e0891",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -20,7 +20,7 @@
     "attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION": "{\"mainnet\":null,\"regtest\":0,\"testnet\":151800}",
     "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2": "{\"headroom\":1,\"maxSlots\":2,\"startOffset\":0}",
     "rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":152208}",
-    "xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION": "{\"BTC:mainnet\":9999999999,\"BTC:testnet\":9999999999,\"DOGE:mainnet\":9999999999,\"DOGE:testnet\":9999999999,\"LTC:mainnet\":9999999999,\"LTC:testnet\":9999999999,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION": "{\"BTC:mainnet\":9999999999,\"BTC:testnet\":152795,\"DOGE:mainnet\":9999999999,\"DOGE:testnet\":67900889,\"LTC:mainnet\":9999999999,\"LTC:testnet\":4887694,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":null,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":null,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
     "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":null,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":null,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
     "mirror_admission_activation.ADMIT_MARGIN_BLOCKS": "{\"anchor_reward_attestations\":144,\"attestation_responses\":1,\"default\":4,\"oracle_prices\":1}",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-16
+
 ### Added
 - The hub publishes a per-table per-chain admission height watermark on the mirror heartbeat, the ready frame and all ten REST snapshot pages, bounded by each rail's round-abandon timeout.  
 - A finalization arriving after its round was abandoned for admission purposes is refused rather than broadcast to the mirror.  
@@ -18,12 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The PRICE batch canonical, the on-chain batch wire and the batch push carry one admission map per round, era-keyed on each round's own anchor, and a window never straddles the mirror-admission activation.  
 - The batch signer rebuilds each round's admission map from its stored columns, and the batch ingest stores each round's map in `price_snapshots`.  
 - The oracle leader pins each price round's admission map from its own chain tips behind the mirror-admission activation, carries it in the PROPOSE, and followers co-sign the leader's map only after bounding it against their own tips; both round stores persist the map.
+- Consensus: a cross-chain bridge engine with quorum-signed transfer and policy-snapshot tables, the hub schema version at 6, and a bridge invariant read.
+
+### Changed
+- Each transfer leg is gated on its own chain's activation height rather than on the Bitcoin snapshot block.
+- The served chain registry snapshot is resynced so every chain lists the bridge action.
+- Audited transitive packages move to their patched releases (lockfile only).
+- The schema-mirror changelog states the hub-first roll order, because the reader check is strict equality in both directions.
+- Restructured under the platform code-structure standard (feature directories, snake_case files, split test suites, restored comments); consensus identity byte-identical and pinned.
 
 ### Fixed
 - The PRICE batch ingest refuses an admission-era round that carries no map, and a legacy round handed one, instead of storing legacy rows above the activation.  
 - A hub whose signing key is outside the chain-effective signer set no longer broadcasts into rounds it cannot sign or opens checkpoint rounds it cannot lead, and says so once per set change; it keeps receiving, relaying and serving.
 - The PRICE v0 payload builder now accepts a coinPair-keyed pair the same as a pair-keyed one, matching the hub's other two v0 payload copies byte for byte.
 - A bridge source leg finalizes as exactly one transfer however many snapshot heights it spans, so the destination chain mints or releases once per lock or burn.
+- The peer listener ceiling credits the relay and rollcall channels only when each is actually configured.
+- A code-structure split had moved awaits inside the attestation and DEX PBFT `handlePropose`, opening a window for a vote to land mid-step; both are restored to their synchronous ordering with a regression test per site, consensus identity unchanged.
+- The `.env.example` lists `DOGE_INDEXER_API_URL` and `DOGE_INDEXER_API_KEY`, since a validator hub on a roll-call network publishes nothing without a Dogecoin read.
 
 ## [0.18.0] - 2026-09-11
 

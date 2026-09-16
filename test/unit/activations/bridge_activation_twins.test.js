@@ -52,24 +52,30 @@ it('the hub copy of the bridge twin resolves a coin-keyed slot ahead of the bare
         assert.strictEqual(XCHAIN_BRIDGE_ACTIVATION['LTC:regtest'], saved, 'the vendored map was not restored');
     });
 
-    // The hub's three shipped maps must stay dark on both live networks for every chain: the
-    // hub signs transfer records, so an armed slot here is a federation that starts signing
-    // on a network the fleet has not deployed the flag day to.
-    it('holds every mainnet and testnet slot of all three twins unarmed', function () {
+    // The hub's three shipped maps must stay dark on mainnet for every chain, and the two
+    // token maps on testnet too: the hub signs transfer records, so an armed slot here is a
+    // federation that starts signing on a network the fleet has not deployed the flag day to.
+    // The one exception is what the v0.19.0 train wrote: XCHAIN_BRIDGE_ACTIVATION's three
+    // testnet coin slots, pinned here to the cut's heights so the vendored copy cannot drift
+    // from that record without this suite saying so; the bare testnet fallback stays dark.
+    it('holds every mainnet slot of all three twins unarmed, the token twins unarmed on testnet, and the cut\'s XCHAIN testnet heights', function () {
         const maps = {
             XCHAIN_BRIDGE_ACTIVATION: require('../../../src/xchain_bridge_activation.js').XCHAIN_BRIDGE_ACTIVATION,
             TOKEN_BRIDGE_ACTIVATION:  require('../../../src/token_bridge_activation.js').TOKEN_BRIDGE_ACTIVATION,
             TOKEN_POLICY_INHERITANCE_ACTIVATION:
                 require('../../../src/token_policy_activation.js').TOKEN_POLICY_INHERITANCE_ACTIVATION
         };
+        // Sized 2026-09-16 at the v0.19.0 cut from each chain's own tip and measured cadence.
+        const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152795, 'LTC:testnet': 4887694, 'DOGE:testnet': 67900889 };
         for (const [name, map] of Object.entries(maps)) {
             let checked = 0;
             for (const key of Object.keys(map)) {
                 if (!/mainnet|testnet/.test(key)) continue;
                 checked++;
-                assert.strictEqual(map[key], 9999999999,
-                    name + '.' + key + ' is off the house sentinel; arming a live network is the operator\'s ' +
-                    'act on the arming train, never a code change');
+                const armed = name === 'XCHAIN_BRIDGE_ACTIVATION' && ARMED_XCHAIN_TESTNET[key] !== undefined;
+                assert.strictEqual(map[key], armed ? ARMED_XCHAIN_TESTNET[key] : 9999999999,
+                    name + '.' + key + (armed ? ' does not carry the height the v0.19.0 cut sized; ' : ' is off the house sentinel; ') +
+                    'arming a live network is the operator\'s act on the arming train, never a code change');
             }
             assert.ok(checked >= 2, 'not vacuous: ' + name + ' declares no live-network slot');
         }
