@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- The hub's token bridge and policy inheritance gates arm on testnet per chain at BTC 153160, LTC 4888478 and DOGE 67906525.
 - Mirrored rows carry per-chain admission heights so a future-dated block no longer stalls indexer processing while the mirror proves completeness by height.
 - `carrier_logic_pin_ops --move` can re-pin changed carrier logic while recording the path and hash transitions atomically.
 
