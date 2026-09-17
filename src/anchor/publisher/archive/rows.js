@@ -141,18 +141,18 @@ module.exports = {
         for(let m of matchIds){
             await this.db.updateCrossChainMatchByMatchIdAndBatchSeq(batchSeq, m.status, txid, m.match_id);
         }
-        // Re-emit the stamped rows on the hub-DB mirror feed: anchor_txid is the one
-        // back-filled column the mirror twins carry, and without a re-broadcast a
-        // long-running streamed mirror keeps NULL forever while a later REST bootstrap
-        // serves the stamp (divergent mirrors). Retracted rows stay out of the feed
-        // (the stream already deleted them on mirrors); old sync clients INSERT IGNORE
-        // the re-delivery, so this is backward-compatible.
+        // Emit a metadata-only anchor stamp on the hub-DB mirror feed. A full-row
+        // re-broadcast can be refused after the admission watermark abandons the
+        // original XDEX round, while bypassing that refusal for a full row could
+        // insert a consensus row below a certified height. The narrow event lets a
+        // mirror update an existing row only. Retracted rows stay out of the feed
+        // because the stream already deleted them on mirrors.
         if(txid && matchIds.length && this.hub && this.hub.hubDbBroadcaster){
             try {
                 let ids = matchIds.map(m => m.match_id);
                 let rows = await this.db.findLiveCrossChainMatchesByMatchIds(ids);
                 for(let row of rows)
-                    this.hub.hubDbBroadcaster.broadcastRow({ table: 'cross_chain_matches', row: row });
+                    this.hub.hubDbBroadcaster.broadcastMatchAnchorStamp(row.match_id, row.anchor_txid);
             } catch(e){
                 logger.warn(nodeUtil.format('StateAnchorPublisher: anchor-stamp re-broadcast failed (mirrors converge on next bootstrap):', e.message));
             }
