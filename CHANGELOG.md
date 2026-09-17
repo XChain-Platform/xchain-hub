@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - A BTC-sourced bridge transfer is never anchored below the BTC block its source leg was mined in, so a mint is no longer proven against escrow from before the lock.
+- The mirror bootstrap pages for cross-chain calls, attestation responses and anchor-reward attestations carry the admission-height columns, so a reconnecting indexer binds those rows by height exactly as a streaming one does.
 
 ## [0.19.0] - 2026-09-16
 
