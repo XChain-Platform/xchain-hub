@@ -360,7 +360,9 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
 
             let p = makeScriptedPublisher(hub, []);
             let cap = captureErrors();
-            try { await p.hydrateMarkers(); } finally { cap.restore(); }
+            // The suite's own clock, because the hydrate is bounded to the catch-up
+            // horizon and this window is one below `now` rather than one below wall clock.
+            try { await p.hydrateMarkers(now); } finally { cap.restore(); }
 
             expect(p._quarantined.has(start)).to.equal(true);
             expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);

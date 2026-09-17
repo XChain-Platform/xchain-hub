@@ -23,8 +23,22 @@
 'use strict';
 
 const fs = require('fs');
+const { MAX_CATCHUP_WINDOWS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+// An age in seconds as the two coarsest units that still locate it. A four-day marker
+// and a four-hour one have to read differently at a glance, because the age is the
+// whole difference between an operator action item and a reconciliation record.
+function formatAge(seconds){
+    let secs = Math.max(0, Math.floor(Number(seconds) || 0));
+    let d = Math.floor(secs / 86400);
+    let h = Math.floor((secs % 86400) / 3600);
+    let m = Math.floor((secs % 3600) / 60);
+    if(d > 0) return d + 'd' + h + 'h';
+    if(h > 0) return h + 'h' + m + 'm';
+    return m + 'm' + (secs % 60) + 's';
+}
 
 module.exports = {
 
@@ -37,18 +51,62 @@ module.exports = {
         return (rows && rows.length) ? rows[0] : null;
     },
 
-    // Load every window this hub has already resolved. Only the intent-only rows need
-    // remembering in memory: they are the ones the sweep must refuse, once each rather
-    // than once per pass.
-    async hydrateMarkers(){
+    // The oldest window a marker can still matter for: pendingWindows builds candidates
+    // only at current - 1..MAX_CATCHUP_WINDOWS. The current window only ever advances, so
+    // a floor taken at boot cannot exclude a window a later sweep would consider.
+    catchupFloorWindow(currentWindow){
+        return Number(currentWindow) - MAX_CATCHUP_WINDOWS * this.windowS;
+    },
+
+    // Quarantine the windows a crash left with an intent and no outcome, bounded to the
+    // catch-up horizon: an intent-only row is remembered so the sweep refuses it once
+    // rather than per pass, and a window the sweep cannot propose needs no refusal.
+    //
+    // `nowSec` is the clock the horizon is measured from, defaulting to this hub's.
+    async hydrateMarkers(nowSec){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
-        for(let r of (rows || [])) this._quarantined.add(Number(r.window_start));
-        if(this._quarantined.size > 0)
-            logger.error('AttestationBatchPublisher: ' + this._quarantined.size + ' window(s) carry a ' +
+        let current = this.windowStartFor(Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds());
+        let floor   = this.catchupFloorWindow(current);
+
+        let live = [], aged = [];
+        for(let r of (rows || [])){
+            let start = Number(r.window_start);
+            // A row whose window_start does not read as a number cannot be matched against
+            // any window the sweep proposes, so it is neither quarantined nor counted.
+            if(!Number.isFinite(start)) continue;
+            (start >= floor ? live : aged).push(start);
+        }
+        live.sort((a, b) => a - b);
+        for(let start of live) this._quarantined.add(start);
+        this.reportHydratedMarkers(live, aged, current);
+    },
+
+    // Two kinds of marker at two severities. A window inside the horizon is an action item
+    // and names its age, because a count with no age leaves a four-day-old marker reading
+    // like a fresh one; a window below it is a record and must not read as an alarm.
+    reportHydratedMarkers(live, aged, currentWindow){
+        if(live.length > 0)
+            logger.error('AttestationBatchPublisher: ' + live.length + ' window(s) carry a ' +
                 'publish-intent marker with no outcome; they are NOT re-published automatically. ' +
-                'Operator: verify each on chain and replay by hand if absent.');
+                'Operator: verify each on chain and replay by hand if absent. Windows: ' +
+                live.map(s => s + ' (' + this.markerAge(s, currentWindow) + ')').join(', ') + '.');
+        if(aged.length > 0)
+            logger.info('AttestationBatchPublisher: ' + aged.length + ' publish-intent marker(s) lie below ' +
+                'the ' + MAX_CATCHUP_WINDOWS + '-window catch-up horizon and are NOT an action item: no ' +
+                'sweep can propose those windows again. Oldest ' +
+                this.markerAge(Math.min.apply(null, aged), currentWindow) + ', newest ' +
+                this.markerAge(Math.max.apply(null, aged), currentWindow) + '.');
+    },
+
+    // A marker's age in the two units that decide what to do with it: windows closed
+    // since, which is what the catch-up horizon is measured in, and wall-clock, which is
+    // what an operator reading the line has.
+    markerAge(windowStart, currentWindow){
+        let secs    = Math.max(0, Number(currentWindow) - Number(windowStart));
+        let windows = this.windowS > 0 ? Math.round(secs / this.windowS) : 0;
+        return windows + ' window(s) / ' + formatAge(secs) + ' old';
     },
 
     // Idempotent: an existing row for the window is left exactly as it is, so a replay
