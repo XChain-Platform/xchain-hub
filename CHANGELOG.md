@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mirrored rows carry per-chain admission heights so a future-dated block no longer stalls indexer processing while the mirror proves completeness by height.
 - `carrier_logic_pin_ops --move` can re-pin changed carrier logic while recording the path and hash transitions atomically.
 
+### Fixed
+- A BTC-sourced bridge transfer is never anchored below the BTC block its source leg was mined in, so a mint is no longer proven against escrow from before the lock.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added

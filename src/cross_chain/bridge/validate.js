@@ -62,6 +62,24 @@ module.exports = {
     // Follower verification
     // ---------------------------------------------------------------------------
 
+    // Whether a transfer's snapshot_block covers the block its own source leg was mined in.
+    // The destination indexer proves a BTC lock's escrow at the FIRST checkpoint at or after
+    // snapshot_block, and a checkpoint at a height commits that block's state, so an anchor
+    // below the lock block can select a checkpoint from BEFORE the lock credited the escrow:
+    // the mint is then refused every block while the value sits locked (drive 24, row
+    // 490092b8: lock at 4912, a hub tip trailing the indexer stamped 4911, a checkpoint at
+    // 4911). The proposer holds the leg until its tip reaches the block and the follower
+    // refuses a row below it, both judged at the block the leg's OWN indexer reports.
+    //
+    // snapshot_block is a BTC height, so the floor is read only for a BTC-sourced leg. A
+    // DOGE or LTC leg's block_index is on another chain's axis, and those legs are never
+    // proven against a BTC checkpoint. Signing rule only: no id, canonical or mirrored
+    // column changes, and what an indexer does with a finalized row is untouched.
+    snapshotCoversLeg(srcChain, snapshotBlock, legBlock){
+        if(String(srcChain) !== 'BTC') return true;
+        return Number(snapshotBlock) >= Number(legBlock);
+    },
+
     // What a peer runs before it signs a leader's proposed row. A Byzantine leader cannot
     // get us to sign a record we cannot independently see: the transfer is re-fetched from
     // OUR source-chain indexer field for field at OUR effective depth, and the policy is
@@ -110,6 +128,8 @@ module.exports = {
         // Our OWN depth judgement, at the MIN_DEPTH our own indexer reports the lock stamped.
         let depth = latest - Number(leg.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.effectiveDepth(row.src_chain, leg.min_depth)) return false;
+        // The leader's adopted snapshot_block must not predate the leg (snapshotCoversLeg).
+        if(!this.snapshotCoversLeg(row.src_chain, row.snapshot_block, leg.block_index)) return false;
 
         // The SOURCE CHAIN's own flag day, at the height the leg was mined: the mirror of the
         // proposer's gate in maybeFinalizeTransfer, on the same (block, coin) pair, so a leg

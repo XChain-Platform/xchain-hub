@@ -283,7 +283,9 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part3()
       btcBlock: 150
     });
     for (const [block, ok] of [[294, true], [295, false], [6, true], [5, false]]) {
-      feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
+      // The lock sits at block 5 so the lower edge is the window alone, not the rule that a
+      // BTC leg is never anchored below its own block (snapshotCoversLeg).
+      feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, { block_index: 5 });
       // eslint-disable-next-line no-await-in-loop
       expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine, {
         snapshot_block: block
