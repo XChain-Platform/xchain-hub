@@ -167,9 +167,30 @@ it('holds an INERT network inert at height 0 and at a huge height', function () 
     });
 }
 
+// testnet left registerBarrierHorizonTests' inert loop at the 2026-09-16 cut, so the property
+// that replaces its coverage is the SIZED height itself, driven on the SHIPPED map rather than
+// an armed copy. The barrier rides the BTC mirror consumer's instant, so this height is also
+// what says the maturity horizon and the mirror consumer flip together, never a block apart.
+function registerBarrierCutTests() {
+    it('arms the testnet barrier horizon exactly at its sized height, never a block early', function () {
+        expect(local.ANCHOR_ATTEST_BARRIER_ACTIVATION.testnet,
+            'not vacuous: the sized testnet height this case is about must still be in the map').to.equal(153266);
+        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 153265),
+            'the horizon armed a block BELOW its sized height').to.equal(false);
+        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 153266),
+            'the horizon is not armed AT its own sized height; the comparison must be >=, not >').to.equal(true);
+        // The same `0 >= threshold` direction the inert case guards, but on a LIVE height: a
+        // guard keyed on null alone would arm genesis here and no inert case would catch it.
+        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 0),
+            'the horizon armed at genesis on a network carrying a real, far-future height').to.equal(false);
+    });
+}
+
 describe('anchor_reward_activation: isAnchorAttestBarrierHorizonActive (the 0 >= null trap)', function () {
 
     registerBarrierHorizonTests();
+
+    registerBarrierCutTests();
 
     // ONE venue lever arms BOTH flag days. A drill that armed the admission axis while leaving
     // the horizon inert would rehearse a split the fleet is never supposed to be in.
