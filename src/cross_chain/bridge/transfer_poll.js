@@ -280,10 +280,8 @@ module.exports = {
         // A general-token leg needs the token-bridge gate as well as the bridge gate; the
         // base spec's own legs are XCHAIN and ride the bridge gate alone. The parity test
         // pins TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key, so
-        // this can never arm v3/v4 without an engine behind it. The token map is keyed per
-        // chain and the snapshot block is a BTC height, so it is read at BTC's slot, which
-        // is sound only while BTC arms last in wall clock: the indexer parity suite's
-        // height_ordering case asserts that over the canonical sizing records.
+        // this can never arm v3/v4 without an engine behind it. The token map is
+        // network-keyed and the snapshot block is BTC's, so the coin travels with the height.
         if(tick !== 'XCHAIN' && !this.gateActive('token', snapshotBlock, 'BTC'))
             return this.logHeld(coin, t, 'token bridge not active at snapshot_block ' + snapshotBlock);
 

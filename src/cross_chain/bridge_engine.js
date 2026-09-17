@@ -87,9 +87,9 @@ const BRIDGE_GATE_KEYS = {
 };
 
 // The predicate shape every bridge part calls through gateActive: (block, network, coin).
-// All three maps are keyed '<COIN>:<network>' since the v0.20.0 arming train; the registry
-// resolves the coin-keyed entry first, then the bare network, so the coin a caller passes
-// must be the chain whose height `block` is (BTC for the BTC-anchored snapshot block).
+// Only the bridge map is keyed '<COIN>:<network>' today; the registry's own resolution
+// order (coin-keyed entry first, then the bare network) is the one the retired
+// predicates used, and it ignores the coin for a map that has no such key.
 function loadActivation(key){
     registry.get(key);
     return (block, network, coin) => registry.activeAt(key, network, coin, block, null);
