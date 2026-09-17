@@ -95,38 +95,39 @@ function itHandsTheCoinToTheRegistryAheadOfTheBareKey() {
     });
 }
 
-// The three rows must stay dark on mainnet for every chain, and the two token rows on
-// testnet too: the hub signs transfer records, so an armed slot here is a federation that
-// starts signing on a network the fleet has not deployed the flag day to. The one
-// exception is what the v0.19.0 train wrote: the bridge row's three testnet coin slots,
-// pinned here to the cut's heights so the row cannot drift from that record without this
-// suite saying so; the bare testnet fallback stays dark. Sized 2026-09-16 at the v0.19.0
-// cut (re-cut 16:33Z after the chain overran the first sizing) from each chain's own tip
-// and measured cadence.
+// The three rows must stay dark on mainnet for every chain: the hub signs transfer records,
+// so an armed slot here is a federation that starts signing on a network the fleet has not
+// deployed the flag day to. Testnet carries exactly what the trains wrote, pinned here so a
+// row cannot drift from its cut's record without this suite saying so, and every bare
+// testnet fallback stays dark. The bridge row's three coin slots were sized at the v0.19.0
+// cut (2026-09-16, re-cut 16:33Z after the chain overran the first sizing). The token and
+// policy rows were re-keyed per chain and sized at the v0.20.0 cut (2026-09-17 02:42Z),
+// policy at the token bridge's own heights. Each from its chain's own tip and cadence.
 const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'DOGE:testnet': 67902062 };
+const ARMED_TOKEN_TESTNET  = { 'BTC:testnet': 153160, 'LTC:testnet': 4888478, 'DOGE:testnet': 67906525 };
+const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
-    it('holds every mainnet slot of all three gates unarmed, the token gates unarmed on testnet, and the cut\'s bridge testnet heights', function () {
+    it('holds every mainnet slot of all three gates unarmed, and each gate\'s testnet coin slots at the heights its cut sized', function () {
         for (const [key, regKey] of GATES) {
             const row = registry.get(regKey);
+            const armedSlots = ARMED_TESTNET[key];
             for (const slot of Object.keys(row)) {
                 if (!/mainnet$|testnet$/.test(slot)) continue;
-                const armed = key === 'bridge' && ARMED_XCHAIN_TESTNET[slot] !== undefined;
-                expect(row[slot], regKey + ' ' + slot + (armed ? ' does not carry the height the v0.19.0 cut sized' : ' is off the house sentinel'))
-                    .to.equal(armed ? ARMED_XCHAIN_TESTNET[slot] : 9999999999);
+                const armed = armedSlots[slot] !== undefined;
+                expect(row[slot], regKey + ' ' + slot + (armed ? ' does not carry the height its cut sized' : ' is off the house sentinel'))
+                    .to.equal(armed ? armedSlots[slot] : 9999999999);
             }
             expect(engine.activation[key](9999999998, 'mainnet', 'BTC'), regKey + ' mainnet').to.equal(false);
-            if (key === 'bridge') continue;
-            expect(engine.activation[key](9999999998, 'testnet', 'BTC'), regKey + ' testnet').to.equal(false);
+            // The armed slots resolve through the engine, with the coin handed in, at their
+            // height and not one below; an unlisted coin reads the dark bare fallback.
+            for (const [slot, height] of Object.entries(armedSlots)) {
+                const coin = slot.split(':')[0];
+                expect(engine.activation[key](height - 1, 'testnet', coin), regKey + ' ' + slot + ' one below its height').to.equal(false);
+                expect(engine.activation[key](height, 'testnet', coin), regKey + ' ' + slot + ' at its height').to.equal(true);
+            }
+            expect(engine.activation[key](9999999998, 'testnet', 'BCH'), regKey + ': an unlisted testnet coin reads the dark fallback').to.equal(false);
         }
-        // The armed slots resolve through the engine at their height and not one below,
-        // and an unlisted coin reads the dark bare fallback.
-        for (const [slot, height] of Object.entries(ARMED_XCHAIN_TESTNET)) {
-            const coin = slot.split(':')[0];
-            expect(engine.activation.bridge(height - 1, 'testnet', coin), slot + ' one below its height').to.equal(false);
-            expect(engine.activation.bridge(height, 'testnet', coin), slot + ' at its height').to.equal(true);
-        }
-        expect(engine.activation.bridge(9999999998, 'testnet', 'BCH'), 'an unlisted testnet coin reads the dark fallback').to.equal(false);
     });
 }
 
