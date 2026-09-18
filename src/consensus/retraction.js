@@ -65,7 +65,7 @@
  ********************************************************************/
 
 const crypto            = require('crypto');
-const swq               = require('../stake_weighted_quorum.js');
+const swq               = require('./stake_weighted_quorum.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');

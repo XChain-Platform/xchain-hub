@@ -24,6 +24,16 @@
  *
  ********************************************************************/
 
+// The anchor_reward_attestations columns a hub-DB mirror receives, shared by the REST
+// bootstrap page (findAnchorRewardAttestations) and the live stream's read-back
+// (getAnchorRewardAttestation) so a reconnecting mirror and a streaming mirror hold the
+// same row. admit_block_btc is the row's BTC admission height (NULL is the legacy row);
+// a bootstrap list without it would bind a height-stamped row by the legacy rule.
+const ANCHOR_REWARD_MIRROR_COLUMNS = [
+    'id', 'chain', 'network', 'reward_type', 'round_reference', 'snapshot_block', 'publisher',
+    'reward_amount', 'publisher_attestations', 'doge_anchor_txid', 'admit_block_btc', 'created_at'
+];
+
 module.exports = {
     // Inserts a row into anchor_reward_attestations.
     // Moved here from src/anchor/publisher.js:1498.
@@ -52,7 +62,7 @@ module.exports = {
     // Reads rows from anchor_reward_attestations.
     // Moved here from src/api.js:2248.
     async findAnchorRewardAttestations(since, limit) {
-        return this.doQuery('SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        return this.doQuery('SELECT ' + ANCHOR_REWARD_MIRROR_COLUMNS.join(', ') + ' FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
     // Reads one row from anchor_published_archives.
@@ -64,7 +74,7 @@ module.exports = {
     // Reads one row from anchor_reward_attestations.
     // Moved here from src/anchor/publisher.js:1530.
     async getAnchorRewardAttestation(rowChain, network, rewardType, roundReference, snapshotBlock, publisher) {
-        return this.doQuery('SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1', [rowChain, network, rewardType, roundReference, snapshotBlock, publisher]);
+        return this.doQuery('SELECT ' + ANCHOR_REWARD_MIRROR_COLUMNS.join(', ') + ' FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1', [rowChain, network, rewardType, roundReference, snapshotBlock, publisher]);
     },
 
     // Reads one row from anchor_reward_attestations.

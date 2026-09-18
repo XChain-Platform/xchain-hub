@@ -42,7 +42,10 @@ const EventEmitter = require('events');
 const AttestationPublisher      = require('../../../../src/attestation/publisher');
 const AttestationResponseMirror = require('../../../../src/attestation/response_mirror');
 const { DB_METHODS }            = require('../../../helpers/mockHub.js');
-const activationMod = require('../../../../src/attest_response_mirror_activation.js');
+// The mirror flag day is a registry row (W5); the publisher and the mirror read it
+// through the registry module object, which is where the sweep moves the height.
+const gateRegistry = require('../../../../src/consensus/gate_registry');
+const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 
 const PUB = 'aa'.repeat(32);
 
@@ -143,7 +146,8 @@ async function fireAndClassify(consensus, pub, mirror, rid, blockIndex) {
     return result;
 }
 
-let originalRegtestHeight;
+// Its own sandbox: the per-test sinon.restore() below must not take it down mid-suite.
+const heightSandbox = sinon.createSandbox();
 
 function registerResponseEraSweepTests() {
 it('above the activation height: the mirror writes, the publisher stays silent', async function () {
@@ -194,16 +198,20 @@ describe('ATTEST response era partition: publisher XOR mirror, never both, never
 
 
     // Regtest ships armed at genesis (height 0), which leaves no room to drive
-    // a genuine below-the-height case. The activation map is a plain object,
-    // not frozen, so a local, restored-after height gives the sweep a real
-    // boundary to cross without touching the frozen protocol constant itself.
+    // a genuine below-the-height case. activeAt answers the mirror key on regtest
+    // against height 100 for the whole suite, and every other key as before, so
+    // the sweep has a real boundary to cross without touching the registry row.
     before(function () {
-        originalRegtestHeight = activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest;
-        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = 100;
+        const real = gateRegistry.activeAt;
+        heightSandbox.stub(gateRegistry, 'activeAt').callsFake((key, net, coin, height, time) => {
+            if (key !== MIRROR_KEY || net !== 'regtest') return real(key, net, coin, height, time);
+            const h = parseInt(height);
+            return Number.isFinite(h) && h >= 100;
+        });
     });
 
     after(function () {
-        activationMod.ATTEST_RESPONSE_MIRROR_ACTIVATION.regtest = originalRegtestHeight;
+        heightSandbox.restore();
     });
 
     afterEach(function () {

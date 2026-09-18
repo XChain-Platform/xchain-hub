@@ -43,8 +43,11 @@ const os         = require('os');
 const path       = require('path');
 
 const AttestationRelay = require('../../../../src/attestation/relay.js');
-const eq               = require('../../../../src/equivocation_header.js');
-const rejectSlot       = require('../../../../src/attest_relay_reject_slot_activation.js');
+const eq               = require('../../../../src/consensus/equivocation_header.js');
+// The reject-slot rule is a registry row (W5); discovery reads it through the
+// registry module object, which is where the fixture below moves its threshold.
+const gateRegistry     = require('../../../../src/consensus/gate_registry');
+const REJECT_SLOT_KEY  = 'attest_relay_reject_slot_activation.ATTEST_RELAY_REJECT_SLOT_ACTIVATION';
 
 const REQ_ID    = 'd'.repeat(64);
 const PUBKEY_A  = 'a'.repeat(64);
@@ -182,12 +185,17 @@ const refusedHomeRow = () => homeRelayedRow({
             });
 
 // Drive a threshold rather than the armed map, so both sides of the arm are
-            // reachable wherever the networks are armed today. Restored in place.
+            // reachable wherever the networks are armed today: activeAt answers the
+            // reject-slot key against `value` on the time plane for `network` and every
+            // other key as before. Restored after the call.
             function withThreshold(network, value, fn) {
-                const map   = rejectSlot.ATTEST_RELAY_REJECT_SLOT_ACTIVATION;
-                const saved = map[network];
-                map[network] = value;
-                return fn().finally(() => { map[network] = saved; });
+                const real = gateRegistry.activeAt;
+                const stub = sinon.stub(gateRegistry, 'activeAt').callsFake((key, net, coin, height, time) => {
+                    if (key !== REJECT_SLOT_KEY || net !== network) return real(key, net, coin, height, time);
+                    const t = parseInt(time);
+                    return Number.isFinite(t) && t >= value;
+                });
+                return fn().finally(() => stub.restore());
             }
 
 // ── 3. Discovery gating ─────────────────────────────────────────────────

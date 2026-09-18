@@ -25,9 +25,12 @@
 
 'use strict';
 
-const swq               = require('../../stake_weighted_quorum.js');
+const swq               = require('../stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
-const { isRetractionSigningActive } = require('../../retraction_signing_activation.js');
+// The signed-retraction flag day is a registry row read by literal key (W5), on the
+// retraction's BTC-anchored snapshot block.
+const gateRegistry = require('../gate_registry');
+const RETRACTION_SIGNING_KEY = 'retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION';
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -48,7 +51,7 @@ module.exports = {
         if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
 
         let snapshotBlock = await this.resolveSnapshotBlock();
-        if(snapshotBlock == null || !isRetractionSigningActive(snapshotBlock, this.network))
+        if(snapshotBlock == null || !gateRegistry.activeAt(RETRACTION_SIGNING_KEY, this.network, null, snapshotBlock, null))
             return this.broadcastUnsigned(evt);
 
         let validators = await this.resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);

@@ -33,7 +33,7 @@
 const assert          = require('assert');
 const OracleConsensus = require('../../../../src/oracle/consensus.js');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-const eq              = require('../../../../src/equivocation_header.js');
+const eq              = require('../../../../src/consensus/equivocation_header.js');
 
 const ANCHOR = 912345;   // equals the last round's own anchor, per the wire format
 const FIRST  = 1039;
@@ -125,14 +125,14 @@ function loadIndexerTwin(ctx) {
     const ADMIT_TAIL = '|BTC:799004,DOGE:5000004,LTC:2400004';
 
     const HUB_MODULES = [
-        '../../../../src/mirror_admission_activation.js',
+        '../../../../src/consensus/gates/mirror_admission_gate.js',
         '../../../../src/lib/admission_height.js',
         '../../../../src/oracle/consensus.js',
         '../../../../src/oracle/price_aggregator.js'
     ];
 
     const INDEXER_MODULES = [
-        '../../../../../xchain-indexer/src/mirror_admission_activation.js',
+        '../../../../../xchain-indexer/src/consensus/gates/mirror_admission_gate.js',
         '../../../../../xchain-indexer/src/consensus/ed25519.js'
     ];
 
@@ -153,7 +153,7 @@ function loadIndexerTwin(ctx) {
 
         const ArmedOracleConsensus = require('../../../../src/oracle/consensus.js');
         const ArmedPriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-        const act                  = require('../../../../src/mirror_admission_activation.js');
+        const act                  = require('../../../../src/consensus/gates/mirror_admission_gate.js');
         const indexer              = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
 
         // Put the process back exactly as it was found. The instances built below keep the

@@ -28,8 +28,8 @@ const EventEmitter = require('events');
 
 const ValidatorIdentity    = require('../../../src/validators/identity.js');
 const StateAnchorPublisher = require('../../../src/anchor/publisher.js');
-const rca                  = require('../../../src/rollcall_activation.js');
-const rga                  = require('../../../src/rollcall_gates_activation.js');
+const rca                  = require('../../../src/consensus/gates/rollcall_gate.js');
+const rga                  = require('../../../src/consensus/gates/rollcall_gates_gate.js');
 const { knownGateKeys }    = require('../../../src/consensus_rules_digest.js');
 
 const BTC_URL  = 'http://btc-indexer.test';

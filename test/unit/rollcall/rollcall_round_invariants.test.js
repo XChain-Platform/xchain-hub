@@ -21,8 +21,8 @@
 const assert = require('assert');
 
 const RollcallRound = require('../../../src/rollcall/round.js');
-const rca           = require('../../../src/rollcall_activation.js');
-const { CANONICAL_REORG_BUFFER } = require('../../../src/snapshot_reorg_buffer.js');
+const rca           = require('../../../src/consensus/gates/rollcall_gate.js');
+const { CANONICAL_REORG_BUFFER } = require('../../../src/consensus/snapshot_reorg_buffer.js');
 const { turnsUntil, settleFlag } = require('../../helpers/microtask_turns');
 
 const NETWORKS = ['mainnet', 'testnet', 'regtest'];

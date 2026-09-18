@@ -24,9 +24,9 @@
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const ValidatorIdentity = require('../../../validators/identity.js');
-const swq = require('../../../stake_weighted_quorum.js');
-const eq = require('../../../equivocation_header.js');
-const ar = require('../../../anchor_reward_activation.js');
+const swq = require('../../../consensus/stake_weighted_quorum.js');
+const eq = require('../../../consensus/equivocation_header.js');
+const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const { XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();

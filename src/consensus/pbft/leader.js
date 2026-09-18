@@ -25,8 +25,8 @@
 
 'use strict';
 
-const swq    = require('../../stake_weighted_quorum.js');
-const eq     = require('../../equivocation_header.js');
+const swq    = require('../stake_weighted_quorum.js');
+const eq     = require('../equivocation_header.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 

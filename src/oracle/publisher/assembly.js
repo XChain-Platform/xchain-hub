@@ -23,8 +23,11 @@
 
 'use strict';
 
-const swq = require('../../stake_weighted_quorum.js');
-const pst = require('../../price_sig_tally_activation.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
+// The verify-first tally rule is a registry row read by literal key (W5), on the
+// batch's BTC anchor height.
+const gateRegistry = require('../../consensus/gate_registry');
+const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -342,7 +345,7 @@ module.exports = {
     flagDayKey(btcBlockHeight) {
         let h = Number(btcBlockHeight);
         return (swq.isStakeWeightedQuorumActive(h, this.network) ? '1' : '0') +
-               (pst.isPriceSigTallyVerifyFirstActive(h, this.network) ? '1' : '0') +
+               (gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, this.network, null, h, null) ? '1' : '0') +
                (this.admission.isAdmissionEra(this.network, h) ? '1' : '0');
     },
 

@@ -4,7 +4,11 @@
   "globs": [
     {
       "glob": "src/*_activation.js",
-      "why": "gate carriers, resolved by computed require"
+      "why": "gate carriers at the top of src/: the twins before W5, the hub-only three after"
+    },
+    {
+      "glob": "src/consensus/gates/*_gate.js",
+      "why": "the logic-bearing twin gates, byte twins of the indexer copies at this one tail"
     },
     {
       "glob": "src/lib/fullnode_activation.js",
@@ -12,15 +16,27 @@
     },
     {
       "glob": "src/equivocation_header.js",
-      "why": "a SHARED_GATES carrier under a name that is not _activation"
+      "why": "a SHARED_GATES carrier under a name that is not _activation (its home before W5)"
     },
     {
       "glob": "src/snapshot_reorg_buffer.js",
-      "why": "a SHARED_GATES carrier under a name that is not _activation"
+      "why": "a SHARED_GATES carrier under a name that is not _activation (its home before W5)"
     },
     {
       "glob": "src/stake_weighted_quorum.js",
-      "why": "a SHARED_GATES carrier under a name that is not _activation"
+      "why": "a SHARED_GATES carrier under a name that is not _activation (its home before W5)"
+    },
+    {
+      "glob": "src/consensus/equivocation_header.js",
+      "why": "a SHARED_GATES carrier at its W5 home, a byte twin at this tail in every repo"
+    },
+    {
+      "glob": "src/consensus/snapshot_reorg_buffer.js",
+      "why": "a SHARED_GATES carrier at its W5 home, a byte twin at this tail in every repo"
+    },
+    {
+      "glob": "src/consensus/stake_weighted_quorum.js",
+      "why": "a SHARED_GATES carrier at its W5 home, a byte twin at this tail in every repo"
     },
     {
       "glob": "src/consensus_rules_digest.js",
@@ -70,21 +86,15 @@
   "movable": [
     "src/coins/fullnodeComment.test.js"
   ],
-  "fileCount": 81,
+  "fileCount": 70,
   "files": [
-    "src/anchor_reward_activation.js",
     "src/attest_leader_silence_skip_activation.js",
-    "src/attest_relay_activation.js",
-    "src/attest_relay_reject_slot_activation.js",
-    "src/attest_response_mirror_activation.js",
-    "src/attest_responsible_widening_activation.js",
-    "src/attest_zero_conf_activation.js",
-    "src/checkpoint_commitment_activation.js",
     "src/coins/BTC.js",
     "src/coins/DOGE.js",
     "src/coins/LTC.js",
     "src/coins/consensus_pin.js",
     "src/coins/index.js",
+    "src/consensus/equivocation_header.js",
     "src/consensus/gate_registry.js",
     "src/consensus/gate_registry/core.js",
     "src/consensus/gate_registry/regtest_env.js",
@@ -94,24 +104,23 @@
     "src/consensus/gate_registry/shared_rows_3.js",
     "src/consensus/gate_registry/shared_rows_4.js",
     "src/consensus/gate_registry/shared_rows_5.js",
+    "src/consensus/gates/anchor_reward_gate.js",
+    "src/consensus/gates/attest_responsible_widening_gate.js",
+    "src/consensus/gates/mirror_admission_gate.js",
+    "src/consensus/gates/price_pair_gate.js",
+    "src/consensus/gates/price_scale_gate.js",
+    "src/consensus/gates/rollcall_gate.js",
+    "src/consensus/gates/rollcall_gates_gate.js",
+    "src/consensus/snapshot_reorg_buffer.js",
+    "src/consensus/stake_weighted_quorum.js",
     "src/consensus_rules_digest.js",
-    "src/cross_chain_royalty_activation.js",
-    "src/equivocation_header.js",
     "src/lib/fullnode_activation.js",
-    "src/mirror_admission_activation.js",
     "src/observability/README.md",
     "src/observability/index.js",
     "src/observability/logShipper.js",
     "src/observability/metrics.js",
     "src/oracle_clamp_reference_activation.js",
     "src/price_batch_compression.js",
-    "src/price_pair_activation.js",
-    "src/price_scale_activation.js",
-    "src/price_sig_tally_activation.js",
-    "src/retraction_signing_activation.js",
-    "src/rollcall_activation.js",
-    "src/rollcall_gates_activation.js",
-    "src/snapshot_reorg_buffer.js",
     "src/sql/anchor_published_archives.sql",
     "src/sql/anchor_published_checkpoints.sql",
     "src/sql/anchor_reward_attestations.sql",
@@ -144,12 +153,8 @@
     "src/sql/validator_capabilities.sql",
     "src/sql/validator_rewards.sql",
     "src/sql/validators.sql",
-    "src/stake_weighted_quorum.js",
-    "src/token_bridge_activation.js",
-    "src/token_policy_activation.js",
     "src/xchainPrice.js",
     "src/xchainPriceQuery.js",
-    "src/xchain_bridge_activation.js",
     "src/xchain_price_activation.js",
     "test/fixtures/anchor_canonical_vectors.json",
     "test/fixtures/dex-fill-quantization-vectors.json"

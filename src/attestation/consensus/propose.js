@@ -101,7 +101,7 @@ module.exports = {
         // hub. Clamping to max(1, redundancy) keeps max(quorum, redundancy) at
         // redundancy, which is the bar the indexer verifies against
         // (xchain-indexer/src/actions/attest/attest_response_verify.js) and the contract the
-        // ladder states (attest_responsible_widening_activation.js: widening grows
+        // ladder states (attest_responsible_widening_gate.js: widening grows
         // the pool permitted to sign, never the count required to finalize).
         // `quorum` is retained as PBFT scaffolding (and to document intent) but
         // never sets the gate today. Do NOT wire it into a new path expecting it

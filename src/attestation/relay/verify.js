@@ -23,8 +23,11 @@
 
 'use strict';
 
-const swq         = require('../../stake_weighted_quorum.js');
-const attestRelay = require('../../attest_relay_activation.js');
+const swq         = require('../../consensus/stake_weighted_quorum.js');
+// The relay flag day is a registry row read by literal key (W5), on the row's
+// BTC-anchored snapshot block.
+const gateRegistry = require('../../consensus/gate_registry');
+const ATTEST_RELAY_KEY = 'attest_relay_activation.ATTEST_RELAY_ACTIVATION';
 const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { RELAY_CANONICAL_INT_FIELDS, HOME_CHAIN, ORIGIN_CHAINS, SNAPSHOT_DRIFT_BLOCKS } = require('./constants.js');
 const { getLogger } = require('../../observability');
@@ -63,7 +66,7 @@ module.exports = {
         if(ORIGIN_CHAINS.indexOf(String(row.origin_chain)) === -1) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
         if(String(row.round_id).toLowerCase() !== this.roundId(phase, rid)) return false;
-        if(!attestRelay.isAttestRelayActive(row.snapshot_block, this.network)) return false;
+        if(!gateRegistry.activeAt(ATTEST_RELAY_KEY, this.network, null, row.snapshot_block, null)) return false;
         let myBlock = await this.resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > SNAPSHOT_DRIFT_BLOCKS) return false;
         return true;

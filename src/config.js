@@ -156,6 +156,7 @@ const config = {
     get HUB_RATE_LIMIT_RPM() { return process.env.HUB_RATE_LIMIT_RPM; },
     get HUB_REORG_API_KEY() { return process.env.HUB_REORG_API_KEY; },
     get HUB_SENSITIVE_READ_AUTH() { return process.env.HUB_SENSITIVE_READ_AUTH; },
+    get HUB_SNAPSHOT_RATE_LIMIT_RPM() { return process.env.HUB_SNAPSHOT_RATE_LIMIT_RPM; },
     get HUB_SNAPSHOT_REORG_BUFFER() { return process.env.HUB_SNAPSHOT_REORG_BUFFER; },
     get HUB_TRUST_PROXY() { return process.env.HUB_TRUST_PROXY; },
     get INDEXER_COIN_CHECK() { return process.env.INDEXER_COIN_CHECK; },

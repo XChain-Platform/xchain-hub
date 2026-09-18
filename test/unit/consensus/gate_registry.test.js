@@ -21,7 +21,8 @@
  * while copy() hands out mutable ones, the venue's regtest arming is applied
  * when a row is read (D78: the environment as it stands at that moment, with
  * no registry purge), the block lives in the part files and nowhere else,
- * and every part file is a byte twin of the indexer's.
+ * and every block part file is a byte twin of the indexer's, while the one
+ * hub-only part carries no block marker and is twinned nowhere.
  *
  ********************************************************************/
 
@@ -38,6 +39,9 @@ const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
 const PARTS_DIR    = path.join(SRC, 'consensus', 'gate_registry');
 const PARTS        = ['shared_rows_1.js', 'shared_rows_2.js', 'shared_rows_3.js', 'shared_rows_4.js', 'shared_rows_5.js'];
+// The rows this hub alone judges, queued after the block; not a twin, so it
+// carries no SHARED-GATES markers and is graded apart from PARTS.
+const HUB_PARTS    = ['hub_rows.js'];
 // The files under gate_registry/ that are byte twins of the indexer's
 // src/protocol_changes/ files of the same name (core.js is the consumer core,
 // authored here, so it is the one file with no indexer twin).
@@ -46,17 +50,23 @@ const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..'
 const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
 const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
-// Every converted carrier, by stem: the 12 byte twins, the masked twin, the 5 value
-// twins and the 3 carriers under names that are not _activation.
+// Every converted carrier that still has a logic module, by registry stem and the
+// file it lives in since W5: the 7 gate twins under src/consensus/gates/, the
+// hub-owned zero-conf gate, and the 3 carriers under names that are not
+// _activation. The 10 predicate-only twins retired at W5 have no module left;
+// their rows are covered by the twin-parts compare below and the registry tests.
 const CONVERTED = [
-    'anchor_reward_activation', 'attest_relay_activation', 'attest_relay_reject_slot_activation',
-    'checkpoint_commitment_activation', 'cross_chain_royalty_activation', 'mirror_admission_activation',
-    'price_pair_activation', 'price_scale_activation', 'price_sig_tally_activation',
-    'retraction_signing_activation', 'token_bridge_activation', 'token_policy_activation',
-    'xchain_bridge_activation', 'attest_response_mirror_activation',
-    'attest_responsible_widening_activation', 'attest_zero_conf_activation',
-    'rollcall_activation', 'rollcall_gates_activation',
-    'equivocation_header', 'snapshot_reorg_buffer', 'stake_weighted_quorum',
+    ['anchor_reward_activation', 'consensus/gates/anchor_reward_gate.js'],
+    ['mirror_admission_activation', 'consensus/gates/mirror_admission_gate.js'],
+    ['price_pair_activation', 'consensus/gates/price_pair_gate.js'],
+    ['price_scale_activation', 'consensus/gates/price_scale_gate.js'],
+    ['attest_responsible_widening_activation', 'consensus/gates/attest_responsible_widening_gate.js'],
+    ['attest_zero_conf_activation', 'attestation/attest_zero_conf_gate.js'],
+    ['rollcall_activation', 'consensus/gates/rollcall_gate.js'],
+    ['rollcall_gates_activation', 'consensus/gates/rollcall_gates_gate.js'],
+    ['equivocation_header', 'consensus/equivocation_header.js'],
+    ['snapshot_reorg_buffer', 'consensus/snapshot_reorg_buffer.js'],
+    ['stake_weighted_quorum', 'consensus/stake_weighted_quorum.js'],
 ];
 
 // A RegExp compares by source and flags; everything else by canonical JSON.
@@ -82,11 +92,11 @@ function bootedWith(name, value, fn) {
 describe('src/consensus/gate_registry.js: the rows', function () {
 
     it('holds a row for every non-function export of every converted carrier, and nothing else of theirs', function () {
-        this.timeout(10000);   // the first require of 21 carriers, mathjs included
+        this.timeout(10000);   // the first require of 11 carriers, mathjs included
         const missing = [];
         const differing = [];
-        for (const stem of CONVERTED) {
-            const carrier = require('../../../src/' + stem + '.js');
+        for (const [stem, file] of CONVERTED) {
+            const carrier = require('../../../src/' + file);
             for (const name of Object.keys(carrier)) {
                 if (typeof carrier[name] === 'function') {
                     expect(registry.has(stem + '.' + name), stem + '.' + name + ' is a function and must not be a row').to.equal(false);
@@ -106,7 +116,9 @@ describe('src/consensus/gate_registry.js: the rows', function () {
             for (const name of names) {
                 if (registry.has(mod + '.' + name)) continue;
                 notRows.push(mod + '.' + name);
-                expect(typeof require('../../../src/' + mod + '.js')[name], mod + '.' + name).to.equal('function');
+                const file = CONVERTED.find(([stem]) => stem === mod);
+                expect(file, mod + '.' + name + ' is not a row and its module has no file left').to.not.equal(undefined);
+                expect(typeof require('../../../src/' + file[1])[name], mod + '.' + name).to.equal('function');
             }
         }
         expect(notRows.sort()).to.deep.equal([
@@ -141,9 +153,19 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
     });
 
+    it('keeps the hub-only rows outside the SHARED block: no markers, the same data-only shape', function () {
+        for (const part of HUB_PARTS) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            expect(text.split('\n').filter((l) => /^\/\/ SHARED-GATES (BEGIN|END)$/.test(l)), part + ' markers').to.deep.equal([]);
+            const requires = text.match(/require\([^)]*\)/g) || [];
+            expect(requires, part + ' requires').to.deep.equal(["require('./shared_rows.js')"]);
+            expect(text, part + ' holds at least one row').to.match(/^addGate\('/m);
+        }
+    });
+
     it('registers every queued row: the part files name exactly the keys the registry holds', function () {
         const queued = [];
-        for (const part of PARTS) {
+        for (const part of PARTS.concat(HUB_PARTS)) {
             const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
             for (const m of text.matchAll(/^addGate\('([^']+)'/gm)) queued.push(m[1]);
         }
@@ -280,7 +302,7 @@ describe('src/consensus/gate_registry.js: regtest arming from the environment', 
         bootedWith('XC_MIRROR_ADMISSION_ACTIVATION', '150', (fresh) => {
             const producer = fresh.get(ADMISSION);
             for (const k of ['BTC:regtest', 'LTC:regtest', 'DOGE:regtest']) expect(producer[k], k).to.equal(150);
-            expect(producer['BTC:testnet']).to.equal(null);
+            expect(producer['BTC:testnet']).to.equal(153222);
             expect(fresh.copy(BARRIER).regtest).to.equal(150);
             expect(fresh.get(ROLLCALL).regtest, 'the roll-call lever is a different variable').to.equal(null);
         });
@@ -296,12 +318,12 @@ describe('src/consensus/gate_registry.js: the arming follows the environment at 
         expect(before, 'the suite runs bare').to.equal(null);
         const saved = process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION;
         process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed';
-        const id = require.resolve('../../../src/rollcall_gates_activation.js');
+        const id = require.resolve('../../../src/consensus/gates/rollcall_gates_gate.js');
         const cached = require.cache[id];
         try {
             expect(registry.get(GATES).regtest, 'the loaded registry answers for the environment at the read').to.equal(0);
             delete require.cache[id];
-            expect(require('../../../src/rollcall_gates_activation.js').ROLLCALL_GATES_ACTIVATION.regtest,
+            expect(require('../../../src/consensus/gates/rollcall_gates_gate.js').ROLLCALL_GATES_ACTIVATION.regtest,
                 'a carrier re-required alone sees the armed table, as its own literal did').to.equal(0);
         } finally {
             if (cached) require.cache[id] = cached; else delete require.cache[id];

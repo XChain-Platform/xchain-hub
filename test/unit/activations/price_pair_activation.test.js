@@ -30,15 +30,15 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-const local = require('../../../src/price_pair_activation.js');
+const local = require('../../../src/consensus/gates/price_pair_gate.js');
 
 // Sibling checkout, same resolution convention as ConsensusPrimitiveConformance:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
-const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'price_pair_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'price_pair_activation.js');
+const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'consensus', 'gates', 'price_pair_gate.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'consensus', 'gates', 'price_pair_gate.js');
 
 describe('PRICE v0 pair-name widening flag-day: hub copy @regression', function () {
 
@@ -51,7 +51,7 @@ describe('PRICE v0 pair-name widening flag-day: hub copy @regression', function 
             }
         });
 
-        it('is byte-identical to xchain-indexer/src/price_pair_activation.js', function () {
+        it('is byte-identical to xchain-indexer/src/consensus/gates/price_pair_gate.js', function () {
             // Byte-identity rather than value-identity: the activation map, the two
             // bounds AND the fail-closed edge cases all have to match, and a
             // value-only check would miss a divergent guard clause.

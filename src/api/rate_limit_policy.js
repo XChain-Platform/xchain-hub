@@ -50,6 +50,30 @@
  * req.ip and is still throttled. Only a caller that is genuinely on the host
  * or the private network is exempt. Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to
  * enforce the cap on every caller including those.
+ *
+ * 3. ONE BUDGET SERVED TWO WORKLOADS THAT STARVE EACH OTHER, measured on the
+ *    2026-09-16 fleet roll. Recreating the five testnet validator hubs made
+ *    every mirroring indexer re-drain each hub table from id 0 over
+ *    /hub-db/snapshot/<table>. That drain is a short burst of expensive page
+ *    reads (PAGE_LIMIT 10000 rows, about 30 pages for a full ten-table
+ *    bootstrap), it arrives from THREE indexers behind one public source
+ *    address, and it shared the 100 req/min budget that ordinary fleet polling
+ *    was already drawing on. It 429ed part way through, retried every 30s,
+ *    re-spent the budget on the retry, and testnet indexing stayed wedged for
+ *    over an hour until the limit was raised to 60000 by hand on all five
+ *    hubs. The exemption in (2) could not help: those indexers reach the hub
+ *    over a PUBLIC address, so req.ip is public by design.
+ *
+ *    The fix is a SECOND bucket rather than a bigger first one. Raising the
+ *    shared limit to fit the drain would have taken the throttle off every
+ *    open JSON-RPC read as a side effect (about 1.7 req/s to about 1000 req/s
+ *    per address on DB-backed reads), and those reads are the surface the cap
+ *    exists for. So the snapshot family below is skipped by the general
+ *    limiter and metered by its own, sized to the measured bootstrap; the
+ *    general limiter's value is left exactly where it was. Neither workload
+ *    can now starve the other, and the route family that got the bigger
+ *    number is the one whose per-request cost is already bounded by its own
+ *    `limit` parameter.
  */
 
 // JSON-RPC reserves -32000..-32099 for server-defined errors. -32029 is the
@@ -57,6 +81,24 @@
 // rather than on the HTTP status, because a proxy can rewrite the status and
 // the envelope survives.
 const RATE_LIMIT_RPC_ERROR_CODE = -32029;
+
+// The mirror-bootstrap route family (src/api/rest/hub_db_snapshot.js). Mounting the
+// second limiter on this prefix and skipping it in the first is what separates the two
+// budgets; both halves read it from here so they can never drift apart.
+const SNAPSHOT_PATH_PREFIX = '/hub-db/snapshot';
+
+// Requests per minute per IP for that family, and the number is derived rather than
+// picked. One mirror's full bootstrap, measured against a testnet validator hub on the
+// 2026-09-16 roll: price_snapshots 102041 rows is 11 pages at the indexer's PAGE_LIMIT
+// of 10000, capability_snapshots 25924 rows is 3, the other eight tables are one page
+// each, plus a catch-up read per table, so
+// about 32 requests. Three testnet indexers share one public source address, so a
+// fleet-wide re-bootstrap is about 96, and a failed attempt retries every 30s, which
+// offers about 192 req/min from that address while any mirror is still draining. 600
+// clears the retry cadence roughly threefold, so the drain completes on the first
+// attempt instead of feeding a loop, and it leaves this family's abuse ceiling at six
+// times the old shared cap rather than the six hundred times a raised shared cap cost.
+const DEFAULT_SNAPSHOT_RPM = 600;
 
 const PRIVATE_V4 = [
     // [network, prefix length] - the ranges a co-located or same-LAN caller
@@ -155,6 +197,52 @@ function parseExemptLocal (raw) {
 }
 
 /**
+ * The request's path with any query string and fragment cut off, from whichever of
+ * originalUrl/url this middleware position carries. Returns '' for anything that is not
+ * a usable string, which isSnapshotRequest then reports as "not the snapshot family":
+ * a request whose path cannot be read stays with the general limiter rather than
+ * falling into the larger budget.
+ *
+ * @param {*} req - an express request, or anything at all
+ * @returns {string} the path, or '' when there isn't one
+ */
+function requestPath (req) {
+    const raw = req && (req.originalUrl || req.url);
+    if (typeof raw !== 'string') return '';
+    const cut = raw.search(/[?#]/);
+    return cut === -1 ? raw : raw.slice(0, cut);
+}
+
+/**
+ * Is this request a mirror-bootstrap page read?
+ *
+ * Matches on a path SEGMENT boundary, so a route that merely starts with the same
+ * letters (/hub-db/snapshotting) is not handed the bootstrap budget.
+ *
+ * @param {*} req - an express request
+ * @returns {boolean} true when the request is under the snapshot prefix
+ */
+function isSnapshotRequest (req) {
+    const path = requestPath(req);
+    if (!path.startsWith(SNAPSHOT_PATH_PREFIX)) return false;
+    const next = path.charAt(SNAPSHOT_PATH_PREFIX.length);
+    return next === '' || next === '/';
+}
+
+/**
+ * Read the operator's bootstrap-budget setting. Anything unset, unparseable or
+ * non-positive falls back to the measured default above, because the failure this
+ * budget exists to prevent is a mirror that never finishes draining.
+ *
+ * @param {string|number|undefined|null} raw - the raw HUB_SNAPSHOT_RATE_LIMIT_RPM value
+ * @returns {number} requests per minute per IP for the snapshot family
+ */
+function parseSnapshotRpm (raw) {
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) && value > 0 ? value : DEFAULT_SNAPSHOT_RPM;
+}
+
+/**
  * The one sentence a throttled caller needs: what tripped, what the cap is,
  * how long to wait, and which knob raises it. Shared by the JSON body and the
  * log line so an operator grepping either finds the same text.
@@ -164,8 +252,8 @@ function parseExemptLocal (raw) {
  */
 function rateLimitMessage (facts) {
     return 'hub rate limit exceeded: ' + facts.limit + ' requests per ' +
-        Math.round(facts.windowMs / 1000) + 's per IP (HUB_RATE_LIMIT_RPM); retry after ' +
-        facts.retryAfterSeconds + 's';
+        Math.round(facts.windowMs / 1000) + 's per IP (' + (facts.env || 'HUB_RATE_LIMIT_RPM') +
+        '); retry after ' + facts.retryAfterSeconds + 's';
 }
 
 // A throttled JSON-RPC request still deserves its id echoed back, so a client
@@ -187,6 +275,12 @@ function requestId (req) {
  * @param {number} [opts.rpm=100]            requests per window per IP (HUB_RATE_LIMIT_RPM)
  * @param {number} [opts.windowMs=60000]     the window
  * @param {boolean} [opts.exemptLocal=true]  skip loopback/private-range callers
+ * @param {function} [opts.skipPath]         skip requests this predicate accepts, before the
+ *                                           exemption is consulted; how the general limiter
+ *                                           hands the snapshot family to its own bucket
+ * @param {string} [opts.envName]            the env var the message and facts name
+ * @param {boolean} [opts.jsonRpcEnvelope=true] answer in a JSON-RPC error envelope; false gives
+ *                                           the `{ error }` shape the REST routes already use
  * @param {function} [opts.onLimited]        called once per throttled request, with the facts
  * @returns {object} options for rateLimit(), including `skip` and a JSON `handler`
  */
@@ -195,6 +289,9 @@ function buildRateLimitOptions (opts) {
     const windowMs = Number.isFinite(opts.windowMs) && opts.windowMs > 0 ? opts.windowMs : 60 * 1000;
     const limit = Number.isFinite(opts.rpm) && opts.rpm > 0 ? opts.rpm : 100;
     const exemptLocal = opts.exemptLocal === undefined ? true : !!opts.exemptLocal;
+    const skipPath = typeof opts.skipPath === 'function' ? opts.skipPath : null;
+    const envName = opts.envName || 'HUB_RATE_LIMIT_RPM';
+    const jsonRpcEnvelope = opts.jsonRpcEnvelope === undefined ? true : !!opts.jsonRpcEnvelope;
     const onLimited = typeof opts.onLimited === 'function' ? opts.onLimited : null;
     const retryAfterSeconds = Math.max(1, Math.ceil(windowMs / 1000));
 
@@ -204,6 +301,7 @@ function buildRateLimitOptions (opts) {
         standardHeaders: true,
         legacyHeaders: false,
         skip (req) {
+            if (skipPath && skipPath(req)) return true;
             return exemptLocal && isLocalCaller(req && req.ip);
         },
         handler (req, res) {
@@ -212,7 +310,7 @@ function buildRateLimitOptions (opts) {
                 windowMs,
                 retryAfterSeconds,
                 policy: 'per-ip',
-                env: 'HUB_RATE_LIMIT_RPM'
+                env: envName
             };
             const message = rateLimitMessage(facts);
             if (onLimited) {
@@ -222,24 +320,22 @@ function buildRateLimitOptions (opts) {
             // here keeps the value the body advertises and the value the header
             // advertises identical even if the middleware's own units change.
             res.setHeader('Retry-After', String(retryAfterSeconds));
-            res.status(429).json({
-                jsonrpc: '2.0',
-                id: requestId(req),
-                error: {
-                    code: RATE_LIMIT_RPC_ERROR_CODE,
-                    message,
-                    data: facts
-                }
-            });
+            res.status(429).json(jsonRpcEnvelope
+                ? { jsonrpc: '2.0', id: requestId(req), error: { code: RATE_LIMIT_RPC_ERROR_CODE, message, data: facts } }
+                : { error: message, code: RATE_LIMIT_RPC_ERROR_CODE, data: facts });
         }
     };
 }
 
 module.exports = {
+    DEFAULT_SNAPSHOT_RPM,
     RATE_LIMIT_RPC_ERROR_CODE,
+    SNAPSHOT_PATH_PREFIX,
     buildRateLimitOptions,
     isLocalCaller,
+    isSnapshotRequest,
     normalizeIp,
     parseExemptLocal,
+    parseSnapshotRpm,
     rateLimitMessage
 };

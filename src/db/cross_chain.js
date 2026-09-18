@@ -94,10 +94,14 @@ module.exports = {
         return this.doQuery('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status ORDER BY call_id ASC, phase ASC LIMIT ?', [maxBatch]);
     },
 
-    // Reads rows from cross_chain_calls.
+    // Reads rows from cross_chain_calls: the REST bootstrap page a reconnecting mirror fills from.
+    // The admission map (admit_block_btc/ltc/doge) is selected because the live stream
+    // (getCrossChainCallByCallIdAndPhase, SELECT *) carries it: a bootstrapped copy without
+    // it stores NULLs, binds the row by effective_time under the legacy rule, and reads a
+    // different admitted set at the same block than a mirror that streamed the row.
     // Moved here from src/api.js:2145.
     async findCrossChainCallsById(since, limit) {
-        return this.doQuery(`SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, cross_hops, effective_time, status, finalizing_view, push_generation, result_status, return_payload_b64, validator_signatures, btc_chain_id, created_at FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?`, [since, limit]);
+        return this.doQuery(`SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, cross_hops, effective_time, status, finalizing_view, push_generation, result_status, return_payload_b64, validator_signatures, btc_chain_id, admit_block_btc, admit_block_ltc, admit_block_doge, created_at FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?`, [since, limit]);
     },
 
     // Reads rows from cross_chain_calls.

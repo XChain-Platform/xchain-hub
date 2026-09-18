@@ -25,9 +25,12 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const ValidatorIdentity = require('../../../validators/identity.js');
-const swq = require('../../../stake_weighted_quorum.js');
-const eq = require('../../../equivocation_header.js');
-const ccr = require('../../../cross_chain_royalty_activation.js');
+const swq = require('../../../consensus/stake_weighted_quorum.js');
+const eq = require('../../../consensus/equivocation_header.js');
+// The royalty flag day is a registry row read by literal key (W5), on the match's
+// BTC-anchored snapshot block.
+const gateRegistry = require('../../../consensus/gate_registry');
+const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
@@ -48,7 +51,7 @@ module.exports = {
         ].join('|');
         // Cross-chain royalty legs ride the signed match at/above the CROSS_CHAIN_ROYALTY
         // flag-day; below it the canonical is byte-identical to the legacy format.
-        if(ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network))
+        if(gateRegistry.activeAt(CROSS_CHAIN_ROYALTY_KEY, m.network, null, m.snapshot_block, null))
             raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
         // EQUIV (WI-2 bump 2): VIEW = the archived row's finalizing_view. TAG=XDEX,
         // ROUND_ID=match_id. Byte-matches the hub engine + indexer cross_settle.

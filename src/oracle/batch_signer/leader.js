@@ -24,7 +24,7 @@
 
 'use strict';
 
-const swq = require('../../stake_weighted_quorum.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../../price_batch_compression.js');
 const { getLogger } = require('../../observability');

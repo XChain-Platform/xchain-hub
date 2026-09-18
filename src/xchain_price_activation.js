@@ -25,7 +25,7 @@
  * byte-identical. Indexer replay determinism needs no gate at all: getLatestPrice
  * selects historical price_snapshots rows by block/time, so replaying blocks from
  * before the pair existed reads the same absent-pair state as it always did.
- * Contrast price_pair_activation.js, which DOES have an indexer twin because the
+ * Contrast price_pair_gate.js, which DOES have an indexer twin because the
  * on-chain PRICE v0 parser enforces the same bound.
  *
  * KEYED ON THE ROUND'S CANONICAL START INSTANT (epochStart + round x interval),
@@ -62,7 +62,7 @@
 
 'use strict';
 
-const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./price_pair_activation.js');
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./consensus/gates/price_pair_gate.js');
 
 // Per-network activation TIME, Unix seconds, matching the unit the wire-format gate
 // uses so the two are directly comparable.
@@ -97,7 +97,7 @@ function isXchainPriceActive(roundTimeSeconds, network) {
     // Reject the empty-ish values BEFORE Number(), which maps null, '' and false to
     // a perfectly finite 0. On a genesis-on network (threshold 0) that 0 reads as
     // ACTIVE, so a missing time would silently compose the pair instead of failing
-    // closed as this function promises. Same trap price_pair_activation.js documents.
+    // closed as this function promises. Same trap price_pair_gate.js documents.
     if (roundTimeSeconds === null || roundTimeSeconds === undefined ||
         roundTimeSeconds === '' || typeof roundTimeSeconds === 'boolean') return false;
     let t = Number(roundTimeSeconds);

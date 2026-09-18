@@ -43,8 +43,7 @@ const os         = require('os');
 const path       = require('path');
 
 const AttestationRelay = require('../../../../src/attestation/relay.js');
-const eq               = require('../../../../src/equivocation_header.js');
-const rejectSlot       = require('../../../../src/attest_relay_reject_slot_activation.js');
+const eq               = require('../../../../src/consensus/equivocation_header.js');
 
 const REQ_ID    = 'd'.repeat(64);
 const PUBKEY_A  = 'a'.repeat(64);

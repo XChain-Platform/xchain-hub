@@ -220,6 +220,9 @@ module.exports = {
         let leg = await this.admitTransferLeg(coin, network, latestBlock, snapshotBlock, t);
         if(!leg) return;
         let { destChain, tick, srcActionIndex, transferId, sourceLegKey } = leg;
+        // Held, not raised: this hub has no validator set past its own tip (snapshotCoversLeg).
+        if(!this.snapshotCoversLeg(coin, snapshotBlock, t.block_index))
+            return this.logHeld(coin, t, 'snapshot_block below the source block ' + t.block_index);
 
         let row = {
             transfer_id:          transferId,

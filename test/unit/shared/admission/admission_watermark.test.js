@@ -27,7 +27,7 @@ const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
 const StateAnchorPublisher = require('../../../../src/anchor/publisher.js');
 const Database             = require('../../../../src/db');
-const { admitMarginBlocks } = require('../../../../src/mirror_admission_activation.js');
+const { admitMarginBlocks } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 
 // Short, distinct windows per rail so "which rail settled" is observable without
 // waiting out a production timeout. The xdex window is the longest in production too

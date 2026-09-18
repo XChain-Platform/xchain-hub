@@ -23,7 +23,7 @@
 
 'use strict';
 const crypto            = require('crypto');
-const eq                = require('../../equivocation_header.js');
+const eq                = require('../../consensus/equivocation_header.js');
 // The response canonical in both eras. Byte-twinned with the indexer's copy;
 // never reimplement it here.
 const { buildResponseCanonicalRaw } = require('../attest_response_canonical.js');

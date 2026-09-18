@@ -71,7 +71,7 @@ describe('consensus_rules_digest: values by registry key', function () {
 
     it('reads the four function-valued names from their carrier, canonicalising to no value, as before', function () {
         const { gates } = crd.computeConsensusRulesDigest();
-        const carrier = require('../../../src/mirror_admission_activation.js');
+        const carrier = require('../../../src/consensus/gates/mirror_admission_gate.js');
         for (const name of ['encodeAdmitBlocks', 'decodeAdmitBlocks', 'isAdmissionEra', 'admissionCanonicalField']) {
             const key = 'mirror_admission_activation.' + name;
             expect(registry.has(key), key + ' is not a row').to.equal(false);
@@ -89,7 +89,12 @@ describe('consensus_rules_digest: values by registry key', function () {
 
 describe('consensus_rules_digest: a registry miss', function () {
 
-    const KEY = 'attest_relay_activation.ATTEST_RELAY_ACTIVATION';
+    // A value on a module whose logic file still exists (src/consensus/gates/rollcall_gate.js):
+    // the loader opens the carrier, finds no function under the name and rethrows the miss.
+    const KEY = 'rollcall_activation.ROLLCALL_ACTIVATION';
+    // A value on a module whose predicate-only file retired at W5: no carrier to open, so
+    // the loader throws naming the key and the path it looked at, never ABSENT.
+    const RETIRED_KEY = 'attest_relay_activation.ATTEST_RELAY_ACTIVATION';
 
     it('takes the digest, the GATES field and the active set down naming the key, never ABSENT', function () {
         const fresh = freshDigestMissing(KEY);
@@ -98,8 +103,18 @@ describe('consensus_rules_digest: a registry miss', function () {
         expect(() => fresh.activeGatesAt(0, 'regtest')).to.throw(KEY);
     });
 
+    it('names the key and the carrier path it has no file for when the module retired at W5', function () {
+        const fresh = freshDigestMissing(RETIRED_KEY);
+        expect(() => fresh.computeConsensusRulesDigest())
+            .to.throw(Error, RETIRED_KEY)
+            .with.property('message').that.includes('src/consensus/gates/attest_relay_gate.js');
+        expect(() => fresh.knownGateKeys()).to.throw(RETIRED_KEY);
+        expect(() => fresh.activeGatesAt(0, 'regtest')).to.throw(RETIRED_KEY);
+    });
+
     it('leaves the shipped module untouched: the digest still reads the pinned value afterwards', function () {
         expect(crd.computeConsensusRulesDigest().gates[KEY]).to.equal(crd.canonical(registry.get(KEY)));
+        expect(crd.computeConsensusRulesDigest().gates[RETIRED_KEY]).to.equal(crd.canonical(registry.get(RETIRED_KEY)));
         expect(crd.knownGateKeys().length).to.equal(33);
     });
 });

@@ -23,8 +23,8 @@
 
 const canonicalForms = require('../canonical_forms.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
-const swq = require('../../../stake_weighted_quorum.js');
-const eq = require('../../../equivocation_header.js');
+const swq = require('../../../consensus/stake_weighted_quorum.js');
+const eq = require('../../../consensus/equivocation_header.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 

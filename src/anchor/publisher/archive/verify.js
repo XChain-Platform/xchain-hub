@@ -24,8 +24,8 @@
 
 const canonicalForms = require('../canonical_forms.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
-const swq = require('../../../stake_weighted_quorum.js');
-const ar = require('../../../anchor_reward_activation.js');
+const swq = require('../../../consensus/stake_weighted_quorum.js');
+const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const ark = require('../../anchor_reward_key.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();

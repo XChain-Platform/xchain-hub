@@ -18,9 +18,9 @@
 
 const { expect }            = require('chai');
 const ValidatorIdentity     = require('../../../../src/validators/identity');
-const eq                    = require('../../../../src/equivocation_header.js');
+const eq                    = require('../../../../src/consensus/equivocation_header.js');
 const { waitUntil }         = require('../../../helpers/waitUntil');
-const arMod                 = require('../../../../src/anchor_reward_activation.js');
+const arMod                 = require('../../../../src/consensus/gates/anchor_reward_gate.js');
 const { CP_ROW, parseV7Sections, parseV7Tail, buildMesh, v0Order, mkBundleDone, startAll,
         registerMeshHooks } = require('../../../helpers/anchor_mesh.js');
 

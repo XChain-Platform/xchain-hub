@@ -30,7 +30,7 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 
-// The hub keeps its vendored copies flat in src/, while the indexer sorted its own tree into feature
+// The hub keeps its vendored price copies flat in src/, while the indexer sorted its own tree into feature
 // directories, so the twin's path is no longer the hub's path. Each entry is [hub basename, twin path
 // relative to the indexer's src/, then the camelCase path an indexer origin from before its snake_case rename has].
 const VENDORED = [
@@ -41,7 +41,8 @@ const VENDORED = [
     // above never reaches the require text). It is a consensus input like the
     // predicates it spells, so it is held to the same byte identity.
     ['db/price/xchain_price_query_sql.js', 'db/price/xchain_price_query_sql.js'],
-    ['price_pair_activation.js', 'price_pair_activation.js'],
+    // The price-pair gate, at the same tail in both repos since W5.
+    ['consensus/gates/price_pair_gate.js', 'consensus/gates/price_pair_gate.js'],
 ];
 
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||

@@ -87,7 +87,9 @@
 const fs   = require('fs');
 const path = require('path');
 
-const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('../attest_response_mirror_activation.js');
+// The mirror flag-day map is a registry row read by literal key (W5).
+const gateRegistry = require('../consensus/gate_registry');
+const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
 const { initBatchFiles, initBatchTimeouts, initBatchRuntime } = require('./batch_publisher/options.js');
 const windows   = require('./batch_publisher/window.js');
@@ -142,7 +144,7 @@ class AttestationBatchPublisher {
     // Read off the activation map itself rather than off a height, because the window
     // is a clock and has no block to evaluate the height gate against.
     isArmedNetwork(){
-        let entry = ATTEST_RESPONSE_MIRROR_ACTIVATION[this.network];
+        let entry = gateRegistry.get(ATTEST_RESPONSE_MIRROR_KEY)[this.network];
         return entry !== null && entry !== undefined;
     }
 

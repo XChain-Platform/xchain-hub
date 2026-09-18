@@ -128,10 +128,14 @@ module.exports = {
         return this.doQuery('SELECT status, body, meta FROM attestation_fetch_cache WHERE request_id = ? AND created_at >= FROM_UNIXTIME(?)', [rid, created_at]);
     },
 
-    // Reads rows from attestation_responses.
+    // Reads rows from attestation_responses: the REST bootstrap page a reconnecting mirror
+    // fills from. Built from ATTESTATION_RESPONSE_MIRROR_COLUMNS, the list the live stream's
+    // read-back (getAttestationResponseMirrorRow) uses, so the two feeds cannot drift apart
+    // again: a hand-written list here once dropped admit_block_btc, and a bootstrapped copy
+    // then bound the response by effective_time while a streamed copy bound it by height.
     // Moved here from src/api.js:2284.
     async findAttestationResponsesById(since, limit) {
-        return this.doQuery('SELECT id, network, request_id, request_action_index, request_block_index, provider_id, status, response_payload, response_hash, meta, effective_time, signer_pubkeys, signatures, widen, batch_action_index, finalized_at FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        return this.doQuery('SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
     // Reads rows from attestation_responses.

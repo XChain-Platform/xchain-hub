@@ -31,11 +31,11 @@
  ********************************************************************/
 
 const axios  = require('axios');
-const wid    = require('../attest_responsible_widening_activation.js');
+const wid    = require('../consensus/gates/attest_responsible_widening_gate.js');
 // The zero-confirmation flag day. Selects the effective confirmation count for a
 // request (confirmationsFor) and carries the boot-time ordering assertion the
 // constructor runs; keyed on the REQUEST's own block, never on the tip.
-const zc     = require('../attest_zero_conf_activation.js');
+const zc     = require('./attest_zero_conf_gate.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();

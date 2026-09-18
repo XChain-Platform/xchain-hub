@@ -22,7 +22,7 @@
 
 'use strict';
 
-const swq               = require('../../stake_weighted_quorum.js');
+const swq               = require('../../consensus/stake_weighted_quorum.js');
 const ocr               = require('../../oracle_clamp_reference_activation.js');
 const { takeSeat }      = require('./seats.js');
 const { getLogger } = require('../../observability');

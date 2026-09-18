@@ -22,7 +22,9 @@
 
 'use strict';
 // Era selection, keyed on the REQUEST's own block (never the response's).
-const { isResponseMirrorActive } = require('../../attest_response_mirror_activation.js');
+// The mirror flag day is a registry row read by literal key (W5).
+const gateRegistry = require('../../consensus/gate_registry');
+const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 // The spelling rule the appended field must obey, from the same byte-twinned
 // module as the canonical; never reimplement it here.
 const { isCanonicalIntSpelling } = require('../attest_response_canonical.js');
@@ -65,7 +67,7 @@ module.exports = {
     // the mirror. Keyed on the request's own block, so the rule for a given request
     // is fixed the moment it is admitted and cannot move under it mid-round.
     isMirrorEra(requestBlock){
-        return isResponseMirrorActive(requestBlock, this.hub && this.hub.network);
+        return gateRegistry.activeAt(ATTEST_RESPONSE_MIRROR_KEY, this.hub && this.hub.network, null, requestBlock, null);
     },
 
     // The forward margin this hub stamps and bounds against. Resolved per call

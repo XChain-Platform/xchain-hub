@@ -36,7 +36,7 @@
  ********************************************************************/
 
 const EventEmitter      = require('events');
-const eq                = require('../equivocation_header.js');
+const eq                = require('../consensus/equivocation_header.js');
 const ah                = require('../lib/admission_height.js');
 // The COIN-KEYED producer predicate, taken from the twin rather than from the hub's
 // admission seam above, because the seam does not carry it: every SIGNED rail's era block
@@ -45,7 +45,7 @@ const ah                = require('../lib/admission_height.js');
 // so its era must be judged on that chain's own key or an LTC height would be compared
 // against a BTC activation. HubDbBroadcaster already reaches the twin directly for the
 // same kind of non-canonical read.
-const { isMirrorAdmissionProducerActive } = require('../mirror_admission_activation.js');
+const { isMirrorAdmissionProducerActive } = require('../consensus/gates/mirror_admission_gate.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 

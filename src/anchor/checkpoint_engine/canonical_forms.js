@@ -22,8 +22,11 @@
 
 'use strict';
 
-const eq   = require('../../equivocation_header.js');
-const ckpt = require('../../checkpoint_commitment_activation.js');
+const eq   = require('../../consensus/equivocation_header.js');
+// The checkpoint-commitment flag day is a registry row read by literal key (W5),
+// on the checkpoint's BTC-anchored snapshot block.
+const gateRegistry = require('../../consensus/gate_registry');
+const CHECKPOINT_COMMITMENT_KEY = 'checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION';
 
 const forms = {
 
@@ -44,7 +47,7 @@ const forms = {
     // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
     // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
     checkpointRootSuffix(cp){
-        if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return '';
+        if(!gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
         // refuses to sign a checkpoint that lacks them (runRound throws), so for every
         // REAL post-flag-day checkpoint this is always true and the suffix is byte-
@@ -103,7 +106,7 @@ const forms = {
     // be enforced on one path and quietly skipped on the others again.
     isRootless(cp){
         if(!cp) return false;
-        if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return false;
+        if(!gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null)) return false;
         return (!cp.state_root || !cp.block_merkle_root ||
                 cp.state_root_version == null || cp.block_merkle_version == null);
     },

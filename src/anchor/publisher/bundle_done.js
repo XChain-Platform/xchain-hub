@@ -24,7 +24,7 @@
 
 const canonicalForms = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
-const ar = require('../../anchor_reward_activation.js');
+const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE, XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN, XANCREWARD } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

@@ -24,7 +24,7 @@ const fs         = require('fs');
 const path       = require('path');
 
 const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine');
-const eq         = require('../../../../src/equivocation_header.js');
+const eq         = require('../../../../src/consensus/equivocation_header.js');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
 const CALL_ID = 'c'.repeat(64);

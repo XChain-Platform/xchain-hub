@@ -23,7 +23,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const swq    = require('../../stake_weighted_quorum.js');
+const swq    = require('../../consensus/stake_weighted_quorum.js');
 const bcmath = require('../../bcmath.js');
 
 module.exports = {
@@ -77,7 +77,7 @@ module.exports = {
     // not agree with means followers step in early or the true rank-1 steps in late,
     // so it tracks them exactly. An unresolvable floor returns null (rank unknown),
     // which the caller already handles as "snapshot unavailable".
-    // `widen` mirrors AttestationRound's liveness ladder (attest_responsible_widening_activation.js):
+    // `widen` mirrors AttestationRound's liveness ladder (attest_responsible_widening_gate.js):
     // the failover rank must be computed over the SAME set the round authorized, or a
     // widened member never learns it is allowed to step in and publish. 0 below the
     // flag-day, where this is byte-for-byte its pre-widening self.

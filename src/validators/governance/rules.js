@@ -19,9 +19,13 @@
  * reader has to hold to read any other half: what a vote is signed over, what makes
  * a vote seq usable, the earliest block a block-anchored change may activate at, and
  * the bounds a change is measured against. The engine and its mixins all read them
- * from here, so a constant has one definition per repo.
+ * from here, so a constant has one definition per repo. The one flag-day table
+ * among them is a row of the hub's activation registry, read here by key, so the
+ * table lives in one place per repo and this module keeps its readers' shape.
  *
  ********************************************************************/
+
+const { get } = require('../../consensus/gate_registry');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -45,17 +49,14 @@ const COOLDOWN_DAYS        = 14;    // Days before re-proposing a rejected param
 
 const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRESHOLD'];
 
-// R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
-// height a hub still ATTACHES and PERSISTS a validator_snapshot (harmless,
-// additive) but tallies by the legacy live-set rule and accepts snapshotless
-// proposals; at/above it the snapshot is REQUIRED and is the tally denominator,
-// so validator-set churn between propose() and tally can no longer move the
-// quorum/approval goalposts. Same shape + BTC-anchored gating discipline as
-// STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet ARMED 2026-07-16, with the rest of
-// that flag-day set: BTC 963000, RE-PINNED 2026-08-12 off 969500
-// onto the shared pre-freeze train boundary, the one height the rest of that
-// BTC-height cohort now carries; deploy every hub before this era.
-const GOV_SNAPSHOT_ACTIVATION = { mainnet: 963000, testnet: 0, regtest: 0 };
+// R2-M2: the BTC height per network at/above which the electorate is
+// snapshot-locked onto each proposal (the snapshot is REQUIRED and is the tally
+// denominator; below it the legacy live-set tally applies). The heights and
+// the why live with the row in consensus/gate_registry/hub_rows.js; the
+// registry hands back a frozen table under the same name, so electorate.js
+// indexes it by network exactly as it did the literal, and a build without
+// the row throws here at load rather than reading the lock as off.
+const GOV_SNAPSHOT_ACTIVATION = get('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION');
 
 // Bounds on a persisted/wire snapshot (DoS): a validator set is small, so a
 // snapshot far past these is adversarial padding, not a real electorate.

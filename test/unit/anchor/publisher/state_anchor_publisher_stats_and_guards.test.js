@@ -18,7 +18,7 @@
 const { expect }            = require('chai');
 const StateAnchorPublisher  = require('../../../../src/anchor/publisher');
 const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine');
-const arMod                 = require('../../../../src/anchor_reward_activation.js');
+const arMod                 = require('../../../../src/consensus/gates/anchor_reward_gate.js');
 const { DB_METHODS }        = require('../../../helpers/mockHub.js');
 
 // Publisher-wallet runway stats (#5443): checkBalance records the last-observed
@@ -147,14 +147,12 @@ describe('StateAnchorPublisher stop() archive-attestation teardown (#2360)', fun
 // rawCanonicalCheckpoint so the presence-gated root suffix can never flip them
 // fail-closed post-flag-day (#2462).
 describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canonical (#2462)', function () {
-    const ckptMod = require('../../../../src/checkpoint_commitment_activation.js');
-    let savedRegtest;
-    beforeEach(function () {
-        savedRegtest = ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest;
-        ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest = 0;   // roots committed at genesis on regtest
-    });
-    afterEach(function () {
-        ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest = savedRegtest;
+    // Roots are committed at genesis on regtest: the registry row (W5) is what the
+    // canonical reads, and the cases below assume that arming.
+    const gateRegistry = require('../../../../src/consensus/gate_registry');
+    before(function () {
+        expect(gateRegistry.get('checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION').regtest,
+            'regtest checkpoint commitment must be armed at genesis for these cases').to.equal(0);
     });
 
     it('rawCanonicalCheckpoint matches across the rootless and root-bearing shapes while canonicalCheckpoint differs', function () {

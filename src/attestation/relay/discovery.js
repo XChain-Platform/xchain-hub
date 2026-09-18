@@ -24,7 +24,10 @@
 'use strict';
 
 const axios      = require('axios');
-const rejectSlot = require('../../attest_relay_reject_slot_activation.js');
+// The refused-slot rule is a registry row on the block-TIME plane, read by literal
+// key (W5); the clock goes in activeAt's time slot.
+const gateRegistry = require('../../consensus/gate_registry');
+const RELAY_REJECT_SLOT_KEY = 'attest_relay_reject_slot_activation.ATTEST_RELAY_REJECT_SLOT_ACTIVATION';
 const { HOME_CHAIN, PAGE_LIMIT, MAX_PAGES, REFUSED_REQUEST_STATUS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -168,7 +171,7 @@ module.exports = {
             this.logRejectSlotPlaneOnce();
             return false;
         }
-        return rejectSlot.isAttestRelayRejectSlotActive(blockTime, this.network);
+        return gateRegistry.activeAt(RELAY_REJECT_SLOT_KEY, this.network, null, null, blockTime);
     },
 
     logRejectSlotPlaneOnce(){

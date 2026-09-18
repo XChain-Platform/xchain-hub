@@ -17,7 +17,7 @@
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../../../../src/validators/identity');
-const ar                   = require('../../../../../src/anchor_reward_activation');
+const ar                   = require('../../../../../src/consensus/gates/anchor_reward_gate');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 const BLOCK = 100;

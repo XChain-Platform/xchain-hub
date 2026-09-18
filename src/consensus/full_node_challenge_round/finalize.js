@@ -27,7 +27,7 @@
 
 const fs                = require('fs');
 const path              = require('path');
-const eq                = require('../../equivocation_header.js');
+const eq                = require('../equivocation_header.js');
 const { isAmbiguousSendError } = require('../../lib/idempotent_broadcast.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');

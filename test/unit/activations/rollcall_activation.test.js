@@ -44,14 +44,14 @@
 const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
-const local = require('../../../src/rollcall_activation.js');
+const local = require('../../../src/consensus/gates/rollcall_gate.js');
 // Sibling resolution, same convention as price_pair_activation.test.js: an
 // explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
-const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'rollcall_activation.js');
-const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'rollcall_activation.js');
+const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'consensus', 'gates', 'rollcall_gate.js');
+const LOCAL_PATH = path.join(__dirname, '..', '..', '..', 'src', 'consensus', 'gates', 'rollcall_gate.js');
 const NETWORKS = ['mainnet', 'testnet', 'regtest'];
 const MAPS = [
     'ROLLCALL_ACTIVATION',
@@ -293,18 +293,11 @@ function loadWithEnv(value){
     // ------------------------------------------------------------------
     let registerparityWithTheXchainIndexerTwin33;
     {
-        // Byte-identity apart from the ONE header line in which each copy names
-        // the other, which is the only difference the module header sanctions.
-        // Normalizing that line rather than skipping the comparison is what keeps
-        // comment drift (which carries the reasoning a future editor relies on)
-        // inside the guard.
+        // Raw byte-identity: since W5 the header names "the same path" in both repos
+        // instead of the other repo's file, so no line is exempt and comment drift
+        // (which carries the reasoning a future editor relies on) stays inside the guard.
         function isByteIdenticalToXchainIndexerTest35() {
-            const TWIN_REF = /xchain-\S+\/src\/rollcall_activation\.js/;
-            const norm = (p) => fs.readFileSync(p, 'utf8')
-                .split(/\r?\n/)
-                .map(l => TWIN_REF.test(l) ? '<TWIN-REF>' : l)
-                .join('\n');
-            expect(norm(LOCAL_PATH)).to.equal(norm(TWIN_PATH),
+            expect(fs.readFileSync(LOCAL_PATH, 'utf8')).to.equal(fs.readFileSync(TWIN_PATH, 'utf8'),
                 'the hub copy has drifted from the indexer twin; the hub would sign roll calls '
                 + 'for epochs the indexer does not judge the same way, and eviction forks at the boundary');
         }
@@ -343,7 +336,7 @@ function loadWithEnv(value){
                     this.skip();
                 }
             });
-            it('is byte-identical to xchain-indexer/src/rollcall_activation.js, twin-reference line aside', isByteIdenticalToXchainIndexerTest35);
+            it('is byte-identical to xchain-indexer/src/consensus/gates/rollcall_gate.js', isByteIdenticalToXchainIndexerTest35);
             it('agrees with the twin on every consensus value', agreesWithTheTwinOnEveryTest36);
             it('agrees with the twin predicate across the boundaries and the failure cases', agreesWithTheTwinPredicateAcrossTest37);
         }

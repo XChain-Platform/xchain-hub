@@ -24,7 +24,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const eq     = require('../../equivocation_header.js');
+const eq     = require('../../consensus/equivocation_header.js');
 const { ATTEST_WIRE_MAX_BYTES } = require('./constants.js');
 
 module.exports = {

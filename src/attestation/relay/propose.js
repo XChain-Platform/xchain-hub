@@ -24,7 +24,10 @@
 'use strict';
 
 const crypto      = require('crypto');
-const attestRelay = require('../../attest_relay_activation.js');
+// The relay flag day is a registry row read by literal key (W5), on the
+// BTC-anchored snapshot block.
+const gateRegistry = require('../../consensus/gate_registry');
+const ATTEST_RELAY_KEY = 'attest_relay_activation.ATTEST_RELAY_ACTIVATION';
 const { HOME_CHAIN, ORIGIN_CHAINS, RELAYABLE_STATUSES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -85,7 +88,7 @@ module.exports = {
 
         let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) return;
-        if(!attestRelay.isAttestRelayActive(snapshotBlock, this.network)){
+        if(!gateRegistry.activeAt(ATTEST_RELAY_KEY, this.network, null, snapshotBlock, null)){
             this.logGateOnce(snapshotBlock);
             return;
         }
@@ -241,7 +244,7 @@ module.exports = {
         // The flag-day gate, evaluated on the BTC-anchored snapshot we are about to
         // pin. Below it the fleet's indexers reject a v3 outright, so proposing a
         // round would only burn a BTC fee on a guaranteed-invalid action.
-        if(!attestRelay.isAttestRelayActive(snapshotBlock, this.network)){
+        if(!gateRegistry.activeAt(ATTEST_RELAY_KEY, this.network, null, snapshotBlock, null)){
             this.logGateOnce(snapshotBlock);
             return;
         }

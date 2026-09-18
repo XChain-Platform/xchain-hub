@@ -20,7 +20,7 @@
  *
  ********************************************************************/
 
-const swq               = require('../../stake_weighted_quorum.js');
+const swq               = require('../../consensus/stake_weighted_quorum.js');
 const snapWrite         = require('../../lib/capability_snapshot_write.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

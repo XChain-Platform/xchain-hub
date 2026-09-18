@@ -34,7 +34,7 @@ const META     = 'tag=1';
 const PROVIDER = 'http_get';
 const NOW      = 1780000000;
 const LEGACY_BLK = 10;   // no network below arms the mirror, so any block is legacy era
-const MIRROR_BLK = 500;  // regtest arms the mirror at genesis (attest_response_mirror_activation.js)
+const MIRROR_BLK = 500;  // regtest arms the mirror at genesis (the attest_response_mirror_activation registry row)
 
 // Bodies straddling the cap. Plain ASCII, so byte length equals Buffer length
 // directly; the multibyte cases below prove the measurement is bytes, not

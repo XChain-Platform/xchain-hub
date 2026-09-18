@@ -185,7 +185,7 @@ module.exports = {
             // signature covers. Null in the legacy era.
             admitBlocks:  pending.admitBlocks == null ? null : pending.admitBlocks,
             // Extra responsible slots the liveness ladder granted this round
-            // (attest_responsible_widening_activation.js). Derived from the set consensus actually
+            // (attest_responsible_widening_gate.js). Derived from the set consensus actually
             // ran, not recomputed, so the publisher's failover rank is ordered over the
             // SAME membership that signed. 0 below the flag-day, and an older queue entry
             // carrying no field reads as 0, which is the pre-widening ordering.

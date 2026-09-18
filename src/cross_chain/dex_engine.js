@@ -45,8 +45,11 @@ const EventEmitter = require('events');
 const axios        = require('axios');
 
 const bc                     = require('../bcmath.js');
-const eq                     = require('../equivocation_header.js');
-const ccr                    = require('../cross_chain_royalty_activation.js');
+const eq                     = require('../consensus/equivocation_header.js');
+// The royalty flag day is a registry row read by literal key (W5), on the match's
+// BTC-anchored snapshot block.
+const gateRegistry           = require('../consensus/gate_registry');
+const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
@@ -255,7 +258,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Cross-chain royalty legs ride the signed match at/above the CROSS_CHAIN_ROYALTY
         // flag-day (a colluding hub must not be able to strip a royalty at settlement);
         // below it the canonical is byte-identical to the legacy format.
-        if(ccr.isCrossChainRoyaltyActive(r.snapshot_block, r.network))
+        if(gateRegistry.activeAt(CROSS_CHAIN_ROYALTY_KEY, r.network, null, r.snapshot_block, null))
             raw += '|' + String(r.a_payout_legs || '') + '|' + String(r.b_payout_legs || '');
         // The admission map, height-gated on the ROW's own snapshot_block and never on a
         // consumer's height, so the rule for a match is fixed the moment it is produced and

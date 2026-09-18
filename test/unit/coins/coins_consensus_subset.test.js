@@ -27,7 +27,7 @@ const coins      = require('../../../src/coins');
         // out of the hash because it is not a ledger input. The one path that could make it
         // one, the BTC indexer's anchor-reward mint gate, reads a frozen ledger constant of
         // its own instead (ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS in
-        // anchor_reward_activation.js), so a divergent bundle cannot derive the same reward
+        // anchor_reward_gate.js), so a divergent bundle cannot derive the same reward
         // at a different height with the pin verifying clean. A future consensus path
         // reaching for this field is what would make folding it in correct; today folding
         // it in would only freeze a knob four hub engines legitimately tune.

@@ -24,10 +24,10 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../helpers/mockHub');
-const { CANONICAL_REORG_BUFFER } = require('../../../../../src/snapshot_reorg_buffer.js');
+const { CANONICAL_REORG_BUFFER } = require('../../../../../src/consensus/snapshot_reorg_buffer.js');
 // The pair-name flag day's own map. Every shipped network is genesis-on since the
 // 2026-09-09 ruling, so the D14 case below straddles a threshold it installs itself.
-const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../../../src/price_pair_activation.js');
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../../../src/consensus/gates/price_pair_gate.js');
 
 // Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) -> 128-hex }
 function makeValidator() {

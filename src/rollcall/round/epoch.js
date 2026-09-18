@@ -25,8 +25,8 @@
 
 'use strict';
 
-const rca                        = require('../../rollcall_activation.js');
-const { CANONICAL_REORG_BUFFER } = require('../../snapshot_reorg_buffer.js');
+const rca                        = require('../../consensus/gates/rollcall_gate.js');
+const { CANONICAL_REORG_BUFFER } = require('../../consensus/snapshot_reorg_buffer.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

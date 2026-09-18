@@ -27,9 +27,12 @@
 'use strict';
 
 const ValidatorIdentity = require('../../validators/identity');
-const swq               = require('../../stake_weighted_quorum.js');
+const swq               = require('../stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
-const { isRetractionSigningActive } = require('../../retraction_signing_activation.js');
+// The signed-retraction flag day is a registry row read by literal key (W5), on the
+// retraction's BTC-anchored snapshot block.
+const gateRegistry = require('../gate_registry');
+const RETRACTION_SIGNING_KEY = 'retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION';
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -75,7 +78,7 @@ module.exports = {
         let sender   = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;                            // our own broadcast
 
-        if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
+        if(!gateRegistry.activeAt(RETRACTION_SIGNING_KEY, this.network, null, evt.snapshot_block, null)) return;
 
         // Freshness (fail-closed): bound the initiator-chosen snapshot_block
         // against our own tip view before it can select the validator set.
@@ -140,7 +143,7 @@ module.exports = {
         let d   = envelope.data;
         let evt = this.normalizeRetraction(d.retraction);
         if(!evt || !Array.isArray(d.signatures)) return;
-        if(!isRetractionSigningActive(evt.snapshot_block, this.network)) return;
+        if(!gateRegistry.activeAt(RETRACTION_SIGNING_KEY, this.network, null, evt.snapshot_block, null)) return;
 
         let canonical = retractionClass().canonicalRetraction(evt);
         let id        = this.roundId(canonical);

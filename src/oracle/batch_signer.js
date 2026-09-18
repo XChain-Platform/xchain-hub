@@ -37,8 +37,11 @@
  ********************************************************************/
 
 const ValidatorIdentity = require('../validators/identity.js');
-const swq               = require('../stake_weighted_quorum.js');
-const pst               = require('../price_sig_tally_activation.js');
+const swq               = require('../consensus/stake_weighted_quorum.js');
+// The verify-first tally rule is a registry row read by literal key (W5), on the
+// batch's BTC anchor height.
+const gateRegistry      = require('../consensus/gate_registry');
+const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
 const { positiveIntConfig } = require('../lib/config_int.js');
 const ah                = require('../lib/admission_height.js');
 const { getLogger } = require('../observability');
@@ -243,8 +246,8 @@ class OracleBatchSigner {
     straddlesArmedOracleFlagDay(firstAnchor, lastAnchor){
         if(swq.isStakeWeightedQuorumActive(firstAnchor, this.network) !==
            swq.isStakeWeightedQuorumActive(lastAnchor, this.network)) return true;
-        if(pst.isPriceSigTallyVerifyFirstActive(firstAnchor, this.network) !==
-           pst.isPriceSigTallyVerifyFirstActive(lastAnchor, this.network)) return true;
+        if(gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, this.network, null, firstAnchor, null) !==
+           gateRegistry.activeAt(PRICE_SIG_TALLY_KEY, this.network, null, lastAnchor, null)) return true;
         if(ah.isAdmissionEra(this.network, firstAnchor) !==
            ah.isAdmissionEra(this.network, lastAnchor)) return true;
         return false;

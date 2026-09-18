@@ -23,4 +23,14 @@ describe('hub-schema-version', function () {
         const again = require('../../../src/hub_schema_version.js');
         assert.strictEqual(again.HUB_SCHEMA_VERSION, mod.HUB_SCHEMA_VERSION);
     });
+
+    // The value is part of the contract: this hub stamps admission-height
+    // columns on seven mirror tables (2026-09-16-admission-height in every
+    // reader), and a stamp of 6 on rows that carry them would let a stale
+    // reader apply admission-era rows it cannot verify. Pin the shape, not
+    // just the type, so the bump cannot be lost in a rebase.
+    it('is v7, the admission-height mirror shape, so a v6 reader refuses this stream', function () {
+        assert.strictEqual(mod.HUB_SCHEMA_VERSION, 7);
+        assert.notStrictEqual(6, mod.HUB_SCHEMA_VERSION);
+    });
 });

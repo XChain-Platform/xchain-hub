@@ -17,8 +17,8 @@
  *
  ********************************************************************/
 
-const swq = require('../../stake_weighted_quorum.js');
-const wid = require('../../attest_responsible_widening_activation.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
+const wid = require('../../consensus/gates/attest_responsible_widening_gate.js');
 const { validateChain, validateLimit, strictInt } = require('../validate');
 
 // Bounded page walk over the BTC indexer's pending-attestation queue, oldest

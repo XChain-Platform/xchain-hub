@@ -32,7 +32,7 @@ const PriceAggregator  = require('../../../src/oracle/price_aggregator');
 
 // The real gate modules, used here to state the expected values rather than to
 // produce them: the assertions below read the aggregator's OWN behaviour.
-const eq               = require('../../../src/equivocation_header.js');
+const eq               = require('../../../src/consensus/equivocation_header.js');
 
 const API_ENTRY = path.resolve(__dirname, '../../../src/api.js');
 

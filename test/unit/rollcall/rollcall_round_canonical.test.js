@@ -57,7 +57,7 @@ function builder(network) {
         // and ENGINE_TAGS.ROLLCALL is where the tag comes from. Assert the pieces
         // are really in the built string, so a hand-rolled template that happened
         // to match today cannot pass tomorrow.
-        const eq  = require('../../../src/equivocation_header.js');
+        const eq  = require('../../../src/consensus/equivocation_header.js');
         const eng = builder('regtest');
         const out = eng.canonical(30, V.canonical.ledger_hash);
         assert.ok(out.startsWith(eq.equivPrefix(eq.equivKey(eq.ENGINE_TAGS.ROLLCALL, '30', 0))));

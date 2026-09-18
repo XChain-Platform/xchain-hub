@@ -13,12 +13,13 @@
  * The reachability sweep, driven against the real tree rather than a fixture.
  * This verdict decides what a restructure deletes, so every assertion is about a
  * file whose status is independently known: src/api.js is the container command,
- * the gate carriers are reached ONLY through a computed require, and a module
- * whose one caller is a bin/ script is held by that script and not dead.
+ * the admission gate carrier is reached by the rules digest ONLY through a
+ * computed require, and a module whose one caller is a bin/ script is held by
+ * that script and not dead.
  *
- * WHAT THE TESTS ARE REALLY GUARDING. Three of this repo's require edges are
+ * WHAT THE TESTS ARE REALLY GUARDING. Two of this repo's require edges are
  * built at runtime and swallow their own failures, so the tool declares them by
- * hand. A declaration that silently stopped resolving would turn a live file
+ * hand (the bridge engine's was a third until W5 retired its computed require). A declaration that silently stopped resolving would turn a live file
  * into a deletion candidate, and nothing else in the toolchain would notice. The
  * assertions below are therefore about the EDGES, not about the totals: a total
  * moves every time a file is added.
@@ -108,29 +109,36 @@ describe('bin/reachability.js', function () {
     this.timeout(120000);
 
     describe('the declared dynamic edges', () => {
-        it('resolves every SHARED_GATES carrier to a file that exists', () => {
+        it('resolves every SHARED_GATES stem to its gate module under src/consensus/gates/', () => {
+            // loadGateValue computes src/consensus/gates/<stem>_gate.js for a
+            // SHARED_GATES name with no registry row (W5). A stem whose predicate-only
+            // shim retired has no file there and drops out of the graph; every gate
+            // module that IS there must be on the list, or the digest stops holding it.
             const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/consensus_rules_digest.js');
             assert.ok(edge, 'the rules-digest edge must be declared');
             const targets = edge.toList();
-            assert.ok(targets.length >= 15, `expected the full gate list, got ${targets.length}`);
+            // The carriers named without an _activation stem map under gates/ too (the
+            // loader would look there on a miss); they are rows, so nothing is ever opened.
             for (const rel of targets) {
-                assert.ok(fs.existsSync(path.join(REPO_ROOT, rel)),
-                    `${rel} is resolved by a computed require that catches its own failure, so it must exist`);
+                assert.ok(rel.startsWith('src/consensus/gates/'), `${rel} is not where the W5 loader looks`);
             }
+            const { SHARED_GATES } = require(path.join(REPO_ROOT, 'src/consensus_rules_digest.js'));
+            const stems = new Set(SHARED_GATES.map(([mod]) => mod.replace(/_activation$/, '')));
+            const present = fs.readdirSync(path.join(REPO_ROOT, 'src/consensus/gates'))
+                .filter((f) => f.endsWith('_gate.js') && stems.has(f.replace(/_gate\.js$/, '')))
+                .map((f) => `src/consensus/gates/${f}`);
+            assert.ok(present.length >= 6, `expected the W5 gate twins SHARED_GATES names on disk, got ${present.length}`);
+            for (const rel of present) assert.ok(targets.includes(rel), `${rel} is on disk but not on the digest edge`);
+            assert.ok(targets.includes('src/consensus/gates/mirror_admission_gate.js'),
+                'the one carrier the digest opens today for its function-valued names');
         });
 
-        it('resolves all three bridge gates out of the engine itself', () => {
+        it('declares no edge for the bridge engine, which reads its gates from the registry since W5', () => {
             const edge = reach.DYNAMIC_EDGES.find((e) => e.from === 'src/cross_chain/bridge_engine.js');
-            assert.ok(edge, 'the bridge edge must be declared');
-            const targets = edge.toList();
-            assert.deepStrictEqual(targets.slice().sort(), [
-                'src/token_bridge_activation.js',
-                'src/token_policy_activation.js',
-                'src/xchain_bridge_activation.js',
-            ], 'the three gates the constructor loads, read from its loadActivation calls');
-            for (const rel of targets) {
-                assert.ok(fs.existsSync(path.join(REPO_ROOT, rel)), `${rel} must exist`);
-            }
+            assert.strictEqual(edge, undefined, 'the bridge engine builds no require at run time any more');
+            const engine = fs.readFileSync(path.join(REPO_ROOT, 'src/cross_chain/bridge_engine.js'), 'utf8');
+            assert.ok(!/require\s*\(\s*path\s*\./.test(engine) && !/require\s*\(\s*['"][^'"]*['"]\s*\+/.test(engine),
+                'a computed require is back in the engine: declare its edge or the static walk misses it');
         });
 
     });
@@ -211,18 +219,21 @@ describe('bin/reachability.js', function () {
             assert.deepStrictEqual(noHome, [], 'a checkout with no db home is zero edges');
         });
 
-        it('holds every gate carrier in the runtime closure ONLY through that edge', () => {
-            // The point of the whole mechanism: no literal anywhere names
-            // rollcall_activation.js, so without the declared edge it reads dead
-            // and a sweep would delete a consensus carrier.
+        it('holds the admission gate carrier from the digest through that edge alone', () => {
+            // The point of the whole mechanism: no literal in the digest names
+            // mirror_admission_gate.js (loadGateValue builds the path from the
+            // SHARED_GATES row), so withdrawing the declared edge drops the digest
+            // from the carrier's holders and a sweep could read a consensus carrier dead.
             const report = reach.analyse({ siblings: false });
-            const carrier = report.files['src/rollcall_activation.js'];
+            const carrier = report.files['src/consensus/gates/mirror_admission_gate.js'];
             assert.ok(carrier, 'the carrier must be in the verdict');
             assert.strictEqual(carrier.reachableFromHubRuntime, true,
                 'the rules digest holds it, by computed require');
+            assert.ok(carrier.requiredByInRepo.includes('src/consensus_rules_digest.js'),
+                'the digest is one of its holders through the edge; holders: ' + carrier.requiredByInRepo.join(', '));
 
             const literal = fs.readFileSync(path.join(REPO_ROOT, 'src/consensus_rules_digest.js'), 'utf8');
-            assert.ok(!literal.includes("require('./rollcall_activation.js')"),
+            assert.ok(!/require\(['"][^'"]*mirror_admission_gate\.js['"]\)/.test(literal),
                 'if a literal require appears, this test has stopped proving the edge does the work');
         });
     });

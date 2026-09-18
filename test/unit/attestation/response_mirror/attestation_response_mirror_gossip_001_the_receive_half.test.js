@@ -42,7 +42,7 @@ const { MIRROR_COLUMNS, GOSSIP_COLUMNS, ATTEST_RESULT, PARK_MAX } = AttestationR
 const AttestationRound     = require('../../../../src/attestation/round');
 const AttestationConsensus = require('../../../../src/attestation/consensus');
 const ValidatorIdentity    = require('../../../../src/validators/identity');
-const eq                   = require('../../../../src/equivocation_header.js');
+const eq                   = require('../../../../src/consensus/equivocation_header.js');
 const { buildResponseCanonicalRaw } = require('../../../../src/attestation/attest_response_canonical.js');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 

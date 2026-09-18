@@ -182,7 +182,7 @@ module.exports = {
         // This is HUB-LOCAL trust policy and it is the only end of the anchor path the
         // knob moves. The BTC indexer's anchor-reward MINT gate does NOT read it: minting
         // happens inside the block transaction, so its depth is a ledger input frozen at
-        // ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS (anchor_reward_activation.js), equal to the
+        // ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS (anchor_reward_gate.js), equal to the
         // per-coin default. Because the resolver's floor is that same default, a hub on
         // mainnet or testnet can never attest shallower than the fleet will mint. On
         // regtest a lowered override deliberately can: the hub attests early and the BTC

@@ -34,7 +34,7 @@
  * their price-value flag day; this is that rule made shareable, plus the
  * scalar-type and column-width checks a `String(value)` test cannot make.
  *
- * It deliberately does NOT follow that gate up. price_scale_activation.js grades
+ * It deliberately does NOT follow that gate up. price_scale_gate.js grades
  * a value the CHAIN finalized, on the chain's own key; this door grades a peer's
  * live submission, which carries no block time to resolve a gate against, and the
  * band and median that read it downstream are hub-local. The width cap below is
