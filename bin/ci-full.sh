@@ -122,7 +122,7 @@ run_tier "measurement tools (bin/test)" \
   npx mocha 'bin/test/**/*.test.js' --no-config --timeout 120000 --recursive --exit
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
-run_tier "ci" npm run ci
+run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
 
 # --- job: perf -------------------------------------------------------------
 # The workflow gives this job its own MariaDB service container; here the DB is
@@ -159,7 +159,8 @@ run_tier "drift: vendored observability shim vs canonical (six consumers)" \
   npm run check:observability-sync
 
 # --- job: coverage ---------------------------------------------------------
-run_tier "coverage ratchet (coverage:check)" npm run coverage:check
+run_tier "coverage ratchet (coverage:check)" \
+  env XCHAIN_REQUIRE_SIBLINGS=1 npm run coverage:check
 
 echo
 if [ -n "$FAILED" ]; then
