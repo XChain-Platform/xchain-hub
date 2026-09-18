@@ -45,4 +45,35 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         // one-liner carries none, so this is the line that tells the two apart.
         expect(res.stderr).to.not.match(/^\s+at /m);
     });
+
+    it('refuses an unknown flag before measuring the checkout', function () {
+        const res = run(['--out', 'ignored.json']);
+        expect(res.status).to.equal(2);
+        expect(res.stdout).to.equal('');
+        expect(res.stderr).to.include('REFUSING: unknown flag --out');
+        expect(res.stderr).to.include('Usage: node bin/consensus-identity.js [--json] [--compare <pin>]');
+    });
+
+    it('refuses a bare positional argument the same way', function () {
+        const res = run(['pin.json']);
+        expect(res.status).to.equal(2);
+        expect(res.stderr).to.include('REFUSING: unknown flag pin.json');
+    });
+
+    it('keeps JSON output and committed-pin comparison working', function () {
+        const json = run(['--json']);
+        const comparison = run(['--compare', path.join(REPO, 'bin/pins/at1-consensus-identity.json')]);
+        expect(json.status, json.stderr).to.equal(0);
+        expect(() => JSON.parse(json.stdout)).to.not.throw();
+        expect(comparison.status, comparison.stdout + comparison.stderr).to.equal(0);
+        expect(comparison.stdout).to.match(/^consensus identity holds against /);
+    });
+
+    it('documents only the JSON and compare pin workflows', function () {
+        const res = run(['--help']);
+        expect(res.status, res.stderr).to.equal(0);
+        expect(res.stdout).to.include('node bin/consensus-identity.js --json');
+        expect(res.stdout).to.include('node bin/consensus-identity.js --compare <pin>');
+        expect(res.stdout).to.not.include('--out');
+    });
 });

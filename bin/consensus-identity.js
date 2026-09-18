@@ -68,13 +68,11 @@
  * USAGE
  *   node bin/consensus-identity.js                    human summary
  *   node bin/consensus-identity.js --json             the full pin on stdout
- *   node bin/consensus-identity.js --out <file>       write the pin as JSON
- *   node bin/consensus-identity.js --root <dir>       measure another checkout
- *   node bin/consensus-identity.js --assert-no-absent exit 1 if any gate is
- *                                                     unresolved (the check a
- *                                                     move has to survive)
  *   node bin/consensus-identity.js --compare <pin>    diff a tree against a pin,
  *                                                     exit 1 on any difference
+ *
+ * Pin output is stdout only. Redirect --json explicitly when updating a pin;
+ * there is no output-file flag.
  *
  ********************************************************************/
 
@@ -83,6 +81,15 @@
 const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
+
+const USAGE = 'Usage: node bin/consensus-identity.js [--json] [--compare <pin>]';
+
+class CliUsageError extends Error {
+    constructor(arg) {
+        super(`REFUSING: unknown flag ${arg}\n${USAGE}`);
+        this.name = 'CliUsageError';
+    }
+}
 
 // The checkout under measurement. A binding rather than a constant so `--root`
 // can aim it at another hub worktree: several lanes of a restructure run at once
@@ -222,9 +229,9 @@ function parseArgs(argv) {
         if (argv[i] === '--json') opts.json = true;
         else if (argv[i] === '--assert-no-absent') opts.assertNoAbsent = true;
         else if (argv[i] === '--root') { opts.root = path.resolve(argv[i + 1]); i += 1; }
-        else if (argv[i] === '--out') { opts.out = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--compare') { opts.compare = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--help' || argv[i] === '-h') opts.help = true;
+        else throw new CliUsageError(argv[i]);
     }
     return opts;
 }
@@ -252,10 +259,6 @@ function main() {
         return;
     }
 
-    if (opts.out) {
-        fs.mkdirSync(path.dirname(opts.out), { recursive: true });
-        fs.writeFileSync(opts.out, `${JSON.stringify(identity, null, 2)}\n`);
-    }
     if (opts.json) {
         console.log(JSON.stringify(identity, null, 2));
     } else {
@@ -270,7 +273,6 @@ function main() {
         console.log(`coin pins skipped on:     ${identity.coin_pin_skipped_networks.join(', ') || 'none'}`);
         console.log(`hub_schema_version:       ${identity.hub_schema_version}`);
         console.log(`carrier_logic_digest:     ${identity.carrier_logic_digest}`);
-        if (opts.out) console.log(`\nwritten to ${opts.out}`);
     }
 
     if (opts.assertNoAbsent && identity.absent_gates.length) {
@@ -287,7 +289,12 @@ if (require.main === module) {
     // Caught here rather than left to Node's default uncaught-exception handler,
     // which exits 1 with a raw stack. The indexer's copy of this tool already gives
     // a caller the contract this one now matches: exit 2, one clean line on stderr.
-    try { main(); } catch (e) { console.error(`consensus-identity: ${e.message}`); process.exit(2); }
+    try {
+        main();
+    } catch (e) {
+        console.error(e instanceof CliUsageError ? e.message : `consensus-identity: ${e.message}`);
+        process.exit(2);
+    }
 }
 
 module.exports = {
