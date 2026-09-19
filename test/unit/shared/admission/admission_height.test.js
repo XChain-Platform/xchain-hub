@@ -353,11 +353,11 @@ describe('admission_height: the era gate, INERT', () => {
         expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, 1000, null)).to.equal('');
     });
 
-    it('builds NO field for a legacy-era row that was handed a map, ignoring it', () => {
-        // An activation-inert consumer treats admit_blocks as absent even when a newer producer
-        // supplied it, so the legacy bytes stay byte for byte what every peer rebuilds.
-        expect(armed.ah.admissionCanonicalField('XTEST', 'mainnet', 1000, { BTC: 1004 })).to.equal('');
-        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, 1000, { BTC: 1004 })).to.equal('');
+    it('refuses to build an ADMISSION canonical for a legacy-era row', () => {
+        expect(() => armed.ah.admissionCanonicalField('XTEST', 'mainnet', 1000, { BTC: 1004 }))
+            .to.throw(/refusing to build an admission-era canonical/);
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, 1000, { BTC: 1004 }))
+            .to.throw(/refusing to build an admission-era canonical/);
     });
 });
 
@@ -378,11 +378,13 @@ describe('admission_height: the era gate, ARMED at a regtest height', () => {
         expect(armed.ah.isAdmissionEra('testnet', ERA_AT)).to.equal(false);
     });
 
-    it('builds NO field for an admission-era row with no map, taking the legacy path', () => {
-        // Only an armed consumer WITH a present map emits admission bytes. Armed with nothing
-        // in hand it spells the legacy bytes and lets quorum verification decide.
-        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, null)).to.equal('');
-        expect(armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, undefined)).to.equal('');
+    it('refuses to build a LEGACY canonical for an admission-era row', () => {
+        // The branch under test is the refusal, and it is the one that strands a row: a
+        // modern row signed over pre-admission bytes reproduces for no verifier in the fleet.
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, null))
+            .to.throw(/refusing to build a legacy canonical/);
+        expect(() => armed.ah.admissionCanonicalField('XTEST', REGTEST, ERA_AT, undefined))
+            .to.throw(/refusing to build a legacy canonical/);
     });
 
     it('appends the field after a single pipe when the era is active', () => {

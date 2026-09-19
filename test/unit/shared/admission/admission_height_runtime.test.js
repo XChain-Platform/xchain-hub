@@ -162,10 +162,9 @@ describe('at and above the activation', () => {
         before(() => { armed = withAdmissionActivation(ERA_AT); });
         after(() => { armed.restore(); });
 
-        it('the match builder builds LEGACY bytes for an admission-era row with no map', () => {
-            // Armed with no map in hand, the builder spells the legacy bytes.
-            let raw = armed.DEX.call({}, matchRow(), 0);
-            expect(raw).to.not.match(/BTC:/);
+        it('the match builder refuses to build LEGACY bytes for an admission-era row', () => {
+            expect(() => armed.DEX.call({}, matchRow(), 0))
+                .to.throw(/CrossChainDex.*refusing to build a legacy canonical/);
         });
 
         it('an admission-era match canonical ends with the ASCII-ordered map', () => {
@@ -212,16 +211,14 @@ describe('below the activation', () => {
             expect(raw.split('|').pop()).to.equal('0');   // b_filled_before, the old last field
         });
 
-        it('the match builder ignores an admission map on a legacy-era row', () => {
-            // Inert means absent, whatever a newer producer put on the row.
-            let raw = inert.DEX.call({}, matchRow({ network: 'mainnet', admit_blocks: { BTC: 1004, DOGE: 2004 } }), 0);
-            expect(raw).to.not.match(/BTC:/);
+        it('the match builder refuses an admission map on a legacy-era row', () => {
+            expect(() => inert.DEX.call({}, matchRow({ network: 'mainnet', admit_blocks: { BTC: 1004, DOGE: 2004 } }), 0))
+                .to.throw(/CrossChainDex.*refusing to build an admission-era canonical/);
         });
 
-        it('the policy builder ignores an admission map on a legacy-era row', () => {
-            // The policy carrier reads the same era gate as the match carrier.
-            let raw = inert.BRIDGE.call({}, policyRow({ network: 'mainnet', admit_block_btc: 1004 }), 0);
-            expect(raw).to.not.match(/BTC:/);
+        it('the policy builder refuses an admission map on a legacy-era row', () => {
+            expect(() => inert.BRIDGE.call({}, policyRow({ network: 'mainnet', admit_block_btc: 1004 }), 0))
+                .to.throw(/CrossChainPolicy.*refusing to build an admission-era canonical/);
         });
     });
 }

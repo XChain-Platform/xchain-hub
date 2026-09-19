@@ -245,22 +245,18 @@ function registerThePriceBatchRailCarries2Tests1() {
             expect(result.rejected).to.equal(2);
         });
 
-        it('takes the legacy byte path for an era batch whose rounds carry NO map, storing nothing', async function () {
-            // A version seam is not a fault. The batch is rebuilt over legacy bytes and quorum
-            // verification decides it, so it is refused on its signatures rather than on an era
-            // complaint. Nothing lands either way, which is the property that still matters.
+        it('refuses an era batch whose rounds carry NO map, whole, storing nothing', async function () {
             const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(ADMIT_AT + 1));
             expect(result.accepted).to.equal(false);
-            expect(result.reason).to.not.match(/admission map does not match the round's era/);
+            expect(result.reason).to.match(/admission map does not match the round's era/);
             expect(result.stored).to.equal(0);
+            expect(result.rejected).to.equal(2);
         });
 
-        it('takes the legacy byte path for a LEGACY batch that was handed a map, the other direction', async function () {
-            // An activation-inert consumer treats admit_blocks as absent even when a newer
-            // producer supplied it, so the map is ignored and the signatures decide.
+        it('refuses a LEGACY batch that was handed a map, the other direction', async function () {
             const result = await aggOn(NETWORK).receiveValidatedBatch('BTC', batchOn(LEGACY_AT, [MAP5, MAP6]));
             expect(result.accepted).to.equal(false);
-            expect(result.reason).to.not.match(/admission map does not match the round's era/);
+            expect(result.reason).to.match(/admission map does not match the round's era/);
         });
 
         it('refuses a map the encoder cannot spell rather than throwing on it', async function () {

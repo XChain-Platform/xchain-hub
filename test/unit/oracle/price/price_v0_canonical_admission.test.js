@@ -173,16 +173,16 @@ function builtBy(height, map, network) {
             expect(b.producer.endsWith('}')).to.equal(true);
         }
 
-        function allThreeIgnoreAMapOnTest7() {
-            // An inert consumer treats a supplied map as absent, so the legacy bytes stand.
-            const plain = builtBy(LEGACY_AT, undefined), b = builtBy(LEGACY_AT, admitMap());
-            for (const k of ['producer', 'ingest', 'indexer']) assert.strictEqual(b[k], plain[k], k);
+        function allThreeRefuseAMapOnTest7() {
+            const b = three(LEGACY_AT, admitMap());
+            for (const [name, build] of [['producer', b.producer], ['ingest', b.ingest], ['indexer', b.indexer]])
+                expect(build, name).to.throw(/refusing to build an admission-era canonical/);
         }
 
         function belowTheActivationTheLegacyBytesSuite4() {
             it('all three emit the identical canonical, with no admission field', allThreeEmitTheIdenticalCanonicalTest5);
             it('a mainnet round is legacy at a height far above the armed regtest one', aMainnetRoundIsLegacyAtTest6);
-            it('all three IGNORE a map on a legacy round and sign the untouched legacy bytes', allThreeIgnoreAMapOnTest7);
+            it('all three REFUSE a map on a legacy round rather than signing bytes no era reads', allThreeRefuseAMapOnTest7);
         }
 
         registerbelowTheActivationTheLegacyBytes3 = function registerSuite() {
@@ -245,13 +245,12 @@ function builtBy(height, map, network) {
             assert.strictEqual(b.indexer, b.producer);
         }
 
-        function allThreeUseLegacyBytesWhenTest14() {
-            // Armed with no map in hand a consumer binds the legacy bytes rather than refusing.
-            // The with-map build is compared alongside: equal spellings would pass vacuously.
-            const withMap = builtBy(ADMIT_AT, admitMap());
-            for (const b of [builtBy(ADMIT_AT, null), builtBy(ADMIT_AT, undefined)])
-                for (const k of ['producer', 'ingest', 'indexer'])
-                    assert.strictEqual(b[k].endsWith('}') && b[k] !== withMap[k], true, k + ' did not use legacy bytes');
+        function allThreeRefuseARoundWithTest14() {
+            for (const missing of [null, undefined]) {
+                const b = three(ADMIT_AT, missing);
+                for (const [name, build] of [['producer', b.producer], ['ingest', b.ingest], ['indexer', b.indexer]])
+                    expect(build, name + ' with ' + String(missing)).to.throw(/refusing to build a legacy canonical/);
+            }
         }
 
         function allThreeRefuseAMapTheTest15() {
@@ -268,7 +267,7 @@ function builtBy(height, map, network) {
             it('appends the field after the JSON body and inside the EQUIV wrapper', appendsTheFieldAfterTheJsonTest11);
             it('the map insertion order never reaches the bytes, on any of the three', theMapInsertionOrderNeverReachesTest12);
             it('one changed height changes the signed bytes on all three, and they still agree', oneChangedHeightChangesTheSignedTest13);
-            it('all three sign the legacy bytes for a round with no map above the era', allThreeUseLegacyBytesWhenTest14);
+            it('all three REFUSE a round with no map, rather than signing legacy bytes above the era', allThreeRefuseARoundWithTest14);
             it('all three refuse a map the encoding cannot spell injectively', allThreeRefuseAMapTheTest15);
         }
 
@@ -327,13 +326,12 @@ function builtBy(height, map, network) {
             expect(result.reason).to.match(/admission map unusable/);
         }
 
-        async function doesNotAcceptAnAdmissionEraRoundTest20() {
-            // Rebuilt over legacy bytes rather than refused at the builder: signatures decide.
+        async function rejectsAnAdmissionEraRoundThatTest20() {
             const r = round();
             delete r.admit_blocks;
             const result = await agg.receiveValidatedRound('BTC', r);
             expect(result.accepted).to.equal(false);
-            expect(result.reason).to.not.match(/refusing to build a legacy canonical/);
+            expect(result.reason).to.match(/refusing to build a legacy canonical/);
         }
 
         async function refusesTheSignaturesWhenThePushedTest21() {
@@ -376,7 +374,7 @@ function builtBy(height, map, network) {
             afterEach(function () { sinon.restore(); });
             it('accepts a round whose signatures cover the admission-era canonical', acceptsARoundWhoseSignaturesCoverTest18);
             it('rejects, and does not throw, when the pushed map is unspellable', rejectsAndDoesNotThrowWhenTest19);
-            it('does not accept an admission-era round that carries no map at all', doesNotAcceptAnAdmissionEraRoundTest20);
+            it('rejects an admission-era round that carries no map at all', rejectsAnAdmissionEraRoundThatTest20);
             it('refuses the signatures when the pushed map is not the one that was signed', refusesTheSignaturesWhenThePushedTest21);
         }
 

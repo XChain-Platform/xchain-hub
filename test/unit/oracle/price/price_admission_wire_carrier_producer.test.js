@@ -251,11 +251,9 @@ function registerTheBatchProducerCarriesEach2Tests1() {
             expect(legacy.join('|')).to.not.match(/BTC:/);
         });
 
-        it('emits a LEGACY wire for an era round with no map, leaving the verifiers to decide it', function () {
-            // An armed producer with no map in hand spells the legacy bytes rather than refusing,
-            // so a mixed-version fleet can still bind the round.
-            const body = pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT), SIGS);
-            expect(body).to.not.match(/BTC:/);
+        it('refuses to emit a wire for an era round with no map, so nothing its verifiers would refuse is ever spent on', function () {
+            expect(() => pub.buildPriceBatchBody(5, 6, ADMIT_AT + 1, rounds(ADMIT_AT), SIGS))
+                .to.throw(/has no admit_blocks; refusing to build a legacy canonical/);
         });
 
         it('splits a window at the activation, so no batch straddles it', function () {
