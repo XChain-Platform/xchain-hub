@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-17
+
 ### Changed
-- Mirrored rows carry per-chain admission heights so a future-dated block no longer stalls indexer processing while the mirror proves completeness by height.
-- `carrier_logic_pin_ops --move` can re-pin changed carrier logic while recording the path and hash transitions atomically.
+- Mirrored rows carry per-chain admission heights so a future-dated block no longer stalls indexer processing.
+- `carrier_logic_pin_ops --move` can re-pin changed carrier logic and record path and hash transitions atomically.
+- Governance activation reads now use the shared registry.
+- Consensus gates, frozen-set derivation, and identity pins follow the consolidated registry layout.
 
 ### Fixed
-- A BTC-sourced bridge transfer is never anchored below the BTC block its source leg was mined in, so a mint is no longer proven against escrow from before the lock.
-- The mirror bootstrap pages for cross-chain calls, attestation responses and anchor-reward attestations carry the admission-height columns, so a reconnecting indexer binds those rows by height exactly as a streaming one does.
+- BTC-sourced bridge transfers cannot be anchored below the source block that mined their lock.
+- Mirror bootstrap pages carry the same admission-height columns as the live stream.
+- Mirror bootstrap requests use a dedicated per-IP rate-limit bucket.
+- Boot marker scans stop at the catch-up horizon.
 
 ## [0.19.0] - 2026-09-16
 
