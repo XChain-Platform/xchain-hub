@@ -247,15 +247,17 @@ function loadIndexerTwin(ctx) {
                 assert.strictEqual(armed.indexer.buildPriceBatchPayload(FIRST, LAST, LEGACY_AT, legacy, NETWORK), fromProducer);
         }
 
-        function everyTwinRefusesInBothDirectionsTest17() {
+        function everyTwinUsesLegacyBytesTest17() {
+            // Both directions of the version seam take the legacy byte path. An armed twin with
+            // no map emits no admission field, and an inert twin handed one ignores it.
             let twins = [['producer', (r, a) => armed.producer.buildPriceBatchPayload(FIRST, LAST, a, r)],
                          ['ingest',   (r, a) => armed.ingest.buildPriceBatchPayload(FIRST, LAST, a, r)]];
             if (armed.indexer) twins.push(['indexer', (r, a) => armed.indexer.buildPriceBatchPayload(FIRST, LAST, a, r, NETWORK)]);
             for (const [name, build] of twins) {
-                assert.throws(() => build(rounds(ADMIT_AT), ADMIT_AT + 1), /has no admit_blocks; refusing to build a legacy canonical/,
-                    name + ' built legacy bytes for an era round');
-                assert.throws(() => build(rounds(LEGACY_AT - 1, MAPS), LEGACY_AT), /was handed admit_blocks .*; refusing to build an admission-era canonical/,
-                    name + ' built era bytes for a legacy round');
+                assert.strictEqual(/admit/.test(build(rounds(ADMIT_AT), ADMIT_AT + 1)), false,
+                    name + ' emitted admission bytes for an era round with no map');
+                assert.strictEqual(/admit/.test(build(rounds(LEGACY_AT - 1, MAPS), LEGACY_AT)), false,
+                    name + ' emitted admission bytes for a legacy round handed a map');
             }
         }
 
@@ -271,7 +273,7 @@ function loadIndexerTwin(ctx) {
         function theBatchCanonicalCarriesOneAdmissionSuite14() {
             it('the hub twins agree, and the indexer verifier with them, in the admission era', theHubTwinsAgreeAndTheTest15);
             it('below the activation the bytes are the pre-admission form exactly, on all twins', belowTheActivationTheBytesAreTest16);
-            it('every twin refuses in both directions: an era round with no map, a legacy round with one', everyTwinRefusesInBothDirectionsTest17);
+            it('every twin uses legacy bytes in both directions: an era round with no map, a legacy round with one', everyTwinUsesLegacyBytesTest17);
             it('the map is keyed on EACH round\'s own anchor: a straddling window carries it on the era round only', theMapIsKeyedOnEachTest18);
         }
 
