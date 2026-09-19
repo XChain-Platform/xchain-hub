@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "01169736d617db9ddab9654879fbaac802c1c7351d40e23fdff9eb7700ef2fea",
+  "consensus_rules_digest": "b57eb9a867a8d3c914dc100b445fccb217c54efc8a7dd671a0ad176c83cebd4c",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -21,12 +21,12 @@
     "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2": "{\"headroom\":1,\"maxSlots\":2,\"startOffset\":0}",
     "rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":152208}",
     "xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION": "{\"BTC:mainnet\":9999999999,\"BTC:testnet\":152929,\"DOGE:mainnet\":9999999999,\"DOGE:testnet\":67902062,\"LTC:mainnet\":9999999999,\"LTC:testnet\":4887898,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":153222,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67911796,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
-    "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":153266,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67912575,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
+    "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":153300,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67916857,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
+    "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":153328,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67917706,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":null}",
     "mirror_admission_activation.ADMIT_MARGIN_BLOCKS": "{\"anchor_reward_attestations\":144,\"attestation_responses\":1,\"default\":4,\"oracle_prices\":1}",
     "mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS": "1",
     "mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS": "{\"BTC\":6,\"DOGE\":60,\"LTC\":24,\"default\":6}",
-    "anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":153266}",
+    "anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":153328}",
     "anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S": "64800",
     "mirror_admission_activation.CHAIN_CODE_RE": "{}",
     "mirror_admission_activation.CANONICAL_HEIGHT_RE": "{}"

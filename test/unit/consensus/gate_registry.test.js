@@ -302,7 +302,7 @@ describe('src/consensus/gate_registry.js: regtest arming from the environment', 
         bootedWith('XC_MIRROR_ADMISSION_ACTIVATION', '150', (fresh) => {
             const producer = fresh.get(ADMISSION);
             for (const k of ['BTC:regtest', 'LTC:regtest', 'DOGE:regtest']) expect(producer[k], k).to.equal(150);
-            expect(producer['BTC:testnet']).to.equal(153222);
+            expect(producer['BTC:testnet']).to.equal(153300);
             expect(fresh.copy(BARRIER).regtest).to.equal(150);
             expect(fresh.get(ROLLCALL).regtest, 'the roll-call lever is a different variable').to.equal(null);
         });
