@@ -73,6 +73,11 @@ module.exports = {
         let agedRows = await db.getAttestPublishedBatchesCountByNetworkAndStatusBefore(
             this.network, 'intent', floor);
         let agedSummary = (agedRows && agedRows[0]) || {};
+        if(!Number.isFinite(Number(agedSummary.count))){
+            let oldest = Number(agedSummary.oldest);
+            agedSummary.count = agedSummary.oldest !== null &&
+                agedSummary.oldest !== undefined && Number.isFinite(oldest) && oldest < floor ? 1 : 0;
+        }
 
         let live = [];
         for(let r of (rows || [])){
