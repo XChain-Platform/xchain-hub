@@ -11,15 +11,16 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * priceV2PayloadTwinParity: the PRICE v0 canonical is written three times, and the
- * hub owns two of them. OracleConsensus.buildPriceBatchPayload SIGNS; anything
+ * priceV0BatchCanonicalParity: the PRICE v0 canonical is written by the two hub
+ * production twins and an indexer verifier. OracleConsensus.buildPriceBatchPayload
+ * SIGNS; anything
  * PriceAggregator.buildPriceBatchPayload or xchain-indexer ed25519.buildPriceBatchPayload
  * builds differently is a batch the federation cannot verify, so the price rail stops
  * and the native-fee / XCHAIN-USD path stops with it. This suite asserts byte equality
  * on a batch built to exercise every normalization the builders own (round order, pair
  * order, integer spelling, the coinPair/pair spelling split).
  *
- * The indexer twin is resolved by monorepo-relative path: a standalone hub checkout
+ * The indexer verifier is resolved by monorepo-relative path: a standalone hub checkout
  * skips that comparison (unless XCHAIN_REQUIRE_SIBLINGS=1) and still compares the hub's
  * own two copies against each other.
  *
@@ -82,7 +83,7 @@ function hubTwins() {
     };
 }
 
-function loadIndexerTwin(ctx) {
+function loadIndexerVerifier(ctx) {
     try { return require('../../../../../xchain-indexer/src/consensus/ed25519.js'); }
     catch (e) {
         if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
@@ -145,12 +146,12 @@ function loadIndexerTwin(ctx) {
         assert.strictEqual(eq.isEquivHeaderActive(1, 'mainnet'), false, 'the gate v0 would have failed here');
     }
 
-    let registeragainstTheIndexerVerifierTwin6;
+    let registerAgainstTheIndexerVerifier6;
 
     {
 
-        function allThreeTwinsEmitTheIdenticalTest8() {
-            let ed25519 = loadIndexerTwin(this);
+        function allThreeBuildersEmitTheIdenticalTest8() {
+            let ed25519 = loadIndexerVerifier(this);
             if (!ed25519) return;
 
             let fromIndexer  = ed25519.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
@@ -160,8 +161,8 @@ function loadIndexerTwin(ctx) {
                 'PriceAggregator (hub ingest verifier) diverged from the indexer verifier');
         }
 
-        function allThreeNormalizeCallerOrderingToTest9() {
-            let ed25519 = loadIndexerTwin(this);
+        function allThreeBuildersNormalizeCallerOrderingToTest9() {
+            let ed25519 = loadIndexerVerifier(this);
             if (!ed25519) return;
 
             let expected = ed25519.buildPriceBatchPayload(FIRST, LAST, ANCHOR, batch());
@@ -174,39 +175,39 @@ function loadIndexerTwin(ctx) {
             }
         }
 
-        function allThreeSpellCoinpairAndPairTest10() {
-            let ed25519 = loadIndexerTwin(this);
+        function allThreeBuildersSpellCoinpairAndPairTest10() {
+            let ed25519 = loadIndexerVerifier(this);
             if (!ed25519) return;
 
             let rounds = [{ round: 7, timestamp: 100, btcBlockHeight: 5, pairs: [{ coinPair: 'BTC/USD', price: '1' }] }];
-            let twin   = [{ round: 7, timestamp: 100, btcBlockHeight: 5, pairs: [{ pair:     'BTC/USD', price: 1   }] }];
+            let alternate = [{ round: 7, timestamp: 100, btcBlockHeight: 5, pairs: [{ pair: 'BTC/USD', price: 1 }] }];
             let expected = ed25519.buildPriceBatchPayload(7, 7, 5, rounds);
-            assert.strictEqual(ed25519.buildPriceBatchPayload(7, 7, 5, twin), expected, 'indexer verifier');
-            assert.strictEqual(hub.producer.buildPriceBatchPayload(7, 7, 5, twin), expected, 'hub producer');
+            assert.strictEqual(ed25519.buildPriceBatchPayload(7, 7, 5, alternate), expected, 'indexer verifier');
+            assert.strictEqual(hub.producer.buildPriceBatchPayload(7, 7, 5, alternate), expected, 'hub producer');
             assert.strictEqual(hub.ingest.buildPriceBatchPayload(7, 7, 5, rounds), expected, 'hub ingest');
         }
 
-        function againstTheIndexerVerifierTwinSuite7() {
-            it('all three twins emit the identical canonical for one batch', allThreeTwinsEmitTheIdenticalTest8);
-            it('all three normalize caller ordering to the same bytes', allThreeNormalizeCallerOrderingToTest9);
-            it('all three spell coinPair and pair to the same bytes', allThreeSpellCoinpairAndPairTest10);
+        function againstTheIndexerVerifierSuite7() {
+            it('all three builders emit the identical canonical for one batch', allThreeBuildersEmitTheIdenticalTest8);
+            it('all three builders normalize caller ordering to the same bytes', allThreeBuildersNormalizeCallerOrderingToTest9);
+            it('all three builders spell coinPair and pair to the same bytes', allThreeBuildersSpellCoinpairAndPairTest10);
         }
 
-        registeragainstTheIndexerVerifierTwin6 = function registerSuite() {
-            describe('against the indexer verifier twin', againstTheIndexerVerifierTwinSuite7);
+        registerAgainstTheIndexerVerifier6 = function registerSuite() {
+            describe('against the indexer verifier', againstTheIndexerVerifierSuite7);
         };
 
     }
 
-    function priceV0CanonicalThreeWayTwinSuite1() {
+    function priceV0BatchCanonicalParitySuite1() {
         before(function () { hub = hubTwins(); });
         it('the producer emits the pinned key order, ascending rounds and sorted pairs', theProducerEmitsThePinnedKeyTest2);
         it('the hub twins agree with each other, byte for byte', theHubTwinsAgreeWithEachTest3);
         it('the hub twins are caller-order independent', theHubTwinsAreCallerOrderTest4);
         it('the hub twins wrap in the EQUIV header unconditionally, with no activation gate', theHubTwinsWrapInTheTest5);
-        registeragainstTheIndexerVerifierTwin6();
+        registerAgainstTheIndexerVerifier6();
     }
 
-    describe('PRICE v0 canonical: three-way twin parity', priceV0CanonicalThreeWayTwinSuite1);
+    describe('PRICE v0 batch canonical parity', priceV0BatchCanonicalParitySuite1);
 
 }
