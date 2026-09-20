@@ -124,7 +124,7 @@ module.exports = {
     // Summarizes attest_published_batches below a window floor without returning
     // the historical rows. MIN and MAX preserve the age range in the operator log.
     async getAttestPublishedBatchesCountByNetworkAndStatusBefore(network, status, beforeWindowStart) {
-        return this.doQuery('SELECT COUNT(*) AS count, MIN(window_start) AS oldest, MAX(window_start) AS newest FROM attest_published_batches WHERE network = ? AND status = ? AND window_start < ?', [network, status, beforeWindowStart]);
+        return this.doQuery('SELECT MIN(window_start) AS oldest, MAX(window_start) AS newest, COUNT(*) AS count FROM attest_published_batches WHERE network = ? AND status = ? AND window_start < ?', [network, status, beforeWindowStart]);
     },
 
     // Reads rows from attest_published_requests.
