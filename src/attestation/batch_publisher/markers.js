@@ -66,38 +66,43 @@ module.exports = {
     async hydrateMarkers(nowSec){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
-        let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
         let current = this.windowStartFor(Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds());
         let floor   = this.catchupFloorWindow(current);
+        let rows = await db.findAttestPublishedBatchesByNetworkAndStatusSince(
+            this.network, 'intent', floor);
+        let agedRows = await db.getAttestPublishedBatchesCountByNetworkAndStatusBefore(
+            this.network, 'intent', floor);
+        let agedSummary = (agedRows && agedRows[0]) || {};
 
-        let live = [], aged = [];
+        let live = [];
         for(let r of (rows || [])){
             let start = Number(r.window_start);
             // A row whose window_start does not read as a number cannot be matched against
             // any window the sweep proposes, so it is neither quarantined nor counted.
             if(!Number.isFinite(start)) continue;
-            (start >= floor ? live : aged).push(start);
+            if(start >= floor) live.push(start);
         }
         live.sort((a, b) => a - b);
         for(let start of live) this._quarantined.add(start);
-        this.reportHydratedMarkers(live, aged, current);
+        this.reportHydratedMarkers(live, agedSummary, current);
     },
 
     // Two kinds of marker at two severities. A window inside the horizon is an action item
     // and names its age, because a count with no age leaves a four-day-old marker reading
     // like a fresh one; a window below it is a record and must not read as an alarm.
-    reportHydratedMarkers(live, aged, currentWindow){
+    reportHydratedMarkers(live, agedSummary, currentWindow){
         if(live.length > 0)
             logger.error('AttestationBatchPublisher: ' + live.length + ' window(s) carry a ' +
                 'publish-intent marker with no outcome; they are NOT re-published automatically. ' +
                 'Operator: verify each on chain and replay by hand if absent. Windows: ' +
                 live.map(s => s + ' (' + this.markerAge(s, currentWindow) + ')').join(', ') + '.');
-        if(aged.length > 0)
-            logger.info('AttestationBatchPublisher: ' + aged.length + ' publish-intent marker(s) lie below ' +
+        let agedCount = Number(agedSummary.count) || 0;
+        if(agedCount > 0)
+            logger.info('AttestationBatchPublisher: ' + agedCount + ' publish-intent marker(s) lie below ' +
                 'the ' + MAX_CATCHUP_WINDOWS + '-window catch-up horizon and are NOT an action item: no ' +
                 'sweep can propose those windows again. Oldest ' +
-                this.markerAge(Math.min.apply(null, aged), currentWindow) + ', newest ' +
-                this.markerAge(Math.max.apply(null, aged), currentWindow) + '.');
+                this.markerAge(agedSummary.oldest, currentWindow) + ', newest ' +
+                this.markerAge(agedSummary.newest, currentWindow) + '.');
     },
 
     // A marker's age in the two units that decide what to do with it: windows closed
