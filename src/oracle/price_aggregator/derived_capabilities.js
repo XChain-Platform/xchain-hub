@@ -20,6 +20,7 @@
  *
  ********************************************************************/
 
+const hubConfig = require('../../config.js');
 const { positiveIntConfig } = require('../../lib/config_int.js');
 
 // ── Derived capability snapshots ────────────────────────────────────────────
@@ -87,7 +88,7 @@ const PRICE_CAP_DERIVE_INTERVAL_S = 60;
 // HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK accepts a positive integer RPC-unit budget;
 // an unset or invalid value retains the 64-unit default.
 const PRICE_CAP_DERIVE_MAX_PER_TICK = positiveIntConfig(
-    process.env.HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK, 64,
+    hubConfig.env().HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK, 64,
     'HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK');
 
 module.exports = {
