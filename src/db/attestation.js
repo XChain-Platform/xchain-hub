@@ -116,6 +116,17 @@ module.exports = {
         return this.doQuery('SELECT window_start FROM attest_published_batches WHERE network = ? AND status = ?', [network, status]);
     },
 
+    // Reads rows from attest_published_batches at or above a window floor.
+    async findAttestPublishedBatchesByNetworkAndStatusSince(network, status, sinceWindowStart) {
+        return this.doQuery('SELECT window_start FROM attest_published_batches WHERE network = ? AND status = ? AND window_start >= ?', [network, status, sinceWindowStart]);
+    },
+
+    // Summarizes attest_published_batches below a window floor without returning
+    // the historical rows. MIN and MAX preserve the age range in the operator log.
+    async getAttestPublishedBatchesCountByNetworkAndStatusBefore(network, status, beforeWindowStart) {
+        return this.doQuery('SELECT COUNT(*) AS count, MIN(window_start) AS oldest, MAX(window_start) AS newest FROM attest_published_batches WHERE network = ? AND status = ? AND window_start < ?', [network, status, beforeWindowStart]);
+    },
+
     // Reads rows from attest_published_requests.
     // Moved here from src/attestation/publisher.js:616.
     async findAttestPublishedRequestsByRequestId(rid) {
