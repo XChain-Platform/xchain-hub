@@ -159,7 +159,8 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                         'attest-vec-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
                     // Block 100: below the mainnet SWQ anchor (961000) and above the
                     // regtest one (0), so the vector's `weighted` flag alone picks the branch.
-                    let got = await pub.computeResponsible(c.requestId, 100, c.redundancy, 'http_get');
+                    let got = await pub.computeResponsible(c.requestId, 100,
+                        c.redundancy - (c.widen ?? 0), 'http_get', c.widen);
                     expect(got).to.deep.equal(c.expected.length ? c.expected : null);
                 });
             }); }); }); });
