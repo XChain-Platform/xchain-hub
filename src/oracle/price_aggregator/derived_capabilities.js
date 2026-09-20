@@ -20,6 +20,8 @@
  *
  ********************************************************************/
 
+const { positiveIntConfig } = require('../../lib/config_int.js');
+
 // ── Derived capability snapshots ────────────────────────────────────────────
 // Every capability the consensus path persists into capability_snapshots, and so
 // every capability a chain-only hub must derive for itself. Row 45 built this pass
@@ -82,7 +84,11 @@ const PRICE_CAP_DERIVE_INTERVAL_S = 60;
 // widen this budget. The pass walks newest-first and covers ALL capabilities at a height
 // before it steps back one, so the tip (what a node following the chain needs next) is
 // fully covered first and the backfill trails behind it over the following ticks.
-const PRICE_CAP_DERIVE_MAX_PER_TICK = 64;
+// HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK accepts a positive integer RPC-unit budget;
+// an unset or invalid value retains the 64-unit default.
+const PRICE_CAP_DERIVE_MAX_PER_TICK = positiveIntConfig(
+    process.env.HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK, 64,
+    'HUB_PRICE_CAPABILITY_DERIVE_MAX_PER_TICK');
 
 module.exports = {
     DERIVED_CAPABILITIES, CAPABILITY_CONSENSUS_ENGINES,
