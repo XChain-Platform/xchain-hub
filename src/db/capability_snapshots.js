@@ -31,6 +31,11 @@ const TABLE   = 'capability_snapshots';
 const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source, btc_chain_id)';
 
 module.exports = {
+    // The table has no network column, so a regtest chain-instance change clears it whole.
+    async deleteAllCapabilitySnapshots() {
+        return this.doQuery('DELETE FROM capability_snapshots');
+    },
+
     // Reads rows from capability_snapshots.
     // Moved here from src/api.js:2116.
     async findCapabilitySnapshotsById(since, limit) {
