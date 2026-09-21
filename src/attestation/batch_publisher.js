@@ -283,11 +283,22 @@ class AttestationBatchPublisher {
     }
 
     getStats(){
+        let currentWindow = this.windowStartFor(this.nowSeconds());
+        let quarantineFloor = this.catchupFloorWindow(currentWindow);
+        let quarantinedWindows = 0;
+        for(let start of this._quarantined){
+            let windowStart = Number(start);
+            if(Number.isFinite(windowStart) && windowStart >= quarantineFloor &&
+               windowStart < currentWindow) quarantinedWindows++;
+        }
         return Object.assign({}, this.stats, {
             windowSeconds: this.windowS,
             enabled:       this.enabled,
             armed:         this.isArmedNetwork(),
-            quarantinedWindows: this._quarantined.size,
+            // The number of quarantines a sweep can still reach, not every quarantine
+            // retained by this process. A dashboard that counts whole retained history
+            // will read a lower number here, by design.
+            quarantinedWindows: quarantinedWindows,
             // Windows an earlier sweep walked past that are being caught up now. A count
             // that keeps rising is a publish path failing, not a busy federation.
             coverageGapWindows: this._coverageGaps.size,
