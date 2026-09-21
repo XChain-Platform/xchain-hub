@@ -26,8 +26,13 @@ const { blockIntervalS } = require('../lib/relay_margin.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
 const logger = getLogger();
+
+// One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
+// isolated even when tests or embedded callers deliberately use more than one in a scope.
+const admissionTipMemo = new AsyncLocalStorage();
 
 class ChainTips {
 
@@ -159,6 +164,13 @@ class ChainTips {
     // fast chains. Overridable per deployment, never per call.
     static get ADMISSION_TIP_STALL_BLOCKS(){ return 6; }
 
+    // Share admission-tip reads only within one proposal. Nested users join the current
+    // scope, while the next top-level proposal starts with an empty memo.
+    withAdmissionTipMemo(fn){
+        if(admissionTipMemo.getStore()) return fn();
+        return admissionTipMemo.run(new WeakMap(), fn);
+    }
+
     async resolveAdmissionTip(coin){
         let c = admissionHeight.normalizeChain(coin);
         if(c === null){
@@ -253,7 +265,18 @@ class ChainTips {
             if(c === null){ out[String(raw)] = null; continue; }
             if(want.indexOf(c) === -1) want.push(c);
         }
-        let tips = await Promise.all(want.map((c) => this.resolveAdmissionTip(c).catch(() => null)));
+        let scope = admissionTipMemo.getStore();
+        let memo = null;
+        if(scope){
+            memo = scope.get(this);
+            if(!memo){ memo = new Map(); scope.set(this, memo); }
+        }
+        let tips = await Promise.all(want.map((c) => {
+            if(!memo) return this.resolveAdmissionTip(c).catch(() => null);
+            if(!memo.has(c))
+                memo.set(c, Promise.resolve().then(() => this.resolveAdmissionTip(c)).catch(() => null));
+            return memo.get(c);
+        }));
         want.forEach((c, i) => { out[c] = tips[i]; });
         return out;
     }

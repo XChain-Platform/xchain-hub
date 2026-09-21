@@ -36,6 +36,7 @@ const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const { createMockHub } = require('../../../helpers/mockHub');
+const armAdmission      = require('../../../helpers/armAdmission');
 const eq                = require('../../../../src/consensus/equivocation_header.js');
 // The regtest producer activation this suite arms, keyed on the ROUND's own BTC anchor. One
 // armed process therefore drives both eras: a round below this height is a pre-activation round and
@@ -81,43 +82,26 @@ function armTwins() {
         if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
             throw new Error('PRICE v0 admission parity cannot run: xchain-indexer sibling missing (' + e.message + ')');
     }
-    const paths    = hubPaths.concat(indexerPaths || []);
-    const saved    = paths.map(p => [p, require.cache[p]]);
-    const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-    for (const p of paths) delete require.cache[p];
-    process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
+    return armAdmission(ADMIT_AT, hubPaths.concat(indexerPaths || []), () => {
+        const OracleConsensus = require('../../../../src/oracle/consensus.js');
+        const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+        const act             = require('../../../../src/consensus/gates/mirror_admission_gate.js');
+        const indexer         = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
+        function hubOn(network) { return { db: null, network: network, getPeerManager: () => ({}) }; }
 
-    const OracleConsensus = require('../../../../src/oracle/consensus.js');
-    const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-    const act             = require('../../../../src/consensus/gates/mirror_admission_gate.js');
-    const indexer         = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
-
-    // Put the process back exactly as it was found. The instances built below keep the
-    // armed modules they closed over, so the rest of the run still sees the inert tree it
-    // was written against: arming is scoped to this file and not to the process.
-    function restore() {
-        for (const [p, mod] of saved) {
-            if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
-        }
-        if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-        else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
-    }
-
-    function hubOn(network) { return { db: null, network: network, getPeerManager: () => ({}) }; }
-
-    return {
-        act:      act,
-        indexer:  indexer,
-        producer: new OracleConsensus(hubOn(NETWORK), {}),
-        ingest:   new PriceAggregator(hubOn(NETWORK)),
-        // Second pair on an INERT network, to drive the era key: a mainnet round is a pre-activation
-        // round at every height, including heights far above the armed regtest threshold.
-        inertProducer: new OracleConsensus(hubOn('mainnet'), {}),
-        inertIngest:   new PriceAggregator(hubOn('mainnet')),
-        OracleConsensus: OracleConsensus,
-        PriceAggregator: PriceAggregator,
-        restore:  restore
-    };
+        return {
+            act:      act,
+            indexer:  indexer,
+            producer: new OracleConsensus(hubOn(NETWORK), {}),
+            ingest:   new PriceAggregator(hubOn(NETWORK)),
+            // Second pair on an INERT network, to drive the era key: a mainnet round is a pre-activation
+            // round at every height, including heights far above the armed regtest threshold.
+            inertProducer: new OracleConsensus(hubOn('mainnet'), {}),
+            inertIngest:   new PriceAggregator(hubOn('mainnet')),
+            OracleConsensus: OracleConsensus,
+            PriceAggregator: PriceAggregator
+        };
+    });
 }
 
 // The three builders on one round. `network` picks which pair of hub instances answers,
@@ -386,7 +370,7 @@ function builtBy(height, map, network) {
 
     function priceV0CanonicalTheAdmissionFieldSuite1() {
         before(function () { armed = armTwins(); });
-        after(function () { if (armed) armed.restore(); armed = null; });
+        after(function () { armed = null; });
         it('is ARMED for this suite, so neither era case is vacuous', isArmedForThisSuiteSoTest2);
         registerbelowTheActivationTheLegacyBytes3();
         registeratAndAboveTheActivationThe8();

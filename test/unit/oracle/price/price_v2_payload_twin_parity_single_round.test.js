@@ -33,6 +33,7 @@
 const assert          = require('assert');
 const OracleConsensus = require('../../../../src/oracle/consensus.js');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+const armAdmission    = require('../../../helpers/armAdmission');
 const eq              = require('../../../../src/consensus/equivocation_header.js');
 
 const ANCHOR = 912345;   // equals the last round's own anchor, per the wire format
@@ -145,37 +146,19 @@ function loadIndexerTwin(ctx) {
                 throw new Error('PRICE v0 single-round parity cannot run: xchain-indexer sibling missing (' + e.message + ')');
         }
 
-        const paths    = hubPaths.concat(indexerPaths || []);
-        const saved    = paths.map(p => [p, require.cache[p]]);
-        const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-        for (const p of paths) delete require.cache[p];
-        process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
-
-        const ArmedOracleConsensus = require('../../../../src/oracle/consensus.js');
-        const ArmedPriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-        const act                  = require('../../../../src/consensus/gates/mirror_admission_gate.js');
-        const indexer              = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
-
-        // Put the process back exactly as it was found. The instances built below keep the
-        // armed modules they closed over, so the batch describe above and every other file in
-        // the run still see the inert tree they were written against: the arming is scoped to
-        // this describe and never to the process.
-        function restore() {
-            for (const [p, mod] of saved) {
-                if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
-            }
-            if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-            else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
-        }
-
-        const stubHub = { db: null, network: NETWORK, getPeerManager: () => ({}) };
-        return {
-            act:      act,
-            indexer:  indexer,
-            producer: new ArmedOracleConsensus(stubHub, {}),
-            ingest:   new ArmedPriceAggregator(stubHub),
-            restore:  restore
-        };
+        return armAdmission(ADMIT_AT, hubPaths.concat(indexerPaths || []), () => {
+            const ArmedOracleConsensus = require('../../../../src/oracle/consensus.js');
+            const ArmedPriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+            const act                  = require('../../../../src/consensus/gates/mirror_admission_gate.js');
+            const indexer              = indexerPaths ? require('../../../../../xchain-indexer/src/consensus/ed25519.js') : null;
+            const stubHub = { db: null, network: NETWORK, getPeerManager: () => ({}) };
+            return {
+                act:      act,
+                indexer:  indexer,
+                producer: new ArmedOracleConsensus(stubHub, {}),
+                ingest:   new ArmedPriceAggregator(stubHub)
+            };
+        });
     }
 
     let armed = null;
@@ -283,7 +266,7 @@ function loadIndexerTwin(ctx) {
 
     function priceV0SingleRoundCanonicalThreeSuite11() {
         before(function () { armed = armTwins(); });
-        after(function () { if (armed) armed.restore(); armed = null; });
+        after(function () { armed = null; });
         it('is ARMED, so neither era block below is the other one in disguise', isArmedSoNeitherEraBlockTest12);
         for (const era of [
             { name: 'below the activation, where the round is legacy',            height: LEGACY_AT, map: () => undefined, tail: null },

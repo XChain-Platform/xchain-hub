@@ -33,29 +33,28 @@ module.exports = {
         if(!proposal) return;
         let { rid, pending, view, row, canonical } = proposal;
 
-        // INDEPENDENT confirmation: re-derive + validate against our own view of
-        // the underlying data. This (not byte-equality with our locally pre-built
-        // row) is the gate against a Byzantine leader.
-        let ok = false;
-        try { ok = await this.engine.validateProposedMatch(row); }
-        catch(e){ ok = false; }
-        if(!ok){
-            logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
-            return;
-        }
+        const validateAndBound = async () => {
+            // INDEPENDENT confirmation: re-derive + validate against our own view of
+            // the underlying data. This (not byte-equality with our locally pre-built
+            // row) is the gate against a Byzantine leader.
+            let ok = false;
+            try { ok = await this.engine.validateProposedMatch(row); }
+            catch(e){ ok = false; }
+            if(!ok){
+                logger.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
+                return false;
+            }
 
-        // The per-chain follower bound on the row's ADMISSION MAP (C38, BF6), applied here
-        // because this is the one PROPOSE handler every engine on this consensus shares.
-        // An engine opts in by answering admissionScope(row) with the row's table and read
-        // set; one that does not is on the legacy effective_time rule and is unchanged.
-        //
-        // Deliberately a SECOND application for CrossChainCallEngine, which also holds the
-        // bound inside its own validateProposedMatch. The engine gate binds every caller of
-        // validateProposedMatch (its own tests, the e2e legs, any future caller) and this
-        // one binds every engine on the shared path, so neither can be removed by work on
-        // the other. The cost is one getlatestblock per reading chain on a path that
-        // already makes at least two indexer round trips per proposal.
-        if(!(await this.admissionBoundHolds(row, rid))) return;
+            // The per-chain follower bound on the row's ADMISSION MAP (C38, BF6), applied
+            // here because this is the one PROPOSE handler every engine shares. XCALL also
+            // applies the bound inside validateProposedMatch, so the proposal-scoped memo
+            // makes both gates reuse one tip promise per reading chain.
+            return this.admissionBoundHolds(row, rid);
+        };
+        const checked = this.hub && typeof this.hub.withAdmissionTipMemo === 'function'
+            ? await this.hub.withAdmissionTipMemo(validateAndBound)
+            : await validateAndBound();
+        if(!checked) return;
 
         // Every await of the round sits in this function, so adopting the leader's row and
         // writing the leader's and our own signature are one synchronous step.

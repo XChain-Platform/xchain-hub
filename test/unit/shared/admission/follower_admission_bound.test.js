@@ -13,12 +13,9 @@
  **********************************************************************
  * followerAdmissionBound: the CALL SITES of the per-chain follower bound (BF6, C38).
  *
- * admissionHeight.test.js drives checkAdmitBlocks as a function. This file drives the two
- * places a live hub actually reaches it, because a bound with no call site refuses nothing:
- *
- *   1. CrossChainCallEngine.validateProposedMatch, the XCALL engine's own follower gate;
- *   2. CrossChainDexConsensus.handlePropose, the ONE proposal handler every engine on that
- *      consensus shares, for any engine that declares an admissionScope.
+ * admissionHeight.test.js drives checkAdmitBlocks as a function. This file drives
+ * CrossChainCallEngine.validateProposedMatch, the XCALL engine's own follower gate.
+ * The shared consensus call site is covered in follower_admission_bound_consensus.test.js.
  *
  * Both must refuse in the same directions, and both must resolve the FOLLOWER'S OWN tips
  * rather than trusting the map the leader sent. The refusals driven here are the ones BF6
@@ -39,6 +36,7 @@ const { expect }        = require('chai');
 const sinon             = require('sinon');
 const crypto            = require('crypto');
 const ValidatorIdentity = require('../../../../src/validators/identity.js');
+const armAdmission      = require('../../../helpers/armAdmission');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
@@ -60,34 +58,11 @@ const ARMED_MODULES = [
     '../../../../src/cross_chain/call_engine.js'
 ];
 
-// Purge, arm, re-require, and hand back a restore() that puts the process back byte-exact.
-// The objects built from the armed modules keep them by closure, so the rest of the run
-// still sees the inert tree it was written against.
-function armAdmission() {
-    const paths    = ARMED_MODULES.map(m => require.resolve(m));
-    const saved    = paths.map(p => [p, require.cache[p]]);
-    const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-    for (const p of paths) delete require.cache[p];
-    process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
-
-    const ah                   = require('../../../../src/lib/admission_height.js');
-    const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
-
-    function restore() {
-        for (const [p, mod] of saved) {
-            if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
-        }
-        if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-        else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
-    }
-    return { ah, CrossChainCallEngine, restore };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. CrossChainCallEngine.validateProposedMatch
 // ─────────────────────────────────────────────────────────────────────────────
 
-let armedAh, CallEngine, restore;
+let armedAh, CallEngine;
 let tipCalls;
 
     // tips: chain code -> the height this hub's own indexer reports, or null for a chain
@@ -269,12 +244,13 @@ function registerLegacyCallAdmissionTest() {
 
 describe('follower admission bound: CrossChainCallEngine.validateProposedMatch', function () {
     before(function () {
-        const armed = armAdmission();
+        const armed = armAdmission(ADMIT_AT, ARMED_MODULES.map(m => require.resolve(m)), () => ({
+            ah: require('../../../../src/lib/admission_height.js'),
+            CrossChainCallEngine: require('../../../../src/cross_chain/call_engine.js')
+        }));
         armedAh    = armed.ah;
         CallEngine = armed.CrossChainCallEngine;
-        restore    = armed.restore;
     });
-    after(function () { restore(); });
     afterEach(function () { sinon.restore(); });
 
     registerCallAdmissionAcceptTests();

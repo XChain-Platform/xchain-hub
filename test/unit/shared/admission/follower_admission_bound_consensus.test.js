@@ -11,81 +11,33 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * followerAdmissionBound: the CALL SITES of the per-chain follower bound (BF6, C38).
+ * followerAdmissionBound: the shared consensus call site of the per-chain follower
+ * bound (BF6, C38).
  *
- * admissionHeight.test.js drives checkAdmitBlocks as a function. This file drives the two
- * places a live hub actually reaches it, because a bound with no call site refuses nothing:
- *
- *   1. CrossChainCallEngine.validateProposedMatch, the XCALL engine's own follower gate;
- *   2. CrossChainDexConsensus.handlePropose, the ONE proposal handler every engine on that
- *      consensus shares, for any engine that declares an admissionScope.
+ * admissionHeight.test.js drives checkAdmitBlocks as a function. This file drives
+ * CrossChainDexConsensus.handlePropose, the one proposal handler every engine on that
+ * consensus shares, for any engine that declares an admissionScope.
  *
  * Both must refuse in the same directions, and both must resolve the FOLLOWER'S OWN tips
  * rather than trusting the map the leader sent. The refusals driven here are the ones BF6
  * names: a map that omits a reading chain, a height past the chain's own forward window, a
  * height at or behind our tip, and no usable own tip at all (a dead indexer, a frozen
  * decoder, or a hub with no resolver) which is a REFUSAL and never a pass.
- *
- * THE SUITE ARMS ITSELF, in the shape priceV0CanonicalAdmission.test.js established: the
- * activation resolves at module load, so the engine half purges the twin, the admission seam
- * and both classes from the require cache, sets the regtest height, re-requires, and restores
- * every entry and the variable afterwards. A default run that only drove the inert tree would
- * report the whole file as vacuous green, since below the activation there is no map to bound.
  ********************************************************************/
 
 'use strict';
 
 const { expect }        = require('chai');
-const sinon             = require('sinon');
 const crypto            = require('crypto');
 const ValidatorIdentity = require('../../../../src/validators/identity.js');
+const ChainTips         = require('../../../../src/hub/chain_tips.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
-// The regtest producer activation this suite arms. Rows below it are legacy rows in the
-// same armed process, which is how the "no map, no tip read" case below is driven.
-const ADMIT_AT   = 1000;
 const ERA_BLOCK  = 2000;
-const LEGACY_BLK = 150;
 
 const OWN_BTC  = 900000;
 const OWN_DOGE = 5000000;
-
-const CALL_ID = 'c'.repeat(64);
-
-const ARMED_MODULES = [
-    '../../../../src/consensus/gates/mirror_admission_gate.js',
-    '../../../../src/lib/admission_height.js',
-    '../../../../src/cross_chain/dex_consensus.js',
-    '../../../../src/cross_chain/call_engine.js'
-];
-
-// Purge, arm, re-require, and hand back a restore() that puts the process back byte-exact.
-// The objects built from the armed modules keep them by closure, so the rest of the run
-// still sees the inert tree it was written against.
-function armAdmission() {
-    const paths    = ARMED_MODULES.map(m => require.resolve(m));
-    const saved    = paths.map(p => [p, require.cache[p]]);
-    const savedEnv = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-    for (const p of paths) delete require.cache[p];
-    process.env.XC_MIRROR_ADMISSION_ACTIVATION = String(ADMIT_AT);
-
-    const ah                   = require('../../../../src/lib/admission_height.js');
-    const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
-
-    function restore() {
-        for (const [p, mod] of saved) {
-            if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod;
-        }
-        if (savedEnv === undefined) delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
-        else process.env.XC_MIRROR_ADMISSION_ACTIVATION = savedEnv;
-    }
-    return { ah, CrossChainCallEngine, restore };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. CrossChainCallEngine.validateProposedMatch
-// ─────────────────────────────────────────────────────────────────────────────
 
 // No arming here on purpose: the consensus never asks the era gate. It asks the ENGINE
 // for a scope, which is the only thing that can know the row's table and read set, and
@@ -112,12 +64,12 @@ const ah                     = require('../../../../src/lib/admission_height.js'
 
     // A round id whose leader is the OTHER identity, so handlePropose runs for real
     // instead of the follower being its own leader.
-    function ridLedBy(pub) {
+    function ridLedBy(pub, excluded) {
         const sorted = VALIDATORS.map(v => v.pubkey).sort();
         for (let n = 0; n < 512; n++) {
             const rid = sha256('round-' + n).slice(0, 64);
             const mInt = parseInt(rid.slice(0, 8), 16) || 0;
-            if (sorted[mInt % sorted.length] === pub) return rid;
+            if (rid !== excluded && sorted[mInt % sorted.length] === pub) return rid;
         }
         throw new Error('no round id in the search space is led by the requested validator');
     }
@@ -145,7 +97,11 @@ const ah                     = require('../../../../src/lib/admission_height.js'
             capSnapshot: null,
             canonicalMatch: canonicalMatch,
             persistCapabilitySnapshot: async () => {},
-            validateProposedMatch: async () => true
+            validateProposedMatch: async () => {
+                if(opts.validationReadSet)
+                    await engine.hub.resolveAdmissionTips(opts.validationReadSet);
+                return true;
+            }
         };
         if (opts.scope !== false) {
             engine.admissionScope = opts.scope || ((row) => ({
@@ -154,18 +110,19 @@ const ah                     = require('../../../../src/lib/admission_height.js'
             }));
         }
         if (opts.tips !== undefined) {
-            engine.hub.resolveAdmissionTips = async (chains) => {
-                let out = {};
-                for (const c of chains) out[c] = Object.prototype.hasOwnProperty.call(opts.tips, c) ? opts.tips[c] : null;
-                return out;
+            engine.hub.resolveAdmissionTip = async (chain) => {
+                if(opts.tipReads) opts.tipReads.push(chain);
+                return Object.prototype.hasOwnProperty.call(opts.tips, chain) ? opts.tips[chain] : null;
             };
+            engine.hub.resolveAdmissionTips = ChainTips.prototype.resolveAdmissionTips;
+            engine.hub.withAdmissionTipMemo = ChainTips.prototype.withAdmissionTipMemo;
         }
         return new CrossChainDexConsensus(engine);
     }
 
     // Seed the round, hand the follower a validly signed leader PROPOSE, and report whether
     // it took the leader's signature (which is what "signed and moved to PREPARE" means).
-    async function offerPropose(consensus, row, rid) {
+    async function offerPropose(consensus, row, rid, stop) {
         await consensus.propose(rid, { row, snapshot: { validators: VALIDATORS, count: 2 } });
         const canonical = canonicalMatch(row);
         await consensus.handlePropose({
@@ -175,11 +132,27 @@ const ah                     = require('../../../../src/lib/admission_height.js'
         const pending = consensus.pending.get(rid);
         const took = !!(pending && pending.signatures.has(LEADER_PUB));
         if (pending && pending.timer) clearTimeout(pending.timer);
-        await consensus.stop();
+        if(stop !== false) await consensus.stop();
         return took;
     }
 
 function registerConsensusAdmissionBoundTests() {
+    it('reads each chain once inside one proposal and reads both afresh for the next proposal', async function () {
+        const reads = [];
+        const firstRid = ridLedBy(LEADER_PUB);
+        const secondRid = ridLedBy(LEADER_PUB, firstRid);
+        const c = makeFollower({
+            tips: { BTC: OWN_BTC, DOGE: OWN_DOGE },
+            validationReadSet: ['BTC', 'DOGE'],
+            tipReads: reads
+        });
+
+        expect(await offerPropose(c, matchRow(firstRid, honestColumns()), firstRid, false)).to.equal(true);
+        expect(reads).to.deep.equal(['BTC', 'DOGE']);
+        expect(await offerPropose(c, matchRow(secondRid, honestColumns()), secondRid)).to.equal(true);
+        expect(reads).to.deep.equal(['BTC', 'DOGE', 'BTC', 'DOGE']);
+    });
+
     it('signs a proposal whose map holds against this follower\'s own tips', async function () {
         const rid = ridLedBy(LEADER_PUB);
         const c   = makeFollower({ tips: { BTC: OWN_BTC, DOGE: OWN_DOGE } });
