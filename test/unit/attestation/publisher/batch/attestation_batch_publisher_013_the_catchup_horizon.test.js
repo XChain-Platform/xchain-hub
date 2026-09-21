@@ -257,116 +257,45 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-// ------------------------------------------------------------ publishing
 
-
-
-        // A hub whose Bitcoin indexer never called pushchaintip publishes nothing, ever.
-        // That is a one-line configuration gap presenting as total silence, so the defer
-        // has to name the missing thing; and it has to name it ONCE, because the sweep
-        // runs every window and a regtest window is seconds long.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names the missing BTC chain tip when it defers, once per cause', async function () {
+        // The set is deliberately report-once process memory, so entries remain after
+        // their windows age out. The public statistic is narrower: it counts only the
+        // quarantines a bounded sweep can still reach.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('drops quarantines from the statistic when they leave the catch-up horizon', async function () {
             let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
-            p._floorWindow = now - WINDOW_S;
+            let oldestReachable = now - MAX_CATCHUP_WINDOWS * WINDOW_S;
+            let newestReachable = now - WINDOW_S;
+            hub.db.markers.push(
+                { network: 'regtest', window_start: oldestReachable, status: 'intent' },
+                { network: 'regtest', window_start: newestReachable, status: 'intent' }
+            );
+            let p = makePublisher(hub);
+            p.nowSeconds = () => now;
 
-            let warned = [];
-            let realWarn = console.warn;
-            console.warn = (msg) => warned.push(String(msg));
+            let realError = console.error;
             try {
-                await p.sweep(now);
-                await p.sweep(now + WINDOW_S);
+                console.error = () => {};
+                await p.hydrateMarkers();
             } finally {
-                console.warn = realWarn;
+                console.error = realError;
             }
 
-            let anchorWarnings = warned.filter(w => /no BTC anchor/.test(w));
-            expect(anchorWarnings.length, 'one line per cause, not one per window').to.equal(1);
-            expect(anchorWarnings[0]).to.match(/chain_tips/);
-            expect(anchorWarnings[0], 'the operator has to be told which call is missing')
-                .to.match(/pushchaintip/);
-            expect(p.getStats().anchorFailure).to.match(/chain_tips/);
+            expect(p._quarantined.size, 'both reachable markers stay in report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the boundary window is still inside the horizon').to.equal(2);
 
-            // A DIFFERENT cause speaks again: the latch is on the reason, not on the fact
-            // that something once failed.
-            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
-            warned.length = 0;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now + 2 * WINDOW_S); } finally { console.warn = realWarn; }
-            expect(warned.filter(w => /connection lost/.test(w)).length).to.equal(1);
-
-            // And it clears once the tip resolves, so a LATER outage of the same cause is
-            // a new episode rather than a swallowed one.
-            hub.db.getChainTip = async () => ({ blockHeight: ANCHOR, blockTime: 1 });
-            await p.sweep(now + 3 * WINDOW_S);
-            expect(p.getStats().anchorFailure).to.equal(null);
-
-            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
-            warned.length = 0;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
-            expect(warned.filter(w => /connection lost/.test(w)).length,
-                'a recovered rail that fails again must warn again').to.equal(1);
+            p.nowSeconds = () => now + WINDOW_S;
+            expect(p._quarantined.size, 'aging does not erase report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the marker below the moving horizon is not actionable').to.equal(1);
         }); }); });
 
 // ------------------------------------------------------------ publishing
 
-        // so a hub with no pushed row anchors on the tip its own round observed.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('anchors on the tip the attestation poll observed when no chain tip was pushed', async function () {
-            let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            hub.getAttestationRound = () => ({
-                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
-            });
-            let p = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            p._floorWindow = now - WINDOW_S;
 
-            let result = await p.sweep(now);
 
-            expect(result.published).to.equal(1);
-            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR - 3);
-            expect(p.getStats().anchorSource).to.equal('observed');
-            expect(p.getStats().anchorFailure).to.equal(null);
-        }); }); });
-
-// ------------------------------------------------------------ publishing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('prefers the pushed chain tip over the observed one where both exist', async function () {
-            let hub = makeHub({ dir: dir });
-            hub.getAttestationRound = () => ({
-                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
-            });
-            let p = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            p._floorWindow = now - WINDOW_S;
-
-            await p.sweep(now);
-
-            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR);
-            expect(p.getStats().anchorSource).to.equal('pushed');
-        }); }); });
-
-// ------------------------------------------------------------ publishing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names both missing sources when neither the pushed nor the observed tip resolves', async function () {
-            let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
-            let p = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            p._floorWindow = now - WINDOW_S;
-
-            let warned = [];
-            let realWarn = console.warn;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now); } finally { console.warn = realWarn; }
-
-            expect(p.wires.length).to.equal(0);
-            let line = warned.find(w => /no BTC anchor/.test(w));
-            expect(line).to.match(/chain_tips/);
-            expect(line).to.match(/pushchaintip/);
-            expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
-            expect(p.getStats().anchorSource).to.equal(null);
-        }); }); });
+        // A federation that shares one Bitcoin indexer has one hub with a chain_tips
+        // row and N-1 without (testnet 2026-09-07: four of five validators). Every
+        // one of them polls that indexer for requests, and the poll reports the tip,
 }
