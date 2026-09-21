@@ -48,7 +48,10 @@ module.exports = {
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return null;
         let rows = await db.findAttestPublishedBatchesByNetwork(this.network, windowStart);
-        return (rows && rows.length) ? rows[0] : null;
+        let marker = (rows && rows.length) ? rows[0] : null;
+        // `tracking` records when this hub began owing coverage; it is not an outcome
+        // for that window. Returning it as absent keeps the ordinary retry path live.
+        return marker && String(marker.status) === 'tracking' ? null : marker;
     },
 
     // The oldest window a marker can still matter for: pendingWindows builds candidates
@@ -90,6 +93,14 @@ module.exports = {
         live.sort((a, b) => a - b);
         for(let start of live) this._quarantined.add(start);
         this.reportHydratedMarkers(live, agedSummary, current);
+
+        // Absence on its own cannot separate "the publisher has never run" from "the
+        // publisher ran but produced no outcome". Mark the in-progress window as the
+        // durable coverage floor so a later table read can tell them apart. The insert
+        // is deliberately a no-op on an existing terminal row.
+        if(live.length === 0 && (Number(agedSummary.count) || 0) === 0)
+            await db.setAttestPublishedBatchByNetwork(
+                this.network, current, this.windowEndFor(current), null, 0, 'tracking');
     },
 
     // Two kinds of marker at two severities. A window inside the horizon is an action item
@@ -119,11 +130,15 @@ module.exports = {
         return windows + ' window(s) / ' + formatAge(secs) + ' old';
     },
 
-    // Idempotent: an existing row for the window is left exactly as it is, so a replay
-    // can never downgrade a `sent` or `landed` marker back to an intent.
+    // A tracking row becomes the pre-send intent; an existing outcome row is left
+    // exactly as it is, so a replay cannot downgrade `sent` or `landed` to intent.
     async recordIntent(window, batchKey){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
+        // A tracking row licenses no spend and must become the real pre-send marker.
+        // Delete it under a status guard before the insert. A concurrent landed row is
+        // untouched, and the intent insert's duplicate-key no-op preserves it.
+        await db.deleteAttestPublishedBatch(this.network, window.window_start, 'tracking');
         await db.setAttestPublishedBatchByNetwork(this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent');
     },
 

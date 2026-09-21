@@ -38,6 +38,7 @@ const AttestationBatchPublisher = require('../../../../../src/attestation/batch_
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
+const { MAX_CATCHUP_WINDOWS } = require('../../../../../src/attestation/batch_publisher/constants.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
@@ -109,6 +110,15 @@ function updateMarker(markers, args){
 function doDbQuery(responses, markers, sql, args){
             if(/FROM attestation_responses/i.test(sql)) return selectResponses(responses, sql, args);
             if(/^DELETE FROM attest_published_batches/i.test(sql)) return deleteMarker(markers, args);
+            if(/SELECT MIN\(window_start\).*window_start < \?/i.test(sql)){
+                let [network, status, before] = args;
+                let starts = markers.filter(m => m.network === network && m.status === status &&
+                                                   Number(m.window_start) < Number(before))
+                                    .map(m => Number(m.window_start));
+                return [{ oldest: starts.length ? Math.min.apply(null, starts) : null,
+                          newest: starts.length ? Math.max.apply(null, starts) : null,
+                          count: starts.length }];
+            }
             // The floor read. BOTH aggregates are answered from the same row set, so a
             // publisher that went back to flooring on the newest marker reads a real
             // value here rather than an undefined the test would silently coerce.
@@ -117,8 +127,14 @@ function doDbQuery(responses, markers, sql, args){
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
                 return [{ oldest: Number.isFinite(oldest) ? oldest : null, newest: newest || null }];
             }
+            if(/SELECT window_start FROM attest_published_batches.*window_start >= \?/i.test(sql)){
+                return markers.filter(m => m.network === args[0] && m.status === args[1] &&
+                                           Number(m.window_start) >= Number(args[2]))
+                              .map(m => ({ window_start: m.window_start }));
+            }
             if(/SELECT window_start FROM attest_published_batches/i.test(sql)){
-                return markers.filter(m => m.status === args[1]).map(m => ({ window_start: m.window_start }));
+                return markers.filter(m => m.network === args[0] && m.status === args[1])
+                              .map(m => ({ window_start: m.window_start }));
             }
             if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
@@ -293,6 +309,42 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
             expect(warned.filter(w => /connection lost/.test(w)).length,
                 'a recovered rail that fails again must warn again').to.equal(1);
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+
+
+        // The set is deliberately report-once process memory, so entries remain after
+        // their windows age out. The public statistic is narrower: it counts only the
+        // quarantines a bounded sweep can still reach.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('drops quarantines from the statistic when they leave the catch-up horizon', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let oldestReachable = now - MAX_CATCHUP_WINDOWS * WINDOW_S;
+            let newestReachable = now - WINDOW_S;
+            hub.db.markers.push(
+                { network: 'regtest', window_start: oldestReachable, status: 'intent' },
+                { network: 'regtest', window_start: newestReachable, status: 'intent' }
+            );
+            let p = makePublisher(hub);
+            p.nowSeconds = () => now;
+
+            let realError = console.error;
+            try {
+                console.error = () => {};
+                await p.hydrateMarkers();
+            } finally {
+                console.error = realError;
+            }
+
+            expect(p._quarantined.size, 'both reachable markers stay in report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the boundary window is still inside the horizon').to.equal(2);
+
+            p.nowSeconds = () => now + WINDOW_S;
+            expect(p._quarantined.size, 'aging does not erase report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the marker below the moving horizon is not actionable').to.equal(1);
         }); }); });
 
 // ------------------------------------------------------------ publishing

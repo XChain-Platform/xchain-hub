@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The attestation batch publisher's `quarantinedWindows` statistic now counts only quarantines inside the current catch-up horizon. Dashboards keyed to the previous all-history count may see a one-time decrease after upgrade.
+
 ## [0.20.0] - 2026-09-17
 
 ### Changed
