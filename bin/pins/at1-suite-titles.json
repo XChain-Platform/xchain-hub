@@ -1363,15 +1363,6 @@
       "e5a52ef95e935f53002f3f6a19037a22b54ca1b84cb9992030d82bdf00cf0325",
       "6c5adea75dbab254c4617ef8432e0f54b654bea928e43045848c57f1270cc4bf"
     ],
-    "247daec60db604ec": [
-      "790d33b706a4d861b11e2babc8fc013869a72cc0e2257fdb5e2853e50f224ff5",
-      "ea5bb9ecbea9d4ee6103ebc21439ec93cc5931488bf8391ebe09261f876d4c36",
-      "96c6aaf15072d51c011cb1eb3fb40130f4f000fa83f22e8cf4e655e49919e006",
-      "5fa294212ce85473365e4c7083a7aa4c2cf756fec55a1c21d29208fd0f5a514f",
-      "94bdf42183dea70f4ed78a4177f0435ac64c6c0a339f962829e4716e93854385",
-      "8a953a352a75b6d0fed2c5aa4c08d93aa0d5299d2d4376b1dd5b2ff80bb4840b",
-      "f1cf5f9d20412c1e1bde8fa62b397e7dd5963f779a8f26fdbb5d7e66109b9db4"
-    ],
     "24a2552ee5e2627c": [
       "581e0eb1c6087dd597caa1b626ee3d2bf4f31759c7cef2abc2b7babedb0acec5",
       "a34547f2ee4f1fb534ae4928d97c8e7cf426898ab6208f4a35a213d6951896ac",
@@ -8804,6 +8795,15 @@
       "7af9fce537c9dfea9527bbe2fe3b89d9df8045444e7ea77b3fe233185da29754",
       "f88a9439387d34c4125d9a15306290a0fcefad9404606798986ce2cca98f62b5"
     ],
+    "f7bbb4514212d6f3": [
+      "d49bfd35be6446b731f4e829348fbf91507e2c0de88534b534dec19a1551e4de",
+      "e37529ab23c20969256b4ce679cd69ee8e2e310e6e99c20add14fd6cd4af6c1d",
+      "9dfe8307d9051964bfd7040786fa1f64d6d3b89f6d331a469e5846d9d9f58d25",
+      "2ef917540e197747b07cc70e835949934359b23af1880a834166a2253643898b",
+      "b57c69ad8ddaa61ec0cd5eae6968fcbf9347c996bb6e0abfff38dbb165d96c3d",
+      "3f3e628ad8fe6308403564408b2f72ad22552cf296384aef39110dff2458bb3a",
+      "6a8d80e71f9b5b27d793b946d8004ec5549023915a9c4e55e08880d2550b4c1d"
+    ],
     "f848101de0f26a45": [
       "aa72839c5ce957458accfdd1ed69a78aae4bdc722a874c6da9640fa6c01699f2",
       "b50da41333f64911824a0cf1e23253031fa64ff4fade89d3defb67032f9e7708",
@@ -9527,7 +9527,7 @@
         "test/unit/oracle/price/price_capability_derivation_rows.test.js": "35eb18802fe53bd9",
         "test/unit/oracle/price/price_capability_derivation_topology.test.js": "a525401f113821d1",
         "test/unit/oracle/price/price_v0_canonical_admission.test.js": "c6ad10cbe91a98b9",
-        "test/unit/oracle/price/price_v2_payload_twin_parity.test.js": "247daec60db604ec",
+        "test/unit/oracle/price/price_v0_batch_canonical_parity.test.js": "f7bbb4514212d6f3",
         "test/unit/oracle/price/price_v2_payload_twin_parity_single_round.test.js": "09a26ce652e78b52",
         "test/unit/oracle/price/push_price_batch.test.js": "a1d7bb616c893e9e",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_01_the_separate_durable_buffer_file.test.js": "91662f70f43b9692",
@@ -10201,7 +10201,7 @@
         "test/unit/oracle/price/price_capability_derivation_rows.test.js": "35eb18802fe53bd9",
         "test/unit/oracle/price/price_capability_derivation_topology.test.js": "a525401f113821d1",
         "test/unit/oracle/price/price_v0_canonical_admission.test.js": "c6ad10cbe91a98b9",
-        "test/unit/oracle/price/price_v2_payload_twin_parity.test.js": "247daec60db604ec",
+        "test/unit/oracle/price/price_v0_batch_canonical_parity.test.js": "f7bbb4514212d6f3",
         "test/unit/oracle/price/price_v2_payload_twin_parity_single_round.test.js": "09a26ce652e78b52",
         "test/unit/oracle/price/push_price_batch.test.js": "a1d7bb616c893e9e",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_01_the_separate_durable_buffer_file.test.js": "91662f70f43b9692",
@@ -10903,7 +10903,7 @@
         "test/unit/oracle/price/price_capability_derivation_rows.test.js": "35eb18802fe53bd9",
         "test/unit/oracle/price/price_capability_derivation_topology.test.js": "a525401f113821d1",
         "test/unit/oracle/price/price_v0_canonical_admission.test.js": "c6ad10cbe91a98b9",
-        "test/unit/oracle/price/price_v2_payload_twin_parity.test.js": "247daec60db604ec",
+        "test/unit/oracle/price/price_v0_batch_canonical_parity.test.js": "f7bbb4514212d6f3",
         "test/unit/oracle/price/price_v2_payload_twin_parity_single_round.test.js": "09a26ce652e78b52",
         "test/unit/oracle/price/push_price_batch.test.js": "a1d7bb616c893e9e",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_01_the_separate_durable_buffer_file.test.js": "91662f70f43b9692",
