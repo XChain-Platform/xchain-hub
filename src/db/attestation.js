@@ -43,12 +43,14 @@ const STATS_TABLE = 'attestation_validator_stats';
 // AttestationResponseMirror.MIRROR_COLUMNS spells the same list for the wire (its
 // GOSSIP_COLUMNS derive from it); a column added to the table goes in both, and the
 // mirror suite's every-column-written test fails when only one of them gains it.
-const ATTESTATION_RESPONSE_MIRROR_COLUMNS = [
+const ATTESTATION_RESPONSE_MIRROR_COLUMNS = Object.freeze([
     'network', 'request_id', 'request_action_index', 'request_block_index',
     'provider_id', 'status', 'response_payload', 'response_hash', 'meta',
     'effective_time', 'admit_block_btc', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
     'finalized_at'
-];
+]);
+// Both read paths include the paging cursor, then project the identical mirror row.
+const ATTESTATION_RESPONSE_MIRROR_SELECT = ['id'].concat(ATTESTATION_RESPONSE_MIRROR_COLUMNS).join(', ');
 
 module.exports = {
     // Deletes from attest_published_batches.
@@ -146,7 +148,7 @@ module.exports = {
     // then bound the response by effective_time while a streamed copy bound it by height.
     // Moved here from src/api.js:2284.
     async findAttestationResponsesById(since, limit) {
-        return this.doQuery('SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        return this.doQuery('SELECT ' + ATTESTATION_RESPONSE_MIRROR_SELECT + ' FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
     // Reads rows from attestation_responses.
@@ -319,7 +321,7 @@ module.exports = {
     // why the mirror selects the row back rather than broadcasting the object it holds.
     async getAttestationResponseMirrorRow(network, requestId, effectiveTime) {
         return this.doQuery(
-            'SELECT id, ' + ATTESTATION_RESPONSE_MIRROR_COLUMNS.join(', ') + ' ' +
+            'SELECT ' + ATTESTATION_RESPONSE_MIRROR_SELECT + ' ' +
             'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
             [network, requestId, effectiveTime]);
     },
