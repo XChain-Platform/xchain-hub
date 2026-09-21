@@ -74,7 +74,13 @@
     "ajv": "^8.17.2",
     "decimal.js": "10.4.3",
     "js-yaml": "^4.3.1",
-    "form-data": "^4.0.6"
+    "form-data": "^4.0.6",
+    "eslint": {
+      "ajv": "^6.14.0"
+    },
+    "@eslint/eslintrc": {
+      "ajv": "^6.14.0"
+    }
   },
   "engines": {
     "node": ">=22.12.0"
