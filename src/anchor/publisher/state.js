@@ -26,6 +26,13 @@ const coins = require('../../coins');
 const hubConfig = require('../../config');
 const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
 
+// The anchor-attest arrival budget counts both the durable-intent hold and the
+// deferred announcement/reward-attestation queue. Its measured 18 h envelope
+// allocates 6 h to each TTL, so the shared default is also the maximum. Keeping
+// the clamp at the two config reads prevents an operator override from silently
+// moving the height watermark's worst-case trail past that fixed budget.
+const MAX_ANCHOR_ATTEST_TTL_MS = 6 * 60 * 60 * 1000;
+
 module.exports = {
 
     initRoundState(){
@@ -220,7 +227,9 @@ module.exports = {
         // announcement queues.
         this._deferredRewardAttest = new Map();
         this.announceRetryMs      = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min
-        this.announceRetryTtlMs   = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || '21600000');  // 6 h, ~6x the 60-conf DOGE window
+        this.announceRetryTtlMs   = Math.min(parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_TTL_MS ||
+                                                       cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS || '21600000'),
+                                                MAX_ANCHOR_ATTEST_TTL_MS); // 6 h, ~6x the 60-conf DOGE window
         this.announceQueueMax     = parseInt(hubConfig.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
         this._deferTimer          = null;
         this._rankWakeTimer       = null;   // failover wake, see rankWakeMs
@@ -232,7 +241,9 @@ module.exports = {
         // same reasoning as announceRetryTtlMs above: ~6x the 60-conf DOGE window, past
         // which a send that never relayed is not coming back and holding the row costs
         // more than re-broadcasting it.
-        this.anchorIntentTtlMs    = parseInt(hubConfig.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
+        this.anchorIntentTtlMs    = Math.min(parseInt(hubConfig.ANCHOR_INTENT_TTL_MS ||
+                                                      cfg.ANCHOR_INTENT_TTL_MS || '21600000'),
+                                               MAX_ANCHOR_ATTEST_TTL_MS); // 6 h
         // Retention window for the two durable anchor marker tables. Both appended one
         // row per DOGE-spending broadcast and never removed one, so they grew for the
         // life of the deployment while their oracle_published_rounds sibling was swept.
