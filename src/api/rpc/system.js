@@ -47,7 +47,6 @@ function systemReads(ctx) {
 
         async updateconfig({config}){
             try {
-                hub.learnNetworkFromConfig(config);
                 await hub.addParametersFromJson(config);
                 return {status: "success"};
             } catch (err) {

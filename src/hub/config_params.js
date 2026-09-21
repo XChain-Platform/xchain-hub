@@ -42,11 +42,6 @@ const logger = getLogger();
 const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync", "hub_url"];
 const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
-const HUB_NETWORKS       = new Set(["mainnet", "testnet", "regtest"]);
-
-function isConfigObject(value) {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 // The string-valued parameters of one (coin, network, module): the transport
 // keys every module carries, then the operational ones.
@@ -123,27 +118,6 @@ function collectJsonBlobRows(rows, moduleLevel, nextCoin, nextNetwork, nextModul
 }
 
 class ConfigParams {
-
-    // Infer only when every object-valued network slot names the same recognized
-    // network. Preserve explicit settings and refuse ambiguous input.
-    learnNetworkFromConfig(json){
-        if(this.network) return this.network;
-        if(!isConfigObject(json)) return this.network;
-
-        let learnedNetwork = null;
-        for(const coinLevel of Object.values(json)){
-            if(!isConfigObject(coinLevel)) continue;
-            for(const [network, networkLevel] of Object.entries(coinLevel)){
-                if(!isConfigObject(networkLevel)) continue;
-                if(!HUB_NETWORKS.has(network)) return this.network;
-                if(learnedNetwork !== null && learnedNetwork !== network) return this.network;
-                learnedNetwork = network;
-            }
-        }
-
-        if(learnedNetwork !== null) this.network = learnedNetwork;
-        return this.network;
-    }
 
     async addParametersFromJson(json){
         if(this.consensus){
