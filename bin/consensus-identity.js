@@ -225,6 +225,9 @@ function parseArgs(argv) {
         else if (argv[i] === '--out') { opts.out = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--compare') { opts.compare = path.resolve(argv[i + 1]); i += 1; }
         else if (argv[i] === '--help' || argv[i] === '-h') opts.help = true;
+        // A misspelt flag would otherwise run as the default reading and exit 0,
+        // which a caller checking --assert-no-absent would take as a pass.
+        else throw new Error(`unknown flag ${argv[i]}`);
     }
     return opts;
 }
