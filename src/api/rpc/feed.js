@@ -65,6 +65,14 @@ function chainTipFeedRpc(ctx) {
                 chainId = chain_id;
             }
             try {
+                if (coin === 'BTC' && network === 'regtest' && chainId !== undefined) {
+                    let storedTip = await hub.db.getChainTip(coin, network);
+                    if (storedTip && storedTip.chainId && storedTip.chainId !== chainId) {
+                        await hub.db.deleteCrossChainMatchesByNetwork(network);
+                        await hub.db.deleteCrossChainCallsByNetwork(network);
+                        await hub.db.deleteAllCapabilitySnapshots();
+                    }
+                }
                 await hub.db.setChainTip(coin, network, height, time, chainId);
                 return {status: "success"};
             } catch (err) {

@@ -88,6 +88,16 @@ const CROSS_CHAIN_MATCH_COLUMNS = ['match_id','snapshot_block','network',
     'admit_block_btc','admit_block_ltc','admit_block_doge'];
 
 module.exports = {
+    // Deletes rows tied to one network after a regtest chain instance changes.
+    async deleteCrossChainMatchesByNetwork(network) {
+        return this.doQuery('DELETE FROM cross_chain_matches WHERE network = ?', [network]);
+    },
+
+    // Deletes rows tied to one network after a regtest chain instance changes.
+    async deleteCrossChainCallsByNetwork(network) {
+        return this.doQuery('DELETE FROM cross_chain_calls WHERE network = ?', [network]);
+    },
+
     // Reads rows from cross_chain_calls.
     // Moved here from src/anchor/publisher.js:2491.
     async findCrossChainCallsByBatchSeq(maxBatch) {
