@@ -95,6 +95,15 @@ module.exports = {
         return this.finalized.has(String(rid).toLowerCase());
     },
 
+    // `finalized` has no un-finalize path, by design: D2 ruled (2026-09-22) that
+    // a federation-wide re-serve trigger stays deferred, the case being rare and
+    // bounded by deadline expiry plus refund. Ring eviction is not part of that
+    // deferred case - the tombstone re-propose path already covers ring eviction:
+    // once `rid` falls off this ring, isFinalized(rid) reads false on its own and
+    // propose.js's inbound gate lets the round reopen, with notePrematureEviction
+    // there logging the premature-eviction proof from `_finalizedEvicted` below.
+    // Do not build a federation-wide un-finalize path here without a new ruling.
+    //
     // Record a finalized request ID, evicting the oldest once the ring-buffer
     // cap (`finalizedMax`) is reached. Keeps `finalized` bounded while
     // preserving Set semantics for the duplicate-finalization guards.
