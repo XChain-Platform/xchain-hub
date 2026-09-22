@@ -25,6 +25,8 @@
 const coins = require('../../coins');
 const hubConfig = require('../../config');
 const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
+const { getLogger } = require('../../observability');
+const logger = getLogger();
 
 // The anchor-attest arrival budget counts both the durable-intent hold and the
 // deferred announcement/reward-attestation queue. Its measured 18 h envelope
@@ -32,6 +34,18 @@ const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
 // the clamp at the two config reads prevents an operator override from silently
 // moving the height watermark's worst-case trail past that fixed budget.
 const MAX_ANCHOR_ATTEST_TTL_MS = 6 * 60 * 60 * 1000;
+const ANCHOR_ATTEST_TTL_CLAMP_REASON = 'ANCHOR_ATTEST_WRITE_LAG_ENVELOPE';
+
+function anchorAttestTtlMs(raw, name) {
+    let ttlMs = parseInt(raw, 10);
+    if(ttlMs > MAX_ANCHOR_ATTEST_TTL_MS){
+        logger.warn('config: ' + name + '=' + ttlMs + 'ms exceeds the ' +
+                    MAX_ANCHOR_ATTEST_TTL_MS + 'ms anchor-attest write-lag allocation; ' +
+                    'clamping at boot (reason=' + ANCHOR_ATTEST_TTL_CLAMP_REASON + ').');
+        return MAX_ANCHOR_ATTEST_TTL_MS;
+    }
+    return ttlMs;
+}
 
 module.exports = {
 
@@ -227,9 +241,10 @@ module.exports = {
         // announcement queues.
         this._deferredRewardAttest = new Map();
         this.announceRetryMs      = parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min
-        this.announceRetryTtlMs   = Math.min(parseInt(hubConfig.ANCHOR_ANNOUNCE_RETRY_TTL_MS ||
-                                                       cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS || '21600000'),
-                                                MAX_ANCHOR_ATTEST_TTL_MS); // 6 h, ~6x the 60-conf DOGE window
+        this.announceRetryTtlMs   = anchorAttestTtlMs(
+            hubConfig.ANCHOR_ANNOUNCE_RETRY_TTL_MS ||
+                cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS || String(MAX_ANCHOR_ATTEST_TTL_MS),
+            'ANCHOR_ANNOUNCE_RETRY_TTL_MS'); // 6 h, ~6x the 60-conf DOGE window
         this.announceQueueMax     = parseInt(hubConfig.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
         this._deferTimer          = null;
         this._rankWakeTimer       = null;   // failover wake, see rankWakeMs
@@ -241,9 +256,10 @@ module.exports = {
         // same reasoning as announceRetryTtlMs above: ~6x the 60-conf DOGE window, past
         // which a send that never relayed is not coming back and holding the row costs
         // more than re-broadcasting it.
-        this.anchorIntentTtlMs    = Math.min(parseInt(hubConfig.ANCHOR_INTENT_TTL_MS ||
-                                                      cfg.ANCHOR_INTENT_TTL_MS || '21600000'),
-                                               MAX_ANCHOR_ATTEST_TTL_MS); // 6 h
+        this.anchorIntentTtlMs    = anchorAttestTtlMs(
+            hubConfig.ANCHOR_INTENT_TTL_MS ||
+                cfg.ANCHOR_INTENT_TTL_MS || String(MAX_ANCHOR_ATTEST_TTL_MS),
+            'ANCHOR_INTENT_TTL_MS'); // 6 h
         // Retention window for the two durable anchor marker tables. Both appended one
         // row per DOGE-spending broadcast and never removed one, so they grew for the
         // life of the deployment while their oracle_published_rounds sibling was swept.
