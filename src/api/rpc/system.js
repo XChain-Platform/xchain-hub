@@ -23,6 +23,11 @@
 
 const configRedaction = require('../config_redaction.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
+const {
+    ADMIT_COLUMN_CHAINS,
+    ADMIT_MARGIN_BLOCKS,
+    isMirrorAdmissionProducerActive
+} = require('../../consensus/gates/mirror_admission_gate.js');
 const { validateChain } = require('../validate');
 
 function buildSystemRpc(ctx) {
@@ -185,11 +190,21 @@ function healthRpc(ctx) {
                 ? hub.capabilitySnapshot.monitor.snapshot() : null;
             if (consensusInput && consensusInput.alerting) healthy = false;
 
+            // Admission-height production has a hard per-chain precondition: above
+            // its activation the hub cannot finalize a mirrored row unless every
+            // chain in that row's read set has a fresh decoder tip. Probe the full
+            // federation set here so an operator sees the dependency before a round
+            // pays for it. The resolver applies the same freshness gate as the
+            // producer and returns null rather than guessing a height.
+            let admissionTips = await probeAdmissionTips(hub, p2pConfig, DB_PROBE_TIMEOUT_MS);
+            if (admissionTips && !admissionTips.healthy) healthy = false;
+
             let published = publisherStats(hub);
 
             if(!healthy) res.status(503);
             return healthBody(hub, configFetchCounters, published, {
-                healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS, consensusInput
+                healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS,
+                consensusInput, admissionTips
             });
         },
     };
@@ -240,6 +255,77 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
     return { oracleAgeS, oracleStale, oracleThresholdS };
 }
 
+// The same per-chain read the producer uses, bounded so /health cannot hang behind
+// an indexer. A stale resolver result is null; the last observation is retained only
+// as diagnosis and is never promoted back into a usable admission height.
+async function probeAdmissionTips(hub, p2pConfig, timeoutMs) {
+    if (!p2pConfig || !hub || typeof hub.resolveAdmissionTips !== 'function') return null;
+
+    let resolved = {};
+    try {
+        resolved = await Promise.race([
+            hub.resolveAdmissionTips(ADMIT_COLUMN_CHAINS.slice()),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+        ]) || {};
+    } catch (_) {
+        resolved = {};
+    }
+
+    let chains = {};
+    let missing = [];
+    for (let chain of ADMIT_COLUMN_CHAINS) {
+        let tip = usableAdmissionHeight(resolved[chain]);
+        let previous = lastAdmissionTip(hub, chain);
+        let stale = false;
+        if (tip === null && previous !== null) {
+            stale = typeof hub.admissionTipFresh === 'function'
+                ? !hub.admissionTipFresh(chain, previous.height)
+                : true;
+        }
+        if (tip === null) missing.push(chain);
+        chains[chain] = {
+            height: tip === null && previous !== null ? previous.height : tip,
+            observed_at_ms: previous === null ? null : previous.at_ms,
+            age_s: previous === null || previous.at_ms === null
+                ? null : Math.max(0, Math.floor((Date.now() - previous.at_ms) / 1000)),
+            fresh: tip !== null,
+            stale,
+            reason: tip !== null ? null : (stale
+                ? 'admission tip for ' + chain + ' is stale'
+                : 'no fresh admission tip for ' + chain)
+        };
+    }
+
+    // Signed admission rows use their own BTC anchor for the producer flag day.
+    // A stale last observation is sufficient to establish that the node has crossed
+    // the activation, but is diagnostic only and remains unusable above.
+    let btcHeight = chains.BTC && chains.BTC.height;
+    let producerActive = usableAdmissionHeight(btcHeight) !== null &&
+        isMirrorAdmissionProducerActive('BTC', hub.network, btcHeight);
+    return {
+        producer_active: producerActive,
+        healthy: !producerActive || missing.length === 0,
+        reason: producerActive && missing.length > 0
+            ? 'no fresh admission tip for ' + missing.join(', ') + '; refusing to finalize admission-era rows'
+            : null,
+        admit_margin_blocks: ADMIT_MARGIN_BLOCKS,
+        chains
+    };
+}
+
+function usableAdmissionHeight(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function lastAdmissionTip(hub, chain) {
+    let seen = hub && hub._admissionTipSeen;
+    if (!seen || typeof seen.get !== 'function') return null;
+    let value = seen.get(chain);
+    if (!value) return null;
+    let height = usableAdmissionHeight(value.height);
+    return height === null ? null : { height, at_ms: Number(value.atMs) || null };
+}
+
 // The anchor, attestation and relay stats, read before the status code is set.
 function publisherStats(hub) {
     let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
@@ -256,7 +342,8 @@ function publisherStats(hub) {
 
 // The /health response body; every section past config_fetch is telemetry only.
 function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayStats },
-                    { healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS, consensusInput }) {
+                    { healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS,
+                      consensusInput, admissionTips }) {
     let healthResult = {
         status:    healthy ? "healthy" : "degraded",
         db:        dbOk,
@@ -270,6 +357,7 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayS
         }
     };
     if (consensusInput) healthResult.consensus_input = consensusInput;
+    if (admissionTips) healthResult.admission_tips = admissionTips;
     if (anchorStats) healthResult.anchor = anchorStats;
     if (attestStats) healthResult.attest = attestStats;
     // Telemetry only, never a 503: a relay that is disabled, or holding
