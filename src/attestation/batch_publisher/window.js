@@ -211,7 +211,38 @@ module.exports = {
             return false;
         }
 
-        return await this.broadcastWindow(window, batchKey, encoded);
+        // Claim at broadcastWindow's existing pre-send intent point. The unique
+        // (network, window_start) marker is the cross-publisher mutex: only the INSERT
+        // that creates it may send. A marker read followed by a send is not sufficient,
+        // because several validators can all complete that read before any one sends.
+        let claimed = Object.create(this);
+        claimed.recordIntent = async (candidate, key) => {
+            if(!(await this.claimWindowForBroadcast(candidate, key))){
+                let error = new Error('window already has a durable publication claim');
+                error.code = 'ATTEST_BATCH_WINDOW_CLAIMED';
+                throw error;
+            }
+        };
+        return await this.broadcastWindow.call(claimed, window, batchKey, encoded);
+    },
+
+    // Atomically acquire the durable pre-send marker. setAttestPublishedBatchByNetwork
+    // uses INSERT with a duplicate-key no-op, so affectedRows separates the sole
+    // creator from every competing publisher. This runs inside broadcastWindow after
+    // its pipeline, balance and spend reservations have passed, preserving the rule
+    // that a window unable to attempt a send leaves no intent marker.
+    async claimWindowForBroadcast(window, batchKey){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function')
+            throw new Error('no hub DB for durable batch-window claim');
+
+        // A tracking row is a coverage floor, not a publication claim. The guarded
+        // delete cannot remove an intent or outcome installed by a competing path.
+        await db.deleteAttestPublishedBatch(this.network, window.window_start, 'tracking');
+        let result = await db.setAttestPublishedBatchByNetwork(
+            this.network, window.window_start, window.window_end,
+            batchKey, window.row_count, 'intent');
+        return !!(result && Number(result.affectedRows) === 1);
     },
 
     // ------------------------------------------------------------ the mirror read
