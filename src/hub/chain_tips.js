@@ -171,7 +171,9 @@ class ChainTips {
         return admissionTipMemo.run(new WeakMap(), fn);
     }
 
-    async resolveAdmissionTip(coin){
+    // opts.signal, when given, cancels the indexer read (the health probe's deadline).
+    async resolveAdmissionTip(coin, opts){
+        let signal = opts && opts.signal;
         let c = admissionHeight.normalizeChain(coin);
         if(c === null){
             logger.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
@@ -188,9 +190,11 @@ class ChainTips {
             let res = await axiosFor(this).post(url, {
                 jsonrpc: '2.0', id: Date.now(),
                 method: 'getlatestblock', params: {}
-            }, { timeout: 5000 });
+            }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
             result = res && res.data && res.data.result;
         } catch (err) {
+            // A read the caller cancelled is the caller's deadline, not an indexer fault.
+            if(signal && signal.aborted) return null;
             logger.error(nodeUtil.format('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message));
             return null;
         }
@@ -257,7 +261,10 @@ class ChainTips {
 
     // Every admission tip a row's read set needs, read in parallel. A chain whose tip is
     // refused comes back null rather than missing, so the caller's refusal names it.
-    async resolveAdmissionTips(chains){
+    // opts.signal cancels the reads, but only outside a proposal memo: a memoized read
+    // is shared with the rest of the proposal, and one caller's deadline must not
+    // cancel it for the others.
+    async resolveAdmissionTips(chains, opts){
         let out = {};
         let want = [];
         for(let raw of (chains || [])){
@@ -272,7 +279,7 @@ class ChainTips {
             if(!memo){ memo = new Map(); scope.set(this, memo); }
         }
         let tips = await Promise.all(want.map((c) => {
-            if(!memo) return this.resolveAdmissionTip(c).catch(() => null);
+            if(!memo) return this.resolveAdmissionTip(c, opts).catch(() => null);
             if(!memo.has(c))
                 memo.set(c, Promise.resolve().then(() => this.resolveAdmissionTip(c)).catch(() => null));
             return memo.get(c);
