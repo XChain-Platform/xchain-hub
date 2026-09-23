@@ -174,10 +174,10 @@ it('holds an INERT network inert at height 0 and at a huge height', function () 
 function registerBarrierCutTests() {
     it('arms the testnet barrier horizon exactly at its sized height, never a block early', function () {
         expect(local.ANCHOR_ATTEST_BARRIER_ACTIVATION.testnet,
-            'not vacuous: the sized testnet height this case is about must still be in the map').to.equal(153328);
-        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 153327),
+            'not vacuous: the sized testnet height this case is about must still be in the map').to.equal(154291);
+        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 154290),
             'the horizon armed a block BELOW its sized height').to.equal(false);
-        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 153328),
+        expect(local.isAnchorAttestBarrierHorizonActive('testnet', 154291),
             'the horizon is not armed AT its own sized height; the comparison must be >=, not >').to.equal(true);
         // The same `0 >= threshold` direction the inert case guards, but on a LIVE height: a
         // guard keyed on null alone would arm genesis here and no inert case would catch it.
