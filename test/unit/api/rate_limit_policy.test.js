@@ -310,7 +310,8 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             });
             const keys = ['HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_RATE_LIMIT_RPM',
                           'HUB_RATE_LIMIT_EXEMPT_LOCAL', 'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME',
-                          'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
+                          'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
+                          'P2P_VALIDATOR_ADDR', 'ORACLE_EPOCH_START', 'HUB_NETWORK'];
             const saved = {};
             for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
             Object.assign(process.env, {
@@ -354,10 +355,22 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             expect(opts.limit).to.equal(4200);
             expect(opts.skip({ ip: '172.17.0.4' })).to.equal(false);
         }
+        function validatorEnv(extra) {
+            return Object.assign({ P2P_VALIDATOR_ADDR: 'validator-1', ORACLE_EPOCH_START: '1700000000000',
+                                    HUB_NETWORK: 'regtest' }, extra);
+        }
+        async function aValidatorHubDefaultsToTheFleetTest37() {
+            expect((await bootApiCapturingLimiter(validatorEnv({}))).limit).to.equal(60000);
+        }
+        async function anExplicitHubRateLimitRpmStillWinsOnATest38() {
+            expect((await bootApiCapturingLimiter(validatorEnv({ HUB_RATE_LIMIT_RPM: '4200' }))).limit).to.equal(4200);
+        }
         function apiJsWiringSuite34() {
             this.timeout(10000);
             it('installs the policy options, exemption on, at the shipped default of 100', installsThePolicyOptionsExemptionOnTest35);
             it('honours HUB_RATE_LIMIT_RPM and HUB_RATE_LIMIT_EXEMPT_LOCAL=false', honoursHubRateLimitRpmAndTest36);
+            it('a validator hub defaults to the fleet rate limit without a hand override', aValidatorHubDefaultsToTheFleetTest37);
+            it('an explicit HUB_RATE_LIMIT_RPM still wins on a validator hub', anExplicitHubRateLimitRpmStillWinsOnATest38);
         }
         registerapiJsWiring33 = function registerSuite() {
             describe('api.js wiring', apiJsWiringSuite34);
