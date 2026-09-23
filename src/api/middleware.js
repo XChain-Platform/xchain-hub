@@ -15,16 +15,18 @@
  * XChain Hub - the express middleware stack ahead of every route.
  *
  * Order is the auth boundary and is kept exactly: trust proxy, helmet, the JSON
- * body parser, CORS, the two per-IP rate limits, the observability surface and
+ * body parser, CORS, the three per-IP rate limits, the observability surface and
  * hub gauges, then the x-api-key tier gate and the public-port allowlist.
  *
  ********************************************************************/
 
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults. The mirror
-// bootstrap is metered separately; see installRateLimits below.
+// bootstrap and key-holding callers are metered separately; see installRateLimits below.
 const { buildRateLimitOptions, isSnapshotRequest, parseSnapshotRpm,
         SNAPSHOT_PATH_PREFIX } = require('./rate_limit_policy.js');
+const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
+const FixedWindowStore = require('./rate_limit_store.js');
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
 const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const { authGate, feedPortAllowlist } = require('./auth_gate');
@@ -83,30 +85,39 @@ function throttleReporter(logger, envName) {
     };
 }
 
-// TWO per-IP buckets, because the hub serves two workloads with different shapes and one
-// shared budget let them starve each other. The general bucket meters the JSON-RPC surface
-// and everything else at HUB_RATE_LIMIT_RPM (100). The snapshot bucket meters the mirror
-// bootstrap alone at HUB_SNAPSHOT_RATE_LIMIT_RPM (600), which is sized to the measured
-// drain: on the 2026-09-16 fleet roll three indexers re-draining from id 0 behind one
-// public address spent the shared 100 req/min that fleet polling was already using, 429ed
-// part way, retried every 30s and stayed wedged until the limit was raised by hand on five
-// hubs. Splitting the budgets is what makes that recovery run at shipped defaults WITHOUT
-// taking the throttle off the public reads; src/api/rate_limit_policy.js has the numbers.
+// THREE per-IP buckets, because the hub serves workloads with different shapes and one
+// shared budget let them starve or cover for each other. The public bucket meters the
+// JSON-RPC surface and everything else at HUB_RATE_LIMIT_RPM (100 on every role). The
+// authenticated bucket meters callers presenting a configured hub key at
+// HUB_AUTH_RATE_LIMIT_RPM (60000): the fleet's own indexers and replay traffic, which the
+// 60000 validator default of 08c756e5 was for, without handing that budget to keyless
+// callers; src/api/rate_limit_tiers.js has the history. The snapshot bucket meters the
+// mirror bootstrap alone at HUB_SNAPSHOT_RATE_LIMIT_RPM (600), sized to the drain that
+// wedged the 2026-09-16 fleet roll; src/api/rate_limit_policy.js has the numbers.
 //
-// The general limiter is installed FIRST and skips the snapshot family, so a drain charges
-// exactly one bucket rather than both. The options for both (the 429 body, the
+// The two JSON-RPC tiers skip the snapshot family and each other, so a request charges
+// exactly one bucket. Each is followed by its batch surcharge, so a batch costs one token
+// per call rather than one per HTTP request. The options (the 429 body, the
 // loopback/private exemption) live in the policy module so they are unit-testable; api.js
 // self-starts on require, so nothing declared inline here could ever be asserted against.
 function installRateLimits(app, ctx) {
     const { hubConfig, logger, rateLimit, HUB_RATE_LIMIT_RPM, HUB_RATE_LIMIT_EXEMPT_LOCAL } = ctx;
     const snapshotRpm = parseSnapshotRpm(hubConfig.HUB_SNAPSHOT_RATE_LIMIT_RPM);
-    app.use(rateLimit(buildRateLimitOptions({
+    const authRpm = parseAuthRpm(hubConfig.HUB_AUTH_RATE_LIMIT_RPM, HUB_RATE_LIMIT_RPM);
+    const isAuthenticated = authenticatedCaller(ctx);
+    installRpcTier(app, rateLimit, {
         rpm:         HUB_RATE_LIMIT_RPM,
-        windowMs:    60 * 1000,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
-        skipPath:    isSnapshotRequest,
+        skipPath:    (req) => isSnapshotRequest(req) || isAuthenticated(req),
         onLimited:   throttleReporter(logger, 'HUB_RATE_LIMIT_RPM')
-    })));
+    });
+    installRpcTier(app, rateLimit, {
+        rpm:         authRpm,
+        exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
+        skipPath:    (req) => isSnapshotRequest(req) || !isAuthenticated(req),
+        envName:     'HUB_AUTH_RATE_LIMIT_RPM',
+        onLimited:   throttleReporter(logger, 'HUB_AUTH_RATE_LIMIT_RPM')
+    });
     // Answers in the REST `{ error }` shape its routes already use for 401 and 500, not in
     // a JSON-RPC envelope: nothing on this path speaks JSON-RPC.
     app.use(SNAPSHOT_PATH_PREFIX, rateLimit(buildRateLimitOptions({
@@ -118,10 +129,22 @@ function installRateLimits(app, ctx) {
         onLimited:       throttleReporter(logger, 'HUB_SNAPSHOT_RATE_LIMIT_RPM')
     })));
     logger.info('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP, ' +
-        snapshotRpm + ' req/min per IP on ' + SNAPSHOT_PATH_PREFIX +
+        authRpm + ' req/min per IP with a hub key, ' +
+        snapshotRpm + ' req/min per IP on ' + SNAPSHOT_PATH_PREFIX + ', batches charged per call' +
         (HUB_RATE_LIMIT_EXEMPT_LOCAL
             ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
             : ' (enforced for every caller, including loopback and private-range)'));
+}
+
+// One JSON-RPC tier: its limiter over a store the surcharge can charge in bulk, then the
+// surcharge built from the very same options.
+function installRpcTier(app, rateLimit, tier) {
+    const opts = Object.assign(buildRateLimitOptions(Object.assign({ windowMs: 60 * 1000 }, tier)), {
+        store:        new FixedWindowStore(),
+        keyGenerator: rateLimitKey
+    });
+    app.use(rateLimit(opts));
+    app.use(batchSurcharge(opts));
 }
 
 function installMetrics(app, ctx) {

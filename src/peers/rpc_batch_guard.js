@@ -15,12 +15,13 @@
  * XChain Hub - JSON-RPC batch-size cap
  *
  * express-json-rpc-router dispatches EVERY element of a batch array
- * concurrently, while the per-IP express-rate-limit in front of it charges one
- * token per HTTP REQUEST regardless of array length. So one ~100 KB body of
- * ~1,400 seventy-byte call objects amplifies into ~1,400 concurrent handlers,
- * each drawing on the shared MariaDB pool, for the price of a single token -
- * and on a keyless deploy (no HUB_API_KEY) the amplified set includes the
- * push* write rails. Cap the CARDINALITY before dispatch.
+ * concurrently. The per-IP limiter in front of it once charged one token per
+ * HTTP REQUEST, so one ~100 KB body of ~1,400 seventy-byte call objects
+ * amplified into ~1,400 concurrent handlers, each drawing on the shared
+ * MariaDB pool, for a single token - and on a keyless deploy (no HUB_API_KEY)
+ * the amplified set includes the push* write rails. The limiter now charges
+ * per call (src/api/rate_limit_tiers.js); this still caps the CARDINALITY
+ * before dispatch, so no single request can fan out that far.
  *
  * Lives in its own module rather than inline in api.js because the hub's whole
  * middleware stack is built inside async function startApi(), which exports

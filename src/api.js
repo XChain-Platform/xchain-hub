@@ -100,9 +100,8 @@ const HUB_API_KEY        = hubConfig.HUB_API_KEY || '';
 // ConfigService sets this var for a managed deploy that has no key in its host
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (hubConfig.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
-// A validator hub (P2P_VALIDATOR_ADDR set) defaults to 60000, the fleet's shipped
-// override; an explicit HUB_RATE_LIMIT_RPM still wins on either role.
-const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || (hubConfig.P2P_VALIDATOR_ADDR ? 60000 : 100);
+// The PUBLIC budget on every role; key-holding callers (HUB_AUTH_RATE_LIMIT_RPM) have their own.
+const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
 // Loopback and private-range callers skip the per-IP cap by default: the node's
 // OWN indexer replaying a batch-bearing chain pushes one pushpricebatch per batch
 // block as fast as it reads them. Keyed on req.ip (post-trust-proxy), so a public
@@ -375,12 +374,11 @@ async function startApi(){
     mountRegistryRoutes(app, ctx);
 
     // Bound JSON-RPC batch cardinality (src/peers/rpc_batch_guard.js). The router below runs
-    // Promise.all over every element of a batch array while the per-IP rate limiter at
-    // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
-    // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in
-    // front of the router rather than globally, so it governs the dispatcher that
-    // amplifies and cannot reject a REST route's array body; the limiter has already
-    // charged its token by this point, so an oversize batch is never free.
+    // Promise.all over every element of a batch array, so a single ~100 KB body fans out
+    // into ~1,400 concurrent handlers on the shared DB pool. The limiter at the top of
+    // this stack already charges a batch one token per call; this caps it outright.
+    // Mounted in front of the router rather than globally, so it governs the dispatcher
+    // that amplifies and cannot reject a REST route's array body.
     // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
     // (every connector sends one call object), so the cap breaks no existing client.
     app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));

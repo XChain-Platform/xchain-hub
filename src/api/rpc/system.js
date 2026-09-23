@@ -23,11 +23,7 @@
 
 const configRedaction = require('../config_redaction.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
-const {
-    ADMIT_COLUMN_CHAINS,
-    ADMIT_MARGIN_BLOCKS,
-    isMirrorAdmissionProducerActive
-} = require('../../consensus/gates/mirror_admission_gate.js');
+const { makeAdmissionTipProbe, raceTimeout } = require('./health_probes.js');
 const { validateChain } = require('../validate');
 
 function buildSystemRpc(ctx) {
@@ -39,10 +35,7 @@ function systemReads(ctx) {
     return {
         async ping(params, {res}) {
             try {
-                await Promise.race([
-                    hub.db.getDatabaseLivenessProbe(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-                ]);
+                await raceTimeout(hub.db.getDatabaseLivenessProbe(), DB_PROBE_TIMEOUT_MS);
                 return {status: "success", db: true};
             } catch (err) {
                 res.status(503);
@@ -157,6 +150,8 @@ function configsRpc(ctx) {
 
 function healthRpc(ctx) {
     const { hub, hubConfig, p2pConfig, configFetchCounters, DB_PROBE_TIMEOUT_MS } = ctx;
+    // One probe per controller, so concurrent health calls share its upstream read.
+    const probeAdmissionTips = makeAdmissionTipProbe(hub, p2pConfig, DB_PROBE_TIMEOUT_MS);
     return {
         // Like ping, but also reports the DB circuit-breaker state. The breaker
         // trips open after repeated connection failures and rejects queries during
@@ -195,8 +190,10 @@ function healthRpc(ctx) {
             // chain in that row's read set has a fresh decoder tip. Probe the full
             // federation set here so an operator sees the dependency before a round
             // pays for it. The resolver applies the same freshness gate as the
-            // producer and returns null rather than guessing a height.
-            let admissionTips = await probeAdmissionTips(hub, p2pConfig, DB_PROBE_TIMEOUT_MS);
+            // producer and returns null rather than guessing a height. Single-flight
+            // and cached briefly (health_probes.js), so a health flood cannot
+            // multiply into indexer reads.
+            let admissionTips = await probeAdmissionTips();
             if (admissionTips && !admissionTips.healthy) healthy = false;
 
             let published = publisherStats(hub);
@@ -214,10 +211,7 @@ function healthRpc(ctx) {
 async function probeDatabase(hub, DB_PROBE_TIMEOUT_MS) {
     let dbOk = false;
     try {
-        await Promise.race([
-            hub.db.getDatabaseLivenessProbe(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-        ]);
+        await raceTimeout(hub.db.getDatabaseLivenessProbe(), DB_PROBE_TIMEOUT_MS);
         dbOk = true;
     } catch (err) {
         dbOk = false;
@@ -238,10 +232,7 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
             // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
             oracleThresholdS = parseInt(hubConfig.ORACLE_STALENESS_THRESHOLD_S)
                 || Math.round((roundIntervalMs * 2) / 1000);
-            let rows = await Promise.race([
-                hub.db.getPriceSnapshotsFinalizedAgeSeconds(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-            ]);
+            let rows = await raceTimeout(hub.db.getPriceSnapshotsFinalizedAgeSeconds(), DB_PROBE_TIMEOUT_MS);
             // age_s is null when no round has ever finalized (fresh node);
             // treat that as not-stale so a slow first round doesn't 503.
             if (rows && rows.length && rows[0].age_s != null) {
@@ -253,77 +244,6 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
         }
     }
     return { oracleAgeS, oracleStale, oracleThresholdS };
-}
-
-// The same per-chain read the producer uses, bounded so /health cannot hang behind
-// an indexer. A stale resolver result is null; the last observation is retained only
-// as diagnosis and is never promoted back into a usable admission height.
-async function probeAdmissionTips(hub, p2pConfig, timeoutMs) {
-    if (!p2pConfig || !hub || typeof hub.resolveAdmissionTips !== 'function') return null;
-
-    let resolved = {};
-    try {
-        resolved = await Promise.race([
-            hub.resolveAdmissionTips(ADMIT_COLUMN_CHAINS.slice()),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
-        ]) || {};
-    } catch (_) {
-        resolved = {};
-    }
-
-    let chains = {};
-    let missing = [];
-    for (let chain of ADMIT_COLUMN_CHAINS) {
-        let tip = usableAdmissionHeight(resolved[chain]);
-        let previous = lastAdmissionTip(hub, chain);
-        let stale = false;
-        if (tip === null && previous !== null) {
-            stale = typeof hub.admissionTipFresh === 'function'
-                ? !hub.admissionTipFresh(chain, previous.height)
-                : true;
-        }
-        if (tip === null) missing.push(chain);
-        chains[chain] = {
-            height: tip === null && previous !== null ? previous.height : tip,
-            observed_at_ms: previous === null ? null : previous.at_ms,
-            age_s: previous === null || previous.at_ms === null
-                ? null : Math.max(0, Math.floor((Date.now() - previous.at_ms) / 1000)),
-            fresh: tip !== null,
-            stale,
-            reason: tip !== null ? null : (stale
-                ? 'admission tip for ' + chain + ' is stale'
-                : 'no fresh admission tip for ' + chain)
-        };
-    }
-
-    // Signed admission rows use their own BTC anchor for the producer flag day.
-    // A stale last observation is sufficient to establish that the node has crossed
-    // the activation, but is diagnostic only and remains unusable above.
-    let btcHeight = chains.BTC && chains.BTC.height;
-    let producerActive = usableAdmissionHeight(btcHeight) !== null &&
-        isMirrorAdmissionProducerActive('BTC', hub.network, btcHeight);
-    return {
-        producer_active: producerActive,
-        healthy: !producerActive || missing.length === 0,
-        reason: producerActive && missing.length > 0
-            ? 'no fresh admission tip for ' + missing.join(', ') + '; refusing to finalize admission-era rows'
-            : null,
-        admit_margin_blocks: ADMIT_MARGIN_BLOCKS,
-        chains
-    };
-}
-
-function usableAdmissionHeight(value) {
-    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
-function lastAdmissionTip(hub, chain) {
-    let seen = hub && hub._admissionTipSeen;
-    if (!seen || typeof seen.get !== 'function') return null;
-    let value = seen.get(chain);
-    if (!value) return null;
-    let height = usableAdmissionHeight(value.height);
-    return height === null ? null : { height, at_ms: Number(value.atMs) || null };
 }
 
 // The anchor, attestation and relay stats, read before the status code is set.
