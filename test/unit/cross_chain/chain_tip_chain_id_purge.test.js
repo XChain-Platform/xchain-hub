@@ -29,16 +29,16 @@ function makeDb(storedId = OLD_ID) {
     };
 }
 
-async function push(db, overrides = {}) {
+async function push(db, overrides = {}, hubOverrides = {}) {
     const params = {
         coin: 'BTC', network: 'regtest', block_height: 42,
         block_time: 1700000000, chain_id: NEW_ID,
         ...overrides
     };
-    return buildFeedRpc({ hub: { db } }).pushchaintip(params);
+    return buildFeedRpc({ hub: { db, network: 'regtest', ...hubOverrides } }).pushchaintip(params);
 }
 
-describe('regtest chain-tip identity purge', function () {
+function registerScopedSqlTest() {
     it('uses scoped SQL for cross-chain rows and an unfiltered snapshot delete', async function () {
         const doQuery = sinon.stub().resolves();
         await crossChainDb.deleteCrossChainMatchesByNetwork.call({ doQuery }, 'regtest');
@@ -53,7 +53,9 @@ describe('regtest chain-tip identity purge', function () {
         ]);
         expect(doQuery.getCall(2).args).to.deep.equal(['DELETE FROM capability_snapshots']);
     });
+}
 
+function registerPurgeAndFailureTests() {
     it('purges all three tables before replacing a changed BTC regtest tip', async function () {
         const db = makeDb();
         expect(await push(db)).to.deep.equal({ status: 'success' });
@@ -77,7 +79,9 @@ describe('regtest chain-tip identity purge', function () {
             expect(db.setChainTip.called).to.equal(false);
         });
     }
+}
 
+function registerNoOpTests() {
     const noOps = [
         ['no stored identity', null, {}],
         ['an unchanged identity', NEW_ID, {}],
@@ -94,4 +98,34 @@ describe('regtest chain-tip identity purge', function () {
             expect(db.setChainTip.calledOnce).to.equal(true);
         });
     }
+}
+
+// The purge must gate on THIS hub's own configured network, never the caller's
+// param alone: a caller (an indexer relaying a pushed tip) claiming network:
+// 'regtest' twice with different chain_ids is not evidence of a regtest
+// re-genesis when the hub answering the call is a testnet or mainnet hub.
+function registerHubNetworkGuardTests() {
+    for (const hubNetwork of ['testnet', 'mainnet']) {
+        it('does not purge when the caller sends regtest but the hub is ' + hubNetwork, async function () {
+            const db = makeDb(OLD_ID);
+            expect(await push(db, {}, { network: hubNetwork })).to.deep.equal({ status: 'success' });
+            expect(db.deleteCrossChainMatchesByNetwork.called).to.equal(false);
+            expect(db.deleteCrossChainCallsByNetwork.called).to.equal(false);
+            expect(db.deleteAllCapabilitySnapshots.called).to.equal(false);
+            expect(db.setChainTip.calledOnce).to.equal(true);
+        });
+    }
+
+    it('still purges for a regtest hub, unaffected by the added hub.network guard', async function () {
+        const db = makeDb(OLD_ID);
+        expect(await push(db, {}, { network: 'regtest' })).to.deep.equal({ status: 'success' });
+        expect(db.order).to.deep.equal(['get', 'matches', 'calls', 'snapshots', 'set']);
+    });
+}
+
+describe('regtest chain-tip identity purge', function () {
+    registerScopedSqlTest();
+    registerPurgeAndFailureTests();
+    registerNoOpTests();
+    registerHubNetworkGuardTests();
 });

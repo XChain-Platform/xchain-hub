@@ -52,7 +52,7 @@ function makeDb(){
                 markers.splice(i, 1);
                 return { affectedRows: 1 };
             }
-            if(/^INSERT INTO attest_published_batches/i.test(sql)){
+            if(/^INSERT (?:IGNORE )?INTO attest_published_batches/i.test(sql)){
                 insertAttempts++;
                 let [network, windowStart, windowEnd, batchKey, rowCount, status] = args;
                 let existing = markers.find(m => m.network === network &&

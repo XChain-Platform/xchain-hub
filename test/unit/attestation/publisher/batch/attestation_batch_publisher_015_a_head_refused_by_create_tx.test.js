@@ -117,7 +117,7 @@ function doDbQuery(responses, markers, sql, args){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
                 return found ? [Object.assign({}, found)] : [];
             }
-            if(/^INSERT INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
+            if(/^INSERT (?:IGNORE )?INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
             if(/^UPDATE attest_published_batches SET status/i.test(sql)) return updateMarker(markers, args);
             throw new Error('unexpected statement: ' + sql);
 }

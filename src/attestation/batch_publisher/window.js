@@ -214,9 +214,13 @@ module.exports = {
         }
 
         // Claim at broadcastWindow's existing pre-send intent point. The unique
-        // (network, window_start) marker is the cross-publisher mutex: only the INSERT
-        // that creates it may send. A marker read followed by a send is not sufficient,
-        // because several validators can all complete that read before any one sends.
+        // (network, window_start) marker is this hub's own exclusivity guard: only the
+        // INSERT that creates it may send. Each validator runs its own hub against its
+        // own DB, so this never arbitrates between validators; it is what keeps two
+        // overlapping sweep attempts on the SAME hub (a retry racing the original, or a
+        // restart racing an in-flight run) from both broadcasting the same window. A
+        // marker read followed by a send is not sufficient, because both attempts can
+        // complete that read before either one sends.
         let claimed = Object.create(this);
         claimed.recordIntent = async (candidate, key) => {
             if(!(await this.claimWindowForBroadcast(candidate, key))){
@@ -229,8 +233,8 @@ module.exports = {
     },
 
     // Atomically acquire the durable pre-send marker. setAttestPublishedBatchByNetwork
-    // uses INSERT with a duplicate-key no-op, so affectedRows separates the sole
-    // creator from every competing publisher. This runs inside broadcastWindow after
+    // uses INSERT IGNORE, so affectedRows separates the sole creator of this hub's
+    // marker row from every other attempt on it. This runs inside broadcastWindow after
     // its pipeline, balance and spend reservations have passed, preserving the rule
     // that a window unable to attempt a send leaves no intent marker.
     async claimWindowForBroadcast(window, batchKey){

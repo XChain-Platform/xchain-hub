@@ -179,10 +179,18 @@ module.exports = {
         return this.doQuery('SELECT MAX(id) AS max_id FROM attestation_responses');
     },
 
-    // Inserts or updates a row in attest_published_batches.
-    // Moved here from src/attestation/batch_publisher.js:1310.
+    // Inserts a row in attest_published_batches; a no-op on an existing (network,
+    // window_start) row of any status, like an ON DUPLICATE KEY UPDATE no-op,
+    // but with an affectedRows split that stays exclusive. INSERT IGNORE
+    // reports 0 for a duplicate and 1 only for the row it actually created,
+    // regardless of the driver's foundRows setting; an ON DUPLICATE KEY UPDATE
+    // no-op does not have that property, because the hub pool
+    // (src/db/index.js) leaves mariadb's default foundRows:true in effect, under
+    // which a duplicate's matched-but-unchanged row also reports affectedRows 1.
+    // claimWindowForBroadcast in batch_publisher/window.js reads that split to tell
+    // the sole creator of an intent row from every other attempt on it.
     async setAttestPublishedBatchByNetwork(network, window_start, window_end, batchKey, row_count, status) {
-        return this.doQuery('INSERT INTO attest_published_batches (network, window_start, window_end, batch_key, row_count, status) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE window_start = window_start', [network, window_start, window_end, batchKey, row_count, status]);
+        return this.doQuery('INSERT IGNORE INTO attest_published_batches (network, window_start, window_end, batch_key, row_count, status) VALUES (?, ?, ?, ?, ?, ?)', [network, window_start, window_end, batchKey, row_count, status]);
     },
 
     // Inserts or updates a row in attest_published_batches.
