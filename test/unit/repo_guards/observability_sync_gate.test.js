@@ -53,6 +53,13 @@ const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..
 // restated, so adding a consumer or a file there cannot leave this suite
 // asserting against a stale copy of the truth.
 const SCRIPT_TEXT = fs.readFileSync(SCRIPT, 'utf8');
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+const PORTED_SUITES = new Map([
+  ['xchain-encoder', 'test/unit/observability.test.js'],
+  ['xchain-utxo-tracker', 'test/unit/observability.test.js'],
+  ['xchain-explorer', 'test/unit/lib/observability.test.js'],
+  ['xchain-sync', 'test/unit/observability.test.js']
+]);
 function bashArray(name) {
   const match = SCRIPT_TEXT.match(new RegExp(`^${name}=\\((.*)\\)$`, 'm'));
   return match ? match[1].split(/\s+/).filter(Boolean) : [];
@@ -195,17 +202,20 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part3() {
 }
 function registerObservabilityShimTheVendoredCopyParityGateSuite1Part4() {
   describe('the ported suite headers describe the mechanism that exists', function () {
-    // Skips per consumer when the sibling is absent, the same way every other
+    // Skips per ported suite when the sibling is absent, the same way every other
     // cross-repo guard here does; test/unit/repo_guards/sibling_coverage.test.js is what
-    // reports which of them could not run.
-    //
-    // It reports an absent CHECKOUT, not an absent SUITE, so a consumer that
-    // vendors the code and never ported the suite skips here and is reported
-    // nowhere. Read a green run as "every ported suite named the gate".
-    for (const consumer of CONSUMERS) {
+    // reports which of them could not run. Strict mode makes a missing ported
+    // suite a failure rather than a pending test.
+    for (const [consumer, relativeSuite] of PORTED_SUITES) {
       it(`${consumer}: its ported observability suite names the real gate`, function () {
-        const suite = path.join(SIBLING_ROOT, consumer, 'test', 'unit', 'observability.test.js');
-        if (!fs.existsSync(suite)) return this.skip();
+        expect(CONSUMERS, `${consumer} has a ported suite but is not a sync consumer`).to.contain(consumer);
+        const suite = path.join(SIBLING_ROOT, consumer, relativeSuite);
+        if (!fs.existsSync(suite)) {
+          if (REQUIRE_SIBLINGS) {
+            throw new Error(`XCHAIN_REQUIRE_SIBLINGS=1 but the ported observability suite is missing at ${suite}`);
+          }
+          return this.skip();
+        }
         const header = fs.readFileSync(suite, 'utf8').split('\nconst ')[0];
         expect(header, 'the header must name the script that enforces parity').to.contain('sync-observability.sh');
         expect(header, 'a header claiming a check "in CI" without naming it is what drifted').to.not.match(/parity is gated by a\s*\n\/\/ check across the vendored copies in CI/);
