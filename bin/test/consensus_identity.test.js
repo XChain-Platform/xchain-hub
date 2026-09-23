@@ -10,7 +10,7 @@
  *
  **********************************************************************
  *
- * The four identity values, and the one failure they exist to catch.
+ * The five identity values, and the one failure they exist to catch.
  *
  * The hashes themselves are not asserted against literals: a literal here is a
  * second copy of the pin under bin/pins/, and the day the two disagree the one

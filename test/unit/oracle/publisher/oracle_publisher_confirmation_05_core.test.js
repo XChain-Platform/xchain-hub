@@ -1,22 +1,6 @@
 'use strict';
 
-const {
-    fs,
-    os,
-    path,
-    sinon,
-    expect,
-    waitUntil,
-    ME,
-    ADDR,
-    utxo,
-    makeEncoder,
-    queueEntry,
-    makePublisher,
-    seedQueue,
-    readJsonl,
-    cleanupPublisherConfirmation
-} = require('./oracle_publisher_confirmation.test.js');
+const { expect } = require('./oracle_publisher_confirmation.test.js');
 
 const OraclePublisher = require('../../../../src/oracle/publisher.js');
 
@@ -30,17 +14,15 @@ function pub(cfg) {
     }
 
 const testCase1 = function () {
-        if (pub().allowUnconfirmedInputs !== false) throw new Error('default must be false');
+        expect(pub().allowUnconfirmedInputs, 'default must be false').to.equal(false);
     };
 
 const testCase2 = function () {
-        if (pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: 'true' }).allowUnconfirmedInputs !== true) {
-            throw new Error('explicit true must opt in');
-        }
+        expect(pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: 'true' }).allowUnconfirmedInputs,
+            'explicit true must opt in').to.equal(true);
         for (const v of ['false', '1', 'yes', '', 'TRUE']) {
-            if (pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: v }).allowUnconfirmedInputs !== false) {
-                throw new Error('only the exact string true opts in, got ' + v);
-            }
+            expect(pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: v }).allowUnconfirmedInputs,
+                'only the exact string true opts in, got ' + v).to.equal(false);
         }
     };
 
