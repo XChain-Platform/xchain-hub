@@ -100,13 +100,13 @@ const HUB_API_KEY        = hubConfig.HUB_API_KEY || '';
 // ConfigService sets this var for a managed deploy that has no key in its host
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (hubConfig.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
-const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
-// Loopback and private-range callers skip the per-IP cap by default. The
-// caller this protects is the node's OWN indexer replaying a batch-bearing chain: it
-// pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
-// in seconds, and without this exemption needs HUB_RATE_LIMIT_RPM=60000 set by hand before
-// recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
-// private-IP reverse proxy is still throttled; see src/api/rate_limit_policy.js.
+// A validator hub (P2P_VALIDATOR_ADDR set) defaults to 60000, the fleet's shipped
+// override; an explicit HUB_RATE_LIMIT_RPM still wins on either role.
+const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || (hubConfig.P2P_VALIDATOR_ADDR ? 60000 : 100);
+// Loopback and private-range callers skip the per-IP cap by default: the node's
+// OWN indexer replaying a batch-bearing chain pushes one pushpricebatch per batch
+// block as fast as it reads them. Keyed on req.ip (post-trust-proxy), so a public
+// client through a private-IP reverse proxy is still throttled; see rate_limit_policy.js.
 // Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
 const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
