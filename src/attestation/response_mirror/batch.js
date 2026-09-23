@@ -24,6 +24,8 @@
 'use strict';
 
 const abw = require('../../lib/attest_batch_wire.js');
+// Picks the row field set the batch was signed over from its own anchor (batch_publisher/signing.js).
+const { isAdmissionEra } = require('../../consensus/gates/mirror_admission_gate.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
@@ -249,7 +251,7 @@ module.exports = {
             row_count:        Number(batchData.row_count),
             btc_block_height: anchor,
             rows:             batchData.rows
-        });
+        }, isAdmissionEra);
 
         let qualified = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seen = new Set(), verified = [];

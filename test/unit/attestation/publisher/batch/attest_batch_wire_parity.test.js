@@ -36,6 +36,7 @@ const fs   = require('fs');
 const path = require('path');
 
 const local = require('../../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
 
 // Sibling checkout, resolved the way every other twin test resolves it: an explicit
 // env path for CI (actions/checkout cannot write above the workspace), falling back
@@ -123,10 +124,10 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
 
         it('produces identical wires and an identical canonical from identical input', function () {
             const twin = require(TWIN_PATH);
-            expect(local.buildAttestBatchCanonical(window()))
-                .to.equal(twin.buildAttestBatchCanonical(window()));
-            const mine   = local.encodeAttestBatch(window());
-            const theirs = twin.encodeAttestBatch(window());
+            expect(local.buildAttestBatchCanonical(window(), isAdmissionEra))
+                .to.equal(twin.buildAttestBatchCanonical(window(), isAdmissionEra));
+            const mine   = local.encodeAttestBatch(window(), isAdmissionEra);
+            const theirs = twin.encodeAttestBatch(window(), isAdmissionEra);
             expect(mine.ok && theirs.ok).to.equal(true);
             expect(mine.wires).to.deep.equal(theirs.wires);
             expect(mine.batchKey).to.equal(theirs.batchKey);
@@ -149,16 +150,16 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
         });
 
         it('round-trips a window the hub built back through the parser', function () {
-            const encoded = local.encodeAttestBatch(window());
+            const encoded = local.encodeAttestBatch(window(), isAdmissionEra);
             expect(encoded.ok).to.equal(true);
             const params = encoded.wires[0].split('|').slice(1);
             const head   = local.parseAttestBatchHead(params);
             expect(head.ok, head.status).to.equal(true);
-            const back = local.reassembleAttestBatch(head, []);
+            const back = local.reassembleAttestBatch(head, [], isAdmissionEra);
             expect(back.ok, back.status).to.equal(true);
             expect(back.batch.rows.length).to.equal(2);
-            expect(local.buildAttestBatchCanonical(back.batch))
-                .to.equal(local.buildAttestBatchCanonical(window()));
+            expect(local.buildAttestBatchCanonical(back.batch, isAdmissionEra))
+                .to.equal(local.buildAttestBatchCanonical(window(), isAdmissionEra));
         });
     });
 });

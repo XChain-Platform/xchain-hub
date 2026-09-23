@@ -37,6 +37,7 @@ const { expect } = require('chai');
 const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
@@ -278,7 +279,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
 
             let head = decodeHead(p.wires[0]);
             expect(head.rowCount).to.equal(2);
-            let body = abw.reassembleAttestBatch(head, []);
+            let body = abw.reassembleAttestBatch(head, [], isAdmissionEra);
             expect(body.ok, body.status).to.equal(true);
             expect(body.batch.rows.map(r => r.request_block_index)).to.deep.equal([120, 121]);
             // The audit column is hub wall clock and two hubs disagree on it, so it must

@@ -24,6 +24,8 @@
 'use strict';
 
 const abw = require('../../lib/attest_batch_wire.js');
+// Picks the row field set the encoded body carries from the batch's own anchor (signing.js).
+const { isAdmissionEra } = require('../../consensus/gates/mirror_admission_gate.js');
 const { MAX_CATCHUP_WINDOWS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -199,7 +201,7 @@ module.exports = {
         }
         window.sigs = signed.sigs;
 
-        let encoded = abw.encodeAttestBatch(window);
+        let encoded = abw.encodeAttestBatch(window, isAdmissionEra);
         if(!encoded.ok){
             this.deadLetter({ window_start: windowStart, window_end: windowEnd,
                                row_count: rows.length, reason: encoded.reason },
@@ -285,6 +287,10 @@ module.exports = {
             response_hash:        String(r.response_hash).toLowerCase(),
             meta:                 r.meta == null ? '' : String(r.meta),
             effective_time:       intOrNull(r.effective_time),
+            // Carried so an admission-era batch signs the row's real admission height; a
+            // row read without it would sign null and rebuild on chain as a legacy row.
+            // Below the activation the wire drops the field, so this changes no bytes there.
+            admit_block_btc:      intOrNull(r.admit_block_btc),
             signer_pubkeys:       String(r.signer_pubkeys == null ? '[]' : r.signer_pubkeys),
             signatures:           String(r.signatures == null ? '[]' : r.signatures),
             widen:                intOrNull(r.widen) || 0
