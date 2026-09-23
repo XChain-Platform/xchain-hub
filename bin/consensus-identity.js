@@ -94,6 +94,16 @@ let REPO_ROOT = path.resolve(__dirname, '..');
 
 const ABSENT = '<absent>';
 
+// The row a function-valued shared gate prints: present, body not digested (see SHARED_GATES).
+const FUNCTION_GATE = '<function>';
+
+// Name every gate row, since a function canonicalizes to undefined and JSON would drop it.
+function projectGates(gates) {
+    const out = {};
+    for (const key of Object.keys(gates)) out[key] = gates[key] === undefined ? FUNCTION_GATE : gates[key];
+    return out;
+}
+
 /**
  * Measure `dir` instead of the checkout this script lives in.
  * @param {string} dir a hub checkout
@@ -147,19 +157,20 @@ function codeIdentity() {
     const coins = loadFromRepo('src/coins/index.js');
 
     const rules = rulesModule.computeConsensusRulesDigest();
+    const gates = projectGates(rules.gates);
     // The GATES field verbatim, because the hash alone cannot be checked by hand
     // against a wire capture and this is the string the hub signs.
     const gatesField = rulesModule.knownGateKeys().join(',');
     const coinPins = coinConsensusPins();
 
-    const absentGates = Object.keys(rules.gates).filter((k) => rules.gates[k] === ABSENT).sort();
+    const absentGates = Object.keys(gates).filter((k) => gates[k] === ABSENT).sort();
 
     return {
         consensus_rules_digest: rules.digest,
         // The gate-by-gate preimage. See WHY THE GATES MAP IS PINNED: without it
         // a digest mismatch cannot be traced to the gate that moved.
-        consensus_rules_gates: rules.gates,
-        gate_key_count: Object.keys(rules.gates).length,
+        consensus_rules_gates: gates,
+        gate_key_count: Object.keys(gates).length,
         absent_gates: absentGates,
         gates_field: gatesField,
         gates_field_hash: crypto.createHash('sha256').update(gatesField, 'utf8').digest('hex'),

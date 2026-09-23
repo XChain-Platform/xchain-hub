@@ -65,8 +65,8 @@ describe('consensus_rules_digest: values by registry key', function () {
                 expect(gates[key], key).to.equal(crd.canonical(registry.get(key)));
             }
         }
-        expect(rows, 'the digest rows the registry supplies').to.equal(29);
-        expect(Object.keys(gates).length, 'every SHARED_GATES name is a digest key').to.equal(33);
+        expect(rows, 'the digest rows the registry supplies').to.equal(30);
+        expect(Object.keys(gates).length, 'every SHARED_GATES name is a digest key').to.equal(34);
     });
 
     it('reads the four function-valued names from their carrier, canonicalising to no value, as before', function () {
@@ -115,6 +115,6 @@ describe('consensus_rules_digest: a registry miss', function () {
     it('leaves the shipped module untouched: the digest still reads the pinned value afterwards', function () {
         expect(crd.computeConsensusRulesDigest().gates[KEY]).to.equal(crd.canonical(registry.get(KEY)));
         expect(crd.computeConsensusRulesDigest().gates[RETIRED_KEY]).to.equal(crd.canonical(registry.get(RETIRED_KEY)));
-        expect(crd.knownGateKeys().length).to.equal(33);
+        expect(crd.knownGateKeys().length).to.equal(34);
     });
 });

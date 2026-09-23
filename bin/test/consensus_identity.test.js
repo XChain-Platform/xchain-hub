@@ -146,6 +146,33 @@ describe('bin/consensus-identity.js', function () {
     });
 });
 
+// A function canonicalizes to undefined, which JSON drops and a comparer reads as equal.
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    before(() => { value = identity.codeIdentity(); });
+
+    describe('function-valued gate rows', () => {
+        const FUNCTION_KEYS = ['encodeAdmitBlocks', 'decodeAdmitBlocks', 'isAdmissionEra', 'admissionCanonicalField']
+            .map((name) => `mirror_admission_activation.${name}`);
+
+        it('serializes one row per gate key, naming a function gate by presence', () => {
+            const printed = JSON.parse(JSON.stringify(value));
+            assert.strictEqual(Object.keys(printed.consensus_rules_gates).length, printed.gate_key_count,
+                'the printed map must hold every gate the count names');
+            for (const key of FUNCTION_KEYS) assert.strictEqual(printed.consensus_rules_gates[key], '<function>', key);
+        });
+
+        it('reports a pin that lacks a function gate row as a difference', () => {
+            const pin = JSON.parse(JSON.stringify(value));
+            delete pin.consensus_rules_gates[FUNCTION_KEYS[0]];
+            const differences = identity.compare(pin, value);
+            assert.ok(differences.some((d) => d.kind === 'gate_added' && d.field === FUNCTION_KEYS[0]),
+                'a row the pin lacks must not read as unchanged');
+        });
+    });
+});
+
 describe('bin/consensus-identity.js', function () {
     this.timeout(60000);
 
