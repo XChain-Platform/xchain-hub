@@ -24,6 +24,10 @@
 
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const abw               = require('../../lib/attest_batch_wire.js');
+// The era predicate the wire takes to pick a batch's row field set from its own signed
+// anchor: admit_block_btc is signed only at or above the BTC mirror-admission producer
+// activation, so a batch below it carries the bytes every indexer already verifies.
+const { isAdmissionEra } = require('../../consensus/gates/mirror_admission_gate.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { XATTESTB_SIGN_REQ, XATTESTB_SIGN, ANCHOR_MAX_LAG_BLOCKS } = require('./constants.js');
@@ -48,7 +52,7 @@ module.exports = {
             row_count:        window.row_count,
             btc_block_height: window.btc_block_height,
             rows:             this.wireRows(window.rows)
-        });
+        }, isAdmissionEra);
 
         let set = await this.resolveAttestationSet(window.btc_block_height);
         if(!set) return empty;
@@ -234,7 +238,7 @@ module.exports = {
             row_count:        d.rows.length,
             btc_block_height: anchor,
             rows:             d.rows
-        });
+        }, isAdmissionEra);
         pm.broadcast(XATTESTB_SIGN, {
             network:      this.network,
             window_start: windowStart,

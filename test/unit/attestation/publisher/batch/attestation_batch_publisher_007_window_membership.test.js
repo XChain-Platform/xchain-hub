@@ -37,6 +37,7 @@ const { expect } = require('chai');
 const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
@@ -315,7 +316,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             let head = decodeHead(p.wires[0]);
             expect(head.windowEnd).to.equal(now);
             expect(head.rowCount, 'window_end is exclusive').to.equal(1);
-            let body = abw.reassembleAttestBatch(head, []);
+            let body = abw.reassembleAttestBatch(head, [], isAdmissionEra);
             expect(body.batch.rows[0].request_id).to.equal(first.request_id);
 
             // The boundary row is not dropped: it rides the NEXT window, exactly once.
@@ -323,6 +324,6 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             let next = decodeHead(p.wires[1]);
             expect(next.windowStart).to.equal(now);
             expect(next.rowCount).to.equal(1);
-            expect(abw.reassembleAttestBatch(next, []).batch.rows[0].request_id).to.equal(edge.request_id);
+            expect(abw.reassembleAttestBatch(next, [], isAdmissionEra).batch.rows[0].request_id).to.equal(edge.request_id);
         }); }); });
 }

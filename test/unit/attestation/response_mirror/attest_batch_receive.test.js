@@ -35,6 +35,7 @@ const { expect } = require('chai');
 const AttestationResponseMirror = require('../../../../src/attestation/response_mirror.js');
 const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const abw = require('../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
 const ANCHOR       = 941234;
@@ -106,7 +107,7 @@ function makeBatch(rows, signers, overrides){
         network: 'regtest', window_start: WINDOW_START, window_end: WINDOW_END,
         row_count: rows.length, btc_block_height: ANCHOR, rows: rows
     }, overrides || {});
-    let canonical = abw.buildAttestBatchCanonical(header);
+    let canonical = abw.buildAttestBatchCanonical(header, isAdmissionEra);
     return Object.assign({}, header, {
         sigs: signers.map(s => ({ pubkey: s.getPubkeyHex().toLowerCase(), sig: s.sign(canonical) })),
         action_index: ACTION_INDEX, block_index: 700123, block_time: 1780004000, push_generation: 3
