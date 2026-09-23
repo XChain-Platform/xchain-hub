@@ -282,6 +282,13 @@ function registerRunMigrationSequenceTests() {
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
             expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
             expect(idx.calledWith('validator_rewards', 'idx_batch_seq', '(batch_seq)')).to.be.true;
+            // The three price_snapshots frontier indexes: names and column lists byte-equal
+            // to the KEY lines in src/sql/price_snapshots.sql, the first two also to the
+            // indexer and explorer mirror twins, so a hub that predates them converges on the
+            // same index set a fresh install gets.
+            expect(idx.calledWith('price_snapshots', 'idx_status_block_round', '(status, reference_block, round_number)')).to.be.true;
+            expect(idx.calledWith('price_snapshots', 'idx_status_timestamp_round', '(status, block_timestamp, round_number)')).to.be.true;
+            expect(idx.calledWith('price_snapshots', 'idx_status_created', '(status, created_at)')).to.be.true;
             const enCall = en.getCall(0);
             expect(enCall.args[0]).to.equal('validator_capabilities');
             expect(enCall.args[1]).to.equal('capability');
