@@ -149,6 +149,16 @@ xchainPriceSourceTests('ingestion bounds', function () {
         expect(out.meta.carriedFrom).to.equal('bootstrap');
     });
 
+    it('abstains in the sub-ulp band the downstream gates round onto PRICE_MAX', function () {
+        // Exact math admits this 8dp value; parseFloat rounds it to PRICE_MAX, so every
+        // co-sign and ingest gate refuses it. The producer must refuse it first.
+        const band = String(PRICE_MAX - 1) + '.99999999';
+        expect(parseFloat(band), 'the band value rounds onto the ceiling').to.equal(PRICE_MAX);
+        const { src } = makeSource({}, FINALIZED_BTC);
+        expect(src.entry(band, {})).to.equal(null);
+        expect(src.entry('0.05000000', {}).price).to.equal('0.05000000');
+    });
+
     it('publishes at 8dp like every other pair', async function () {
         const { src } = makeSource({}, FINALIZED_BTC);
         expect((await src.derive(CTX)).price).to.match(/^\d+\.\d{8}$/);

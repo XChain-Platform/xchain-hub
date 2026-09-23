@@ -23,6 +23,7 @@
 
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const swq = require('../../consensus/stake_weighted_quorum.js');
 const logger = getLogger();
 
 module.exports = {
@@ -67,12 +68,17 @@ module.exports = {
         // Primary: deterministic on-chain snapshot at blockIndex
         if (this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null) {
             try {
-                let snapshot = await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
+                let snapshot = await this.oraclePublishSnapshot(blockIndex);
                 if (snapshot && Array.isArray(snapshot.validators)) {
-                    this._snapshotDark = false;
-                    return snapshot.validators
-                        .map(v => String(v.pubkey).toLowerCase())
-                        .sort();
+                    // Dedupe: weighted snapshots carry one row per (source, pubkey), and rank must see each key once.
+                    let pubkeys = [...new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()))].sort();
+                    if (pubkeys.length > 0) {
+                        this._snapshotDark = false;
+                        return pubkeys;
+                    }
+                    // An empty set elects no leader on any hub, so log it as loudly as the null path.
+                    this.logSnapshotDark('resolved to an empty member set at block ' + blockIndex, null);
+                    return [];
                 }
                 // Snapshot resolved to null. This is the dominant dark path:
                 // CapabilitySnapshot.getSnapshot returns null (does NOT throw) when the
@@ -97,6 +103,17 @@ module.exports = {
         // caller already treats myRank === null as "not a publisher". Matches the
         // accepted fix for #686/#925/#930.
         return [];
+    },
+
+    // Resolve the block-pinned oracle_publish membership the leader quorum judges by:
+    // the source-keyed weight snapshot at/above STAKE_WEIGHTED_QUORUM, the count
+    // snapshot below it, twin of StateAnchorPublisher.oraclePublishSnapshot. Gated on
+    // the DEPLOYMENT network only, never a wire-supplied one.
+    // DEPLOY NOTE: upgrade fleet-wide at once; where the two sets differ, mixed hubs rank differently.
+    oraclePublishSnapshot(blockIndex) {
+        return swq.isStakeWeightedQuorumActive(Number(blockIndex), this.network)
+            ? this.hub.capabilitySnapshot.getWeightSnapshot('oracle_publish', blockIndex)
+            : this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
     },
 
     // Fallback: build a single-validator signature locally if the round event didn't carry any.

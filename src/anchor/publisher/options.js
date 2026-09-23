@@ -25,6 +25,7 @@
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard = require('../../lib/spend_guard.js');
 const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
+const { DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const hubConfig = require('../../config');
 
 module.exports = {
@@ -72,7 +73,7 @@ module.exports = {
         this.batchSize     = parseInt(hubConfig.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
         this.maxBatch      = parseInt(hubConfig.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
         this.chunkMaxBytes = parseInt(hubConfig.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
-        this.roundTimeoutMs = parseInt(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
+        this.roundTimeoutMs = parseInt(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || DEFAULT_ANCHOR_ROUND_TIMEOUT_MS);
         this.chunkRetryDelayMs = parseInt(hubConfig.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
     },
 

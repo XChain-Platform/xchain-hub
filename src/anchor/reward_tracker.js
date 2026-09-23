@@ -29,6 +29,12 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
+// Render the operator-tunable (below-flag-day) anchor reward on the 8-decimal grid.
+// bcmath, never parseFloat: a prefix-numeric knob ('10abc') renders '0.00000000', not 10.
+function legacyAnchorRewardAmount(knob) {
+    return bcmath.bcformat(knob, 8);
+}
+
 class RewardTracker {
 
     constructor(hub) {
@@ -149,9 +155,8 @@ class RewardTracker {
         let lcPubkey = pubkey.toLowerCase();
 
         // The frozen consensus amount at/above its flag-day, else the operator-tunable one.
-        let amount = this.resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork);
-        if (!Number.isFinite(amount) || amount <= 0) return;
-        let amountStr = amount.toFixed(8);
+        let amountStr = this.resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork);
+        if (!bcmath.bcgt(amountStr, '0')) return;
 
         // Qualify the logical anchor by the archive leg's snapshot block. round_number is
         // MATCH_BATCH_SEQ for anchor_archive, a dense counter a wipe-and-replay rebase
@@ -193,9 +198,9 @@ class RewardTracker {
         // chain already determines.
     }
 
-    // The anchor reward amount to record, as a parsed float (NaN when the configured
-    // legacy amount does not parse). Pure: no DB access, so the locked body keeps its
-    // statement order.
+    // The anchor reward amount to record, as a decimal string ('0.00000000' when the
+    // configured legacy amount is not numeric). Pure: no DB access, so the locked body
+    // keeps its statement order.
     resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork) {
         // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
         // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
@@ -229,8 +234,10 @@ class RewardTracker {
                                ar.isAnchorRewardActive(Number(blockIndex), network);
         let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
                                ar.isArchiveRewardActive(Number(blockIndex), network);
-        return parseFloat((isDerivedChain || isDerivedBundle) ? ar.ANCHOR_REWARD_AMOUNT
-                         : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
+        // Frozen constants verbatim (byte-identical to what the indexer credits and signs).
+        if (isDerivedChain || isDerivedBundle) return String(ar.ANCHOR_REWARD_AMOUNT);
+        if (isDerivedArchive) return String(ar.ARCHIVE_REWARD_AMOUNT);
+        return legacyAnchorRewardAmount(this.anchorReward);
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,
@@ -293,5 +300,7 @@ class RewardTracker {
         return rows.length > 0 ? rows[0].total.toString() : '0';
     }
 }
+
+RewardTracker.legacyAnchorRewardAmount = legacyAnchorRewardAmount;
 
 module.exports = RewardTracker;

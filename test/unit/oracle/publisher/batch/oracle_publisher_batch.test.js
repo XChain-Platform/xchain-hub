@@ -120,15 +120,18 @@ function makeSigner(opts) {
 }
 
 // Capability snapshot stand-in. `oracle_publish` drives leader election, `price`
-// only sizes the pre-signing estimate.
+// only sizes the pre-signing estimate. The weight snapshot serves the same members,
+// since election reads it at and above the stake-weighted quorum activation.
 function makeSnapshot(publishers, priceSet) {
+    let resolve = async (capability) => {
+        if (capability === 'oracle_publish') {
+            return { validators: (publishers || [ME]).map(p => ({ pubkey: p })) };
+        }
+        return { validators: (priceSet || publishers || [ME]).map(p => ({ pubkey: p })) };
+    };
     return {
-        getSnapshot: sinon.stub().callsFake(async (capability) => {
-            if (capability === 'oracle_publish') {
-                return { validators: (publishers || [ME]).map(p => ({ pubkey: p })) };
-            }
-            return { validators: (priceSet || publishers || [ME]).map(p => ({ pubkey: p })) };
-        })
+        getSnapshot:       sinon.stub().callsFake(resolve),
+        getWeightSnapshot: sinon.stub().callsFake(resolve),
     };
 }
 

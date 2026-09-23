@@ -189,8 +189,9 @@ module.exports = {
         // propose(); without this, every hub records and votes on an out-of-bounds
         // change. Drop it (never record it) so the whole federation ignores it,
         // matching the MIN_STAKE and block-anchor drops above. validateChangeBounds
-        // is a no-op for non-numeric parameters, so only numeric out-of-bounds
-        // proposals are affected.
+        // drops a non-decimal value for a slashing parameter and skips one for any
+        // other parameter, so only numeric out-of-bounds proposals and non-decimal
+        // slashing proposals are affected.
         //
         // DEPLOY NOTE: enforce fleet-wide in one coordinated upgrade. During a
         // mixed-version window, fixed hubs drop an out-of-bounds Byzantine proposal

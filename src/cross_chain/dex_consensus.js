@@ -45,6 +45,8 @@
 
 const EventEmitter      = require('events');
 const { positiveIntConfig } = require('../lib/config_int.js');
+const { DEFAULT_XDEX_ROUND_TIMEOUT_MS } = require('../constants.js');
+const hubConfig         = require('../config');
 const ah                = require('../lib/admission_height.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -60,8 +62,6 @@ const XDEX_MATCH_COMMIT      = 'XDEX_MATCH_COMMIT';
 const XDEX_MATCH_VIEW_CHANGE = 'XDEX_MATCH_VIEW_CHANGE';
 const XDEX_MATCH_NEW_VIEW    = 'XDEX_MATCH_NEW_VIEW';
 const XDEX_MATCH_FINAL_SYNC  = 'XDEX_MATCH_FINAL_SYNC';
-
-const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per match round before view-change
 
 class CrossChainDexConsensus extends EventEmitter {
 
@@ -114,13 +114,19 @@ class CrossChainDexConsensus extends EventEmitter {
         this.initEarlyBuffer();
 
         this._messageHandler = null;
-        this.roundTimeoutMs  = parseInt(this.config.XDEX_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
+        // Resolve env first, then p2pConfig, as the mirror admission watermark does: its
+        // xdex trail is this engine's terminal bound, so both must read one value.
+        this.roundTimeoutMs  = positiveIntConfig(
+            hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS,
+            DEFAULT_XDEX_ROUND_TIMEOUT_MS, 'XDEX_ROUND_TIMEOUT_MS');
         // A round that keeps view-changing without ever finalizing (sustained
         // message loss, e.g. P2P rate-limit drops during a burst of concurrent
         // rounds) must not leak in `pending` forever: past this lifetime it is
         // abandoned so the engine can re-propose a fresh round once the storm
         // clears. Default = several view-change cycles.
-        this.roundMaxLifetimeMs = parseInt(this.config.XDEX_ROUND_MAX_LIFETIME_MS) || (this.roundTimeoutMs * 4);
+        this.roundMaxLifetimeMs = positiveIntConfig(
+            hubConfig.XDEX_ROUND_MAX_LIFETIME_MS || this.config.XDEX_ROUND_MAX_LIFETIME_MS,
+            this.roundTimeoutMs * 4, 'XDEX_ROUND_MAX_LIFETIME_MS');
     }
 
     async start(){

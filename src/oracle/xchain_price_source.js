@@ -223,14 +223,17 @@ class XchainPriceSource {
     }
 
     // Final ingestion bound, applied to every value this file emits whether derived or
-    // carried forward. The API sources bound their values the same way for the same
-    // reason: garbage must never enter a round, and a carried-forward value read out
-    // of a database is no more trusted than a fetched one.
+    // carried forward: garbage must never enter a round, and a carried-forward value read
+    // out of a database is no more trusted than a fetched one. Compare doubles, not exact
+    // decimals, so this is the same predicate the API sources, co-sign gate, aggregation
+    // and ingest apply; an exact bound admits the sub-ulp band below PRICE_MAX that
+    // parseFloat rounds onto the ceiling, and a pair every gate then refuses costs the round.
     entry(price, meta) {
         let value;
         try {
             value = bcmath.bcformat(price, 8);
-            if (!bcmath.bcgt(value, '0') || !bcmath.bclt(value, String(PRICE_MAX))) {
+            let val = parseFloat(value);
+            if (!(Number.isFinite(val) && val > 0 && val < PRICE_MAX)) {
                 logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - computed value ' +
                     price + ' failed the ingestion bound (0 < value < ' + PRICE_MAX + ')');
                 return null;

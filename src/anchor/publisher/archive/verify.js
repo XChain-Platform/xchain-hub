@@ -27,6 +27,7 @@ const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const ark = require('../../anchor_reward_key.js');
+const { legacyAnchorRewardAmount } = require('../../reward_tracker.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -217,7 +218,7 @@ module.exports = {
             ? ar.ANCHOR_REWARD_AMOUNT
             : isDerivedArchive
             ? ar.ARCHIVE_REWARD_AMOUNT
-            : (this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null);
+            : (this.hub.rewardTracker ? legacyAnchorRewardAmount(this.hub.rewardTracker.anchorReward) : null);
         return expectedAmount;
     },
 

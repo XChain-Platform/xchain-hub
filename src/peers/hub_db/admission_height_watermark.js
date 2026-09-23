@@ -23,6 +23,8 @@
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../../lib/admission_height.js');
 const { admitMarginBlocks } = require('../../consensus/gates/mirror_admission_gate.js');
+const { DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_XDEX_ROUND_TIMEOUT_MS,
+        DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const hubConfig = require('../../config');
 
 // ---------------------------------------------------------------------------
@@ -105,23 +107,24 @@ class AdmissionHeightWatermark {
         // round timeout, because a view change re-arms the timeout on a round that is still
         // open (CrossChainDexConsensus.js:134, :140).
         let xdexTimeout = positiveIntConfig(
-            hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS, 120000, 'XDEX_ROUND_TIMEOUT_MS');
+            hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS,
+            DEFAULT_XDEX_ROUND_TIMEOUT_MS, 'XDEX_ROUND_TIMEOUT_MS');
         this.roundWindows = {
             xdex: positiveIntConfig(
                 hubConfig.XDEX_ROUND_MAX_LIFETIME_MS || this.config.XDEX_ROUND_MAX_LIFETIME_MS,
                 xdexTimeout * 4, 'XDEX_ROUND_MAX_LIFETIME_MS'),
             attest: positiveIntConfig(
                 hubConfig.ATTESTATION_ROUND_TIMEOUT_MS || this.config.ATTESTATION_ROUND_TIMEOUT_MS,
-                120000, 'ATTESTATION_ROUND_TIMEOUT_MS'),
+                DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, 'ATTESTATION_ROUND_TIMEOUT_MS'),
             anchor: positiveIntConfig(
                 hubConfig.ANCHOR_ROUND_TIMEOUT_MS || this.config.ANCHOR_ROUND_TIMEOUT_MS,
-                120000, 'ANCHOR_ROUND_TIMEOUT_MS'),
+                DEFAULT_ANCHOR_ROUND_TIMEOUT_MS, 'ANCHOR_ROUND_TIMEOUT_MS'),
             // A price round's terminal bound is its own cadence: the next round opens only
             // once this one is finalized or skipped, so the interval is what bounds how long
             // a round can hold the watermark.
             price: positiveIntConfig(
                 hubConfig.ORACLE_ROUND_INTERVAL || this.config.ORACLE_ROUND_INTERVAL,
-                600000, 'ORACLE_ROUND_INTERVAL'),
+                DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL'),
             // oracle_prices has no consensus round at all: the rows are the hub's own ingest
             // of an on-chain PRICE v1 transaction, so the bound is how long an ingest may
             // trail the chain it reads. Its own knob, because nothing else sizes it.
