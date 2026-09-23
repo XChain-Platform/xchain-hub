@@ -43,11 +43,18 @@ const forms = {
                 String(cp.checkpoint_seq), String(cp.snapshot_block)].join('|');
     },
 
+    // Is CHECKPOINT_COMMITMENT active at this checkpoint's own network and snapshot_block?
+    // The one reader of the flag-day key, shared by the suffix, the rootless guard and
+    // the ANCHOR bundle selector's floor.
+    isCheckpointCommitmentActive(cp){
+        return gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null);
+    },
+
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
     // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
     // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
     checkpointRootSuffix(cp){
-        if(!gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null)) return '';
+        if(!forms.isCheckpointCommitmentActive(cp)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
         // refuses to sign a checkpoint that lacks them (runRound throws), so for every
         // REAL post-flag-day checkpoint this is always true and the suffix is byte-
@@ -106,7 +113,7 @@ const forms = {
     // be enforced on one path and quietly skipped on the others again.
     isRootless(cp){
         if(!cp) return false;
-        if(!gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null)) return false;
+        if(!forms.isCheckpointCommitmentActive(cp)) return false;
         return (!cp.state_root || !cp.block_merkle_root ||
                 cp.state_root_version == null || cp.block_merkle_version == null);
     },

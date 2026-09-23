@@ -28,9 +28,66 @@
 const nodeUtil = require('node:util');
 const ark = require('../../anchor/anchor_reward_key.js');
 const { getLogger } = require('../../observability');
+const hubConfig = require('../../config');
 const logger = getLogger();
 
+// The width oracle_prices.tick widens to, and the restated column. Literal rather than
+// MAX_TICK_LENGTH: a raised gate constant must not widen the hub past its mirrors unasked.
+const ORACLE_TICK_WIDTH = 250;
+const ORACLE_TICK_DEF   = 'VARCHAR(250) NOT NULL';
+
 module.exports = {
+
+    // Widen oracle_prices.tick to the PRICE v1 ingest bound, once the MIRRORS have.
+    //
+    // A mirror still at VARCHAR(50) under STRICT_TRANS_TABLES refuses the first longer tick
+    // the hub serves and wedges its oracle barrier on every re-page, and the hub cannot see
+    // its mirrors. So the order is operator-attested: widen every indexer and explorer mirror
+    // first, then set XCHAIN_HUB_ORACLE_TICK_MIRRORS_WIDENED=1. Until then this logs and
+    // skips, and each boot asks again; the narrow column keeps a long tick off the wire.
+    async migrateOracleTickWidth(){
+        if(hubConfig.XCHAIN_HUB_ORACLE_TICK_MIRRORS_WIDENED !== '1'){
+            logger.warn('Migration deferred: oracle_prices.tick stays narrower than ' + ORACLE_TICK_WIDTH +
+                ' until every mirror is widened (indexer migration 2026-09-22-oracle-prices-widen-tick.sql, ' +
+                'explorer hub-mirror reconciler). Then set XCHAIN_HUB_ORACLE_TICK_MIRRORS_WIDENED=1 and restart.');
+            return false;
+        }
+        return this.migrateColumnLength('oracle_prices', 'tick', ORACLE_TICK_WIDTH, ORACLE_TICK_DEF);
+    },
+
+
+    // Widen a character column's length in place. Idempotent: reads the live
+    // CHARACTER_MAXIMUM_LENGTH and no-ops once it is at or above `targetLength`, so a fresh
+    // install and an already-migrated node both skip it. migrateColumnType cannot do this:
+    // it compares DATA_TYPE, and varchar to varchar reads as already converted.
+    //
+    // WIDENING ONLY: `columnDef` restates the whole column and must match the definition
+    // file, and a narrower live column is the only case that issues the MODIFY.
+    async migrateColumnLength(table, column, targetLength, columnDef){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                [this.dbName, table, column]
+            );
+            if(!rows || !rows[0]) return false; // table/column not present yet; CREATE TABLE covers it
+            let live = Number(rows[0].len);
+            if(rows[0].len == null || Number.isNaN(live) || live >= targetLength) return false;
+            await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
+            logger.info('Migration: widened ' + table + '.' + column + ' ' + live + ' -> ' + targetLength);
+            return true;
+        } catch(e){
+            // Swallowed loudly, as migrateColumnCharset is: a throw takes the boot down.
+            logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is still narrower than ' +
+                targetLength + ', so a longer value errors or truncates on INSERT. Run by hand: ' +
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e));
+            return false;
+        } finally {
+            await db.release();
+        }
+    },
+
 
 
     // Add the per-chain admission height columns to every mirrored table that carries one.

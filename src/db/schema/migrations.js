@@ -131,7 +131,8 @@ module.exports = {
     },
 
     // The column-level steps: the two DATETIME conversions, the two charset
-    // widens, the price fence re-key, and the mirror admission columns.
+    // widens, the price fence re-key, the mirror admission columns, and the gated
+    // oracle_prices.tick length widen.
     async runColumnAndFenceMigrations(){
         // #4315: governance_proposals.voting_start/voting_end shipped as TIMESTAMP, which
         // MariaDB bounds to the signed 32-bit epoch (2038-01-19 03:14:07 UTC). Both hold a
@@ -164,6 +165,9 @@ module.exports = {
         // xchain-hub/migrations/ are applied by hand, so a migration copied from the
         // indexer's style would sit there and never run on a single deployed hub.
         await this.migrateAdmissionColumns();
+        // oracle_prices.tick to the 250 the PRICE v1 ingest gate admits, gated on the mirrors
+        // having widened first (see migrateOracleTickWidth for the order and the flag).
+        await this.migrateOracleTickWidth();
     }
 
 };

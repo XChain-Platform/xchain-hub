@@ -35,7 +35,8 @@ function registerChunkingAndSummaryCases() {
     it('oversized archive splits into v1 + v2 chunks that reassemble byte-identically', async function () {
         let many = [];
         for (let i = 0; i < 40; i++) many.push(matchRow('m' + String(i).padStart(3, '0')));
-        let bus = buildMesh(1, { network: 'mainnet', matches: many, cfg: { ANCHOR_CHUNK_MAX_BYTES: '500' } });   // count-path chunking mechanics (SWQ off below 961000)
+        // Count-path chunking mechanics (SWQ off below 961000); the armed bundle floor lets the v0 ride.
+        let bus = buildMesh(1, { network: 'mainnet', checkpointCommitment: true, matches: many, cfg: { ANCHOR_CHUNK_MAX_BYTES: '500' } });
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();

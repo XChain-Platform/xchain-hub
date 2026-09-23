@@ -22,6 +22,7 @@
 'use strict';
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
 const { ANCHOR_BUNDLE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -100,6 +101,13 @@ module.exports = {
                                                                     this.anchorEveryNCheckpoints);
     },
 
+    // Is CHECKPOINT_COMMITMENT active at this section's OWN network and snapshot_block?
+    // The bundle selector's floor reads it here, so a test harness can override the
+    // gate on one publisher instance without touching the shared registry.
+    sectionCommitmentActive(row){
+        return checkpointForms.isCheckpointCommitmentActive(row);
+    },
+
     // Group the result set into ONE bundle per network. A chain absent from a
     // group is NOT an anomaly (D4): under the daily cadence the normal case is a
     // chain whose newest eligible seq is already anchored.
@@ -107,15 +115,23 @@ module.exports = {
         let byNetwork = new Map();
         for(let row of (rows || [])){
             // D8: the bundle is root-bearing by construction, so a row with no
-            // light-client roots cannot ride one. Below CHECKPOINT_COMMITMENT_ACTIVATION
-            // (regtest 0, testnet 146000, mainnet 961000) no federation cutting
-            // checkpoints today produces such a row, so this is a loud skip rather than
-            // a rootless fallback wire.
+            // light-client roots cannot ride one; a loud skip, never a rootless wire.
             if(row.state_root == null || row.block_merkle_root == null ||
                row.state_root_version == null || row.block_merkle_version == null){
                 logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
                              row.block_index + ' (seq ' + row.checkpoint_seq + ') carries no light-client roots; ' +
                              'skipped, an ANCHOR v0 section is root-bearing by construction');
+                continue;
+            }
+            // Skip a root-bearing row below CHECKPOINT_COMMITMENT_ACTIVATION at its own
+            // snapshot_block (roots arm earlier, at STATE_COMMITMENT): its signatures cover
+            // the rootless canonical while the indexer rebuilds every v0 section WITH the
+            // root suffix, so it can never verify and would fail the whole bundle.
+            if(!this.sectionCommitmentActive(row)){
+                logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
+                             row.block_index + ' (seq ' + row.checkpoint_seq + ', snapshot_block ' +
+                             row.snapshot_block + ') sits below CHECKPOINT_COMMITMENT; skipped, its ' +
+                             'signatures cover the rootless canonical an ANCHOR v0 section cannot carry');
                 continue;
             }
             let net = String(row.network);

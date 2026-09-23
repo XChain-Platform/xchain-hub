@@ -36,7 +36,8 @@ function registerMeshElectionCase() {
     it('N=4: per-row v0 election + archive leader; v1 carries 2f+1 sigs; back-fill propagates', async function () {
         // Count-path: mainnet record below the 961000 SWQ activation, so the archive
         // quorum stays legacy 2f+1 (the weighted path has its own dedicated suite below).
-        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet' });
+        // checkpointCommitment arms the bundle floor so the block-100 section still rides.
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet', checkpointCommitment: true });
         await startAll(bus);
         let v0Pub  = v0Order(bus)[0];                                  // elected for the BTC checkpoint
         let leader = archiveLeader(bus);                          // elected archive leader
