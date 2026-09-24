@@ -219,7 +219,13 @@ module.exports = {
                           'action silently, so this checkpoint stays off chain until the federation ' +
                           'signer count comes down');
         }
-        for(let group of split.bundles)
+        // A folded network emits one transaction per cycle; groups past the first stay
+        // un-anchored and lead the next cycle's split.
+        let groups = foldActive ? split.bundles.slice(0, 1) : split.bundles;
+        if(foldActive && split.bundles.length > 1)
+            logger.info('StateAnchorPublisher: folded bundle for ' + network + ' carries ' + groups[0].length +
+                        ' section(s); ' + (split.bundles.length - 1) + ' overflow group(s) wait for the next cycle');
+        for(let group of groups)
             await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped,
                                      { active: foldActive, block: foldBlock });
         if(foldActive) this.suppressLegacyArchiveLeg();

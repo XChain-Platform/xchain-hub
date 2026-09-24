@@ -130,6 +130,24 @@ describe('ANCHOR v3 one-round archive fold', function () {
         expect(node.db.matches[0].batch_seq).to.equal(null);
     });
 
+    it('emits one transaction per network per cycle even when the byte budget splits the sections', async function () {
+        let run = async (foldBlock) => {
+            let pub = Object.create(StateAnchorPublisher.prototype);
+            let calls = [];
+            pub.identity = null;
+            pub.getActiveOraclePublishPubkeys = async () => ['aa'];
+            pub.splitBundle = () => ({ bundles: [[section('BTC', 'b')], [section('LTC', 'l')]], oversize: [] });
+            pub.hub = { resolveDogeLatestBlock: async () => foldBlock };
+            pub.suppressLegacyArchiveLeg = () => {};
+            pub.publishBundle = async (signer, network, group) => { calls.push(group.map(x => x.chain)); };
+            await pub.publishNetworkBundles({}, 'regtest', [section('BTC', 'b'), section('LTC', 'l')], 100, false, [], { rows: 0 });
+            return calls;
+        };
+        expect(await run(0)).to.deep.equal([['BTC']]);
+        StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest = 1e9;
+        expect(await run(0)).to.deep.equal([['BTC'], ['LTC']]);
+    });
+
     it('guards a folded spend by row attributes rather than the version byte', async function () {
         let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
         let txid = 'ab'.repeat(32);
