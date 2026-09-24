@@ -26,9 +26,53 @@ const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
-const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
+const ValidatorIdentity = require('../../validators/identity.js');
+const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE,
+        XANCPUB_SIGN_REQ, XANCPUB_SIGN } = require('./constants.js');
+const attestRoundMethods = require('./attest_round.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+function installFoldAttestHooks(){
+    let openRound = attestRoundMethods.openAttestRound;
+    let handleReq = attestRoundMethods.handleAttestSignReq;
+    let handleSign = attestRoundMethods.handleAttestSign;
+    attestRoundMethods.openAttestRound = function(...args){
+        let peerManager = this.peerManager;
+        let broadcast = peerManager && peerManager.broadcast;
+        if(!broadcast || !this._foldArchiveRound) return openRound.apply(this, args);
+        peerManager.broadcast = (type, data) => {
+            if(type === XANCPUB_SIGN_REQ) data.archive = this.foldArchiveRequest(this._foldArchiveRound);
+            return broadcast.call(peerManager, type, data);
+        };
+        try { return openRound.apply(this, args); }
+        finally { peerManager.broadcast = broadcast; }
+    };
+    attestRoundMethods.handleAttestSignReq = async function(envelope){
+        let archiveReply = this.coSignFoldArchiveRequest(envelope).catch(() => null);
+        let peerManager = this.peerManager;
+        let broadcast = peerManager && peerManager.broadcast;
+        let accepted = false;
+        if(broadcast) peerManager.broadcast = (type, data) => {
+            if(type === XANCPUB_SIGN && data && data.sig) accepted = true;
+            return broadcast.call(peerManager, type, data);
+        };
+        try { await handleReq.call(this, envelope); }
+        finally { if(broadcast) peerManager.broadcast = broadcast; }
+        let signed = await archiveReply;
+        if(accepted && signed && peerManager){
+            this.recordObservedArchiveLeader(signed.batchSeq, signed.sender, signed.cp);
+            this.recordObservedArchiveContent(signed.batchSeq, signed.sender, signed.archive);
+            peerManager.broadcast(XANCPUB_SIGN, signed.reply);
+        }
+    };
+    attestRoundMethods.handleAttestSign = async function(envelope){
+        this.acceptFoldArchiveSignature(envelope && envelope.data);
+        await handleSign.call(this, envelope);
+    };
+}
+
+installFoldAttestHooks();
 
 module.exports = {
 
@@ -189,7 +233,7 @@ module.exports = {
         if(me && signingSet.some(v => String(v.pubkey).toLowerCase() === me))
             signatures.push({ pubkey: me, sig: this.identity.sign(canonical) });
         let round = {
-            cp, batchSeq, count: archive.count, crc: wire.crc, chunks: wire.chunks,
+            cp, batchSeq, count: archive.count, crc: wire.crc, b64: wire.b64, chunks: wire.chunks,
             wrapperSectionIndex, signatures, canonical,
             validators: signingSet,
             weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
@@ -202,11 +246,99 @@ module.exports = {
                 round_qualifier: Number(row.round_qualifier || 0)
             }))
         };
-        if(this.quorumVerified(canonical, signatures, signingSet, round.weighted)) return round;
-        if(typeof this.requestFoldArchiveSignatures !== 'function') return null;
-        let gathered = await this.requestFoldArchiveSignatures(round);
-        round.signatures = Array.isArray(gathered) ? gathered : [];
-        return this.quorumVerified(canonical, round.signatures, signingSet, round.weighted) ? round : null;
+        return round;
+    },
+
+    foldArchiveRequest(round){
+        return {
+            checkpoint: round.cp, wrapper_section_index: round.wrapperSectionIndex,
+            batch_seq: round.batchSeq, match_count: round.count,
+            batch_crc32: round.crc, total_chunks: round.chunks.length,
+            archive_b64: round.b64,
+            sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
+            sig: this.identity.sign(round.canonical)
+        };
+    },
+
+    async coSignFoldArchiveRequest(envelope){
+        let d = envelope && envelope.data;
+        let a = d && d.archive;
+        if(!this.identity || !a || !a.checkpoint || !Array.isArray(d.sections)) return null;
+        let sender = String(d.sig_pubkey || '').toLowerCase();
+        let myPubkey = this.identity.getPubkeyHex().toLowerCase();
+        if(!sender || sender === myPubkey || String(d.publisher || '').toLowerCase() !== sender) return null;
+        let foldBlock = Number(d.snapshot_block);
+        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
+            try { foldBlock = Number(await this.hub.resolveDogeLatestBlock()); }
+            catch(_e){ return null; }
+        }
+        if(!canonicalForms.isAnchorFoldActive(foldBlock, String(d.network))) return null;
+        let index = Number(a.wrapper_section_index);
+        let sec = Number.isInteger(index) ? d.sections[index] : null;
+        let cp = a.checkpoint;
+        if(!sec || String(sec.chain) !== String(cp.chain) ||
+           Number(sec.block_index) !== Number(cp.block_index) ||
+           Number(sec.checkpoint_seq) !== Number(cp.checkpoint_seq)) return null;
+        let local = await this.db.getStateCheckpointByChain(
+            String(cp.chain), String(d.network), Number(cp.block_index), Number(cp.checkpoint_seq));
+        let mine = this.ownArchiveWrapper(local, cp);
+        if(!mine || Number(await this.getNextBatchSeq()) !== Number(a.batch_seq)) return null;
+        let canonical = canonicalForms.foldArchiveCanonical(
+            local[0], Number(a.batch_seq), Number(a.match_count),
+            String(a.batch_crc32), Number(a.total_chunks));
+        if(!ValidatorIdentity.verify(canonical, String(a.sig || ''), sender)) return null;
+        let signingSet = await this.archiveSigningSet(mine);
+        if(!signingSet.some(v => String(v.pubkey).toLowerCase() === myPubkey)) return null;
+        let archive = this.decodeArchiveProposal(a);
+        if(!archive || !(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))) return null;
+        return {
+            batchSeq: Number(a.batch_seq), sender, cp, archive,
+            reply: {
+                network: String(d.network), snapshot_block: Number(d.snapshot_block),
+                sig_pubkey: myPubkey, sig: '', archive_sig: this.identity.sign(canonical)
+            }
+        };
+    },
+
+    armFoldArchiveRound(round){
+        let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
+                                         Number(this.roundTimeoutMs) || 30000));
+        round.signatures = new Map((round.signatures || []).map(s => [String(s.pubkey).toLowerCase(), String(s.sig)]));
+        round.done = false;
+        round.result = new Promise(resolve => { round.resolve = resolve; });
+        this._foldArchiveRound = round;
+        round.timer = setTimeout(() => this.finishFoldArchiveRound(round, null), waitMs);
+        if(round.timer.unref) round.timer.unref();
+        this.checkFoldArchiveQuorum(round);
+    },
+
+    finishFoldArchiveRound(round, result){
+        if(!round || round.done) return;
+        round.done = true;
+        if(round.timer) clearTimeout(round.timer);
+        round.timer = null;
+        if(this._foldArchiveRound === round) this._foldArchiveRound = null;
+        round.resolve(result);
+    },
+
+    checkFoldArchiveQuorum(round){
+        if(!round || round.done) return;
+        let signatures = Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig }));
+        if(!this.quorumVerified(round.canonical, signatures, round.validators, round.weighted)) return;
+        round.signatures = signatures;
+        this.finishFoldArchiveRound(round, round);
+    },
+
+    acceptFoldArchiveSignature(d){
+        let round = this._foldArchiveRound;
+        if(!round || round.done || !d || !d.archive_sig) return;
+        if(String(d.network) !== String(round.cp.network) ||
+           Number(d.snapshot_block) !== Number(round.cp.snapshot_block)) return;
+        let pubkey = String(d.sig_pubkey || '').toLowerCase();
+        if(!round.validators.some(v => String(v.pubkey).toLowerCase() === pubkey)) return;
+        if(!ValidatorIdentity.verify(round.canonical, String(d.archive_sig), pubkey)) return;
+        round.signatures.set(pubkey, String(d.archive_sig));
+        this.checkFoldArchiveQuorum(round);
     },
 
     async collectFoldArchive(group, network){
@@ -451,16 +583,20 @@ module.exports = {
             if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
 
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-            let archivePromise = foldActive
-                ? this.collectFoldArchive(group, network).catch(e => {
+            let archiveSection = foldActive
+                ? await this.collectFoldArchive(group, network).catch(e => {
                     logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
                                 '; publishing checkpoints without it: ' + (e && e.message));
                     return null;
                 })
-                : Promise.resolve(null);
+                : null;
+            if(archiveSection) this.armFoldArchiveRound(archiveSection);
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
-            if(!attestation) return;
-            let archiveSection = await archivePromise;
+            if(!attestation){
+                if(archiveSection) this.finishFoldArchiveRound(archiveSection, null);
+                return;
+            }
+            if(archiveSection) archiveSection = await archiveSection.result;
             if(foldActive) this.suppressLegacyArchiveLeg();
             let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
                                                snapshotBlock, foldActive, archiveSection);

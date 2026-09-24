@@ -8,7 +8,8 @@
 const { expect } = require('chai');
 const StateAnchorPublisher = require('../../../src/anchor/publisher');
 const ar = require('../../../src/consensus/gates/anchor_reward_gate.js');
-const { CP_ROW, buildMesh, startAll, registerMeshHooks } = require('../../helpers/anchor_mesh.js');
+const { XANC_SIGN_REQ, XANCPUB_SIGN_REQ } = require('../../../src/anchor/publisher/constants.js');
+const { CP_ROW, buildMesh, v0Order, startAll, registerMeshHooks } = require('../../helpers/anchor_mesh.js');
 
 function section(chain, sig){
     return Object.assign({}, CP_ROW, {
@@ -95,6 +96,26 @@ describe('ANCHOR v3 one-round archive fold', function () {
         expect(node.rewards.filter(r => r.type === 'anchor_archive')).to.have.length(0);
     });
 
+    it('co-signs the archive through the bundle attestation request in a multi-node round', async function () {
+        let bus = buildMesh(4, { stakeWeighted: true, checkpointCommitment: true });
+        await startAll(bus);
+        let leader = v0Order(bus)[0];
+        let messages = [];
+        let broadcast = leader.pub.peerManager.broadcast.bind(leader.pub.peerManager);
+        leader.pub.peerManager.broadcast = (type, data) => {
+            messages.push({ type, data });
+            return broadcast(type, data);
+        };
+        await leader.pub.flush();
+        expect(leader.published).to.have.length(1);
+        expect(archiveCount(leader.published[0])).to.equal(1);
+        expect(messages.filter(m => m.type === XANC_SIGN_REQ)).to.have.length(0);
+        let requests = messages.filter(m => m.type === XANCPUB_SIGN_REQ);
+        expect(requests).to.have.length(1);
+        expect(requests[0].data.archive).to.include({ batch_seq: 0, wrapper_section_index: 0 });
+        expect(walkSections(leader.published[0]).sections[0].sigs).to.have.length(3);
+    });
+
     it('ships checkpoints on the archive sub-deadline with ARCHIVE_COUNT 0', async function () {
         let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
         let node = bus.nodes[0];
@@ -115,7 +136,7 @@ describe('ANCHOR v3 one-round archive fold', function () {
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
         pub.indexerCall = async (coin, method) => method === 'getanchoraction'
             ? { exists: true, status: 'valid', version: 91, chain: 'BTC', match_batch_seq: null, txid }
-            : { exists: true, status: 'valid', version: 92, chain: null, match_batch_seq: 7, txid };
+            : { exists: true, status: 'valid', version: 2, chain: null, match_batch_seq: 7, txid };
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
         ], { batchSeq: 7 });

@@ -45,8 +45,7 @@ module.exports = {
     },
 
     isArchiveAnchorRow(row){
-        return !!row && row.match_batch_seq !== null && row.match_batch_seq !== undefined &&
-               Number(row.version) !== 2;
+        return !!row && row.match_batch_seq !== null && row.match_batch_seq !== undefined;
     },
 
     isCheckpointAnchorRow(row){
