@@ -40,4 +40,30 @@ describe('coverage ratchet floors', () => {
   it('fails the job on a shortfall rather than only reporting it', () => {
     assert.match(pkg.scripts['coverage:check'], /--check-coverage/);
   });
+
+  it('measures every source file in both coverage scripts', () => {
+    for (const name of ['coverage', 'coverage:check']) {
+      assert.match(
+        pkg.scripts[name],
+        /(?:^|\s)--all(?:\s|$)/,
+        `${name} omits --all, so files the suite never loads disappear from the denominator`,
+      );
+    }
+  });
+
+  it('excludes only the process entrypoint, identically in both scripts', () => {
+    for (const name of ['coverage', 'coverage:check']) {
+      const excludes = [...pkg.scripts[name].matchAll(/--exclude\s+'([^']+)'/g)]
+        .map((match) => match[1]);
+      assert.deepEqual(
+        excludes,
+        ['src/api.js'],
+        `${name} must exclude only the subprocess entrypoint`,
+      );
+    }
+  });
+
+  it('documents the process-only exclusion with the measured floors', () => {
+    assert.match(declared.comment, /process entrypoint src\/api\.js/);
+  });
 });
