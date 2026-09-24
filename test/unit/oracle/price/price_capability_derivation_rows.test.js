@@ -191,6 +191,27 @@ function registerRowCacheTest() {
 }
 
 function registerUnavailableTests() {
+    it('refuses every height when HUB_NETWORK is unset without reading or writing a snapshot', async function () {
+        const warn = sinon.stub(console, 'warn');
+        hub.network = '';
+
+        const refusal = await agg.persistPriceCapabilitySnapshot(ANCHOR);
+        expect(refusal).to.deep.equal({ status: 'unresolved', rows: 0,
+            detail: 'HUB_NETWORK is unset; capability snapshot derivation refused' });
+
+        const res = await agg.runPriceCapabilityDerivation();
+        expect(res.written).to.equal(0);
+        expect(res.failed).to.equal(GRID);
+        expect(capSnapshot.getSnapshot.called).to.be.false;
+        expect(capSnapshot.getWeightSnapshot.called).to.be.false;
+        expect(db.store.size).to.equal(0);
+        expect(db.queries.filter(query => /INSERT/.test(query.sql))).to.have.length(0);
+        expect(broadcaster.broadcastRow.called).to.be.false;
+        expect(warn.getCalls().some(call => /HUB_NETWORK is unset; capability snapshot derivation refused/
+            .test(call.args.join(' ')))).to.be.true;
+        for (const capability of CAPS)
+            expect(agg._capDerivedBlocks.get(capability).size, capability).to.equal(0);
+    });
     it('writes NOTHING when the Bitcoin view is unreachable, and says so', async function () {
         const err = sinon.stub(console, 'warn');
         capSnapshot.getWeightSnapshot.resolves(null);   // CapabilitySnapshot's degraded sentinel
