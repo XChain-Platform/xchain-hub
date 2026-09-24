@@ -274,6 +274,23 @@ class CrossChainBridgeEngine extends EventEmitter {
         return true;
     }
 
+    // The shared consensus follower gate cannot infer which of this engine's two mirror
+    // tables a proposal belongs to. Require the same exclusive row discriminator as the
+    // canonical builder, then derive the table's measured read set.
+    admissionScope(row){
+        let r = row || {};
+        if(!ah.isAdmissionEra(r.network, r.snapshot_block)) return null;
+        let hasTransfer = !!r.transfer_id;
+        let hasPolicy   = !!r.snapshot_id;
+        if(hasTransfer === hasPolicy)
+            throw new Error('CrossChainBridge: a row must carry exactly one of transfer_id / snapshot_id');
+        let table = hasTransfer ? 'bridge_transfers' : 'policy_snapshots';
+        return {
+            table,
+            readSet: ah.admissionReadSet(table, r, hasPolicy ? ah.ADMIT_COLUMN_CHAINS : undefined)
+        };
+    }
+
     canonicalMatch(r, view){
         let hasTransfer = !!(r && r.transfer_id);
         let hasPolicy   = !!(r && r.snapshot_id);

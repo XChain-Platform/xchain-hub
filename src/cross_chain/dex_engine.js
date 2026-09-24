@@ -236,6 +236,17 @@ class CrossChainDexEngine extends EventEmitter {
         return true;
     }
 
+    // Tell the shared consensus follower gate which mirror table and chains bind this
+    // proposal. A row below activation stays on the legacy effective_time rule.
+    admissionScope(row){
+        let r = row || {};
+        if(!ah.isAdmissionEra(r.network, r.snapshot_block)) return null;
+        return {
+            table: 'cross_chain_matches',
+            readSet: ah.admissionReadSet('cross_chain_matches', r)
+        };
+    }
+
     // Canonical signing string. MUST byte-match the indexer's verifier (the cross-chain
     // settlement pass rebuilds this from the mirrored row). Phase B appends the fill fields
     // after `network` so the Phase-A field order is preserved. a_amount/b_amount carry the
