@@ -1,8 +1,8 @@
-# Pinned to node:22-bookworm, the tag .nvmrc and the sibling service images
-# already declare. `node:latest` floats: a rebuild silently moves the runtime
-# off the declared Node 22, so the image and the repo's pin drift apart with
-# no signal anywhere.
-FROM node:22-bookworm
+# Pinned by digest to the node:22.23.2-bookworm build whose V8/ICU match
+# xchain-vm's consensus runtime pin: the floating node:22-bookworm tag moved
+# to a Node patch that fails that check, so a tag alone can silently drift
+# the image off the runtime the fleet requires.
+FROM node:22.23.2-bookworm@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844
 
 RUN mkdir /XChainHub/
 COPY ./package.json /XChainHub/package.json

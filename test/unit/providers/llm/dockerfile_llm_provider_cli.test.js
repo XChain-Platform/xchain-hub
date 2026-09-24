@@ -51,7 +51,7 @@ describe('Dockerfile: the llm provider CLI is in the image', () => {
     // Coverage floor: if the file stops looking like the hub's Dockerfile at all,
     // every assertion below could pass vacuously against an empty read.
     it('reads a Dockerfile that still builds the hub', () => {
-        expect(dockerfile).to.match(/^FROM node:22-bookworm$/m);
+        expect(dockerfile).to.match(/^FROM node:22\.23\.2-bookworm@sha256:[0-9a-f]{64}$/m);
         expect(dockerfile).to.include('/XChainHub/src');
     });
 
