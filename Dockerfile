@@ -24,6 +24,11 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.266
 
 COPY ./src /XChainHub/src
 COPY ./docs /XChainHub/docs
+# The consensus-identity pin assets: src/api/rpc/system.js reads
+# bin/lib/carrier_logic_pin.js and bin/pins/carrier-logic.json at startup to
+# publish carrier_logic_digest in /health, and neither lived in the image
+# before this COPY (only ./src and ./docs did).
+COPY ./bin /XChainHub/bin
 # No .env is baked in: configuration reaches the container as environment
 # (xchain-node at `docker run`, a standalone run via `--env-file .env`). An
 # optional `COPY ./.en[v]` glob here builds only under BuildKit (issue 23).
