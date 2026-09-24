@@ -115,6 +115,27 @@ const CALL_KEYS = ['id', 'call_id', 'phase', 'snapshot_block', 'network',
     'gas_limit', 'cross_hops', 'effective_time', 'finalizing_view', 'result_status',
     'return_payload_b64', 'validator_signatures', 'status'];
 
+// Fixed serialization order for an archived bridge transfer row and an archived policy
+// snapshot row; same crc32/byte-comparison rules as MATCH_KEYS. `id` is per-hub
+// provenance, and the push generation, chain id and created_at columns stay out.
+const BRIDGE_KEYS = ['id', 'transfer_id', 'snapshot_block', 'network',
+    'src_chain', 'src_action_index', 'src_address', 'dest_chain', 'dest_address',
+    'tick', 'decimals', 'amount', 'effective_time',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+    'finalizing_view', 'validator_signatures', 'status'];
+
+const POLICY_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
+    'origin_chain', 'tick', 'policy_seq', 'origin_block', 'policy_hash',
+    'allow_list', 'block_list', 'sleeping', 'effective_time',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+    'finalizing_view', 'validator_signatures', 'status'];
+
+// One policy list can reach 10000 members, so a round carries at most this many policy
+// rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
+// decompress cap every verifier enforces.
+const ARCHIVE_MAX_POLICY_ROWS = 8;
+const ARCHIVE_MAX_JSON_BYTES = 8 * 1024 * 1024;
+
 module.exports = {
     ANCHOR_FLAG_DAY_REWARD_TYPES,
     ARCHIVE_FLAG_DAY_REWARD_TYPE,
@@ -134,5 +155,9 @@ module.exports = {
     DEFAULT_ANCHOR_MARKER_RETENTION_MS,
     ANCHOR_MARKER_RETENTION_TTL_SAFETY,
     MATCH_KEYS,
-    CALL_KEYS
+    CALL_KEYS,
+    BRIDGE_KEYS,
+    POLICY_KEYS,
+    ARCHIVE_MAX_POLICY_ROWS,
+    ARCHIVE_MAX_JSON_BYTES
 };
