@@ -266,12 +266,21 @@ module.exports = {
     // append-only and never retracted, so it carries no archived_status: a stamped
     // row is pending again only by a NEW row at a higher policy_seq, never by a
     // status change on the same row.
+    // Also adds the columns to state_checkpoints and price_snapshots.
+    // state_checkpoints is append-only, so batch_seq alone marks a published row;
+    // price_snapshots is mutated in place, so it also records the status,
+    // batch_block_time and proof digest the archive carried.
     async migrateArchiveBookkeepingColumns(){
         await this.migrateAddNullableColumn('bridge_transfers', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
         await this.migrateAddNullableColumn('bridge_transfers', 'archived_status', 'VARCHAR(20) DEFAULT NULL');
         await this.migrateAddNullableColumn('bridge_transfers', 'anchor_txid', 'VARCHAR(64) DEFAULT NULL');
         await this.migrateAddNullableColumn('policy_snapshots', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
         await this.migrateAddNullableColumn('policy_snapshots', 'anchor_txid', 'VARCHAR(64) DEFAULT NULL');
+        await this.migrateAddNullableColumn('state_checkpoints', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('price_snapshots', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('price_snapshots', 'archived_status', 'VARCHAR(20) DEFAULT NULL');
+        await this.migrateAddNullableColumn('price_snapshots', 'archived_batch_block_time', 'BIGINT DEFAULT NULL');
+        await this.migrateAddNullableColumn('price_snapshots', 'archived_proof_sha', 'CHAR(64) DEFAULT NULL');
     },
 
 

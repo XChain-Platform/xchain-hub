@@ -75,6 +75,7 @@ const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
 const policySnapshotsMixin     = require('./policy_snapshots.js');
 const pricesMixin              = require('./prices/index.js');
+const priceArchiveMixin        = require('./prices/archive_bookkeeping.js');
 const reorgAttestationsMixin   = require('./reorg_attestations.js');
 const slashProposalsMixin      = require('./slash_proposals.js');
 const stateCheckpointsMixin    = require('./state_checkpoints.js');
@@ -118,6 +119,7 @@ const MIXINS = [
     p2pPeersMixin,
     policySnapshotsMixin,
     pricesMixin,
+    priceArchiveMixin,
     reorgAttestationsMixin,
     slashProposalsMixin,
     stateCheckpointsMixin,

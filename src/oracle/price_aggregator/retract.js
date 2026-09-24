@@ -77,7 +77,8 @@ async function persistIngestFence(sourceChain, bounds) {
 // action-index column, so each named method owns its own column: price_snapshots
 // tracks the PRICE v0 round action via source_action_index, oracle_prices the
 // PRICE v1 action via action_index.
-function snapshotRetractionDelete(sourceChain, b) {
+async function snapshotRetractionDelete(sourceChain, b) {
+    await this.db.insertPriceTombstonesForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
     return this.db.deletePriceSnapshotsForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
 }
 

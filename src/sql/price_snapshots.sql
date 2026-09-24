@@ -22,6 +22,15 @@ CREATE TABLE price_snapshots (
     admit_block_ltc     BIGINT UNSIGNED DEFAULT NULL,
     admit_block_doge    BIGINT UNSIGNED DEFAULT NULL,
     batch_block_time    BIGINT NOT NULL DEFAULT 0,             -- clock of the block the PRICE batch carrying this round LANDED in; 0 = no landed batch seen yet (a round this hub finalized over P2P, ahead of its batch). Stamped by PriceAggregator batch ingest for every round a landed batch carries, stored or deduped, and mirrored to every indexer that follows this hub.
+    -- ANCHOR v1 archive bookkeeping, hub-side only. The table is mutated in place (a skipped
+    -- row upgrades, a v0 row takes a batch proof, batch_block_time is stamped late, a
+    -- finalized row flips to disputed), so a stamped row is pending again whenever its
+    -- status, batch_block_time or SHA2(consensus_proof, 256) no longer equals what the
+    -- archive carried.
+    batch_seq                 BIGINT UNSIGNED DEFAULT NULL,
+    archived_status           VARCHAR(20) DEFAULT NULL,
+    archived_batch_block_time BIGINT DEFAULT NULL,
+    archived_proof_sha        CHAR(64) DEFAULT NULL,
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_round_pair (round_number, coin_pair),
     KEY idx_pair_block (coin_pair, reference_block),

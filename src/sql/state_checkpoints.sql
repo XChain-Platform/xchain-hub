@@ -16,6 +16,7 @@ CREATE TABLE state_checkpoints (
     block_merkle_version TINYINT UNSIGNED,                         -- merkle.js BLOCK_MERKLE_VERSION; NULL pre-flag-day
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}], 2f+1 over the XCHECKPOINT canonical (incl. the roots post-flag-day)
     anchor_txid          VARCHAR(64),                              -- DOGE ANCHOR txid once published on-chain (hub-side audit only)
+    batch_seq            BIGINT UNSIGNED,                          -- ANCHOR v1 archive batch this checkpoint was published in; hub-side only, NULL = still owed to an archive
     created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;

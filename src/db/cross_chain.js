@@ -171,10 +171,11 @@ module.exports = {
     // Reads one row from cross_chain_matches.
     // Moved here from src/anchor/publisher.js:4808. Spans every table the ANCHOR
     // archive draws batch_seq from, so a batch never reissues a seq a table still
-    // holds pending: cross_chain_matches, cross_chain_calls and validator_rewards,
-    // plus bridge_transfers and policy_snapshots.
+    // holds pending: cross_chain_matches, cross_chain_calls, validator_rewards,
+    // bridge_transfers, policy_snapshots, state_checkpoints, price_snapshots and
+    // archive_price_tombstones.
     async getNextAnchorBatchSeq() {
-        return this.doQuery('SELECT COALESCE(GREATEST(  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1),   COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1),   COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1),   COALESCE((SELECT MAX(batch_seq) FROM bridge_transfers), -1),   COALESCE((SELECT MAX(batch_seq) FROM policy_snapshots), -1)), -1) + 1 AS next_seq');
+        return this.doQuery('SELECT COALESCE(GREATEST(  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1),   COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1),   COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1),   COALESCE((SELECT MAX(batch_seq) FROM bridge_transfers), -1),   COALESCE((SELECT MAX(batch_seq) FROM policy_snapshots), -1),   COALESCE((SELECT MAX(batch_seq) FROM state_checkpoints), -1),   COALESCE((SELECT MAX(batch_seq) FROM price_snapshots), -1),   COALESCE((SELECT MAX(batch_seq) FROM archive_price_tombstones), -1)), -1) + 1 AS next_seq');
     },
 
     // Probes for a matching row in cross_chain_calls.
