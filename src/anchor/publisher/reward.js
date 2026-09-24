@@ -210,7 +210,7 @@ module.exports = {
         if(!chain || !publisher || !sender) return null;
         if(!/^[0-9a-f]{64}$/.test(txid)) return null;
         if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return null;
-        if(![0, 1].includes(version)) return null;                                // only the attestation-bearing ANCHOR versions carry a reward
+        if(![0, 1, 3].includes(version)) return null;                             // only the attestation-bearing ANCHOR versions carry a reward
         if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return null;
         // BIND the two: v1 is the archive leg, v0 the checkpoint-bundle leg, which is the
         // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
@@ -223,6 +223,7 @@ module.exports = {
         // never retracted, and the derive path rejects it forever: consensus-table
         // pollution and a permanently stranded credit. Reject at ingress instead.
         if((rewardType === 'anchor_archive') !== (version === 1)) return null;
+        if(rewardType === 'anchor_bundle' && version !== 0 && version !== 3) return null;
         if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return null;
         if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return null;   // our own broadcast echoing back
             return { network, snapshotBlock, rewardType, chain, publisher, txid, sender, roundRef, version, blockIndex, cpSeq };

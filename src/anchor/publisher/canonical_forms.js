@@ -25,8 +25,44 @@
 
 const crypto = require('crypto');
 const { MATCH_KEYS, CALL_KEYS } = require('./constants.js');
+const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
+const eq = require('../../consensus/equivocation_header.js');
+
+const ANCHOR_FOLD_ACTIVATION = {
+    mainnet: null,
+    testnet: null,
+    regtest: null
+};
 
 module.exports = {
+
+    ANCHOR_FOLD_ACTIVATION,
+
+    isAnchorFoldActive(blockIndex, network){
+        let threshold = ANCHOR_FOLD_ACTIVATION[String(network || '')];
+        return threshold !== null && threshold !== undefined &&
+               Number.isFinite(Number(blockIndex)) && Number(blockIndex) >= Number(threshold);
+    },
+
+    isArchiveAnchorRow(row){
+        return !!row && row.match_batch_seq !== null && row.match_batch_seq !== undefined &&
+               Number(row.version) !== 2;
+    },
+
+    isCheckpointAnchorRow(row){
+        return !!row && row.chain !== null && row.chain !== undefined && String(row.chain) !== '';
+    },
+
+    foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
+        let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
+                  checkpointForms.checkpointRootSuffix(checkpoint) + '|' +
+                  [String(batchSeq), String(count), String(crc).toLowerCase(), String(totalChunks)].join('|');
+        if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +
+                checkpoint.checkpoint_seq + '|' + batchSeq, 0, raw);
+        return raw;
+    },
 
     // Deterministic publisher ordering (AttestationRound's responsible-set
     // idiom): sort the eligible set by SHA256(key ‖ pubkey) ascending. Every

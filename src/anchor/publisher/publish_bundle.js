@@ -24,6 +24,8 @@
 
 const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
+const { resolveQuorumNetwork } = require('../quorum_network.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -80,7 +82,7 @@ module.exports = {
         return false;
     },
 
-    async bundleHeldByIntent(group, chains, network, snapshotBlock){
+    async bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive){
         // The durable at-most-once marker, consulted BEFORE building a fresh PSBT and
         // before the attestation round solicits a peer quorum. The existence check
         // reads mined state only, so it cannot see a send this hub made and then
@@ -94,7 +96,9 @@ module.exports = {
         }
         if(held){
             let mined = null;
-            try { mined = await this.findExistingBundle(group); }
+            try { mined = foldActive
+                ? await this.findExistingFoldedBundle(group, null)
+                : await this.findExistingBundle(group); }
             catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
             if(!(mined && mined.exists)){
                 logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
@@ -151,9 +155,86 @@ module.exports = {
         return { attested: attested, attestSigs: attestSigs };
     },
 
-    // The v0 payload this bundle will sign and send, or null when it does not fit.
-    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock){
-        let payload = this.buildV7Payload(group, me, attestSigs);
+    async buildFoldArchiveSection(group, network){
+        if(!this.db || typeof this.db.findCrossChainMatchesByBatchSeq !== 'function' ||
+           typeof this.db.findCrossChainCallsByBatchSeq !== 'function') return null;
+        let matches = await this.db.findCrossChainMatchesByBatchSeq(this.maxBatch);
+        let calls = await this.db.findCrossChainCallsByBatchSeq(this.maxBatch);
+        let rewards = [];
+        if(typeof this.pendingArchiveRewards === 'function')
+            rewards = this.dropChainDerivedRewards(await this.pendingArchiveRewards());
+        let rows = this.archiveRows(matches, calls, rewards);
+        if(!rows) return null;
+        matches = rows.matches;
+        calls = rows.calls;
+        rewards = rows.rewards;
+
+        let ordered = this.orderedBundleSections(group);
+        let wrapperSectionIndex = ordered.findIndex(s => String(s.chain) === 'BTC');
+        if(wrapperSectionIndex < 0) wrapperSectionIndex = 0;
+        if(!ordered[wrapperSectionIndex]) return null;
+        let wrapper = ordered[wrapperSectionIndex];
+        let cp = this.cpFromRow(wrapper);
+        let batchSeq = await this.getNextBatchSeq();
+        let rewardRows = await this.resolveArchiveRewardSources(rewards);
+        if(this.archiveEmptyAfterResolution(matches, calls, rewardRows)) return null;
+        let archive = await this.buildArchive(network, batchSeq, matches, cp.snapshot_block, calls, rewardRows);
+        let wire = this.archiveWire(archive.json);
+        let canonical = canonicalForms.foldArchiveCanonical(wrapper, batchSeq, archive.count,
+                                                            wire.crc, wire.chunks.length);
+        let signingSet = await this.archiveSigningSet(cp);
+        if(!signingSet || this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return null;
+        let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        let signatures = [];
+        if(me && signingSet.some(v => String(v.pubkey).toLowerCase() === me))
+            signatures.push({ pubkey: me, sig: this.identity.sign(canonical) });
+        let round = {
+            cp, batchSeq, count: archive.count, crc: wire.crc, chunks: wire.chunks,
+            wrapperSectionIndex, signatures, canonical,
+            validators: signingSet,
+            weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
+                                                       resolveQuorumNetwork(cp, this.network)),
+            matchIds: matches.map(m => ({ match_id: m.match_id, status: m.status })),
+            callIds: calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
+            rewardIds: rewardRows.map(({row}) => ({
+                reward_type: String(row.reward_type), round_number: Number(row.round_number),
+                validator_pubkey: String(row.validator_pubkey).toLowerCase(),
+                round_qualifier: Number(row.round_qualifier || 0)
+            }))
+        };
+        if(this.quorumVerified(canonical, signatures, signingSet, round.weighted)) return round;
+        if(typeof this.requestFoldArchiveSignatures !== 'function') return null;
+        let gathered = await this.requestFoldArchiveSignatures(round);
+        round.signatures = Array.isArray(gathered) ? gathered : [];
+        return this.quorumVerified(canonical, round.signatures, signingSet, round.weighted) ? round : null;
+    },
+
+    async collectFoldArchive(group, network){
+        let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
+                                         Number(this.roundTimeoutMs) || 30000));
+        let timer;
+        let timeout = new Promise(resolve => {
+            timer = setTimeout(() => resolve(null), waitMs);
+            if(timer.unref) timer.unref();
+        });
+        try {
+            return await Promise.race([this.buildFoldArchiveSection(group, network), timeout]);
+        } finally {
+            if(timer) clearTimeout(timer);
+        }
+    },
+
+    suppressLegacyArchiveLeg(){
+        if(this._archiveRound || this._archivePublishing) return;
+        this._archivePublishing = { folded: true };
+    },
+
+    // The bundle payload this publisher will sign and send, or null when it does not fit.
+    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock, foldActive, archiveSection){
+        let payload = foldActive
+            ? this.buildV3Payload({ network: network, snapshot_block: snapshotBlock }, group,
+                                  archiveSection, me, attestSigs)
+            : this.buildV7Payload(group, me, attestSigs);
         // Last byte-budget gate, on the payload that will actually be signed and sent.
         // splitBundle sizes an ESTIMATED tail before the attestation round runs, and
         // after a split it estimates at the caller's network-wide oracle_publish set
@@ -165,7 +246,7 @@ module.exports = {
         let payloadBytes = Buffer.byteLength(payload, 'utf8');
         if(payloadBytes > ANCHOR_BUNDLE_MAX_BYTES){
             this._bundlesOversize++;
-            logger.error('StateAnchorPublisher: v0 bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+            logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') + ' bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
                           ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
                           ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
                           'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
@@ -175,16 +256,21 @@ module.exports = {
     },
 
     // One broadcast of a built bundle, through the retry ladder and its existence check.
-    async sendBundle(signer, group, payload){
+    async sendBundle(signer, group, payload, archiveSection){
         let broadcaster = signer && signer.broadcastFn
             ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer));
         for(let s of group) await this.recordAnchorIntent(s);
+        if(archiveSection) await this.recordArchiveIntent(String(group[0].network), archiveSection.batchSeq);
         // The existence check makes a lost ACK (this flush OR a previous one) adopt
         // the already-mined bundle instead of paying for a second one.
         let result;
         try {
             result = await this.broadcastWithRetry(broadcaster, payload, undefined,
-                () => this.findExistingBundle(group));
+                () => archiveSection
+                    ? this.findExistingFoldedBundle(group, archiveSection)
+                    : (String(payload).split('|')[1] === '3'
+                        ? this.findExistingFoldedBundle(group, null)
+                        : this.findExistingBundle(group)));
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
@@ -192,9 +278,57 @@ module.exports = {
             // send that never happened. An AMBIGUOUS send keeps its intents: that
             // case is exactly what the markers are for.
             if(!(e && e.anchorAmbiguousSend)) for(let s of group) await this.withdrawAnchorIntent(s);
+            if(archiveSection && !(e && e.anchorAmbiguousSend))
+                await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
             throw e;
         }
         return result;
+    },
+
+    async findExistingFoldedBundle(sections, archiveSection){
+        let ix = this.indexers && this.indexers.DOGE;
+        if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
+        let txid = null;
+        let accept = (row, predicate) => {
+            if(!row || row.error) throw new Error('anchor lookup failed: ' + (row && row.error));
+            if(!row.exists || /^invalid/i.test(String(row.status || ''))) return null;
+            if(!predicate(row)) throw new Error('anchor lookup omitted required row attributes');
+            return row.txid ? String(row.txid).toLowerCase() : null;
+        };
+        for(let section of (sections || [])){
+            let row = await this.indexerCall('DOGE', 'getanchoraction', {
+                chain: String(section.chain), network: String(section.network),
+                block_index: Number(section.block_index), checkpoint_seq: Number(section.checkpoint_seq)
+            });
+            let found = accept(row, canonicalForms.isCheckpointAnchorRow);
+            if(found === null) return null;
+            if(txid === null) txid = found;
+            else if(txid !== found) return null;
+        }
+        if(archiveSection){
+            let row = await this.indexerCall('DOGE', 'getarchiveanchor', {
+                match_batch_seq: Number(archiveSection.batchSeq),
+                author: String(this.dogeAddress || '')
+            });
+            let found = accept(row, canonicalForms.isArchiveAnchorRow);
+            if(found === null) return null;
+            if(txid === null) txid = found;
+            else if(txid !== found) return null;
+        }
+        return txid ? { exists: true, txid: txid } : null;
+    },
+
+    async completeFoldArchive(archiveSection, signer, txid){
+        if(!archiveSection) return;
+        await this.markArchiveSent(String(archiveSection.cp.network), archiveSection.batchSeq, txid);
+        let broadcaster = signer && signer.broadcastFn
+            ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer, { allowUnconfirmed: true }));
+        let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
+                                                           broadcaster, archiveSection.cp);
+        let ids = this.archiveBackfillIds(archiveSection, lostChunks, true, false);
+        await this.backfillBatch(archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds);
+        await this.settleArchiveIntent(String(archiveSection.cp.network), archiveSection.batchSeq);
+        this.announceArchiveFinalized(archiveSection, txid, ids);
     },
 
     async stampBundleSections(group, txid, anchored){
@@ -242,7 +376,7 @@ module.exports = {
                         : ''));
     },
 
-    recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid){
+    recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid, anchorVersion){
         // At/above the anchor-reward flag-day the reward is DERIVED on-chain from the
         // v0 publisher attestation (the hub push is retired), and the indexer credits
         // NOTHING for a bundle whose tail carries no attestation. Recording the reward
@@ -266,7 +400,7 @@ module.exports = {
                     // (D21), resolved in recordRewardAttestation from the reward type.
                     chain: String(group[0].chain), network: network,
                     blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
-                    txid: txid, anchorVersion: 0,
+                    txid: txid, anchorVersion: Number(anchorVersion) || 0,
                     rewardType: 'anchor_bundle', roundReference: snapshotBlock,
                     snapshotBlock: snapshotBlock,
                     publisher: String(me).toLowerCase(), attestSigs: attestSigs,
@@ -301,10 +435,11 @@ module.exports = {
     // budget can hand it several bundles for one network in one flush, each electing
     // independently. Never throws past a mid-flush deferral; every other failure is
     // logged and leaves the sections pending for the next flush.
-    async publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped){
+    async publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped, fold){
         let chains = group.map(s => String(s.chain)).join(',');
         try {
             let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+            let foldActive = !!(fold && fold.active);
             let order = await this.bundlePublisherOrder(network, snapshotBlock, chains);
             if(!order) return;
             // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
@@ -313,15 +448,31 @@ module.exports = {
             // the ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             if(this.standsDownFromBundle(order, group, since, failoverOnly, skipped)) return;
-            if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock)) return;
+            if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
 
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+            let archivePromise = foldActive
+                ? this.collectFoldArchive(group, network).catch(e => {
+                    logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
+                                '; publishing checkpoints without it: ' + (e && e.message));
+                    return null;
+                })
+                : Promise.resolve(null);
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
             if(!attestation) return;
-            let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network, snapshotBlock);
+            let archiveSection = await archivePromise;
+            if(foldActive) this.suppressLegacyArchiveLeg();
+            let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
+                                               snapshotBlock, foldActive, archiveSection);
+            if(payload === null && archiveSection){
+                this._bundlesOversize--;
+                archiveSection = null;
+                payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
+                                               snapshotBlock, foldActive, null);
+            }
             if(payload === null) return;
 
-            let result = await this.sendBundle(signer, group, payload);
+            let result = await this.sendBundle(signer, group, payload, archiveSection);
             let txid = result && result.txid ? result.txid : null;
             if(txid && !(result && result.exists))
                 this.notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
@@ -335,20 +486,23 @@ module.exports = {
                 // announcement anyway (handleBundleDone early-returns on !d.txid).
                 // The intents are NOT withdrawn: an empty return from broadcast_tx is not
                 // proof nothing was sent, so the markers hold the sections for the TTL.
-                logger.error('StateAnchorPublisher: v0 bundle broadcast returned no txid for ' + chains + '/' +
+                logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') +
+                              ' bundle broadcast returned no txid for ' + chains + '/' +
                               network + ' @ ' + snapshotBlock + '; treating as failed publish (rows stay pending)');
                 return;
             }
             await this.stampBundleSections(group, txid, anchored);
+            await this.completeFoldArchive(archiveSection, signer, txid);
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
-            this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result, network, snapshotBlock, txid);
+            this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
+                                    network, snapshotBlock, txid, foldActive ? 3 : 0);
             this.announceBundleDone(group, network, snapshotBlock, txid);
         } catch(e){
             // A mid-flush deferral: an earlier anchor in this same pass spent the last
             // confirmed output. Not a failure of anything; the sections stay pending and
             // the next wake retries them as a normal flush.
             if(e && e.anchorNoConfirmedUtxo) this.noteNoConfirmedUtxo('the ' + network + ' bundle');
-            else logger.error('StateAnchorPublisher: v0 bundle publish failed for ' + network + ': ' + (e && e.message));
+            else logger.error('StateAnchorPublisher: bundle publish failed for ' + network + ': ' + (e && e.message));
         }
     }
 
