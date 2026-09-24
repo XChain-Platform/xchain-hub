@@ -71,7 +71,9 @@ describe('archive bridge and policy build', () => {
         expect(Object.keys(o.policy_snapshots[0])).to.deep.equal(POLICY_KEYS);
         expect(r.count).to.equal(1);
     });
+});
 
+describe('archive bridge and policy build: rows and serialization', () => {
     it('a bridge or policy row adds the cross_chain group at its own snapshot_block', async () => {
         let { inputs } = vectors.B;
         let sets = { ...inputs.capability_sets, 'cross_chain@80': [{ pubkey: 'ee'.repeat(32), amount: '4', source: '' }] };
