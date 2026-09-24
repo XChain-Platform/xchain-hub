@@ -34,6 +34,8 @@ function walkJs(dir, out) {
 }
 
 describe('CONFIGURATION.md env-var coverage', function () {
+    // Reads every src/ file synchronously; late in a full run on a loaded host that outlasts the 5 s default.
+    this.timeout(30000);
 
     it('documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/', function () {
         const doc = fs.readFileSync(DOC, 'utf8');
