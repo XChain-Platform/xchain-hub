@@ -75,5 +75,23 @@ module.exports = {
     // or bridge_transfers through one statement built from the table name.
     async getPolicySnapshotBySnapshotId(snapshotId) {
         return this.doQuery('SELECT * FROM policy_snapshots WHERE snapshot_id = ? LIMIT 1', [snapshotId]);
+    },
+
+    // Rows the ANCHOR archive still owes a batch to. Append-only, so there is no
+    // archived_status to re-check: a snapshot the archive already covered never
+    // changes, and a superseding policy arrives as a NEW row at a higher policy_seq.
+    async findPolicySnapshotsByBatchSeq(limit) {
+        return this.doQuery(
+            'SELECT * FROM policy_snapshots WHERE batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?', [limit]);
+    },
+
+    // Stamps the ANCHOR archive batch a snapshot was published in. Guarded on
+    // batch_seq IS NULL, since the append-only table gives an archived row nothing to
+    // re-check a later mutation against.
+    async updatePolicySnapshotArchiveBatchSeq(batchSeq, txid, snapshotId) {
+        return this.doQuery(
+            'UPDATE policy_snapshots SET batch_seq = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
+            'WHERE snapshot_id = ? AND batch_seq IS NULL',
+            [batchSeq, txid, snapshotId]);
     }
 };

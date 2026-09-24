@@ -165,6 +165,10 @@ module.exports = {
         // xchain-hub/migrations/ are applied by hand, so a migration copied from the
         // indexer's style would sit there and never run on a single deployed hub.
         await this.migrateAdmissionColumns();
+        // The bridge_transfers/policy_snapshots ANCHOR archive bookkeeping columns
+        // (batch_seq/archived_status/anchor_txid), the same shape cross_chain_matches
+        // and cross_chain_calls already carry.
+        await this.migrateArchiveBookkeepingColumns();
         // oracle_prices.tick to the 250 the PRICE v1 ingest gate admits, gated on the mirrors
         // having widened first (see migrateOracleTickWidth for the order and the flag).
         await this.migrateOracleTickWidth();

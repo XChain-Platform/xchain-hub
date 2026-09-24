@@ -41,6 +41,8 @@ CREATE TABLE policy_snapshots (
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the canonical was signed under
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] over the EQUIV-wrapped XPOLICY canonical
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted
+    anchor_txid          VARCHAR(64),                              -- DOGE anchor txid (ANCHOR v1 archive back-fill), as cross_chain_matches
+    batch_seq            BIGINT UNSIGNED,                          -- ANCHOR v1 archive batch this snapshot was published in; hub-side only. No archived_status: the table is append-only and never retracted, so a stamped row is pending again only by a NEW row at a higher policy_seq
     push_generation      BIGINT       NOT NULL DEFAULT 0,          -- origin-chain reorg fence, as bridge_transfers
     btc_chain_id         CHAR(64)     NULL,                        -- hash of BTC block 1 on the writing hub's chain; transport, not signed
     created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,

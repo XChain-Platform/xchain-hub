@@ -260,6 +260,21 @@ module.exports = {
     },
 
 
+    // Add the hub-side ANCHOR archive bookkeeping columns to bridge_transfers and
+    // policy_snapshots, the same columns cross_chain_matches and cross_chain_calls
+    // already carry (batch_seq/archived_status/anchor_txid). policy_snapshots is
+    // append-only and never retracted, so it carries no archived_status: a stamped
+    // row is pending again only by a NEW row at a higher policy_seq, never by a
+    // status change on the same row.
+    async migrateArchiveBookkeepingColumns(){
+        await this.migrateAddNullableColumn('bridge_transfers', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('bridge_transfers', 'archived_status', 'VARCHAR(20) DEFAULT NULL');
+        await this.migrateAddNullableColumn('bridge_transfers', 'anchor_txid', 'VARCHAR(64) DEFAULT NULL');
+        await this.migrateAddNullableColumn('policy_snapshots', 'batch_seq', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('policy_snapshots', 'anchor_txid', 'VARCHAR(64) DEFAULT NULL');
+    },
+
+
     // Widen an ENUM column in place to the target value set. Idempotent: skips
     // when the live COLUMN_TYPE already contains every target value, so it is a
     // no-op on fresh installs (which get the full set from the CREATE TABLE) and

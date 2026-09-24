@@ -234,10 +234,13 @@ function mountBridgeSnapshots(app, ctx, helpers) {
     const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
     // GET /hub-db/snapshot/bridge_transfers: bootstrap snapshot of the signed transfer
     // records (the base bridge spec section 6). SELECT * deliberately, as the
-    // cross_chain_matches sibling does: every column on this table is mirror-consumed
-    // (finalizing_view rebuilds the EQUIV header VIEW, push_generation fences reorg
-    // retractions, btc_chain_id arms the mirror's chain-identity filter, tick and decimals
-    // are signed content), so an explicit list could only ever drop one of them silently.
+    // cross_chain_matches sibling does: finalizing_view rebuilds the EQUIV header VIEW,
+    // push_generation fences reorg retractions, btc_chain_id arms the mirror's
+    // chain-identity filter, and tick and decimals are signed content, so an explicit
+    // list could only ever drop one of them silently. batch_seq/archived_status/
+    // anchor_txid are hub-side-only ANCHOR archive bookkeeping, the same columns
+    // cross_chain_matches and cross_chain_calls carry; SELECT * carries them along too,
+    // harmlessly, since the indexer's mirror apply drops any column it does not know.
     //
     // Retracted rows are excluded for the reason the two siblings above give: the streaming
     // path DELETEs them on reorg, so a bootstrapping mirror must skip them or it diverges

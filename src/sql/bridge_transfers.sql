@@ -36,6 +36,9 @@ CREATE TABLE bridge_transfers (
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the canonical was signed under; the indexer rebuilds the exact EQUIV header VIEW from it
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] over the EQUIV-wrapped canonical; stake-weighted two-thirds or 2f+1 per the CROSS_SETTLE rule
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted
+    anchor_txid          VARCHAR(64),                              -- DOGE anchor txid (ANCHOR v1 archive back-fill), as cross_chain_matches
+    batch_seq            BIGINT UNSIGNED,                          -- ANCHOR v1 archive batch this transfer (at archived_status) was published in; hub-side only
+    archived_status      VARCHAR(20),                              -- status at last archive publish; a later retraction re-archives the transfer
     push_generation      BIGINT       NOT NULL DEFAULT 0,          -- source-chain reorg fence stamped from src_chain's indexer generation; an unfenced quorum-class retraction is refused outright
     btc_chain_id         CHAR(64)     NULL,                        -- hash of BTC block 1 on the writing hub's chain; NULL accepted by every mirror. Transport, not signed: `network` guards across environments, this guards across a re-genesis of the same environment
     created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
