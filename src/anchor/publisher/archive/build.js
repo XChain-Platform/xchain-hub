@@ -167,11 +167,14 @@ module.exports = {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes; archived
     // sets are a convenience, the chain remains the root of trust.
-    async buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards){
+    async buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards, quorumRows){
         calls   = calls   || [];
         rewards = rewards || [];
+        let bridges  = this.sortedArchiveRows((quorumRows || {}).bridges, 'transfer_id');
+        let policies = this.sortedArchiveRows((quorumRows || {}).policies, 'snapshot_id');
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
             .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
+            .concat(bridges.concat(policies).map(r => ({ block: Number(r.snapshot_block), capability: 'cross_chain' })))
             // oracle_publish set at each reward's earn block; verifiers (and
             // recovery) check the rewarded pubkey was an eligible publisher.
             .concat(rewards.map(({row}) => ({ block: Number(row.block_index), capability: 'oracle_publish' })));
@@ -203,9 +206,13 @@ module.exports = {
             batch_seq: batchSeq,
             matches: matches.map(m => canonicalForms.serializeMatch(m)),
             calls: calls.map(c => canonicalForms.serializeCall(c)),
-            rewards: rewards.map(({row, source}) => canonicalForms.serializeReward(row, source)),
-            capability_snapshots: snaps
+            rewards: rewards.map(({row, source}) => canonicalForms.serializeReward(row, source))
         };
+        // Emitted only when non-empty, so an archive without them stays byte-identical to
+        // one built before these tables were carried.
+        if(bridges.length) obj.bridge_transfers = bridges.map(r => this.serializeBridgeTransfer(r));
+        if(policies.length) obj.policy_snapshots = policies.map(r => this.serializePolicySnapshot(r));
+        obj.capability_snapshots = snaps;
         return { json: JSON.stringify(obj), count: matches.length };
     },
 

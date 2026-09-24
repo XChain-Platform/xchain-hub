@@ -1,0 +1,273 @@
+{
+  "L": {
+    "inputs": {
+      "network": "regtest",
+      "batch_seq": 7,
+      "wrapper_snapshot_block": 100,
+      "matches": [
+        {
+          "id": 1,
+          "match_id": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "a_chain": "BTC",
+          "a_action_index": 1,
+          "a_kind": "swap",
+          "a_tick": "AAA",
+          "a_amount": "1",
+          "a_filled_before": "0",
+          "a_ownership": 0,
+          "a_payout_addr": "addrA",
+          "b_chain": "DOGE",
+          "b_action_index": 2,
+          "b_kind": "swap",
+          "b_tick": "BBB",
+          "b_amount": "2",
+          "b_filled_before": "0",
+          "b_ownership": 0,
+          "b_payout_addr": "addrB",
+          "effective_time": 10,
+          "finalizing_view": 0,
+          "validator_signatures": "[]",
+          "status": "settled"
+        }
+      ],
+      "calls": [
+        {
+          "id": 3,
+          "call_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "phase": "dispatch",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "source_chain": "BTC",
+          "source_action_index": 4,
+          "source_contract_index": 0,
+          "target_chain": "DOGE",
+          "target_contract_index": 1,
+          "method": "ping",
+          "params_json": "[]",
+          "gas_limit": 1000,
+          "cross_hops": 0,
+          "effective_time": 11,
+          "finalizing_view": 0,
+          "result_status": null,
+          "return_payload_b64": null,
+          "validator_signatures": "[]",
+          "status": "settled"
+        }
+      ],
+      "rewards": [
+        {
+          "row": {
+            "validator_pubkey": "abababababababababababababababababababababababababababababababab",
+            "round_number": 5,
+            "reward_type": "anchor_archive",
+            "amount": "10.00000000",
+            "block_index": 90
+          },
+          "source": "src_abababababab"
+        }
+      ],
+      "capability_sets": {
+        "cross_chain@100": [
+          {
+            "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "amount": "1",
+            "source": ""
+          },
+          {
+            "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "amount": "2",
+            "source": ""
+          }
+        ],
+        "oracle_publish@100": [
+          {
+            "pubkey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "amount": "1",
+            "source": ""
+          }
+        ],
+        "oracle_publish@90": [
+          {
+            "pubkey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "amount": "3",
+            "source": ""
+          }
+        ]
+      }
+    },
+    "json": "{\"v\":1,\"network\":\"regtest\",\"batch_seq\":7,\"matches\":[{\"id\":1,\"match_id\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"snapshot_block\":100,\"network\":\"regtest\",\"a_chain\":\"BTC\",\"a_action_index\":1,\"a_kind\":\"swap\",\"a_tick\":\"AAA\",\"a_amount\":\"1\",\"a_filled_before\":\"0\",\"a_ownership\":0,\"a_payout_addr\":\"addrA\",\"b_chain\":\"DOGE\",\"b_action_index\":2,\"b_kind\":\"swap\",\"b_tick\":\"BBB\",\"b_amount\":\"2\",\"b_filled_before\":\"0\",\"b_ownership\":0,\"b_payout_addr\":\"addrB\",\"effective_time\":10,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"calls\":[{\"id\":3,\"call_id\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"phase\":\"dispatch\",\"snapshot_block\":100,\"network\":\"regtest\",\"source_chain\":\"BTC\",\"source_action_index\":4,\"source_contract_index\":0,\"target_chain\":\"DOGE\",\"target_contract_index\":1,\"method\":\"ping\",\"params_json\":\"[]\",\"gas_limit\":1000,\"cross_hops\":0,\"effective_time\":11,\"finalizing_view\":0,\"result_status\":null,\"return_payload_b64\":null,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"rewards\":[{\"validator_pubkey\":\"abababababababababababababababababababababababababababababababab\",\"source\":\"src_abababababab\",\"round_number\":5,\"reward_type\":\"anchor_archive\",\"amount\":\"10.00000000\",\"block_index\":90}],\"capability_snapshots\":[{\"snapshot_block\":90,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"amount\":\"3\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"2\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":\"1\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"amount\":\"1\",\"source\":\"\"}]}",
+    "crc32": "9654d94a",
+    "count": 1
+  },
+  "B": {
+    "inputs": {
+      "network": "regtest",
+      "batch_seq": 7,
+      "wrapper_snapshot_block": 100,
+      "matches": [
+        {
+          "id": 1,
+          "match_id": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "a_chain": "BTC",
+          "a_action_index": 1,
+          "a_kind": "swap",
+          "a_tick": "AAA",
+          "a_amount": "1",
+          "a_filled_before": "0",
+          "a_ownership": 0,
+          "a_payout_addr": "addrA",
+          "b_chain": "DOGE",
+          "b_action_index": 2,
+          "b_kind": "swap",
+          "b_tick": "BBB",
+          "b_amount": "2",
+          "b_filled_before": "0",
+          "b_ownership": 0,
+          "b_payout_addr": "addrB",
+          "effective_time": 10,
+          "finalizing_view": 0,
+          "validator_signatures": "[]",
+          "status": "settled"
+        }
+      ],
+      "calls": [
+        {
+          "id": 3,
+          "call_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "phase": "dispatch",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "source_chain": "BTC",
+          "source_action_index": 4,
+          "source_contract_index": 0,
+          "target_chain": "DOGE",
+          "target_contract_index": 1,
+          "method": "ping",
+          "params_json": "[]",
+          "gas_limit": 1000,
+          "cross_hops": 0,
+          "effective_time": 11,
+          "finalizing_view": 0,
+          "result_status": null,
+          "return_payload_b64": null,
+          "validator_signatures": "[]",
+          "status": "settled"
+        }
+      ],
+      "rewards": [
+        {
+          "row": {
+            "validator_pubkey": "abababababababababababababababababababababababababababababababab",
+            "round_number": 5,
+            "reward_type": "anchor_archive",
+            "amount": "10.00000000",
+            "block_index": 90
+          },
+          "source": "src_abababababab"
+        }
+      ],
+      "capability_sets": {
+        "cross_chain@100": [
+          {
+            "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "amount": "1",
+            "source": ""
+          },
+          {
+            "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "amount": "2",
+            "source": ""
+          }
+        ],
+        "oracle_publish@100": [
+          {
+            "pubkey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "amount": "1",
+            "source": ""
+          }
+        ],
+        "oracle_publish@90": [
+          {
+            "pubkey": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "amount": "3",
+            "source": ""
+          }
+        ]
+      },
+      "bridges": [
+        {
+          "id": 2,
+          "transfer_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "src_chain": "BTC",
+          "src_action_index": 2,
+          "src_address": "srcaddr2",
+          "dest_chain": "DOGE",
+          "dest_address": "dstaddr2",
+          "tick": "XCP",
+          "decimals": 8,
+          "amount": "150000000",
+          "effective_time": 22,
+          "admit_block_btc": null,
+          "admit_block_ltc": null,
+          "admit_block_doge": null,
+          "finalizing_view": 0,
+          "validator_signatures": "[]",
+          "status": "finalized"
+        },
+        {
+          "id": 1,
+          "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "src_chain": "BTC",
+          "src_action_index": 1,
+          "src_address": "srcaddr1",
+          "dest_chain": "DOGE",
+          "dest_address": "dstaddr1",
+          "tick": "XCP",
+          "decimals": 8,
+          "amount": "150000000",
+          "effective_time": 21,
+          "admit_block_btc": null,
+          "admit_block_ltc": null,
+          "admit_block_doge": null,
+          "finalizing_view": 0,
+          "validator_signatures": "[]",
+          "status": "retracted"
+        }
+      ],
+      "policies": [
+        {
+          "id": 4,
+          "snapshot_id": "9999999999999999999999999999999999999999999999999999999999999999",
+          "snapshot_block": 100,
+          "network": "regtest",
+          "origin_chain": "BTC",
+          "tick": "XCP",
+          "policy_seq": 3,
+          "origin_block": 95,
+          "policy_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "allow_list": "[\"addr1\",\"addr2\"]",
+          "block_list": "[\"addr9\"]",
+          "sleeping": 0,
+          "effective_time": 30,
+          "admit_block_btc": null,
+          "admit_block_ltc": null,
+          "admit_block_doge": null,
+          "finalizing_view": 0,
+          "validator_signatures": "[]",
+          "status": "finalized"
+        }
+      ]
+    },
+    "json": "{\"v\":1,\"network\":\"regtest\",\"batch_seq\":7,\"matches\":[{\"id\":1,\"match_id\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"snapshot_block\":100,\"network\":\"regtest\",\"a_chain\":\"BTC\",\"a_action_index\":1,\"a_kind\":\"swap\",\"a_tick\":\"AAA\",\"a_amount\":\"1\",\"a_filled_before\":\"0\",\"a_ownership\":0,\"a_payout_addr\":\"addrA\",\"b_chain\":\"DOGE\",\"b_action_index\":2,\"b_kind\":\"swap\",\"b_tick\":\"BBB\",\"b_amount\":\"2\",\"b_filled_before\":\"0\",\"b_ownership\":0,\"b_payout_addr\":\"addrB\",\"effective_time\":10,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"calls\":[{\"id\":3,\"call_id\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"phase\":\"dispatch\",\"snapshot_block\":100,\"network\":\"regtest\",\"source_chain\":\"BTC\",\"source_action_index\":4,\"source_contract_index\":0,\"target_chain\":\"DOGE\",\"target_contract_index\":1,\"method\":\"ping\",\"params_json\":\"[]\",\"gas_limit\":1000,\"cross_hops\":0,\"effective_time\":11,\"finalizing_view\":0,\"result_status\":null,\"return_payload_b64\":null,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"rewards\":[{\"validator_pubkey\":\"abababababababababababababababababababababababababababababababab\",\"source\":\"src_abababababab\",\"round_number\":5,\"reward_type\":\"anchor_archive\",\"amount\":\"10.00000000\",\"block_index\":90}],\"bridge_transfers\":[{\"id\":1,\"transfer_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshot_block\":100,\"network\":\"regtest\",\"src_chain\":\"BTC\",\"src_action_index\":1,\"src_address\":\"srcaddr1\",\"dest_chain\":\"DOGE\",\"dest_address\":\"dstaddr1\",\"tick\":\"XCP\",\"decimals\":8,\"amount\":\"150000000\",\"effective_time\":21,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"retracted\"},{\"id\":2,\"transfer_id\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"snapshot_block\":100,\"network\":\"regtest\",\"src_chain\":\"BTC\",\"src_action_index\":2,\"src_address\":\"srcaddr2\",\"dest_chain\":\"DOGE\",\"dest_address\":\"dstaddr2\",\"tick\":\"XCP\",\"decimals\":8,\"amount\":\"150000000\",\"effective_time\":22,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"finalized\"}],\"policy_snapshots\":[{\"id\":4,\"snapshot_id\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"snapshot_block\":100,\"network\":\"regtest\",\"origin_chain\":\"BTC\",\"tick\":\"XCP\",\"policy_seq\":3,\"origin_block\":95,\"policy_hash\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"allow_list\":\"[\\\"addr1\\\",\\\"addr2\\\"]\",\"block_list\":\"[\\\"addr9\\\"]\",\"sleeping\":0,\"effective_time\":30,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"finalized\"}],\"capability_snapshots\":[{\"snapshot_block\":90,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"amount\":\"3\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"2\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":\"1\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"amount\":\"1\",\"source\":\"\"}]}",
+    "crc32": "b58b1d68",
+    "count": 1
+  }
+}
