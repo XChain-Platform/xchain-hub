@@ -69,6 +69,7 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 // identically, or a consumer that switches between the two feeds sees the same value
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 const { parseCorsOrigin } = require('./api/cors_origin.js');
 const { parseExemptLocal } = require('./api/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
@@ -99,13 +100,12 @@ const HUB_API_KEY        = hubConfig.HUB_API_KEY || '';
 // ConfigService sets this var for a managed deploy that has no key in its host
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (hubConfig.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
+// The PUBLIC budget on every role; key-holding callers (HUB_AUTH_RATE_LIMIT_RPM) have their own.
 const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
-// Loopback and private-range callers skip the per-IP cap by default. The
-// caller this protects is the node's OWN indexer replaying a batch-bearing chain: it
-// pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
-// in seconds, and without this exemption needs HUB_RATE_LIMIT_RPM=60000 set by hand before
-// recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
-// private-IP reverse proxy is still throttled; see src/api/rate_limit_policy.js.
+// Loopback and private-range callers skip the per-IP cap by default: the node's
+// OWN indexer replaying a batch-bearing chain pushes one pushpricebatch per batch
+// block as fast as it reads them. Keyed on req.ip (post-trust-proxy), so a public
+// client through a private-IP reverse proxy is still throttled; see rate_limit_policy.js.
 // Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
 const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
@@ -248,8 +248,11 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     XCHAIN_PRICE_MIN_BTC_VOLUME:      hubConfig.XCHAIN_PRICE_MIN_BTC_VOLUME || '',
 
     ORACLE_EPOCH_START:     parseInt(hubConfig.ORACLE_EPOCH_START),
-    ORACLE_ROUND_INTERVAL:  parseInt(hubConfig.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-    ORACLE_SUBMISSION_WINDOW: parseInt(hubConfig.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
+    // Positive-only: the interval divides elapsed time into federation round numbers.
+    ORACLE_ROUND_INTERVAL:  positiveIntConfig(hubConfig.ORACLE_ROUND_INTERVAL,
+        DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL'),
+    ORACLE_SUBMISSION_WINDOW: positiveIntConfig(hubConfig.ORACLE_SUBMISSION_WINDOW,
+        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, 'ORACLE_SUBMISSION_WINDOW'),
     // Per-round cap on collected peer submissions (anti-flood, OracleRound.js).
     // Passed through UNPARSED for the same reason as the retention knob below:
     // OracleRound.js owns the parse, the range check and the 200 default, so a
@@ -371,12 +374,11 @@ async function startApi(){
     mountRegistryRoutes(app, ctx);
 
     // Bound JSON-RPC batch cardinality (src/peers/rpc_batch_guard.js). The router below runs
-    // Promise.all over every element of a batch array while the per-IP rate limiter at
-    // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
-    // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in
-    // front of the router rather than globally, so it governs the dispatcher that
-    // amplifies and cannot reject a REST route's array body; the limiter has already
-    // charged its token by this point, so an oversize batch is never free.
+    // Promise.all over every element of a batch array, so a single ~100 KB body fans out
+    // into ~1,400 concurrent handlers on the shared DB pool. The limiter at the top of
+    // this stack already charges a batch one token per call; this caps it outright.
+    // Mounted in front of the router rather than globally, so it governs the dispatcher
+    // that amplifies and cannot reject a REST route's array body.
     // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
     // (every connector sends one call object), so the cap breaks no existing client.
     app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));

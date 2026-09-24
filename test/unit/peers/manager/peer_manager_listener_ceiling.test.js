@@ -170,6 +170,8 @@ async function warningsDuring(fn) {
 }
 
 describe('PeerManager: message listener ceiling', function () {
+    // Allow for a cold read of every src/ file on a loaded CI venue; it runs in under a second warm.
+    this.timeout(30000);
 
     it('the declared subscriber roster covers exactly the modules the sources register', function () {
         const fromSource = subscribersFromSource();

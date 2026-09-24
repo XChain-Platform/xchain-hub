@@ -36,9 +36,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 33 entries, and contains the gates the last three trains append', function () {
+    it('is sorted, has 34 entries, and contains the gates the last three trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(33, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(34, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -62,7 +62,9 @@ function registerGateInventoryTest() {
             'mirror_admission_activation.encodeAdmitBlocks',
             'mirror_admission_activation.decodeAdmitBlocks',
             'mirror_admission_activation.isAdmissionEra',
-            'mirror_admission_activation.admissionCanonicalField'
+            'mirror_admission_activation.admissionCanonicalField',
+            // The token leg gate this hub loads per bridge leg.
+            'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION'
         ]);
     });
 }
@@ -80,7 +82,7 @@ function registerPinnedDigestTest() {
     // the environment: a venue process launched armed has a different, equally correct digest,
     // and a pin that moved with a drill lever would be a test of the launcher. The pinned value
     // is the fleet's: every shipped process reads the unarmed maps.
-    it('digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut)', function () {
+    it('digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut, and again when LTC:testnet mirror admission shipped null under dq4 (a))', function () {
         // Every gate module that still has a logic file, not just the admission one: the
         // family's arming lever is shared, so the anchor-attest gate resolves from the same
         // variable and a cached copy of it would keep a drill's heights in the digest after
@@ -96,7 +98,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('ee6476f2445fe454b6b262e6f9dbea1b922bd31ba7eec55a6c7b30dbb513cf5e',
+                .to.equal('f69861138e062d4feb1dc7f9975fd28284a1f297e7e8375e6d870c020f3d97fd',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -129,8 +131,10 @@ function registerGateOrderingTest() {
         expect(mods.slice(0, PRE_EXISTING.length),
             'a SHARED_GATES entry was inserted mid-list; that reorders the preimage of every gate after it')
             .to.deep.equal(PRE_EXISTING);
-        expect(mods.slice(PRE_EXISTING.length), 'the family must be the LAST three entries, the encoder registration last of all')
-            .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation']);
+        expect(mods.slice(PRE_EXISTING.length),
+            'the family must follow the bridge gate, the encoder registration last, then the token leg gate')
+            .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation',
+                'token_bridge_activation']);
     });
 }
 

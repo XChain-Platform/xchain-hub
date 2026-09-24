@@ -18,6 +18,7 @@
 // test is what Node does with an uncaught throw, which an in-process stub cannot show.
 
 const { expect } = require('chai');
+const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -44,5 +45,28 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         // A raw Node stack carries the module's own frames; the clean handler's
         // one-liner carries none, so this is the line that tells the two apart.
         expect(res.stderr).to.not.match(/^\s+at /m);
+    });
+
+    it('exits 2 naming an unknown flag instead of ignoring it', function () {
+        const res = run(['--assert-no-absnet']);
+        expect(res.status).to.equal(2);
+        expect(res.stderr).to.match(/^consensus-identity: unknown flag --assert-no-absnet/);
+        expect(res.stdout).to.equal('');
+    });
+
+    it('exits 2 naming a value flag whose value is missing', function () {
+        const res = run(['--out']);
+        expect(res.status).to.equal(2);
+        expect(res.stderr).to.equal('consensus-identity: --out requires a value\n');
+        expect(res.stdout).to.equal('');
+    });
+
+    it('refuses a flag in the value position instead of consuming it as the path', function () {
+        // Consumed as a path, the flag would write a file of that name and drop the assertion.
+        const res = run(['--out', '--assert-no-absent']);
+        expect(res.status).to.equal(2);
+        expect(res.stderr).to.equal('consensus-identity: --out requires a value\n');
+        expect(res.stdout).to.equal('');
+        expect(fs.existsSync(path.join(REPO, '--assert-no-absent'))).to.equal(false);
     });
 });

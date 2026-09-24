@@ -296,7 +296,7 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
         // api.js self-starts on require, so asserting its wiring requires booting it under proxyquire
         // and reading the options handed to express-rate-limit. This keeps the check on the actual
         // application boundary where environment policy becomes middleware configuration.
-        async function bootApiCapturingLimiter(env) {
+        async function bootApiCapturingLimiters(env) {
             const mockApp = {
                 use: sinon.stub(), get: sinon.stub(), post: sinon.stub(), set: sinon.stub(),
                 listen: sinon.stub().callsFake((p, h, cb) => { if (cb) cb(); })
@@ -308,9 +308,10 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             const mockHub = new Proxy({}, {
                 get: (t, p) => { if (!(p in t)) t[p] = sinon.stub().callsFake(async () => ({})); return t[p]; }
             });
-            const keys = ['HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_RATE_LIMIT_RPM',
+            const keys = ['HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_RATE_LIMIT_RPM', 'HUB_AUTH_RATE_LIMIT_RPM',
                           'HUB_RATE_LIMIT_EXEMPT_LOCAL', 'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME',
-                          'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
+                          'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
+                          'P2P_VALIDATOR_ADDR', 'ORACLE_EPOCH_START', 'HUB_NETWORK'];
             const saved = {};
             for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
             Object.assign(process.env, {
@@ -331,16 +332,17 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
                     'geoip-lite': { lookup: sinon.stub().returns(null) },
                     './XChainHub': function () { return mockHub; }
                 });
+                // The async boot reads HUB_AUTH_RATE_LIMIT_RPM, so keep the env until it has.
+                await waitUntil(() => rateLimitStub.callCount >= 3, { label: 'api.js boot to install the rate limiters' });
             } finally {
                 for (const [k, v] of Object.entries(saved)) {
                     if (v === undefined) delete process.env[k]; else process.env[k] = v;
                 }
             }
-            await waitUntil(() => rateLimitStub.called, { label: 'api.js boot to install the rate limiter' });
-            return rateLimitStub.firstCall.args[0];
+            return rateLimitStub.args.map((args) => args[0]);
         }
         async function installsThePolicyOptionsExemptionOnTest35() {
-            const opts = await bootApiCapturingLimiter({});
+            const [opts] = await bootApiCapturingLimiters({});
             expect(opts.limit).to.equal(100);
             expect(opts.windowMs).to.equal(60000);
             expect(opts.skip({ ip: '172.17.0.4' })).to.equal(true);
@@ -348,16 +350,37 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             expect(typeof opts.handler).to.equal('function');
         }
         async function honoursHubRateLimitRpmAndTest36() {
-            const opts = await bootApiCapturingLimiter({
+            const [opts] = await bootApiCapturingLimiters({
                 HUB_RATE_LIMIT_RPM: '4200', HUB_RATE_LIMIT_EXEMPT_LOCAL: 'false'
             });
             expect(opts.limit).to.equal(4200);
             expect(opts.skip({ ip: '172.17.0.4' })).to.equal(false);
         }
+        function validatorEnv(extra) {
+            return Object.assign({ P2P_VALIDATOR_ADDR: 'validator-1', ORACLE_EPOCH_START: '1700000000000',
+                                    HUB_NETWORK: 'regtest' }, extra);
+        }
+        // The 60000 fleet value lives in the key-holders' tier; the keyless surface stays at 100.
+        async function aValidatorHubDefaultsToTheFleetTest37() {
+            const [publicTier, authTier] = await bootApiCapturingLimiters(validatorEnv({}));
+            expect(publicTier.limit).to.equal(100);
+            expect(authTier.limit).to.equal(60000);
+            expect(authTier.skip({ ip: '203.0.113.7', originalUrl: '/', headers: { 'x-api-key': 'test-hub-key' } })).to.equal(false);
+            expect(publicTier.skip({ ip: '203.0.113.7', originalUrl: '/', headers: { 'x-api-key': 'test-hub-key' } })).to.equal(true);
+            expect(publicTier.skip({ ip: '203.0.113.7', originalUrl: '/', headers: {} })).to.equal(false);
+        }
+        async function anExplicitHubRateLimitRpmStillWinsOnATest38() {
+            const [publicTier, authTier] = await bootApiCapturingLimiters(validatorEnv({
+                HUB_RATE_LIMIT_RPM: '4200', HUB_AUTH_RATE_LIMIT_RPM: '9000' }));
+            expect(publicTier.limit).to.equal(4200);
+            expect(authTier.limit).to.equal(9000);
+        }
         function apiJsWiringSuite34() {
             this.timeout(10000);
             it('installs the policy options, exemption on, at the shipped default of 100', installsThePolicyOptionsExemptionOnTest35);
             it('honours HUB_RATE_LIMIT_RPM and HUB_RATE_LIMIT_EXEMPT_LOCAL=false', honoursHubRateLimitRpmAndTest36);
+            it('a validator hub keeps 100 public and gives key-holders the 60000 fleet tier', aValidatorHubDefaultsToTheFleetTest37);
+            it('explicit HUB_RATE_LIMIT_RPM and HUB_AUTH_RATE_LIMIT_RPM win on a validator hub', anExplicitHubRateLimitRpmStillWinsOnATest38);
         }
         registerapiJsWiring33 = function registerSuite() {
             describe('api.js wiring', apiJsWiringSuite34);

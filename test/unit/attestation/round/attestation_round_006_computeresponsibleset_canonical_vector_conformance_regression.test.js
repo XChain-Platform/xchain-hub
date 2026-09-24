@@ -135,7 +135,8 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 let hub = makeHub();
                 let ar  = new AttestationRound(hub, makeProviderRegistry());
                 let got = ar
-                    .computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted, c.minStake)
+                    .computeResponsibleSet(c.validators, c.requestId,
+                        c.redundancy - (c.widen ?? 0), c.weighted, c.minStake, c.widen)
                     .map(v => v.pubkey);
                 expect(got).to.deep.equal(c.expected);
             });

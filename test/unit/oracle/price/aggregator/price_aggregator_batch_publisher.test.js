@@ -13,9 +13,10 @@
 // PRICE v0 (batch) ingest: PriceAggregator.receiveValidatedBatch, spec
 // spec section 5.7, decisions D8, D13, D14, D23, D28.
 //
-// The canonical payload itself is pinned elsewhere (priceV2PayloadTwinParity.test.js
-// asserts buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
-// twins), so these tests sign whatever that builder emits and pin what INGEST does
+// The canonical payload itself is pinned elsewhere (price_v0_batch_canonical_parity.test.js
+// asserts all three buildPriceBatchPayload implementations are byte-identical, including
+// the OracleConsensus and PriceAggregator production twins), so these tests sign whatever
+// that builder emits and pin what INGEST does
 // with a batch: per-round dedupe, column semantics, the block_time-keyed pair flag
 // day, the WS mirror re-emit, the reorg fence and the publisher marker clear.
 

@@ -234,6 +234,31 @@ class HubDbBroadcaster {
         }
     }
 
+    // Deliver the post-archive anchor_txid without replaying the consensus row.
+    // The mirror applies this frame as UPDATE-only, so a row that was not admitted
+    // before the height watermark passed remains absent and must come from REST
+    // bootstrap. This path is intentionally outside isLateFinalization because it
+    // cannot add a match or alter signed match content.
+    broadcastMatchAnchorStamp(matchId, anchorTxid) {
+        if (this.subscribers.size === 0) return;
+        if (typeof matchId !== 'string' || matchId.length === 0 ||
+            typeof anchorTxid !== 'string' || anchorTxid.length === 0) return;
+        let message;
+        try {
+            message = JSON.stringify({
+                type: 'row:anchor-stamped',
+                table: 'cross_chain_matches',
+                match_id: matchId,
+                anchor_txid: anchorTxid,
+                schema_version: HUB_SCHEMA_VERSION
+            });
+        } catch (e) {
+            logger.error(nodeUtil.format('HubDbBroadcaster: anchor-stamp serialization error:', e));
+            return;
+        }
+        for (let ws of this.subscribers) this.send(ws, message);
+    }
+
     // Broadcast a reorg retraction to all subscribers so they prune their local
     // price-table copies. event: { table, source_chain, from_action_index, to_action_index?, retraction_generation? }
     // to_action_index is included only for a CLOSED-range (deferred) retraction so subscribers

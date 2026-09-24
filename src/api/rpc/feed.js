@@ -65,6 +65,17 @@ function chainTipFeedRpc(ctx) {
                 chainId = chain_id;
             }
             try {
+                // hub.network is THIS hub's own configured network, never the caller's
+                // param: a testnet/mainnet hub must not purge over a caller claiming
+                // network: 'regtest' twice with different chain_ids.
+                if (coin === 'BTC' && network === 'regtest' && hub.network === 'regtest' && chainId !== undefined) {
+                    let storedTip = await hub.db.getChainTip(coin, network);
+                    if (storedTip && storedTip.chainId && storedTip.chainId !== chainId) {
+                        await hub.db.deleteCrossChainMatchesByNetwork(network);
+                        await hub.db.deleteCrossChainCallsByNetwork(network);
+                        await hub.db.deleteAllCapabilitySnapshots();
+                    }
+                }
                 await hub.db.setChainTip(coin, network, height, time, chainId);
                 return {status: "success"};
             } catch (err) {

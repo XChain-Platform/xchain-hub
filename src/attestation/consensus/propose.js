@@ -299,6 +299,17 @@ module.exports = {
         let d = envelope.data;
         if(!d || !d.requestId) return null;
         let rid = String(d.requestId).toLowerCase();
+        // This is also the site a federation-wide re-serve trigger would have to
+        // change: every responsible hub would need to un-finalize `rid` from
+        // purely local state first, or a re-serving hub's own PROPOSE is dropped
+        // right here by its peers. D2 ruled (2026-09-22) that trigger stays
+        // deferred, the case being rare and bounded by deadline expiry plus
+        // refund. It does not need to cover ring eviction: the tombstone
+        // re-propose path already covers ring eviction on its own - once `rid`
+        // falls off `finalized`'s ring in round_records.js, this check reads
+        // false and lets the round reopen, with notePrematureEviction above
+        // logging the premature-eviction proof. Do not add an un-finalize path
+        // here without a new ruling.
         if(this.finalized.has(rid)) return null;
         let pending = this.pending.get(rid);
         if(!pending){

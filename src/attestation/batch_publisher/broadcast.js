@@ -219,6 +219,23 @@ module.exports = {
     // The default pipeline: the same encoder, address and wallet hook the PRICE rail
     // uses, because there is one operator wallet. Only the payload differs.
     async defaultBroadcast(payload){
+        let psbtResult;
+        try {
+            psbtResult = await this.buildBatchPsbt(payload);
+        } catch(e){
+            // Tag a build failure neverSent: only broadcast_tx below puts a transaction on
+            // a wire, and the encoder answers a refused create_tx as an HTTP 200 RPC error.
+            if(e && typeof e === 'object') e.neverSent = true;
+            throw e;
+        }
+
+        let txHex = await this.walletSignFn(psbtResult.psbt);
+        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        return (await this.encoder.broadcastTx(txHex)) || { txid: null };
+    },
+
+    // Select inputs and build the unsigned single-transaction PSBT; nothing here sends.
+    async buildBatchPsbt(payload){
         if(!this.encoder)       throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!this.walletSignFn)  throw new Error('no wallet sign hook configured (call setWalletSignHook)');
         if(!this.dogeAddress)   throw new Error('no DOGE_ADDRESS configured');
@@ -242,10 +259,7 @@ module.exports = {
         // Refuse phase one of a two-transaction encoding: this pipeline has no reveal,
         // so broadcasting it would publish an undecodable batch and strand the value.
         assertSingleTxEncoding(psbtResult, 'AttestationBatchPublisher');
-
-        let txHex = await this.walletSignFn(psbtResult.psbt);
-        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
-        return (await this.encoder.broadcastTx(txHex)) || { txid: null };
+        return psbtResult;
     }
 
 };

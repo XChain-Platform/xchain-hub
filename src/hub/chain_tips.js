@@ -26,8 +26,13 @@ const { blockIntervalS } = require('../lib/relay_margin.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
 const logger = getLogger();
+
+// One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
+// isolated even when tests or embedded callers deliberately use more than one in a scope.
+const admissionTipMemo = new AsyncLocalStorage();
 
 class ChainTips {
 
@@ -159,7 +164,16 @@ class ChainTips {
     // fast chains. Overridable per deployment, never per call.
     static get ADMISSION_TIP_STALL_BLOCKS(){ return 6; }
 
-    async resolveAdmissionTip(coin){
+    // Share admission-tip reads only within one proposal. Nested users join the current
+    // scope, while the next top-level proposal starts with an empty memo.
+    withAdmissionTipMemo(fn){
+        if(admissionTipMemo.getStore()) return fn();
+        return admissionTipMemo.run(new WeakMap(), fn);
+    }
+
+    // opts.signal, when given, cancels the indexer read (the health probe's deadline).
+    async resolveAdmissionTip(coin, opts){
+        let signal = opts && opts.signal;
         let c = admissionHeight.normalizeChain(coin);
         if(c === null){
             logger.warn('XChainHub: admission tip requested for unusable chain ' + JSON.stringify(String(coin)));
@@ -176,9 +190,11 @@ class ChainTips {
             let res = await axiosFor(this).post(url, {
                 jsonrpc: '2.0', id: Date.now(),
                 method: 'getlatestblock', params: {}
-            }, { timeout: 5000 });
+            }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
             result = res && res.data && res.data.result;
         } catch (err) {
+            // A read the caller cancelled is the caller's deadline, not an indexer fault.
+            if(signal && signal.aborted) return null;
             logger.error(nodeUtil.format('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message));
             return null;
         }
@@ -245,7 +261,10 @@ class ChainTips {
 
     // Every admission tip a row's read set needs, read in parallel. A chain whose tip is
     // refused comes back null rather than missing, so the caller's refusal names it.
-    async resolveAdmissionTips(chains){
+    // opts.signal cancels the reads, but only outside a proposal memo: a memoized read
+    // is shared with the rest of the proposal, and one caller's deadline must not
+    // cancel it for the others.
+    async resolveAdmissionTips(chains, opts){
         let out = {};
         let want = [];
         for(let raw of (chains || [])){
@@ -253,7 +272,18 @@ class ChainTips {
             if(c === null){ out[String(raw)] = null; continue; }
             if(want.indexOf(c) === -1) want.push(c);
         }
-        let tips = await Promise.all(want.map((c) => this.resolveAdmissionTip(c).catch(() => null)));
+        let scope = admissionTipMemo.getStore();
+        let memo = null;
+        if(scope){
+            memo = scope.get(this);
+            if(!memo){ memo = new Map(); scope.set(this, memo); }
+        }
+        let tips = await Promise.all(want.map((c) => {
+            if(!memo) return this.resolveAdmissionTip(c, opts).catch(() => null);
+            if(!memo.has(c))
+                memo.set(c, Promise.resolve().then(() => this.resolveAdmissionTip(c)).catch(() => null));
+            return memo.get(c);
+        }));
         want.forEach((c, i) => { out[c] = tips[i]; });
         return out;
     }

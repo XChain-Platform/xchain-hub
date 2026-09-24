@@ -53,7 +53,8 @@ function registerBundleWireCases() {
     it('single-node: flush publishes v0 + v1, archive round-trips, batch back-filled', async function () {
         // Count-path archive mechanics: a mainnet record below the 961000 SWQ activation
         // takes the legacy count snapshot the getSnapshot stub serves (weighted has its own suite).
-        let bus = buildMesh(1, { network: 'mainnet' });
+        // checkpointCommitment arms the bundle floor so the block-100 section still rides.
+        let bus = buildMesh(1, { network: 'mainnet', checkpointCommitment: true });
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
@@ -158,7 +159,8 @@ function registerArchiveTxidCases() {
         // broadcast success ({ txid: null }) must NOT dequeue the rows with their final
         // status (which would strand them in an unrecoverable hole) and must NOT credit
         // the anchor_archive reward for an anchor that never landed on-chain.
-        let bus = buildMesh(1, { network: 'mainnet' });   // count-path archive mechanics (SWQ off below 961000)
+        // Count-path archive mechanics (SWQ off below 961000); the armed bundle floor lets the v0 ride.
+        let bus = buildMesh(1, { network: 'mainnet', checkpointCommitment: true });
         let nd = bus.nodes[0];
         // The v0 bundle still gets a txid; only the v1 archive broadcast returns none.
         nd.pub.setBroadcastHook(async (payload) => {

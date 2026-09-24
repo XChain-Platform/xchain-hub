@@ -48,7 +48,10 @@ module.exports = {
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return null;
         let rows = await db.findAttestPublishedBatchesByNetwork(this.network, windowStart);
-        return (rows && rows.length) ? rows[0] : null;
+        let marker = (rows && rows.length) ? rows[0] : null;
+        // `tracking` records when this hub began owing coverage; it is not an outcome
+        // for that window. Returning it as absent keeps the ordinary retry path live.
+        return marker && String(marker.status) === 'tracking' ? null : marker;
     },
 
     // The oldest window a marker can still matter for: pendingWindows builds candidates
@@ -66,38 +69,56 @@ module.exports = {
     async hydrateMarkers(nowSec){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
-        let rows = await db.findAttestPublishedBatchesByNetworkAndStatus(this.network, 'intent');
         let current = this.windowStartFor(Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds());
         let floor   = this.catchupFloorWindow(current);
+        let rows = await db.findAttestPublishedBatchesByNetworkAndStatusSince(
+            this.network, 'intent', floor);
+        let agedRows = await db.getAttestPublishedBatchesCountByNetworkAndStatusBefore(
+            this.network, 'intent', floor);
+        let agedSummary = (agedRows && agedRows[0]) || {};
+        if(!Number.isFinite(Number(agedSummary.count))){
+            let oldest = Number(agedSummary.oldest);
+            agedSummary.count = agedSummary.oldest !== null &&
+                agedSummary.oldest !== undefined && Number.isFinite(oldest) && oldest < floor ? 1 : 0;
+        }
 
-        let live = [], aged = [];
+        let live = [];
         for(let r of (rows || [])){
             let start = Number(r.window_start);
             // A row whose window_start does not read as a number cannot be matched against
             // any window the sweep proposes, so it is neither quarantined nor counted.
             if(!Number.isFinite(start)) continue;
-            (start >= floor ? live : aged).push(start);
+            if(start >= floor) live.push(start);
         }
         live.sort((a, b) => a - b);
         for(let start of live) this._quarantined.add(start);
-        this.reportHydratedMarkers(live, aged, current);
+        this.reportHydratedMarkers(live, agedSummary, current);
+
+        // Absence on its own cannot separate "the publisher has never run" from "the
+        // publisher ran but produced no outcome". Mark the in-progress window as the
+        // durable coverage floor so a later table read can tell them apart. The insert
+        // is deliberately a no-op on an existing terminal row.
+        if(live.length === 0 && (Number(agedSummary.count) || 0) === 0)
+            await db.setAttestPublishedBatchByNetwork(
+                this.network, current, this.windowEndFor(current), null, 0, 'tracking');
     },
 
     // Two kinds of marker at two severities. A window inside the horizon is an action item
     // and names its age, because a count with no age leaves a four-day-old marker reading
     // like a fresh one; a window below it is a record and must not read as an alarm.
-    reportHydratedMarkers(live, aged, currentWindow){
+    reportHydratedMarkers(live, agedSummary, currentWindow){
         if(live.length > 0)
             logger.error('AttestationBatchPublisher: ' + live.length + ' window(s) carry a ' +
                 'publish-intent marker with no outcome; they are NOT re-published automatically. ' +
                 'Operator: verify each on chain and replay by hand if absent. Windows: ' +
                 live.map(s => s + ' (' + this.markerAge(s, currentWindow) + ')').join(', ') + '.');
-        if(aged.length > 0)
-            logger.info('AttestationBatchPublisher: ' + aged.length + ' publish-intent marker(s) lie below ' +
+        let agedCount = Number(agedSummary.count) || 0;
+        if(agedCount > 0)
+            logger.info('AttestationBatchPublisher: ' + agedCount + ' publish-intent marker(s) lie below ' +
                 'the ' + MAX_CATCHUP_WINDOWS + '-window catch-up horizon and are NOT an action item: no ' +
                 'sweep can propose those windows again. Oldest ' +
-                this.markerAge(Math.min.apply(null, aged), currentWindow) + ', newest ' +
-                this.markerAge(Math.max.apply(null, aged), currentWindow) + '.');
+                this.markerAge(agedSummary.oldest, currentWindow) + ', newest ' +
+                this.markerAge(agedSummary.newest, currentWindow) + '.');
     },
 
     // A marker's age in the two units that decide what to do with it: windows closed
@@ -109,11 +130,15 @@ module.exports = {
         return windows + ' window(s) / ' + formatAge(secs) + ' old';
     },
 
-    // Idempotent: an existing row for the window is left exactly as it is, so a replay
-    // can never downgrade a `sent` or `landed` marker back to an intent.
+    // A tracking row becomes the pre-send intent; an existing outcome row is left
+    // exactly as it is, so a replay cannot downgrade `sent` or `landed` to intent.
     async recordIntent(window, batchKey){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
+        // A tracking row licenses no spend and must become the real pre-send marker.
+        // Delete it under a status guard before the insert. A concurrent landed row is
+        // untouched, and the intent insert's duplicate-key no-op preserves it.
+        await db.deleteAttestPublishedBatch(this.network, window.window_start, 'tracking');
         await db.setAttestPublishedBatchByNetwork(this.network, window.window_start, window.window_end, batchKey, window.row_count, 'intent');
     },
 

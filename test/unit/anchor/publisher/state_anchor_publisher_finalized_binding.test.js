@@ -17,6 +17,8 @@
 
 const { expect }            = require('chai');
 const { CP_ROW, matchRow, buildMesh, registerMeshHooks } = require('../../../helpers/anchor_mesh.js');
+const HubDbBroadcaster      = require('../../../../src/peers/hub_db_broadcaster.js');
+const { admitMarginBlocks } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 
 describe('StateAnchorPublisher', function () {
     registerMeshHooks();
@@ -26,6 +28,7 @@ describe('StateAnchorPublisher', function () {
     registerRewardListGateCases();
     registerBackfillStampCase();
     registerBackfillBroadcastCases();
+    registerLateWindowStampCase();
 });
 
 // ── XANC-ELECTED-FORGE-1 (archive half): bind the v1 archive txid ────────────
@@ -187,27 +190,29 @@ function registerBackfillBroadcastCases() {
         let bus = buildMesh(1, { matches: [matchRow('m1'), matchRow('m2', 'retracted')] });
         let nd = bus.nodes[0];
         let broadcast = [];
-        nd.pub.hub.hubDbBroadcaster = { broadcastRow: (ev) => broadcast.push(ev) };
+        nd.pub.hub.hubDbBroadcaster = {
+            broadcastMatchAnchorStamp: (matchId, anchorTxid) => broadcast.push({ matchId, anchorTxid })
+        };
 
         await nd.pub.backfillBatch(0,
             [{ match_id: 'm1', status: 'finalized' }, { match_id: 'm2', status: 'retracted' }],
             'dogetx_rebroadcast', [], []);
 
-        // Only the non-retracted row re-emits (the stream already deleted retracted
-        // rows on mirrors; re-inserting one would diverge them), and it carries the
-        // freshly stamped anchor_txid plus the full signed content.
+        // Only the non-retracted row emits a metadata-only update. A full-row replay
+        // would either be refused after the admission window or admit a missing row
+        // below the certified watermark.
         expect(broadcast.length, 'exactly one re-broadcast').to.equal(1);
-        expect(broadcast[0].table).to.equal('cross_chain_matches');
-        expect(broadcast[0].row.match_id).to.equal('m1');
-        expect(broadcast[0].row.anchor_txid).to.equal('dogetx_rebroadcast');
-        expect(broadcast[0].row.a_amount, 'full row, not a partial patch').to.equal('1000');
+        expect(broadcast[0].matchId).to.equal('m1');
+        expect(broadcast[0].anchorTxid).to.equal('dogetx_rebroadcast');
     });
 
     it('backfillBatch does NOT re-broadcast on a null txid or without a broadcaster', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
         let broadcast = [];
-        nd.pub.hub.hubDbBroadcaster = { broadcastRow: (ev) => broadcast.push(ev) };
+        nd.pub.hub.hubDbBroadcaster = {
+            broadcastMatchAnchorStamp: (matchId, anchorTxid) => broadcast.push({ matchId, anchorTxid })
+        };
 
         // Null txid = the archive never landed on-chain (rows stay pending); there is
         // no stamp to propagate, so the feed stays quiet.
@@ -219,5 +224,37 @@ function registerBackfillBroadcastCases() {
         delete nd.pub.hub.hubDbBroadcaster;
         await nd.pub.backfillBatch(1, [{ match_id: 'm1', status: 'finalized' }], 'dogetx_x', [], []);
         expect(nd.db.matches.find(m => m.match_id === 'm1').anchor_txid, 'back-fill still applied').to.equal('dogetx_x');
+    });
+}
+
+// A stamp raised after the admission window still reaches the mirror, because it
+// rides the metadata-only frame rather than a full-row admission.
+function registerLateWindowStampCase() {
+    it('backfillBatch delivers an anchor stamp after the match admission window closes', async function () {
+        let margin = admitMarginBlocks('cross_chain_matches');
+        let lateMatch = Object.assign(matchRow('m1'), { admit_block_btc: 899999 + margin });
+        let bus = buildMesh(1, { matches: [lateMatch] });
+        let nd = bus.nodes[0];
+        let broadcaster = new HubDbBroadcaster({}, nd.db);
+        broadcaster.admissionWatermark.observeTip('BTC', 900000, Date.now() - 600000);
+        let sent = [];
+        broadcaster.subscribers.add({
+            readyState: 1, bufferedAmount: 0, _hubBuffered: 0,
+            send: (raw) => sent.push(JSON.parse(raw)), close: () => {}
+        });
+        nd.pub.hub.hubDbBroadcaster = broadcaster;
+
+        try {
+            await nd.pub.backfillBatch(0, [{ match_id: 'm1', status: 'finalized' }],
+                'dogetx_after_window', [], []);
+            expect(sent.length, 'the streaming mirror receives the late anchor stamp').to.equal(1);
+            expect(sent[0]).to.deep.include({
+                type: 'row:anchor-stamped', table: 'cross_chain_matches',
+                match_id: 'm1', anchor_txid: 'dogetx_after_window'
+            });
+            expect(sent[0]).to.not.have.property('row');
+        } finally {
+            broadcaster.stop();
+        }
     });
 }

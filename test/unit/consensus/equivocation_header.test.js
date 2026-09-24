@@ -9,7 +9,25 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
+const path = require('node:path');
 const eq = require('../../../src/consensus/equivocation_header.js');
+const REPO_ROOT = path.join(__dirname, '..', '..', '..');
+const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+
+function loadSibling(relativePath) {
+    const absolutePath = path.join(SIBLING_ROOT, relativePath);
+    try {
+        return require(absolutePath);
+    } catch (error) {
+        if (REQUIRE_SIBLINGS) {
+            throw new Error(`XCHAIN_REQUIRE_SIBLINGS=1 but the equivocation-header sibling is unloadable at ${absolutePath}`, {
+                cause: error
+            });
+        }
+        return null;
+    }
+}
 
 // CONSENSUS-CRITICAL: the EQUIV header (WI-2 bump 2) is prefixed onto every signed
 // consensus canonical at/above the flag-day. The indexer keeps a byte-equivalent
@@ -68,23 +86,22 @@ function registerCrossServiceParityTests() {
     // by the dedicated consensus-primitive conformance gate, so the skip is not a false
     // green on this fork-class invariant.
     describe('cross-service activation parity', function () {
+        this.timeout(20000);
         it('hub activation map == canonical constants.js', function () {
-            let canonical;
-            try { canonical = require('../../../../xchain-documentation/protocol/constants.js').EQUIV_HEADER_ACTIVATION; }
-            catch (e) { return this.skip(); }
+            const constants = loadSibling('xchain-documentation/protocol/constants.js');
+            if (!constants) return this.skip();
+            const canonical = constants.EQUIV_HEADER_ACTIVATION;
             expect(eq.EQUIV_HEADER_ACTIVATION).to.deep.equal(canonical);
         });
         it('all 5 copies == hub (map + tags + builder bytes)', function () {
             // hub + indexer (server consensus) + sdk + explorer (client checkpoint
             // verifiers). A drift in ANY copy flips the header on different blocks → fork.
-            let copies;
-            try {
-                copies = {
-                    indexer:  require('../../../../xchain-indexer/src/equivocation_header.js'),
-                    sdk:      require('../../../../xchain-sdk/src/equivocation_header.js'),
-                    explorer: require('../../../../xchain-explorer/src/equivocation_header.js'),
-                };
-            } catch (e) { return this.skip(); }
+            const copies = {
+                indexer:  loadSibling('xchain-indexer/src/consensus/equivocation_header.js'),
+                sdk:      loadSibling('xchain-sdk/src/consensus/equivocation_header.js'),
+                explorer: loadSibling('xchain-explorer/src/consensus/equivocation_header.js'),
+            };
+            if (Object.values(copies).includes(null)) return this.skip();
             const ref = eq.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');
             for(const [name, copy] of Object.entries(copies)){
                 expect(copy.EQUIV_HEADER_ACTIVATION, name + ' activation map').to.deep.equal(eq.EQUIV_HEADER_ACTIVATION);

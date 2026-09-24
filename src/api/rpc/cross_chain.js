@@ -45,27 +45,29 @@ function crossChainCallRpc(ctx) {
         // {call_id, dispatch, result}; getxcall is a shorter alias (mirrors the
         // explorer's getXcall naming). Read-only, public read tier.
         async getcrosschaincall({call_id}){
-            if(!call_id) return {error: "call_id is required"};
-            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
-            try {
-                let call = await hub.getCrossChainCall(call_id);
-                return call || {error: "cross-chain call not found"};
-            } catch (err) {
-                return {error: "error fetching cross-chain call"};
-            }
+            return readCrossChainCall(hub, call_id);
         },
 
         async getxcall({call_id}){
-            if(!call_id) return {error: "call_id is required"};
-            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
-            try {
-                let call = await hub.getCrossChainCall(call_id);
-                return call || {error: "cross-chain call not found"};
-            } catch (err) {
-                return {error: "error fetching cross-chain call"};
-            }
+            return readCrossChainCall(hub, call_id);
         },
     };
+}
+
+// Resolve one XCALL lifecycle for both read aliases. A call_id is a 64-char hex
+// sha256 (the dispatch path refuses any other shape), so refuse junk before the read.
+async function readCrossChainCall(hub, call_id){
+    if(!call_id) return {error: "call_id is required"};
+    if(typeof call_id !== 'string') return {error: "call_id must be a 64-character hex string"};
+    let callId = call_id.trim().toLowerCase();
+    if(!/^[0-9a-f]{64}$/.test(callId)) return {error: "call_id must be a 64-character hex string"};
+    if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+    try {
+        let call = await hub.getCrossChainCall(callId);
+        return call || {error: "cross-chain call not found"};
+    } catch (err) {
+        return {error: "error fetching cross-chain call"};
+    }
 }
 
 function callListSwapReadsRpc(ctx) {

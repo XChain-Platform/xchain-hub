@@ -108,7 +108,9 @@ function drive(mw, methodOrMethods, apiKey, params) {
 }
 
 function findAuthMiddleware(useCalls) {
-    const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3);
+    // The rate-limit batch surcharge also passes a single call through, so it is named out.
+    const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3 &&
+        fn.name !== 'rpcBatchSurcharge');
     let authMw = null;
     for (const fn of candidates) {
         try {

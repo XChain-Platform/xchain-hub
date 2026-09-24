@@ -27,6 +27,17 @@ CREATE TABLE price_snapshots (
     KEY idx_pair_block (coin_pair, reference_block),
     KEY idx_pair_timestamp (coin_pair, block_timestamp),
     KEY idx_status (status),
+    -- The finalized-frontier reads lead on status and take MAX() of one column, so each
+    -- needs an index that carries that column under status or MariaDB scans every row
+    -- (measured 2026-09-23 on the regtest rail: 1.17M rows, 1.2 to 1.4 s per read, four
+    -- readers polling, the hub's database at 60 to 80 percent CPU). The first two are
+    -- byte-equal to the indexer and explorer mirror twins (their hub_db_sync price
+    -- barrier runs both MAX() reads against THIS table over HUB_DB_*); the third serves
+    -- the hub's own finalized-age read (getPriceSnapshotsFinalizedAgeSeconds). Existing
+    -- tables get them from runMigrations (alterTableForDrift never touches indexes).
+    KEY idx_status_block_round (status, reference_block, round_number),
+    KEY idx_status_timestamp_round (status, block_timestamp, round_number),
+    KEY idx_status_created (status, created_at),
     KEY idx_source_chain (source_chain),
     -- The landing stamp is written by round_number and read by (coin_pair, landing
     -- clock, round_number) on the indexer side; keep the hub copy indexed the same way

@@ -23,6 +23,7 @@
 
 const configRedaction = require('../config_redaction.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
+const { makeAdmissionTipProbe, raceTimeout } = require('./health_probes.js');
 const { validateChain } = require('../validate');
 
 function buildSystemRpc(ctx) {
@@ -34,10 +35,7 @@ function systemReads(ctx) {
     return {
         async ping(params, {res}) {
             try {
-                await Promise.race([
-                    hub.db.getDatabaseLivenessProbe(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-                ]);
+                await raceTimeout(hub.db.getDatabaseLivenessProbe(), DB_PROBE_TIMEOUT_MS);
                 return {status: "success", db: true};
             } catch (err) {
                 res.status(503);
@@ -47,6 +45,7 @@ function systemReads(ctx) {
 
         async updateconfig({config}){
             try {
+                hub.learnNetworkFromConfig(config);
                 await hub.addParametersFromJson(config);
                 return {status: "success"};
             } catch (err) {
@@ -151,6 +150,8 @@ function configsRpc(ctx) {
 
 function healthRpc(ctx) {
     const { hub, hubConfig, p2pConfig, configFetchCounters, DB_PROBE_TIMEOUT_MS } = ctx;
+    // One probe per controller, so concurrent health calls share its upstream read.
+    const probeAdmissionTips = makeAdmissionTipProbe(hub, p2pConfig, DB_PROBE_TIMEOUT_MS);
     return {
         // Like ping, but also reports the DB circuit-breaker state. The breaker
         // trips open after repeated connection failures and rejects queries during
@@ -184,11 +185,23 @@ function healthRpc(ctx) {
                 ? hub.capabilitySnapshot.monitor.snapshot() : null;
             if (consensusInput && consensusInput.alerting) healthy = false;
 
+            // Admission-height production has a hard per-chain precondition: above
+            // its activation the hub cannot finalize a mirrored row unless every
+            // chain in that row's read set has a fresh decoder tip. Probe the full
+            // federation set here so an operator sees the dependency before a round
+            // pays for it. The resolver applies the same freshness gate as the
+            // producer and returns null rather than guessing a height. Single-flight
+            // and cached briefly (health_probes.js), so a health flood cannot
+            // multiply into indexer reads.
+            let admissionTips = await probeAdmissionTips();
+            if (admissionTips && !admissionTips.healthy) healthy = false;
+
             let published = publisherStats(hub);
 
             if(!healthy) res.status(503);
             return healthBody(hub, configFetchCounters, published, {
-                healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS, consensusInput
+                healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS,
+                consensusInput, admissionTips
             });
         },
     };
@@ -198,10 +211,7 @@ function healthRpc(ctx) {
 async function probeDatabase(hub, DB_PROBE_TIMEOUT_MS) {
     let dbOk = false;
     try {
-        await Promise.race([
-            hub.db.getDatabaseLivenessProbe(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-        ]);
+        await raceTimeout(hub.db.getDatabaseLivenessProbe(), DB_PROBE_TIMEOUT_MS);
         dbOk = true;
     } catch (err) {
         dbOk = false;
@@ -222,10 +232,7 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
             // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
             oracleThresholdS = parseInt(hubConfig.ORACLE_STALENESS_THRESHOLD_S)
                 || Math.round((roundIntervalMs * 2) / 1000);
-            let rows = await Promise.race([
-                hub.db.getPriceSnapshotsFinalizedAgeSeconds(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
-            ]);
+            let rows = await raceTimeout(hub.db.getPriceSnapshotsFinalizedAgeSeconds(), DB_PROBE_TIMEOUT_MS);
             // age_s is null when no round has ever finalized (fresh node);
             // treat that as not-stale so a slow first round doesn't 503.
             if (rows && rows.length && rows[0].age_s != null) {
@@ -255,7 +262,8 @@ function publisherStats(hub) {
 
 // The /health response body; every section past config_fetch is telemetry only.
 function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayStats },
-                    { healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS, consensusInput }) {
+                    { healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS,
+                      consensusInput, admissionTips }) {
     let healthResult = {
         status:    healthy ? "healthy" : "degraded",
         db:        dbOk,
@@ -269,6 +277,7 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayS
         }
     };
     if (consensusInput) healthResult.consensus_input = consensusInput;
+    if (admissionTips) healthResult.admission_tips = admissionTips;
     if (anchorStats) healthResult.anchor = anchorStats;
     if (attestStats) healthResult.attest = attestStats;
     // Telemetry only, never a 503: a relay that is disabled, or holding

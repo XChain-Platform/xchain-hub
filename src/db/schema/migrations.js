@@ -131,7 +131,8 @@ module.exports = {
     },
 
     // The column-level steps: the two DATETIME conversions, the two charset
-    // widens, the price fence re-key, and the mirror admission columns.
+    // widens, the price fence re-key, the mirror admission columns, and the gated
+    // oracle_prices.tick length widen.
     async runColumnAndFenceMigrations(){
         // #4315: governance_proposals.voting_start/voting_end shipped as TIMESTAMP, which
         // MariaDB bounds to the signed 32-bit epoch (2038-01-19 03:14:07 UTC). Both hold a
@@ -164,6 +165,18 @@ module.exports = {
         // xchain-hub/migrations/ are applied by hand, so a migration copied from the
         // indexer's style would sit there and never run on a single deployed hub.
         await this.migrateAdmissionColumns();
+        // oracle_prices.tick to the 250 the PRICE v1 ingest gate admits, gated on the mirrors
+        // having widened first (see migrateOracleTickWidth for the order and the flag).
+        await this.migrateOracleTickWidth();
+        // The price_snapshots finalized-frontier indexes (see the KEY comments in
+        // src/sql/price_snapshots.sql). Every mirror reader polls MAX(reference_block) and
+        // MAX(block_timestamp) under status = 'finalized' against the hub's table, and the
+        // hub's status RPC polls MAX(created_at) the same way; with only idx_status each is a
+        // full scan on a table that grows a row per pair per round. Appended LAST so the
+        // pass stays a prefix-extension of what every deployed hub already ran.
+        await this.migrateIndex('price_snapshots', 'idx_status_block_round', '(status, reference_block, round_number)');
+        await this.migrateIndex('price_snapshots', 'idx_status_timestamp_round', '(status, block_timestamp, round_number)');
+        await this.migrateIndex('price_snapshots', 'idx_status_created', '(status, created_at)');
     }
 
 };

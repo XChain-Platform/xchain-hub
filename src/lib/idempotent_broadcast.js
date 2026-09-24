@@ -36,11 +36,14 @@
  *
  *   isNeverSentError(e)
  *     The strict half of the definitive class: not merely "retrying is safe" but
- *     "no byte of this transaction left the process". Two shapes prove it, and they
- *     are the two isAmbiguousSendError already reads: a sub-500 HTTP response (the
- *     encoder refused the call before it ever built or forwarded a transaction, for
- *     example insufficient funds or an unconfirmed-change refusal) and a
- *     never-connected transport code. A NAMED node rejection is definitive but NOT
+ *     "no byte of this transaction left the process". Three shapes prove it, and
+ *     isAmbiguousSendError reads all three as definitive: a `neverSent` tag, which a
+ *     pipeline sets on a failure raised before its send step (the encoder answers a
+ *     refused create_tx, such as insufficient funds or an unconfirmed-change refusal,
+ *     as an HTTP 200 JSON-RPC error, so only the pipeline knows nothing was sent); a
+ *     sub-500 HTTP response (the encoder's auth, batch-size and rate-limit gates
+ *     refusing the call before processing); and a never-connected transport code.
+ *     A NAMED node rejection is definitive but NOT
  *     never-sent, because the transaction reached the node to be rejected; callers
  *     that need "nothing was spent and nothing is in flight" must not read it as
  *     such. Used by callers that hold a durable publish-intent marker and want to
@@ -93,6 +96,8 @@ function isAmbiguousSendError(e){
     // definition and the caller must dead-letter rather than rebuild. The hook sets the
     // flag; nothing else in the hub does.
     if (e.fundsCommitted) return true;
+    // A pipeline tags neverSent only on a failure before its send step, so a retry cannot double-spend.
+    if (e.neverSent === true) return false;
     let message = String(e.message || '');
     // A definitive rejection and an ambiguous transport failure share the SAME
     // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.
@@ -114,10 +119,11 @@ function isAmbiguousSendError(e){
 // named rejection is the node's own verdict on a transaction it received.
 function isNeverSentError(e){
     if (!e) return false;
-    // Outranks both shapes below for the same reason it outranks every rule in
+    // Outranks every shape below for the same reason it outranks every rule in
     // isAmbiguousSendError: a multi-phase signer hook can carry a funded phase-one
     // transaction on chain and still surface a 4xx or an ECONNREFUSED on its reveal.
     if (e.fundsCommitted) return false;
+    if (e.neverSent === true) return true;                             // failed before the send step
     if (e.response && Number(e.response.status) < 500) return true;   // refused before processing
     let code = String(e.code || '');
     return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN';   // never connected

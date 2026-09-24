@@ -11,7 +11,7 @@
  *
  **********************************************************************
  *
- * The four numbers that say whether this build still applies the same rules as
+ * The five numbers that say whether this build still applies the same rules as
  * the one before it. A restructure may move any file it likes; it may not move
  * one of these.
  *
@@ -21,9 +21,9 @@
  *                             "same rules?".
  *   gates_field_hash          sha256 of the GATES field this hub signs into a
  *                             ROLLCALL v1 epoch, which is
- *                             knownGateKeys().join(','). Built at
- *                             RollcallRound.js:313 and hashed at
- *                             rollcall_canonical.js:49.
+ *                             knownGateKeys().join(','). Built by gatesFor()
+ *                             in rollcall/round.js and hashed by gatesHash()
+ *                             in rollcall/rollcall_canonical.js.
  *   coin_consensus_pins       the coin registry's consensus hash for every
  *                             (coin, network) PAIR, not one number per network.
  *   hub_schema_version        the mirror-row schema every reader checks for
@@ -34,30 +34,32 @@
  *                             not the tree: the pin's own guard measures the tree.
  *
  * WHY THE GATES MAP IS PINNED AND NOT JUST THE DIGEST, and this is the whole
- * reason this script exists rather than a one-line hash. consensus_rules_digest
- * resolves each carrier with `require('./' + mod + '.js')` in a try/catch that
- * substitutes the ABSENT sentinel, so moving every gate module into a
- * subdirectory produces a perfectly well-formed digest over a map in which every
- * single gate reads `<absent>`. Meanwhile the SIGNED wire field is
- * knownGateKeys().join(','), which is built from the same key list and is
- * therefore IDENTICAL before and after the move. A hub in that state publishes
- * the same GATES string as every peer over a rules set it has entirely lost, and
- * no wire field names the difference. So the pin carries the map, and
- * --assert-no-absent turns "the digest changed" into "these gates stopped
- * resolving", which is the sentence an operator can act on.
+ * reason this script exists rather than a one-line hash. Two digests that differ
+ * say nothing about what to fix; the map turns "the digest changed" into "these
+ * gates changed", which is the sentence an operator can act on, and it is what
+ * makes an environment-shifted digest diagnosable in one read (see ONE OF THE
+ * FIVE below). The SIGNED wire field is knownGateKeys().join(','), built from
+ * the key list alone, so it reads the same whether or not a carrier resolves.
+ * That is why consensus_rules_digest takes each gate from the activation
+ * registry, or a function-valued one from src/consensus/gates/<stem>_gate.js,
+ * and THROWS naming the key when neither is there: this script then prints no
+ * pin and exits 2 with that one line, so a moved carrier cannot hide inside a
+ * well-formed digest. `<absent>` survives as the sentinel that module's
+ * diffGates uses for a key a peer's map lacks, not as a value this build emits.
  *
- * WHY THE COIN PIN IS PER PAIR. coins/index.js:338 is consensusHash(tick,
- * network), and coins/consensus_pin.js has CONSENSUS_CONFIG_PIN.mainnet null,
- * so mainnet verification is a deliberate skip and only the non-mainnet pairs
- * are actually pinned today. One number per network would average over three
- * chains and hide a single moved chain; the pair map cannot.
+ * WHY THE COIN PIN IS PER PAIR. The registry hash is consensusHash(tick,
+ * network) in coins/index.js, and coins/consensus_pin.js has
+ * CONSENSUS_CONFIG_PIN.mainnet null, so mainnet verification is a deliberate
+ * skip and only the non-mainnet pairs are actually pinned today. One number per
+ * network would average over three chains and hide a single moved chain; the
+ * pair map cannot.
  *
- * WHY NO LEDGER READ. The indexer's copy of this tool takes a fourth reading
+ * WHY NO LEDGER READ. The indexer's copy of this tool takes a fifth reading
  * from its blocks table. The hub has no chain of its own to read: it is the
  * config oracle, so its identity is entirely code-derived and this script opens
  * no socket, reads no .env and needs no database.
  *
- * ONE OF THE FOUR IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
+ * ONE OF THE FIVE IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
  * hashes gate VALUES, and a regtest venue arms some gates from its own
  * environment rather than from a committed height, so the same build reports one
  * digest in a bare checkout and another inside a configured container. Two
@@ -70,9 +72,10 @@
  *   node bin/consensus-identity.js --json             the full pin on stdout
  *   node bin/consensus-identity.js --out <file>       write the pin as JSON
  *   node bin/consensus-identity.js --root <dir>       measure another checkout
- *   node bin/consensus-identity.js --assert-no-absent exit 1 if any gate is
- *                                                     unresolved (the check a
- *                                                     move has to survive)
+ *   node bin/consensus-identity.js --assert-no-absent exit 1 if any gate reads
+ *                                                     `<absent>`; a lost carrier
+ *                                                     is the exit-2 refusal
+ *                                                     above, flag or no flag
  *   node bin/consensus-identity.js --compare <pin>    diff a tree against a pin,
  *                                                     exit 1 on any difference
  *
@@ -91,6 +94,16 @@ let REPO_ROOT = path.resolve(__dirname, '..');
 
 const ABSENT = '<absent>';
 
+// The row a function-valued shared gate prints: present, body not digested (see SHARED_GATES).
+const FUNCTION_GATE = '<function>';
+
+// Name every gate row, since a function canonicalizes to undefined and JSON would drop it.
+function projectGates(gates) {
+    const out = {};
+    for (const key of Object.keys(gates)) out[key] = gates[key] === undefined ? FUNCTION_GATE : gates[key];
+    return out;
+}
+
 /**
  * Measure `dir` instead of the checkout this script lives in.
  * @param {string} dir a hub checkout
@@ -103,11 +116,6 @@ function loadFromRepo(rel) {
     // Resolved against REPO_ROOT rather than required relatively, so --root
     // actually reaches the other tree instead of silently re-reading this one.
     return require(path.join(REPO_ROOT, rel));
-}
-
-/** Key-sorted JSON, so the hash of a map does not depend on insertion order. */
-function canonicalJson(value) {
-    return JSON.stringify(value, Object.keys(value).sort());
 }
 
 /**
@@ -138,33 +146,36 @@ function coinConsensusPins() {
 }
 
 /**
- * The four values, all of them derived from the source tree alone.
+ * The five values, all of them derived from the source tree alone.
  * @returns {object}
  */
 function codeIdentity() {
     const rulesModule = loadFromRepo('src/consensus_rules_digest.js');
     const { HUB_SCHEMA_VERSION } = loadFromRepo('src/hub_schema_version.js');
     const logicPin = loadFromRepo('bin/lib/carrier_logic_pin.js');
+    // The measured checkout's registry, whose exported canonicaliser consensusHash uses.
+    const coins = loadFromRepo('src/coins/index.js');
 
     const rules = rulesModule.computeConsensusRulesDigest();
+    const gates = projectGates(rules.gates);
     // The GATES field verbatim, because the hash alone cannot be checked by hand
     // against a wire capture and this is the string the hub signs.
     const gatesField = rulesModule.knownGateKeys().join(',');
     const coinPins = coinConsensusPins();
 
-    const absentGates = Object.keys(rules.gates).filter((k) => rules.gates[k] === ABSENT).sort();
+    const absentGates = Object.keys(gates).filter((k) => gates[k] === ABSENT).sort();
 
     return {
         consensus_rules_digest: rules.digest,
         // The gate-by-gate preimage. See WHY THE GATES MAP IS PINNED: without it
-        // a digest match cannot tell "unchanged" from "all absent on both sides".
-        consensus_rules_gates: rules.gates,
-        gate_key_count: Object.keys(rules.gates).length,
+        // a digest mismatch cannot be traced to the gate that moved.
+        consensus_rules_gates: gates,
+        gate_key_count: Object.keys(gates).length,
         absent_gates: absentGates,
         gates_field: gatesField,
         gates_field_hash: crypto.createHash('sha256').update(gatesField, 'utf8').digest('hex'),
         coin_consensus_pins: coinPins.pairs,
-        coin_consensus_pin_hash: crypto.createHash('sha256').update(canonicalJson(coinPins.pairs)).digest('hex'),
+        coin_consensus_pin_hash: crypto.createHash('sha256').update(coins.canonicalJson(coinPins.pairs)).digest('hex'),
         coin_pin_armed_networks: coinPins.pinnedNetworks,
         coin_pin_skipped_networks: coinPins.unpinnedNetworks,
         hub_schema_version: HUB_SCHEMA_VERSION,
@@ -219,12 +230,24 @@ function compare(pin, fresh) {
 function parseArgs(argv) {
     const opts = { json: false, assertNoAbsent: false };
     for (let i = 0; i < argv.length; i += 1) {
-        if (argv[i] === '--json') opts.json = true;
-        else if (argv[i] === '--assert-no-absent') opts.assertNoAbsent = true;
-        else if (argv[i] === '--root') { opts.root = path.resolve(argv[i + 1]); i += 1; }
-        else if (argv[i] === '--out') { opts.out = path.resolve(argv[i + 1]); i += 1; }
-        else if (argv[i] === '--compare') { opts.compare = path.resolve(argv[i + 1]); i += 1; }
-        else if (argv[i] === '--help' || argv[i] === '-h') opts.help = true;
+        const arg = argv[i];
+        // Refuse a missing value or a following flag: consumed as a path, `--out
+        // --assert-no-absent` would drop the assertion and exit 0.
+        const takeValue = () => {
+            const value = argv[i + 1];
+            if (value === undefined || value.startsWith('-')) throw new Error(`${arg} requires a value`);
+            i += 1;
+            return value;
+        };
+        if (arg === '--json') opts.json = true;
+        else if (arg === '--assert-no-absent') opts.assertNoAbsent = true;
+        else if (arg === '--root') opts.root = path.resolve(takeValue());
+        else if (arg === '--out') opts.out = path.resolve(takeValue());
+        else if (arg === '--compare') opts.compare = path.resolve(takeValue());
+        else if (arg === '--help' || arg === '-h') opts.help = true;
+        // A misspelt flag would otherwise run as the default reading and exit 0,
+        // which a caller checking --assert-no-absent would take as a pass.
+        else throw new Error(`unknown flag ${argv[i]}`);
     }
     return opts;
 }
@@ -294,7 +317,6 @@ module.exports = {
     codeIdentity,
     coinConsensusPins,
     compare,
-    canonicalJson,
     setRepoRoot,
     // The measured checkout, as a call rather than a binding: a consumer that
     // captured the value at require time would keep reading the default after

@@ -153,7 +153,7 @@ function prepareOnPropose(envelope, proposal, proposedAdmit) {
 
 // Bind the leader's admission map (or refuse the round), open the pending round and co-sign it.
 async function bindAndCoSign(envelope, proposal, locked) {
-    let { round, admitBlocks } = proposal;
+    let { round, digest, admitBlocks } = proposal;
     let { blockHeight } = locked;
     let proposedAdmit = null;
     {
@@ -168,6 +168,15 @@ async function bindAndCoSign(envelope, proposal, locked) {
             }
             proposedAdmit = verdict.map;
         }
+    }
+
+    // An exact repeat of a round already open (same digest, same admission map):
+    // keep the first round's votes and timer, and skip re-opening and re-broadcasting.
+    let pending = this.pendingRounds.get(round);
+    if (pending && pending.digest === digest &&
+        this.spellAdmit(pending.admitBlocks) === this.spellAdmit(proposedAdmit)) {
+        logger.info('Oracle: ignoring duplicate PROPOSE for round ' + round + ' from ' + envelope.sender);
+        return;
     }
 
     openFollowerRound.call(this, proposal, locked, proposedAdmit);

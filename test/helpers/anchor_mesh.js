@@ -201,6 +201,13 @@ function applyStakeWeights(bus, recordNetwork) {
     }
 }
 
+// Arm CHECKPOINT_COMMITMENT for the bundle selector's floor on THIS mesh's publishers
+// only, as an own-property override of sectionCommitmentActive that stopMeshes deletes.
+// The shared gate registry is never touched, so no other case or canonical sees it.
+function armCommitmentFloor(bus) {
+    for (let nd of bus.nodes) nd.pub.sectionCommitmentActive = () => true;
+}
+
 // n publishers over a shared gossip bus. Every node shares identical DB
 // contents unless opts.mutate(self) tweaks its copy (divergence tests).
 function buildMesh(n, opts) {
@@ -222,6 +229,8 @@ function buildMesh(n, opts) {
     // snapshot-block-gated rule - EQUIV, checkpoint-commitment, royalty, the anchor/
     // archive reward flag-days - also activates at >=961000 on mainnet, so a block-100
     // mainnet record sits on the fully-legacy, headerless path the count assertions expect).
+    // The bundle selector skips a section below CHECKPOINT_COMMITMENT, so a count-path
+    // case that needs its v0 bundle also passes checkpointCommitment:true (armCommitmentFloor).
     let recordNetwork = opts.network || CP_ROW.network;
     bus.network = recordNetwork;
     let identities = [];
@@ -249,6 +258,7 @@ function buildMesh(n, opts) {
         bus.nodes.push(self);
     }
     if (opts.stakeWeighted) applyStakeWeights(bus, recordNetwork);
+    if (opts.checkpointCommitment) armCommitmentFloor(bus);
     buses.push(bus);
     return bus;
 }
@@ -301,9 +311,15 @@ function rewardRow(pk, over) {
     }, over || {});
 }
 
-// Stop every publisher on every mesh built since the last call, then forget them.
+// Stop every publisher on every mesh built since the last call, drop any
+// commitment-floor override so the prototype's gate read is back, then forget them.
 async function stopMeshes() {
-    for (let bus of buses) { for (let nd of bus.nodes) await nd.pub.stop(); }
+    for (let bus of buses) {
+        for (let nd of bus.nodes) {
+            await nd.pub.stop();
+            delete nd.pub.sectionCommitmentActive;
+        }
+    }
     buses = [];
 }
 

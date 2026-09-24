@@ -24,6 +24,8 @@
 'use strict';
 
 const abw = require('../../lib/attest_batch_wire.js');
+// Picks the row field set the encoded body carries from the batch's own anchor (signing.js).
+const { isAdmissionEra } = require('../../consensus/gates/mirror_admission_gate.js');
 const { MAX_CATCHUP_WINDOWS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -199,7 +201,7 @@ module.exports = {
         }
         window.sigs = signed.sigs;
 
-        let encoded = abw.encodeAttestBatch(window);
+        let encoded = abw.encodeAttestBatch(window, isAdmissionEra);
         if(!encoded.ok){
             this.deadLetter({ window_start: windowStart, window_end: windowEnd,
                                row_count: rows.length, reason: encoded.reason },
@@ -211,7 +213,42 @@ module.exports = {
             return false;
         }
 
-        return await this.broadcastWindow(window, batchKey, encoded);
+        // Claim at broadcastWindow's existing pre-send intent point. The unique
+        // (network, window_start) marker is this hub's own exclusivity guard: only the
+        // INSERT that creates it may send. Each validator runs its own hub against its
+        // own DB, so this never arbitrates between validators; it is what keeps two
+        // overlapping sweep attempts on the SAME hub (a retry racing the original, or a
+        // restart racing an in-flight run) from both broadcasting the same window. A
+        // marker read followed by a send is not sufficient, because both attempts can
+        // complete that read before either one sends.
+        let claimed = Object.create(this);
+        claimed.recordIntent = async (candidate, key) => {
+            if(!(await this.claimWindowForBroadcast(candidate, key))){
+                let error = new Error('window already has a durable publication claim');
+                error.code = 'ATTEST_BATCH_WINDOW_CLAIMED';
+                throw error;
+            }
+        };
+        return await this.broadcastWindow.call(claimed, window, batchKey, encoded);
+    },
+
+    // Atomically acquire the durable pre-send marker. setAttestPublishedBatchByNetwork
+    // uses INSERT IGNORE, so affectedRows separates the sole creator of this hub's
+    // marker row from every other attempt on it. This runs inside broadcastWindow after
+    // its pipeline, balance and spend reservations have passed, preserving the rule
+    // that a window unable to attempt a send leaves no intent marker.
+    async claimWindowForBroadcast(window, batchKey){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function')
+            throw new Error('no hub DB for durable batch-window claim');
+
+        // A tracking row is a coverage floor, not a publication claim. The guarded
+        // delete cannot remove an intent or outcome installed by a competing path.
+        await db.deleteAttestPublishedBatch(this.network, window.window_start, 'tracking');
+        let result = await db.setAttestPublishedBatchByNetwork(
+            this.network, window.window_start, window.window_end,
+            batchKey, window.row_count, 'intent');
+        return !!(result && Number(result.affectedRows) === 1);
     },
 
     // ------------------------------------------------------------ the mirror read
@@ -254,6 +291,10 @@ module.exports = {
             response_hash:        String(r.response_hash).toLowerCase(),
             meta:                 r.meta == null ? '' : String(r.meta),
             effective_time:       intOrNull(r.effective_time),
+            // Carried so an admission-era batch signs the row's real admission height; a
+            // row read without it would sign null and rebuild on chain as a legacy row.
+            // Below the activation the wire drops the field, so this changes no bytes there.
+            admit_block_btc:      intOrNull(r.admit_block_btc),
             signer_pubkeys:       String(r.signer_pubkeys == null ? '[]' : r.signer_pubkeys),
             signatures:           String(r.signatures == null ? '[]' : r.signatures),
             widen:                intOrNull(r.widen) || 0

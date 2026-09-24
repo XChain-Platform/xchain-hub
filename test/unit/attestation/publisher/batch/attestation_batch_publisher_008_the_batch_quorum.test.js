@@ -37,6 +37,7 @@ const { expect } = require('chai');
 const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
@@ -124,7 +125,7 @@ function doDbQuery(responses, markers, sql, args){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
                 return found ? [Object.assign({}, found)] : [];
             }
-            if(/^INSERT INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
+            if(/^INSERT (?:IGNORE )?INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
             if(/^UPDATE attest_published_batches SET status/i.test(sql)) return updateMarker(markers, args);
             throw new Error('unexpected statement: ' + sql);
 }
@@ -255,7 +256,7 @@ const hookAt10827 = function () {
                         network: data.network, window_start: data.window_start,
                         window_end: data.window_end, row_count: data.row_count,
                         btc_block_height: data.btc_block_height, rows: data.rows
-                    });
+                    }, isAdmissionEra);
                     for (let f of followers) {
                         // The follower's own payload shape, window bounds included: a
                         // co-signature that did not name its window would be counted into
@@ -315,7 +316,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             // The proposal the round timed out on and the one it published from are the
             // same window bytes.
             expect(JSON.parse(firstProposal).window_start).to.equal(start);
-            let body = abw.reassembleAttestBatch(head, []);
+            let body = abw.reassembleAttestBatch(head, [], isAdmissionEra);
             expect(body.ok, body.status).to.equal(true);
             expect(body.batch.sigs.length).to.be.at.least(2);
         }); }); });
@@ -343,8 +344,8 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
                         pubkey: followers[0].getPubkeyHex().toLowerCase(), sig: 'ab'.repeat(64) }
             });
 
-            let body = abw.reassembleAttestBatch(decodeHead(p.wires[0]), []);
-            let canonical = abw.buildAttestBatchCanonical(body.batch);
+            let body = abw.reassembleAttestBatch(decodeHead(p.wires[0]), [], isAdmissionEra);
+            let canonical = abw.buildAttestBatchCanonical(body.batch, isAdmissionEra);
             let qualified = new Set(hub._snapshot.validators.map(v => v.pubkey));
             for (let s of body.batch.sigs) {
                 expect(qualified.has(s.pubkey), 'signer ' + s.pubkey.substring(0, 8) + ' is not in the set').to.equal(true);

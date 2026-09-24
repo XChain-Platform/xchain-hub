@@ -124,7 +124,7 @@ function doDbQuery(responses, markers, sql, args){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
                 return found ? [Object.assign({}, found)] : [];
             }
-            if(/^INSERT INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
+            if(/^INSERT (?:IGNORE )?INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
             if(/^UPDATE attest_published_batches SET status/i.test(sql)) return updateMarker(markers, args);
             throw new Error('unexpected statement: ' + sql);
 }
@@ -242,6 +242,51 @@ const hookAt10827 = function () {
     };
 
 // ------------------------------------------------------------ landing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('records the window from which an otherwise empty marker history is tracking coverage', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+
+            await p.hydrateMarkers(now);
+
+            expect(hub.db.markers).to.deep.equal([{
+                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
+                batch_key: null, row_count: 0, status: 'tracking'
+            }]);
+            expect(await p.getMarker(now),
+                'tracking is evidence of participation, not a completed window').to.equal(null);
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a landed outcome', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+
+            await p.hydrateMarkers(now);
+            await p.recordLandedWindow(now, now + WINDOW_S, 'dogetxid', 0);
+
+            expect(hub.db.markers).to.have.length(1);
+            expect(hub.db.marker(now)).to.include({
+                window_start: now, window_end: now + WINDOW_S,
+                row_count: 0, status: 'landed'
+            });
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a publish intent before sending', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            let window = { window_start: now, window_end: now + WINDOW_S, row_count: 2 };
+
+            await p.hydrateMarkers(now);
+            await p.recordIntent(window, 'batchkey');
+
+            expect(hub.db.markers).to.deep.equal([{
+                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
+                batch_key: 'batchkey', row_count: 2, status: 'intent'
+            }]);
+        }); }); });
+
 describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('stops a window the federation has already landed from being published', async function () {
             let hub = makeHub({ dir: dir });
             let p   = makePublisher(hub);

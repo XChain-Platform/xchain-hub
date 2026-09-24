@@ -29,6 +29,12 @@ const { ORACLE_DEVIATION_THRESHOLD } = require('../../constants.js');
 const { SLASHING_PARAMS, MAX_INCREASE, MAX_DECREASE, MAX_SLASH_INCREASE, MAX_SLASH_DECREASE,
         parseDecimalParts, toScaledBigInt } = require('./rules.js');
 
+// Bound a proposed value echoed into an error, since the inbound path logs the message.
+function echoValue(v) {
+    let s = String(v);
+    return s.length > 64 ? s.slice(0, 64) + '...' : s;
+}
+
 module.exports = {
 
     validateChangeBounds(parameter, currentValue, proposedValue) {
@@ -38,24 +44,27 @@ module.exports = {
         this.validateSlashBandFloor(parameter, proposedValue);
     },
 
-    // Absolute floor under the slash band, mirroring the guard SlashDetector's
-    // constructor already hard-enforces (SlashDetector.js): a slash band tighter than
-    // the federation-uniform oracle co-sign band would slash submissions inside the
-    // band the federation just co-signed. validateChangeRatio caps only the SIZE of a
-    // change, so from the 0.05 default a -20% proposal (0.04) cleared every gate,
-    // and applying the approved value then bricked the hub at its next restart.
+    // Absolute floor under the slash band, mirroring resolveDeviationThreshold in
+    // slash_detector/options.js: a slash band tighter than the federation-uniform
+    // oracle co-sign band would slash submissions inside the band the federation just
+    // co-signed, and a non-finite band slashes every submission. That guard reads the
+    // value on presence and throws on a non-finite band and on anything below the
+    // oracle band, an explicit 0 included, so approving either would brick the hub at
+    // its next restart; the floor refuses the same values.
     // Sits outside validateChangeRatio's numeric early-returns so a non-numeric or
-    // zero CURRENT value cannot skip it. A proposed 0 is refused here although
-    // SlashDetector's `parseFloat(...) || DEFAULT` would fall back to the band: the
-    // ratio bound already refuses it, and refusing is the safe direction.
+    // zero CURRENT value cannot skip it.
     // DEPLOY NOTE: same mixed-version caveat as the follower-path bounds re-check in
-    // handlePropose - fixed hubs drop a sub-floor Byzantine proposal that unfixed
-    // hubs still record. Honest proposals always clear the floor, so honest traffic
-    // never diverges.
+    // handlePropose - fixed hubs drop a sub-floor or non-decimal Byzantine proposal
+    // that unfixed hubs still record. Honest proposals are plain decimals that clear
+    // the floor, so honest traffic never diverges.
     validateSlashBandFloor(parameter, proposedValue) {
         if (parameter !== 'SLASH_DEVIATION_THRESHOLD') return;
         let band = parseFloat(proposedValue);
-        if (!Number.isFinite(band) || band >= ORACLE_DEVIATION_THRESHOLD) return;
+        if (!Number.isFinite(band)) {
+            throw new Error('SLASH_DEVIATION_THRESHOLD (' + echoValue(proposedValue) + ') is not a ' +
+                'valid number, and SlashDetector refuses to construct on it.');
+        }
+        if (band >= ORACLE_DEVIATION_THRESHOLD) return;
         throw new Error('SLASH_DEVIATION_THRESHOLD (' + band + ') is below the federation-uniform ' +
             'ORACLE_DEVIATION_THRESHOLD (' + ORACLE_DEVIATION_THRESHOLD + '): this would slash ' +
             'submissions inside the co-signed band, and SlashDetector refuses to construct on it.');
@@ -65,6 +74,12 @@ module.exports = {
         // Only validate numeric parameters
         let cur  = parseDecimalParts(currentValue);
         let prop = parseDecimalParts(proposedValue);
+        let isSlashParam = SLASHING_PARAMS.includes(parameter);
+        // Refuse a non-decimal slash value, or exponent and junk-suffix forms skip the bound.
+        if (isSlashParam && !prop) {
+            throw new Error(parameter + ' (' + echoValue(proposedValue) + ') must be a plain decimal: ' +
+                'no exponent notation, trailing text, NaN or Infinity.');
+        }
         if (!cur || !prop) return;
 
         let scale = Math.max(cur.frac.length, prop.frac.length);
@@ -72,7 +87,6 @@ module.exports = {
         let P = toScaledBigInt(prop, scale);
         if (C === 0n) return;
 
-        let isSlashParam = SLASHING_PARAMS.includes(parameter);
         let maxIncrease = isSlashParam ? MAX_SLASH_INCREASE : MAX_INCREASE;
         let maxDecrease = isSlashParam ? MAX_SLASH_DECREASE : MAX_DECREASE;
 

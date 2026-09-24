@@ -83,7 +83,8 @@ const testCase3 = async function () {
         };
 
 const testCase4 = async function () {
-            let h = makePublisher({ capabilitySnapshot: { getSnapshot: sinon.stub().resolves(null) } });
+            let h = makePublisher({ capabilitySnapshot: {
+                getSnapshot: sinon.stub().resolves(null), getWeightSnapshot: sinon.stub().resolves(null) } });
             await h.p.start();
             for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
 
@@ -97,11 +98,12 @@ const testCase4 = async function () {
 
 const testCase5 = async function () {
             let dark = false;
+            let resolve = async () => (dark ? null : { validators: [{ pubkey: ME }] });
             let h = makePublisher({
                 signerOpts: { met: false },
                 capabilitySnapshot: {
-                    getSnapshot: sinon.stub().callsFake(async () => (
-                        dark ? null : { validators: [{ pubkey: ME }] }))
+                    getSnapshot:       sinon.stub().callsFake(resolve),
+                    getWeightSnapshot: sinon.stub().callsFake(resolve),
                 }
             });
             await h.p.start();
@@ -118,11 +120,12 @@ const testCase5 = async function () {
 
 const testCase6 = async function () {
             let members = [ME, PEER1];
+            let resolve = async () => ({ validators: members.map(p => ({ pubkey: p })) });
             let h = makePublisher({
                 signerOpts: { met: false },
                 capabilitySnapshot: {
-                    getSnapshot: sinon.stub().callsFake(async () => (
-                        { validators: members.map(p => ({ pubkey: p })) }))
+                    getSnapshot:       sinon.stub().callsFake(resolve),
+                    getWeightSnapshot: sinon.stub().callsFake(resolve),
                 }
             });
             await h.p.start();
