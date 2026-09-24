@@ -13,10 +13,12 @@
 const express           = require('express');
 const helmet            = require('helmet');
 const cors              = require('cors');
+const axios             = require('axios');
 const jsonRouter        = require('express-json-rpc-router');
 const XChainHub         = require('../../../src/XChainHub');
+const { buildRpcController } = require('../../../src/api/rpc/index.js');
 const ValidatorIdentity = require('../../../src/validators/identity');
-const testDb            = require('../../helpers/testDb');
+const coins             = require('../../../src/coins');
 
 const DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.TEST_DB_PORT) || 3306;
@@ -24,219 +26,19 @@ const DB_NAME = process.env.TEST_DB_NAME || 'xchain_hub_test';
 const DB_USER = process.env.TEST_DB_USER || 'root';
 const DB_PASS = process.env.TEST_DB_PASS || '';
 
-const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
-function validateChain(chain) {
-    if (!ALLOWED_CHAINS.has(chain))
-        return { error: 'chain must be one of: BTC, LTC, DOGE' };
-    return null;
-}
+const COIN_CONSENSUS_HASHES = {};
+for (const network of coins.NETWORKS)
+    COIN_CONSENSUS_HASHES[network] = coins.consensusHashes(network);
 
-/**
- * Build the JSON-RPC controller for a hub instance.
- * Mirrors the controller in src/api.js.
- */
-function buildController(hub) {
+function rpcContext(hub, hubConfig) {
     return {
-        async ping() { return { status: 'success' }; },
-
-        // The two read methods an off-box prober asks every validator for. They were
-        // absent here while the controller claimed to mirror src/api.js, so a prober
-        // pointed at this cluster saw every node as unreachable and the agreement
-        // check it was written to exercise never ran at all.
-        // `health` keeps only the part a prober keys on (the status token); the
-        // production probe's oracle-staleness and consensus-input degradation need a
-        // running feed and are out of scope for a cluster fixture.
-        async health() {
-            let dbOk = false;
-            try { await hub.db.doQuery('SELECT 1', []); dbOk = true; }
-            catch (err) { dbOk = false; }
-            return { status: dbOk ? 'healthy' : 'degraded' };
-        },
-
-        // Byte-for-byte the src/api.js:1064 body: the engine is optional, and a
-        // throw is reported rather than propagated.
-        async getcheckpointstats() {
-            if (!hub.stateCheckpoints) return { error: 'checkpoint engine not active' };
-            try { return await hub.stateCheckpoints.getStats(); }
-            catch (err) { return { error: 'error fetching checkpoint stats' }; }
-        },
-
-        async getallconfigs() {
-            try { return { configs: await hub.getAllConfigs(), seq: await hub.getLastSeq() }; }
-            catch (err) { return { error: 'error getting configs' }; }
-        },
-
-        async updateconfig({ config }) {
-            try { await hub.addParametersFromJson(config); return { status: 'success' }; }
-            catch (err) { return { error: err.message || 'error updating config' }; }
-        },
-
-        async getoraclesubmissions() {
-            let oracle = hub.getOracle();
-            // Mirrors src/api.js: an absent oracle ROLE is {active:false}, never an error.
-            if (!oracle) return { active: false };
-            return { active: true, ...(await oracle.getSubmissionsInfo()) };
-        },
-
-        async getpricesnapshots({ limit }) {
-            try { return await hub.getPriceSnapshots(limit || 50); }
-            catch (err) { return { error: 'error fetching snapshots' }; }
-        },
-
-        async getprice({ coin_pair }) {
-            if (!coin_pair) return { error: 'coin_pair is required' };
-            try {
-                let price = await hub.getPrice(coin_pair);
-                return price || { error: 'no price data for ' + coin_pair };
-            } catch (err) { return { error: 'error fetching price' }; }
-        },
-
-        async registervalidator({ signing_pubkey, addr }) {
-            try { await hub.registerValidator(signing_pubkey, addr); return { status: 'success' }; }
-            catch (err) { return { error: err.message || 'error registering validator' }; }
-        },
-
-        async syncvalidators({ validators }) {
-            try { await hub.syncValidators(validators); return { status: 'success' }; }
-            catch (err) { return { error: err.message || 'error syncing validators' }; }
-        },
-
-        async getvalidators() {
-            try { return await hub.getValidators(); }
-            catch (err) { return { error: 'error fetching validators' }; }
-        },
-
-        async getvalidatorstatus({ signing_pubkey }) {
-            if (!signing_pubkey) return { error: 'signing_pubkey is required' };
-            try {
-                let status = await hub.getValidatorStatus(signing_pubkey);
-                return status || { error: 'validator not found' };
-            } catch (err) { return { error: 'error fetching validator status' }; }
-        },
-
-        async getfeequote({ action, chain }) {
-            if (!action) return { error: 'action is required' };
-            if (!chain) return { error: 'chain is required' };
-            let chainErr = validateChain(chain);
-            if (chainErr) return chainErr;
-            try { return await hub.getFeeQuote(action, chain); }
-            catch (err) { return { error: 'error calculating fee quote' }; }
-        },
-
-        async pushxcallreorg({ source_chain, from_action_index, to_action_index, retraction_generation }) {
-            if (!source_chain) return { error: 'source_chain is required' };
-            let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
-            if (from_action_index === undefined || from_action_index === null)
-                return { error: 'from_action_index is required' };
-            if (!hub.crossChainCalls) return { error: 'cross-chain call engine not active' };
-            try {
-                await hub.crossChainCalls.retractCallsForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
-                return { status: 'ok', source_chain, from_action_index };
-            } catch (err) { return { error: err.message || 'error retracting cross-chain calls' }; }
-        },
-
-        async pushdexreorg({ source_chain, from_action_index, to_action_index, retraction_generation }) {
-            if (!source_chain) return { error: 'source_chain is required' };
-            let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
-            if (from_action_index === undefined || from_action_index === null)
-                return { error: 'from_action_index is required' };
-            if (!hub.crossChainDex) return { error: 'cross-chain dex engine not active' };
-            try {
-                await hub.crossChainDex.retractMatchesForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
-                return { status: 'ok', source_chain, from_action_index };
-            } catch (err) { return { error: err.message || 'error retracting cross-chain matches' }; }
-        },
-
-        async propose({ parameter, current_value, proposed_value, rationale }) {
-            if (!parameter || !proposed_value) return { error: 'parameter and proposed_value are required' };
-            try { return await hub.propose(parameter, current_value || '', proposed_value, rationale); }
-            catch (err) { return { error: err.message || 'error creating proposal' }; }
-        },
-
-        async vote({ proposal_id, vote }) {
-            if (!proposal_id || !vote) return { error: 'proposal_id and vote are required' };
-            try { return await hub.vote(proposal_id, vote); }
-            catch (err) { return { error: err.message || 'error casting vote' }; }
-        },
-
-        async getproposals({ status }) {
-            try { return await hub.getProposals(status); }
-            catch (err) { return { error: 'error fetching proposals' }; }
-        },
-
-        async getproposal({ proposal_id }) {
-            if (!proposal_id) return { error: 'proposal_id is required' };
-            try {
-                let result = await hub.getProposal(proposal_id);
-                return result || { error: 'proposal not found' };
-            } catch (err) { return { error: 'error fetching proposal' }; }
-        },
-
-        async requestattestation({ source_chain, source_action_index, dest_chain }) {
-            if (!source_chain || !source_action_index || !dest_chain)
-                return { error: 'source_chain, source_action_index, and dest_chain are required' };
-            try { return await hub.requestAttestation(source_chain, source_action_index, dest_chain); }
-            catch (err) { return { error: err.message || 'error requesting attestation' }; }
-        },
-
-        async getattestations({ status, limit }) {
-            try {
-                let cc = hub.getCrossChain();
-                if (!cc) return { error: 'cross-chain engine not active' };
-                return await cc.getAttestations(status, limit);
-            } catch (err) { return { error: 'error fetching attestations' }; }
-        },
-
-        async getattestation({ source_chain, source_action_index }) {
-            if (!source_chain || !source_action_index)
-                return { error: 'source_chain and source_action_index are required' };
-            try {
-                let cc = hub.getCrossChain();
-                if (!cc) return { error: 'cross-chain engine not active' };
-                let att = await cc.getAttestation(source_chain, source_action_index);
-                return att || { error: 'attestation not found' };
-            } catch (err) { return { error: 'error fetching attestation' }; }
-        },
-
-        async reportreorg({ chain, reorg_height, timestamp, old_hash, new_hash }) {
-            if (!chain || !reorg_height || !timestamp)
-                return { error: 'chain, reorg_height, and timestamp are required' };
-            try {
-                await hub.reportReorg(chain, parseInt(reorg_height), parseInt(timestamp),
-                    old_hash ? String(old_hash) : old_hash, new_hash ? String(new_hash) : new_hash);
-                return { status: 'success' };
-            } catch (err) { return { error: err.message || 'error reporting reorg' }; }
-        },
-
-        async getreorghistory({ limit }) {
-            try { return await hub.getReorgHistory(limit); }
-            catch (err) { return { error: 'error fetching reorg history' }; }
-        },
-
-        async initiateswap({ source_chain, source_action_index, dest_chain, dest_action_index }) {
-            if (!source_chain || !source_action_index || !dest_chain)
-                return { error: 'source_chain, source_action_index, and dest_chain are required' };
-            try {
-                await hub.initiateSwap(source_chain, parseInt(source_action_index), dest_chain, dest_action_index ? parseInt(dest_action_index) : null);
-                return { status: 'success' };
-            } catch (err) { return { error: err.message || 'error initiating swap' }; }
-        },
-
-        async getswap({ source_chain, source_action_index }) {
-            if (!source_chain || !source_action_index)
-                return { error: 'source_chain and source_action_index are required' };
-            try {
-                let swap = await hub.getSwap(source_chain, parseInt(source_action_index));
-                return swap || { error: 'swap not found' };
-            } catch (err) { return { error: 'error fetching swap' }; }
-        },
-
-        async getswaps({ status, limit }) {
-            try { return await hub.getSwaps(status, limit); }
-            catch (err) { return { error: 'error fetching swaps' }; }
-        }
+        hub,
+        hubConfig,
+        p2pConfig: hubConfig,
+        axios,
+        DB_PROBE_TIMEOUT_MS: 2000,
+        configFetchCounters: { served: 0, errors: 0 },
+        COIN_CONSENSUS_HASHES
     };
 }
 
@@ -275,7 +77,7 @@ function createCluster(nodeCount, overrides) {
     // followers likewise verify a proposed source action via
     // getactionconfirmations before PREPARing; `actions` overrides the
     // default confirmed response per action_index.
-    let stubIndexer = { tip: 800100, network: 'regtest', hashes: {}, actions: {} };
+    const stubIndexer = { tip: 800100, network: 'regtest', hashes: {}, actions: {} };
     let stubIndexerServer = null;
     let stubIndexerUrl = '';
     function stubHashFor(height) {
@@ -283,7 +85,7 @@ function createCluster(nodeCount, overrides) {
     }
 
     // Generate deterministic keypairs for each node
-    let keypairs = [];
+    const keypairs = [];
     for (let i = 0; i < nodeCount; i++) {
         keypairs.push(ValidatorIdentity.generate());
     }
@@ -303,12 +105,12 @@ function createCluster(nodeCount, overrides) {
             }
 
             // Phase 0: start the shared stub indexer (see stubIndexer above).
-            let stubApp = express();
+            const stubApp = express();
             stubApp.use(express.json());
             stubApp.post('/', (req, res) => {
-                let { method, params, id } = req.body || {};
+                const { method, params, id } = req.body || {};
                 if (method === 'getblockhashes') {
-                    let height = params && params.block_index != null ? Number(params.block_index) : stubIndexer.tip;
+                    const height = params && params.block_index != null ? Number(params.block_index) : stubIndexer.tip;
                     return res.json({ jsonrpc: '2.0', id, result: {
                         block_index: height,
                         block_hash:  stubIndexer.hashes[height] || stubHashFor(height),
@@ -316,7 +118,7 @@ function createCluster(nodeCount, overrides) {
                     } });
                 }
                 if (method === 'getactionconfirmations') {
-                    let idx = params && params.action_index != null ? Number(params.action_index) : 0;
+                    const idx = params && params.action_index != null ? Number(params.action_index) : 0;
                     return res.json({ jsonrpc: '2.0', id,
                         result: stubIndexer.actions[idx] || { exists: true, confirmations: 100 } });
                 }
@@ -331,14 +133,14 @@ function createCluster(nodeCount, overrides) {
 
             // Pre-allocate unique P2P ports for all nodes
             // (P2P_PORT: 0 is treated as falsy by PeerManager's || operator)
-            let p2pPorts = [];
+            const p2pPorts = [];
             for (let i = 0; i < nodeCount; i++) {
                 p2pPorts.push(nextPort());
             }
 
             // Phase 1: Create and start hubs with unique P2P ports
             for (let i = 0; i < nodeCount; i++) {
-                let baseConfig = {
+                const baseConfig = {
                     P2P_PORT:                 p2pPorts[i],
                     P2P_HOST:                 '127.0.0.1',
                     P2P_VALIDATOR_ADDR:       'ws://validator-' + i + ':' + p2pPorts[i],
@@ -368,13 +170,14 @@ function createCluster(nodeCount, overrides) {
                     ...(overrides['node' + i] || {})
                 };
 
-                let p2pConfig = baseConfig;
+                const p2pConfig = baseConfig;
 
-                let hub = new XChainHub(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS, p2pConfig);
+                const hub = new XChainHub(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS, p2pConfig);
                 await hub.start();
 
                 nodes.push({
                     hub:      hub,
+                    config:   baseConfig,
                     server:   null,
                     apiPort:  null,
                     p2pPort:  p2pPorts[i],
@@ -392,7 +195,7 @@ function createCluster(nodeCount, overrides) {
             // Phase 3: For multi-node, connect peers manually
             if (nodeCount > 1) {
                 for (let i = 0; i < nodeCount; i++) {
-                    let pm = nodes[i].hub.getPeerManager();
+                    const pm = nodes[i].hub.getPeerManager();
                     if (!pm) continue;
                     for (let j = 0; j < nodeCount; j++) {
                         if (i === j) continue;
@@ -405,12 +208,13 @@ function createCluster(nodeCount, overrides) {
                 // poll times out we still proceed, preserving the prior
                 // non-fatal behavior (WebSocket.OPEN === 1).
                 await (async () => {
-                    let elapsed = 0, delay = 25, timeout = 3000;
-                    let meshReady = () => nodes.every(n => {
-                        let pm = n.hub.getPeerManager();
+                    let elapsed = 0, delay = 25;
+                    const timeout = 3000;
+                    const meshReady = () => nodes.every(n => {
+                        const pm = n.hub.getPeerManager();
                         if (!pm || !pm.peers) return false;
                         let open = 0;
-                        for (let [, peer] of pm.peers)
+                        for (const [, peer] of pm.peers)
                             if (peer.ws && peer.ws.readyState === 1) open++;
                         return open >= (nodeCount - 1);
                     });
@@ -444,14 +248,16 @@ function createCluster(nodeCount, overrides) {
 
             // Phase 6: Start Express API servers on random ports
             for (let i = 0; i < nodeCount; i++) {
-                let app = express();
+                const app = express();
                 app.use(helmet());
                 app.use(express.json());
                 app.use(cors());
-                app.use(jsonRouter({ methods: buildController(nodes[i].hub) }));
+                app.use(jsonRouter({
+                    methods: buildRpcController(rpcContext(nodes[i].hub, nodes[i].config))
+                }));
 
                 await new Promise((resolve) => {
-                    let server = app.listen(0, '127.0.0.1', () => {
+                    const server = app.listen(0, '127.0.0.1', () => {
                         nodes[i].server  = server;
                         nodes[i].apiPort = server.address().port;
                         resolve();
@@ -475,7 +281,7 @@ function createCluster(nodeCount, overrides) {
                 try { await new Promise(r => { stubIndexerServer.close(r); setTimeout(r, 1000); }); } catch (e) { /* ignore */ }
                 stubIndexerServer = null;
             }
-            for (let node of nodes) {
+            for (const node of nodes) {
                 try {
                     if (node.server) {
                         await new Promise(r => { node.server.close(r); setTimeout(r, 2000); });
@@ -548,7 +354,7 @@ function createCluster(nodeCount, overrides) {
          * Trigger an oracle round on a specific node (bypasses auto-timer).
          */
         async triggerOracleRound(index) {
-            let hub = nodes[index] ? nodes[index].hub : null;
+            const hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.oracle) throw new Error('No oracle on node ' + index);
             await hub.oracle.executeRound();
         },
@@ -557,7 +363,7 @@ function createCluster(nodeCount, overrides) {
          * Trigger oracle rounds on all nodes simultaneously.
          */
         async triggerAllOracleRounds() {
-            let promises = [];
+            const promises = [];
             for (let i = 0; i < nodes.length; i++) {
                 if (nodes[i].hub && nodes[i].hub.oracle) {
                     promises.push(nodes[i].hub.oracle.executeRound());
@@ -570,7 +376,7 @@ function createCluster(nodeCount, overrides) {
          * Manually trigger oracle finalization on a node.
          */
         async triggerOracleFinalization(index, round) {
-            let hub = nodes[index] ? nodes[index].hub : null;
+            const hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.oracleConsensus) throw new Error('No oracle consensus on node ' + index);
             await hub.oracleConsensus.finalizeRound(round);
         },
@@ -579,7 +385,7 @@ function createCluster(nodeCount, overrides) {
          * Force governance tally check on a node.
          */
         async triggerGovernanceTally(index) {
-            let hub = nodes[index] ? nodes[index].hub : null;
+            const hub = nodes[index] ? nodes[index].hub : null;
             if (!hub || !hub.governance) throw new Error('No governance on node ' + index);
             await hub.governance.checkExpiredProposals();
         },

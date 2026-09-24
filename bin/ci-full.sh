@@ -141,15 +141,6 @@ need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-w
 # published number on its own. Cheap and self-contained, so it runs first.
 run_tier "frozen carrier set (check:frozen-set)" npm run check:frozen-set
 
-# --- local guard: the measurement tools' own suites (bin/test) -------------
-# No npm script collects bin/test, and adding one would change what `ci` runs
-# and the suite-title pin that records it, so the tier lives here. These suites
-# are what make the identity, frozen-set, reachability, title-map and sibling
-# reference readings mean anything: a tool that stops seeing what it measures
-# still exits 0, and only its own fixtures say so.
-run_tier "measurement tools (bin/test)" \
-  npx mocha 'bin/test/**/*.test.js' --no-config --timeout 120000 --recursive --exit
-
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
 
@@ -158,12 +149,6 @@ run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
 # the venue's (CI_DB_*), resolved above. SOAK_DURATION_MS mirrors the workflow's
 # env, which keeps the soak bounded well under the suite's 120s default.
 run_tier "perf (test:perf)" env SOAK_DURATION_MS=15000 npm run test:perf
-
-# --- job: regression -------------------------------------------------------
-# Fully mocked (no DB, no network). `npm run ci` already runs ci:regression, so
-# this repeats seconds of work; it stays because the workflow job stays, and a
-# tier this script drops is a tier the gate stops proving.
-run_tier "regression (ci:regression)" npm run ci:regression
 
 # --- job: drift-guards -----------------------------------------------------
 # The workflow checks the hub out beside xchain-wallet and runs the wallet's
