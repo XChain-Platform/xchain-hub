@@ -110,6 +110,19 @@ module.exports = {
             { hub: { network: network == null ? this.network : network } },
             first.round_number, first.block_timestamp,
             pairs, first.reference_block, admissionHeight.rowAdmitBlocks(first));
+    },
+
+    async backfillCheckpointPriceRows(batchSeq, checkpointIds, priceIds, tombstoneIds){
+        for(const checkpoint of (checkpointIds || []))
+            await this.db.updateStateCheckpointArchiveBatchSeq(
+                batchSeq, checkpoint.chain, checkpoint.network, checkpoint.checkpoint_seq);
+        for(const price of (priceIds || []))
+            await this.db.updatePriceSnapshotArchiveBatchSeq(
+                batchSeq, price.status, price.batch_block_time, price.proof_sha,
+                price.round_number, price.coin_pair);
+        for(const tombstone of (tombstoneIds || []))
+            await this.db.updatePriceTombstoneArchiveBatchSeq(
+                batchSeq, tombstone.round_number, tombstone.coin_pair);
     }
 
 };
