@@ -13,10 +13,17 @@
 const express           = require('express');
 const helmet            = require('helmet');
 const cors              = require('cors');
+const rateLimit         = require('express-rate-limit');
+const http              = require('http');
+const WebSocket         = require('ws');
 const axios             = require('axios');
-const jsonRouter        = require('express-json-rpc-router');
+const geoip             = require('geoip-lite');
 const XChainHub         = require('../../../src/XChainHub');
-const { buildRpcController } = require('../../../src/api/rpc/index.js');
+const { createApp }     = require('../../../src/api/server.js');
+const { getLogger }     = require('../../../src/observability');
+const { parseCorsOrigin } = require('../../../src/api/cors_origin.js');
+const { bigIntReplacer } = require('../../../src/lib/bigint_replacer.js');
+const { parseExemptLocal } = require('../../../src/api/rate_limit_policy.js');
 const ValidatorIdentity = require('../../../src/validators/identity');
 const coins             = require('../../../src/coins');
 
@@ -30,15 +37,47 @@ const COIN_CONSENSUS_HASHES = {};
 for (const network of coins.NETWORKS)
     COIN_CONSENSUS_HASHES[network] = coins.consensusHashes(network);
 
-function rpcContext(hub, hubConfig) {
+const WRITE_METHODS = new Set();
+const REORG_WRITE_METHODS = new Set();
+const SENSITIVE_READ_METHODS = new Set();
+
+function buildApiContext(hub, p2pConfig) {
+    const hubConfig = { HUB_RATE_LIMIT_EXEMPT_LOCAL: 'true', HUB_NETWORK: 'regtest' };
     return {
         hub,
+        logger: getLogger(),
         hubConfig,
-        p2pConfig: hubConfig,
-        axios,
-        DB_PROBE_TIMEOUT_MS: 2000,
+        p2pConfig,
+        bigIntReplacer,
+        COIN_CONSENSUS_HASHES,
         configFetchCounters: { served: 0, errors: 0 },
-        COIN_CONSENSUS_HASHES
+        DB_PROBE_TIMEOUT_MS: 2000,
+        HUB_NETWORK: 'regtest',
+        HUB_PORT: 0,
+        HUB_HOST: '127.0.0.1',
+        HUB_DB_KEEPALIVE_INTERVAL: 30000,
+        HUB_API_KEY: '',
+        HUB_REORG_API_KEY: '',
+        HUB_CONFIG_SECRETS_API_KEY: '',
+        SENSITIVE_READ_AUTH: true,
+        WRITE_METHODS,
+        REORG_WRITE_METHODS,
+        SENSITIVE_READ_METHODS,
+        CORS_ORIGIN: parseCorsOrigin(''),
+        HUB_RATE_LIMIT_RPM: 100,
+        HUB_RATE_LIMIT_EXEMPT_LOCAL: parseExemptLocal('true'),
+        TELEMETRY_ENABLED: false,
+        TELEMETRY_RETENTION_DAYS: 90,
+        TELEMETRY_IP_SALT: '',
+        TELEMETRY_ADMIN_KEY: '',
+        express,
+        helmet,
+        cors,
+        rateLimit,
+        http,
+        WebSocket,
+        axios,
+        geoip
     };
 }
 
@@ -248,13 +287,7 @@ function createCluster(nodeCount, overrides) {
 
             // Phase 6: Start Express API servers on random ports
             for (let i = 0; i < nodeCount; i++) {
-                const app = express();
-                app.use(helmet());
-                app.use(express.json());
-                app.use(cors());
-                app.use(jsonRouter({
-                    methods: buildRpcController(rpcContext(nodes[i].hub, nodes[i].config))
-                }));
+                const { app } = createApp(buildApiContext(nodes[i].hub, nodes[i].hub.p2pConfig || null));
 
                 await new Promise((resolve) => {
                     const server = app.listen(0, '127.0.0.1', () => {
@@ -395,4 +428,4 @@ function createCluster(nodeCount, overrides) {
     };
 }
 
-module.exports = { createCluster };
+module.exports = { createCluster, buildApiContext };
