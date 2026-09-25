@@ -130,7 +130,8 @@ module.exports = {
         return validSigners.length >= quorum;
     },
 
-    async backfillBatch(batchSeq, matchIds, txid, callIds, rewardIds){
+    async backfillBatch(batchSeq, matchIds, txid, callIds, rewardIds,
+                        bridgeIds, policyIds, checkpointIds, priceIds, tombstoneIds){
         // Every stamp is guarded by the archive-eligibility predicate the
         // pending selectors use (batch_seq IS NULL OR archived_status <> status):
         // a row that is already fully archived can never be re-stamped onto a
@@ -175,6 +176,8 @@ module.exports = {
             else
                 await this.db.updateValidatorRewardArchiveBatchSeq(batchSeq, rewardType, roundNumber, pubkey);
         }
+        await this.backfillBridgePolicyRows(batchSeq, txid, bridgeIds, policyIds);
+        await this.backfillCheckpointPriceRows(batchSeq, checkpointIds, priceIds, tombstoneIds);
     },
 
     async getNextBatchSeq(){

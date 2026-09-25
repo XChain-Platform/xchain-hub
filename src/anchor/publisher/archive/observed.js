@@ -74,13 +74,33 @@ module.exports = {
         if(!byProposer){ byProposer = new Map(); this._observedArchiveContents.set(batchSeq, byProposer); }
         let key = String(pubkey).toLowerCase();
         let entry = byProposer.get(key);
-        if(!entry){ entry = { matches: new Set(), calls: new Set(), rewards: new Set() }; byProposer.set(key, entry); }
+        if(!entry){
+            entry = {
+                matches: new Set(), calls: new Set(), rewards: new Set(),
+                bridges: new Set(), policies: new Set(), checkpoints: new Set(),
+                prices: new Set(), tombstones: new Set()
+            };
+            byProposer.set(key, entry);
+        }
         for(let m of (archive.matches || []))
             if(m && m.match_id != null) entry.matches.add(String(m.match_id));
         for(let c of (archive.calls || []))
             if(c && c.call_id != null) entry.calls.add(String(c.call_id) + '|' + String(c.phase));
         for(let r of (archive.rewards || []))
             if(r && r.reward_type != null) entry.rewards.add(canonicalForms.archiveRewardKey(r));
+        for(const b of (archive.bridge_transfers || []))
+            if(b && b.transfer_id != null) entry.bridges.add(String(b.transfer_id));
+        for(const p of (archive.policy_snapshots || []))
+            if(p && p.snapshot_id != null) entry.policies.add(String(p.snapshot_id));
+        for(const c of (archive.state_checkpoints || []))
+            if(c && c.chain != null && c.network != null && c.checkpoint_seq != null)
+                entry.checkpoints.add([c.chain, c.network, c.checkpoint_seq].map(String).join('|'));
+        for(const p of (archive.price_snapshots || []))
+            if(p && p.round_number != null && p.coin_pair != null)
+                entry.prices.add([p.round_number, p.coin_pair].map(String).join('|'));
+        for(const t of (archive.price_tombstones || []))
+            if(t && t.round_number != null && t.coin_pair != null)
+                entry.tombstones.add([t.round_number, t.coin_pair].map(String).join('|'));
         // Bounded on its own terms as well as through the leader map's lockstep evict,
         // so a body recorded for a seq whose leader entry is already gone cannot pin
         // memory.
@@ -98,7 +118,8 @@ module.exports = {
     // snapshot_block signing set never decompresses one, and decompressing on its behalf
     // would hand every p2p peer a per-message gzip and CPU amplifier for the sake of
     // local bookkeeping.
-    finalizedOutsideObservedArchive(batchSeq, sender, matches, calls, rewards){
+    finalizedOutsideObservedArchive(batchSeq, sender, matches, calls, rewards,
+                                    bridges, policies, checkpoints, prices, tombstones){
         let byProposer = this._observedArchiveContents.get(Number(batchSeq));
         let entry = byProposer && byProposer.get(String(sender || '').toLowerCase());
         if(!entry) return null;
@@ -111,6 +132,21 @@ module.exports = {
         for(let r of (rewards || []))
             if(r && r.reward_type != null && !entry.rewards.has(canonicalForms.archiveRewardKey(r)))
                 return 'reward ' + String(r.reward_type) + '/#' + String(r.round_number);
+        for(const b of (bridges || []))
+            if(b && b.transfer_id != null && !entry.bridges.has(String(b.transfer_id)))
+                return 'bridge ' + String(b.transfer_id).substring(0, 16) + '...';
+        for(const p of (policies || []))
+            if(p && p.snapshot_id != null && !entry.policies.has(String(p.snapshot_id)))
+                return 'policy ' + String(p.snapshot_id).substring(0, 16) + '...';
+        for(const c of (checkpoints || []))
+            if(c && !entry.checkpoints.has([c.chain, c.network, c.checkpoint_seq].map(String).join('|')))
+                return 'checkpoint ' + String(c.chain) + '/' + String(c.checkpoint_seq);
+        for(const p of (prices || []))
+            if(p && !entry.prices.has([p.round_number, p.coin_pair].map(String).join('|')))
+                return 'price ' + String(p.round_number) + '/' + String(p.coin_pair);
+        for(const t of (tombstones || []))
+            if(t && !entry.tombstones.has([t.round_number, t.coin_pair].map(String).join('|')))
+                return 'tombstone ' + String(t.round_number) + '/' + String(t.coin_pair);
         return null;
     },
 

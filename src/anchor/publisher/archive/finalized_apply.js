@@ -21,6 +21,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
@@ -31,9 +32,10 @@ module.exports = {
     // announced statuses + txid, then mirror the leader's reward. Shared by the
     // immediate-receipt path and the deferred drain, so an announcement that arrives at
     // 0 confirmations lands EXACTLY the same rows as one that arrives already buried.
-    async applyFinalized(d, sender, calls, rewards){
+    async applyFinalized(d, sender, calls, rewards, quorumRows){
+        const q = quorumRows || this.finalizedQuorumRows(d);
         await this.backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                                  calls, rewards);
+                                  calls, rewards, q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
         // Mirror the leader's archive-publish reward (sender is signature-
         // verified) so all hubs hold the same reward rows (same rail as the
         // BUNDLE_DONE mirror). Only a COMPLETE publish earns it (the leader skips
@@ -95,7 +97,11 @@ module.exports = {
     // the announcement's full identity INCLUDING the txid, so two competing txids for
     // one batch are tracked separately and whichever actually confirms wins. Queuing
     // grants no authority: the entry is re-verified in full before it can stamp.
-    deferFinalized(d, sender, calls, rewards, reason){
+    deferFinalized(d, sender, calls, rewards, quorumRows, reason){
+        if(reason === undefined){
+            reason = quorumRows;
+            quorumRows = this.finalizedQuorumRows(d);
+        }
         let key = [Number(d.batch_seq), String(d.txid), String(sender)].join('|');
         if(this._deferredFinalized.has(key)) return;
         // Bounded: drop the OLDEST entry rather than the new one (Map preserves
@@ -106,7 +112,10 @@ module.exports = {
             logger.warn('StateAnchorPublisher: deferred FINALIZED queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
-        this._deferredFinalized.set(key, { d: d, sender: sender, calls: calls, rewards: rewards, at: Date.now() });
+        this._deferredFinalized.set(key, {
+            d: d, sender: sender, calls: calls, rewards: rewards,
+            quorumRows: quorumRows, at: Date.now()
+        });
         logger.info('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head not yet buried (' +
                     reason + '); seq staged under the __partial__ sentinel, queued for re-verification (' +
                     this._deferredFinalized.size + ' pending)');
@@ -134,12 +143,13 @@ module.exports = {
                                                                    { rejectVersions: [0, 2] });
                 if(v === 'verified'){
                     this._deferredFinalized.delete(key);
-                    if(!(await this.verifyFinalizedAgainstLocal(d.matches, entry.calls, entry.rewards))){
+                    if(!(await this.verifyFinalizedAgainstLocal(
+                        d.matches, entry.calls, entry.rewards, entry.quorumRows))){
                         logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
                                      'announced content no longer matches our DB; dropping the back-fill');
                         continue;
                     }
-                    await this.applyFinalized(d, entry.sender, entry.calls, entry.rewards);
+                    await this.applyFinalized(d, entry.sender, entry.calls, entry.rewards, entry.quorumRows);
                     logger.info('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE; stamped');
                 } else if(String(v).startsWith('rejected')){
                     this._deferredFinalized.delete(key);
@@ -160,7 +170,7 @@ module.exports = {
     // late joiner has no copy of earlier history. Announced rewards must at
     // least be anchor-rail rows (same bar verifyArchiveAgainstLocal sets);
     // their UPDATE only ever stamps batch_seq on rows we already derived.
-    async verifyFinalizedAgainstLocal(matches, calls, rewards){
+    async verifyFinalizedAgainstLocal(matches, calls, rewards, quorumRows){
         for(let m of (matches || [])){
             if(!m || m.match_id == null) return false;
             if(m.status === '__partial__') continue;
@@ -187,6 +197,29 @@ module.exports = {
                 return false;
             }
         }
+        const q = quorumRows || { bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [] };
+        for(const b of q.bridges){
+            if(!b || b.transfer_id == null || b.status == null) return false;
+            if(b.status === '__partial__') continue;
+            const rows = await this.db.getBridgeTransferByTransferId(b.transfer_id);
+            if(rows && rows.length > 0 && String(rows[0].status) !== String(b.status)) return false;
+        }
+        for(const p of q.policies) if(!p || p.snapshot_id == null) return false;
+        for(const c of q.checkpoints)
+            if(!c || c.chain == null || c.network == null || c.checkpoint_seq == null) return false;
+        for(const p of q.prices){
+            if(!p || p.round_number == null || p.coin_pair == null || p.status == null ||
+               p.batch_block_time == null || p.proof_sha == null) return false;
+            if(p.status === '__partial__') continue;
+            const rows = await this.db.findPriceSnapshotsForRound(Number(p.round_number));
+            const held = (rows || []).find(r => String(r.coin_pair) === String(p.coin_pair));
+            const proofSha = held && crypto.createHash('sha256').update(String(held.consensus_proof)).digest('hex');
+            if(held && (String(held.status) !== String(p.status) ||
+                        Number(held.batch_block_time) !== Number(p.batch_block_time) ||
+                        proofSha !== String(p.proof_sha))) return false;
+        }
+        for(const t of q.tombstones)
+            if(!t || t.round_number == null || t.coin_pair == null) return false;
         return true;
     },
 
