@@ -90,7 +90,8 @@ describe('archive quorum-table selection', function () {
         const rows = pub.archiveRows([], [], [{ reward_type: 'unresolved' }], {
             tombstones: [{ round_number: 9, coin_pair: 'BTC/USD' }]
         });
-        expect(pub.archiveEmptyAfterResolution(rows, [])).to.equal(false);
+        rows.length = 0;
+        expect(pub.archiveEmptyAfterResolution(rows, [], [])).to.equal(false);
         expect(pub.archiveRowCount(rows)).to.equal(2);
     });
 
