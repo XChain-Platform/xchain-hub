@@ -23,7 +23,28 @@
 
 const crypto = require('crypto');
 const nodeUtil = require('node:util');
+const jsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
+const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
+const { installMiddleware } = require('./middleware');
+const { buildRpcController } = require('./rpc');
+const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
+const { mountTelemetryRoutes } = require('./rest/telemetry');
+const { mountRegistryRoutes } = require('./rest/registry');
+
+function createApp(ctx) {
+    const { express, hubConfig } = ctx;
+    const app = express();
+    const observability = installMiddleware(app, ctx);
+    const jsonRpcController = buildRpcController(ctx);
+    mountSnapshotRoutes(app, ctx);
+    mountTelemetryRoutes(app, ctx);
+    mountRegistryRoutes(app, ctx);
+    app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));
+    app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
+    app.use(jsonRouter({ methods: jsonRpcController }));
+    return { app, observability };
+}
 
 function startServer(app, ctx, observability) {
     const { hub, http, WebSocket, logger, HUB_PORT, HUB_HOST } = ctx;
@@ -221,4 +242,4 @@ async function releaseResources({ hub, server, wss, observability }) {
     await observability.shutdown();
 }
 
-module.exports = { startServer };
+module.exports = { createApp, startServer };
