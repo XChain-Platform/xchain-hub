@@ -120,6 +120,7 @@ const archiveRoundMethods          = require('./publisher/archive/round.js');
 const archiveSelectionMethods      = require('./publisher/archive/selection.js');
 const archiveBuildMethods          = require('./publisher/archive/build.js');
 const archiveBridgePolicyMethods   = require('./publisher/archive/bridge_policy_rows.js');
+const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy_verify.js');
 const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price_rows.js');
 const bundleDoneMethods            = require('./publisher/bundle_done.js');
 const lookupMethods                = require('./publisher/lookups.js');
@@ -274,6 +275,7 @@ const PART_METHODS = [
     archiveSelectionMethods,
     archiveBuildMethods,
     archiveBridgePolicyMethods,
+    archiveBridgeVerifyMethods,
     archiveCheckpointPriceMethods,
     bundleDoneMethods,
     lookupMethods,
