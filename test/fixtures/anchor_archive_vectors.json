@@ -269,5 +269,176 @@
     "json": "{\"v\":1,\"network\":\"regtest\",\"batch_seq\":7,\"matches\":[{\"id\":1,\"match_id\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"snapshot_block\":100,\"network\":\"regtest\",\"a_chain\":\"BTC\",\"a_action_index\":1,\"a_kind\":\"swap\",\"a_tick\":\"AAA\",\"a_amount\":\"1\",\"a_filled_before\":\"0\",\"a_ownership\":0,\"a_payout_addr\":\"addrA\",\"b_chain\":\"DOGE\",\"b_action_index\":2,\"b_kind\":\"swap\",\"b_tick\":\"BBB\",\"b_amount\":\"2\",\"b_filled_before\":\"0\",\"b_ownership\":0,\"b_payout_addr\":\"addrB\",\"effective_time\":10,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"calls\":[{\"id\":3,\"call_id\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"phase\":\"dispatch\",\"snapshot_block\":100,\"network\":\"regtest\",\"source_chain\":\"BTC\",\"source_action_index\":4,\"source_contract_index\":0,\"target_chain\":\"DOGE\",\"target_contract_index\":1,\"method\":\"ping\",\"params_json\":\"[]\",\"gas_limit\":1000,\"cross_hops\":0,\"effective_time\":11,\"finalizing_view\":0,\"result_status\":null,\"return_payload_b64\":null,\"validator_signatures\":\"[]\",\"status\":\"settled\"}],\"rewards\":[{\"validator_pubkey\":\"abababababababababababababababababababababababababababababababab\",\"source\":\"src_abababababab\",\"round_number\":5,\"reward_type\":\"anchor_archive\",\"amount\":\"10.00000000\",\"block_index\":90}],\"bridge_transfers\":[{\"id\":1,\"transfer_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshot_block\":100,\"network\":\"regtest\",\"src_chain\":\"BTC\",\"src_action_index\":1,\"src_address\":\"srcaddr1\",\"dest_chain\":\"DOGE\",\"dest_address\":\"dstaddr1\",\"tick\":\"XCP\",\"decimals\":8,\"amount\":\"150000000\",\"effective_time\":21,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"retracted\"},{\"id\":2,\"transfer_id\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"snapshot_block\":100,\"network\":\"regtest\",\"src_chain\":\"BTC\",\"src_action_index\":2,\"src_address\":\"srcaddr2\",\"dest_chain\":\"DOGE\",\"dest_address\":\"dstaddr2\",\"tick\":\"XCP\",\"decimals\":8,\"amount\":\"150000000\",\"effective_time\":22,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"finalized\"}],\"policy_snapshots\":[{\"id\":4,\"snapshot_id\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"snapshot_block\":100,\"network\":\"regtest\",\"origin_chain\":\"BTC\",\"tick\":\"XCP\",\"policy_seq\":3,\"origin_block\":95,\"policy_hash\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"allow_list\":\"[\\\"addr1\\\",\\\"addr2\\\"]\",\"block_list\":\"[\\\"addr9\\\"]\",\"sleeping\":0,\"effective_time\":30,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null,\"finalizing_view\":0,\"validator_signatures\":\"[]\",\"status\":\"finalized\"}],\"capability_snapshots\":[{\"snapshot_block\":90,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"amount\":\"3\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"amount\":\"2\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"cross_chain\",\"signing_pubkey\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"amount\":\"1\",\"source\":\"\"},{\"snapshot_block\":100,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"amount\":\"1\",\"source\":\"\"}]}",
     "crc32": "b58b1d68",
     "count": 1
+  },
+  "C": {
+    "inputs": {
+      "network": "regtest",
+      "batch_seq": 8,
+      "wrapper_snapshot_block": null,
+      "matches": [],
+      "calls": [],
+      "rewards": [],
+      "capability_sets": {
+        "oracle_publish@70": [
+          {
+            "pubkey": "7777777777777777777777777777777777777777777777777777777777777777",
+            "amount": "2",
+            "source": ""
+          }
+        ],
+        "oracle_publish@80": [
+          {
+            "pubkey": "8888888888888888888888888888888888888888888888888888888888888888",
+            "amount": "3",
+            "source": ""
+          }
+        ]
+      },
+      "checkpoints": [
+        {
+          "id": 2,
+          "chain": "LTC",
+          "network": "regtest",
+          "block_index": 700,
+          "block_hash": "7171717171717171717171717171717171717171717171717171717171717171",
+          "ledger_hash": "7272727272727272727272727272727272727272727272727272727272727272",
+          "actions_hash": "7373737373737373737373737373737373737373737373737373737373737373",
+          "contract_hash": "7474747474747474747474747474747474747474747474747474747474747474",
+          "checkpoint_seq": 2,
+          "snapshot_block": 70,
+          "state_root": null,
+          "state_root_version": null,
+          "block_merkle_root": null,
+          "block_merkle_version": null,
+          "validator_signatures": "[]"
+        },
+        {
+          "id": 1,
+          "chain": "BTC",
+          "network": "regtest",
+          "block_index": 800,
+          "block_hash": "8181818181818181818181818181818181818181818181818181818181818181",
+          "ledger_hash": "8282828282828282828282828282828282828282828282828282828282828282",
+          "actions_hash": "8383838383838383838383838383838383838383838383838383838383838383",
+          "contract_hash": "8484848484848484848484848484848484848484848484848484848484848484",
+          "checkpoint_seq": 1,
+          "snapshot_block": 80,
+          "state_root": "8585858585858585858585858585858585858585858585858585858585858585",
+          "state_root_version": 1,
+          "block_merkle_root": "8686868686868686868686868686868686868686868686868686868686868686",
+          "block_merkle_version": 1,
+          "validator_signatures": "[]"
+        }
+      ]
+    },
+    "json": "{\"v\":1,\"network\":\"regtest\",\"batch_seq\":8,\"matches\":[],\"calls\":[],\"rewards\":[],\"state_checkpoints\":[{\"id\":1,\"chain\":\"BTC\",\"network\":\"regtest\",\"block_index\":800,\"block_hash\":\"8181818181818181818181818181818181818181818181818181818181818181\",\"ledger_hash\":\"8282828282828282828282828282828282828282828282828282828282828282\",\"actions_hash\":\"8383838383838383838383838383838383838383838383838383838383838383\",\"contract_hash\":\"8484848484848484848484848484848484848484848484848484848484848484\",\"checkpoint_seq\":1,\"snapshot_block\":80,\"state_root\":\"8585858585858585858585858585858585858585858585858585858585858585\",\"state_root_version\":1,\"block_merkle_root\":\"8686868686868686868686868686868686868686868686868686868686868686\",\"block_merkle_version\":1,\"validator_signatures\":\"[]\"},{\"id\":2,\"chain\":\"LTC\",\"network\":\"regtest\",\"block_index\":700,\"block_hash\":\"7171717171717171717171717171717171717171717171717171717171717171\",\"ledger_hash\":\"7272727272727272727272727272727272727272727272727272727272727272\",\"actions_hash\":\"7373737373737373737373737373737373737373737373737373737373737373\",\"contract_hash\":\"7474747474747474747474747474747474747474747474747474747474747474\",\"checkpoint_seq\":2,\"snapshot_block\":70,\"state_root\":null,\"state_root_version\":null,\"block_merkle_root\":null,\"block_merkle_version\":null,\"validator_signatures\":\"[]\"}],\"capability_snapshots\":[{\"snapshot_block\":70,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"amount\":\"2\",\"source\":\"\"},{\"snapshot_block\":80,\"capability\":\"oracle_publish\",\"signing_pubkey\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"amount\":\"3\",\"source\":\"\"}]}",
+    "crc32": "988c27d6",
+    "count": 0
+  },
+  "P": {
+    "inputs": {
+      "network": "regtest",
+      "batch_seq": 9,
+      "wrapper_snapshot_block": null,
+      "matches": [],
+      "calls": [],
+      "rewards": [],
+      "capability_sets": {
+        "price@111": [
+          {
+            "pubkey": "9999999999999999999999999999999999999999999999999999999999999999",
+            "amount": "5",
+            "source": ""
+          }
+        ]
+      },
+      "prices": [
+        {
+          "id": 3,
+          "round_number": 12,
+          "coin_pair": "BTC/USD",
+          "price": "62000.00",
+          "reference_block": 120,
+          "reference_chain": "DOGE",
+          "block_timestamp": 1200,
+          "validator_count": 3,
+          "consensus_round": 1,
+          "consensus_proof": "{\"batch\":{\"first_round\":12,\"last_round\":17,\"btc_block_height\":119},\"sigs\":[]}",
+          "status": "finalized",
+          "source_chain": "DOGE",
+          "source_action_index": 9,
+          "batch_block_time": 1201,
+          "admit_block_btc": 121,
+          "admit_block_ltc": 221,
+          "admit_block_doge": 321
+        },
+        {
+          "id": 2,
+          "round_number": 11,
+          "coin_pair": "LTC/USD",
+          "price": "81.25",
+          "reference_block": 111,
+          "reference_chain": "BTC",
+          "block_timestamp": 1100,
+          "validator_count": 1,
+          "consensus_round": 1,
+          "consensus_proof": "[{\"pubkey\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"sig\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]",
+          "status": "finalized",
+          "source_chain": "BTC",
+          "source_action_index": 8,
+          "batch_block_time": 0,
+          "admit_block_btc": 112,
+          "admit_block_ltc": 212,
+          "admit_block_doge": 312
+        },
+        {
+          "id": 1,
+          "round_number": 11,
+          "coin_pair": "BTC/USD",
+          "price": "61000.00",
+          "reference_block": 111,
+          "reference_chain": "BTC",
+          "block_timestamp": 1100,
+          "validator_count": 1,
+          "consensus_round": 1,
+          "consensus_proof": "[{\"pubkey\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"sig\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]",
+          "status": "finalized",
+          "source_chain": "BTC",
+          "source_action_index": 8,
+          "batch_block_time": 0,
+          "admit_block_btc": 112,
+          "admit_block_ltc": 212,
+          "admit_block_doge": 312
+        },
+        {
+          "id": 4,
+          "round_number": 13,
+          "coin_pair": "DOGE/USD",
+          "price": null,
+          "reference_block": 130,
+          "reference_chain": "BTC",
+          "block_timestamp": 1300,
+          "validator_count": 0,
+          "consensus_round": 1,
+          "consensus_proof": "[]",
+          "status": "skipped",
+          "source_chain": "BTC",
+          "source_action_index": null,
+          "batch_block_time": 0,
+          "admit_block_btc": null,
+          "admit_block_ltc": null,
+          "admit_block_doge": null
+        }
+      ],
+      "tombstones": [
+        {
+          "round_number": 10,
+          "coin_pair": "XCP/USD"
+        }
+      ]
+    },
+    "json": "{\"v\":1,\"network\":\"regtest\",\"batch_seq\":9,\"matches\":[],\"calls\":[],\"rewards\":[],\"price_snapshots\":[{\"id\":1,\"round_number\":11,\"coin_pair\":\"BTC/USD\",\"price\":\"61000.00\",\"reference_block\":111,\"reference_chain\":\"BTC\",\"block_timestamp\":1100,\"validator_count\":1,\"consensus_round\":1,\"consensus_proof\":\"[{\\\"pubkey\\\":\\\"9999999999999999999999999999999999999999999999999999999999999999\\\",\\\"sig\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\"}]\",\"status\":\"finalized\",\"source_chain\":\"BTC\",\"source_action_index\":8,\"batch_block_time\":0,\"admit_block_btc\":112,\"admit_block_ltc\":212,\"admit_block_doge\":312},{\"id\":2,\"round_number\":11,\"coin_pair\":\"LTC/USD\",\"price\":\"81.25\",\"reference_block\":111,\"reference_chain\":\"BTC\",\"block_timestamp\":1100,\"validator_count\":1,\"consensus_round\":1,\"consensus_proof\":\"[{\\\"pubkey\\\":\\\"9999999999999999999999999999999999999999999999999999999999999999\\\",\\\"sig\\\":\\\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\"}]\",\"status\":\"finalized\",\"source_chain\":\"BTC\",\"source_action_index\":8,\"batch_block_time\":0,\"admit_block_btc\":112,\"admit_block_ltc\":212,\"admit_block_doge\":312},{\"id\":3,\"round_number\":12,\"coin_pair\":\"BTC/USD\",\"price\":\"62000.00\",\"reference_block\":120,\"reference_chain\":\"DOGE\",\"block_timestamp\":1200,\"validator_count\":3,\"consensus_round\":1,\"consensus_proof\":\"{\\\"batch\\\":{\\\"first_round\\\":12,\\\"last_round\\\":17,\\\"btc_block_height\\\":119},\\\"sigs\\\":[]}\",\"status\":\"finalized\",\"source_chain\":\"DOGE\",\"source_action_index\":9,\"batch_block_time\":1201,\"admit_block_btc\":121,\"admit_block_ltc\":221,\"admit_block_doge\":321},{\"id\":4,\"round_number\":13,\"coin_pair\":\"DOGE/USD\",\"price\":null,\"reference_block\":130,\"reference_chain\":\"BTC\",\"block_timestamp\":1300,\"validator_count\":0,\"consensus_round\":1,\"consensus_proof\":\"[]\",\"status\":\"skipped\",\"source_chain\":\"BTC\",\"source_action_index\":null,\"batch_block_time\":0,\"admit_block_btc\":null,\"admit_block_ltc\":null,\"admit_block_doge\":null}],\"price_tombstones\":[{\"round_number\":10,\"coin_pair\":\"XCP/USD\"}],\"capability_snapshots\":[{\"snapshot_block\":111,\"capability\":\"price\",\"signing_pubkey\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"amount\":\"5\",\"source\":\"\"}]}",
+    "crc32": "f5a9edea",
+    "count": 0
   }
 }
