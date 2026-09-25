@@ -94,7 +94,9 @@ describe('archive quorum-table selection', function () {
         expect(pub.archiveEmptyAfterResolution(rows, [], [])).to.equal(false);
         expect(pub.archiveRowCount(rows)).to.equal(2);
     });
+});
 
+describe('archive quorum-table sizing', function () {
     it('trims whole trailing price rounds, then policy, checkpoint, and bridge rows', async function () {
         const { pub } = buildPub();
         const rows = pub.archiveRows([], [], [], {
