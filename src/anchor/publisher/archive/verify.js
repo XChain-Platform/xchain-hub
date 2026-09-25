@@ -54,6 +54,12 @@ module.exports = {
         for(let ac of (archive.calls || [])){
             if(!(await this.verifyArchivedCall(ac))) return false;
         }
+        for(const bridge of (archive.bridge_transfers || [])){
+            if(!(await this.verifyArchivedBridgeTransfer(bridge))) return false;
+        }
+        for(const policy of (archive.policy_snapshots || [])){
+            if(!(await this.verifyArchivedPolicySnapshot(policy))) return false;
+        }
         // Reward rows carry no per-row signatures (they are unilateral local
         // writes), so they verify by RE-DERIVATION: every field must equal what
         // this hub derives independently:
@@ -308,6 +314,8 @@ module.exports = {
     seedRequiredSnapshotGroups(groups, archive, wrapperSnapshotBlock){
     let wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
         .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
+        .concat((archive.bridge_transfers || []).map(b => ({ block: b.snapshot_block, capability: 'cross_chain' })))
+        .concat((archive.policy_snapshots || []).map(p => ({ block: p.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.rewards || []).map(r => ({ block: r.block_index,    capability: 'oracle_publish' })));
     if(wrapperSnapshotBlock != null)
         wants.push({ block: wrapperSnapshotBlock, capability: 'oracle_publish' });
