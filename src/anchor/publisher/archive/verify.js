@@ -60,6 +60,13 @@ module.exports = {
         for(const policy of (archive.policy_snapshots || [])){
             if(!(await this.verifyArchivedPolicySnapshot(policy))) return false;
         }
+        for(const checkpoint of (archive.state_checkpoints || [])){
+            if(!(await this.verifyArchivedStateCheckpoint(checkpoint))) return false;
+        }
+        if(!(await this.verifyArchivedPriceSnapshots(archive.price_snapshots || [], archive))) return false;
+        for(const tombstone of (archive.price_tombstones || [])){
+            if(!(await this.verifyArchivedPriceTombstone(tombstone))) return false;
+        }
         // Reward rows carry no per-row signatures (they are unilateral local
         // writes), so they verify by RE-DERIVATION: every field must equal what
         // this hub derives independently:
@@ -316,6 +323,9 @@ module.exports = {
         .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.bridge_transfers || []).map(b => ({ block: b.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.policy_snapshots || []).map(p => ({ block: p.snapshot_block, capability: 'cross_chain' })))
+        .concat((archive.state_checkpoints || []).map(c => ({ block: c.snapshot_block, capability: 'oracle_publish' })))
+        .concat((archive.price_snapshots || []).filter(p => this.isSignatureProofedPrice(p))
+            .map(p => ({ block: p.reference_block, capability: 'price' })))
         .concat((archive.rewards || []).map(r => ({ block: r.block_index,    capability: 'oracle_publish' })));
     if(wrapperSnapshotBlock != null)
         wants.push({ block: wrapperSnapshotBlock, capability: 'oracle_publish' });
