@@ -35,8 +35,7 @@ module.exports = {
     async applyFinalized(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
         await this.backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                                  calls, rewards, q.bridges, q.policies, q.checkpoints,
-                                  q.prices, q.tombstones);
+                                  calls, rewards, q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
         // Mirror the leader's archive-publish reward (sender is signature-
         // verified) so all hubs hold the same reward rows (same rail as the
         // BUNDLE_DONE mirror). Only a COMPLETE publish earns it (the leader skips

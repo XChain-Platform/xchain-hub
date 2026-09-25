@@ -34,7 +34,7 @@ function publisher(db, broadcast){
     return { pub, identity };
 }
 
-describe('archive quorum-table FINALIZED and back-fill', function () {
+describe('archive quorum-table FINALIZED announcements', function () {
     it('announces all five optional row lists', function () {
         const sent = [];
         const { pub } = publisher({}, (type, data) => sent.push({ type, data }));
@@ -72,6 +72,9 @@ describe('archive quorum-table FINALIZED and back-fill', function () {
         expect(partial.tombstoneIds).to.deep.equal([]);
     });
 
+});
+
+describe('archive quorum-table FINALIZED back-fill', function () {
     it('delegates every new stamp to its guarded DB method', async function () {
         const calls = [];
         const db = {
@@ -96,6 +99,9 @@ describe('archive quorum-table FINALIZED and back-fill', function () {
         ]);
     });
 
+});
+
+describe('archive quorum-table FINALIZED observation binding', function () {
     it('binds all five announcements to the observed archive body', function () {
         const { pub, identity } = publisher();
         const sender = identity.getPubkeyHex().toLowerCase();
@@ -131,6 +137,9 @@ describe('archive quorum-table FINALIZED and back-fill', function () {
             .to.match(/^tombstone /);
     });
 
+});
+
+describe('archive quorum-table deferred FINALIZED staging', function () {
     it('extends deferred staging to mutable rows only', async function () {
         const { pub } = publisher();
         const all = ids();
@@ -156,6 +165,9 @@ describe('archive quorum-table FINALIZED and back-fill', function () {
         expect(deferred).to.have.length(1);
     });
 
+});
+
+describe('archive quorum-table received FINALIZED handling', function () {
     it('treats missing optional fields as empty and stamps none of them', async function () {
         const leader = new ValidatorIdentity('22'.repeat(32));
         const sender = leader.getPubkeyHex().toLowerCase();
