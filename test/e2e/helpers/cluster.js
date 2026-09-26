@@ -37,10 +37,15 @@ const COIN_CONSENSUS_HASHES = {};
 for (const network of coins.NETWORKS)
     COIN_CONSENSUS_HASHES[network] = coins.consensusHashes(network);
 
+// Empty method sets: no RPC method in the e2e cluster sits behind an API key,
+// so a test drives write, reorg and sensitive-read calls without credentials.
 const WRITE_METHODS = new Set();
 const REORG_WRITE_METHODS = new Set();
 const SENSITIVE_READ_METHODS = new Set();
 
+// The same context shape src/api/server.js reads in production, filled with
+// regtest values and a loopback host, so createApp mounts the real middleware
+// and routes rather than a hand-built copy that could drift from them.
 function buildApiContext(hub, p2pConfig) {
     const hubConfig = { HUB_RATE_LIMIT_EXEMPT_LOCAL: 'true', HUB_NETWORK: 'regtest' };
     return {
