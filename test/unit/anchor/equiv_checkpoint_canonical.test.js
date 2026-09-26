@@ -303,7 +303,7 @@ function indexerCanonical(cp, format) {
     });
 }
 function recoveryCanonical(cp) {
-    return AnchorRecovery.prototype.wrapperCanonical.call(null, {
+    return AnchorRecovery.prototype.wrapperCanonical.call(AnchorRecovery.prototype, {
         chain: cp.chain, network: cp.network, block_index: cp.block_index,
         block_hash: cp.block_hash, ledger_hash: cp.ledger_hash,
         actions_hash: cp.actions_hash, contract_hash: cp.contract_hash,
