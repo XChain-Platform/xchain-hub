@@ -38,6 +38,7 @@ const indexerEd25519 = require(path.join(INDEXER_ROOT, 'src/consensus/ed25519.js
 
 const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK;
 const TXID = 'ab'.repeat(32);
+const PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
 
 function copy(value){
     return JSON.parse(JSON.stringify(value));
@@ -284,6 +285,15 @@ async function recover(publisher, result, inputs, oracleKeys){
     const wire = headAndChunks(
         publisher, result.json, inputs.batch_seq, (inputs.matches || []).length, oracleKeys);
     const db = recoveryStubs.memDb([wire.v1], wire.v2s);
+    const tombstones = [];
+    const doQuery = db.doQuery.bind(db);
+    db.doQuery = async (sql, params) => {
+        if(sql.startsWith('DELETE FROM price_snapshots')){
+            tombstones.push({ round_number: params[0], coin_pair: params[1] });
+        }
+        return doQuery(sql, params);
+    };
+    db.tombstones = tombstones;
     const btcDb = (inputs.rewards || []).length
         ? recoveryStubs.rewardBtcDbStub()
         : null;
@@ -418,6 +428,7 @@ describe('archive quorum table recovery round trip', function(){
 
         const recovered = await recover(publisher, result, inputs, oracleKeys);
         expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS);
+        expectRows(recovered.db.tombstones, archive.price_tombstones, PRICE_TOMBSTONE_KEYS);
         expect(recovered.report.tombstones).to.equal(1);
         const signedRound = recovered.db.prices.filter(row => row.round_number === 11);
         const first = signedRound[0];
@@ -428,6 +439,21 @@ describe('archive quorum table recovery round trip', function(){
         expect(canonical).to.equal(publisher.priceSnapshotCanonical(signedRound));
         expectIndexerQuorum(recovered.recovery, canonical, first.consensus_proof,
             setFor(archive, 'price', first.reference_block));
+
+        const batchRow = recovered.db.prices.find(row => row.round_number === 12);
+        const batchProof = JSON.parse(batchRow.consensus_proof);
+        const batchCanonical = indexerEd25519.buildPriceBatchPayload(
+            batchProof.batch.first_round, batchProof.batch.last_round,
+            batchProof.batch.btc_block_height, [{
+                round: batchRow.round_number,
+                timestamp: batchRow.block_timestamp,
+                btcBlockHeight: batchRow.admit_block_btc == null
+                    ? batchRow.reference_block : batchRow.admit_block_btc,
+                pairs: [{ coinPair: batchRow.coin_pair, price: batchRow.price }],
+                admitBlocks: priceAdmitBlocks(batchRow)
+            }], 'regtest');
+        expectIndexerQuorum(recovered.recovery, batchCanonical, batchProof.sigs,
+            setFor(archive, 'price', batchProof.batch.btc_block_height));
     });
 
     it('keeps the indexer fixture byte-exact for every quorum-table vector row', function(){
