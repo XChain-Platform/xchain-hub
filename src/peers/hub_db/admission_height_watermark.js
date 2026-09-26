@@ -109,6 +109,7 @@ class AdmissionHeightWatermark {
         let xdexTimeout = positiveIntConfig(
             hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS,
             DEFAULT_XDEX_ROUND_TIMEOUT_MS, 'XDEX_ROUND_TIMEOUT_MS');
+        const network = String(hubConfig.HUB_NETWORK || this.config.HUB_NETWORK || '').toLowerCase();
         this.roundWindows = {
             xdex: positiveIntConfig(
                 hubConfig.XDEX_ROUND_MAX_LIFETIME_MS || this.config.XDEX_ROUND_MAX_LIFETIME_MS,
@@ -130,7 +131,7 @@ class AdmissionHeightWatermark {
             // trail the chain it reads. Its own knob, because nothing else sizes it.
             oracle: positiveIntConfig(
                 hubConfig.ADMISSION_ORACLE_INGEST_WINDOW_MS || this.config.ADMISSION_ORACLE_INGEST_WINDOW_MS,
-                600000, 'ADMISSION_ORACLE_INGEST_WINDOW_MS'),
+                network === 'regtest' ? 10000 : 600000, 'ADMISSION_ORACLE_INGEST_WINDOW_MS'),
         };
 
         // A hub that is NOT a consensus member for a rail, a relay serving a mirrored copy
