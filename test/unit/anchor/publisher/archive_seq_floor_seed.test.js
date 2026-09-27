@@ -58,6 +58,10 @@ describe('StateAnchorPublisher: archive sequence floor seed', function () {
         expect(order).to.deep.equal(['persist', 'resolve', 'seed', 'subscribe', 'timers']);
     });
 
+});
+
+describe('StateAnchorPublisher: archive sequence floor seed result', function () {
+
     it('seeds the consumed floor from the highest archive under this DOGE address', async function () {
         const rig = makePublisher({ indexerCall: async (coin, method, params) => {
             rig.calls.push({ coin, method, params });
@@ -71,6 +75,10 @@ describe('StateAnchorPublisher: archive sequence floor seed', function () {
             seq: 41, why: 'boot-time floor seed from the DOGE indexer'
         }]);
     });
+
+});
+
+describe('StateAnchorPublisher: archive sequence floor seed tolerance', function () {
 
     it('leaves the floor untouched and warns when no prior archive exists', async function () {
         const rig = makePublisher();
