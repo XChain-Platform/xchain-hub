@@ -35,11 +35,11 @@ module.exports = {
     async applyFinalized(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
         await this.backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                                  calls, rewards, q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
-        // Mirror the leader's archive-publish reward (sender is signature-
-        // verified) so all hubs hold the same reward rows (same rail as the
-        // BUNDLE_DONE mirror). Only a COMPLETE publish earns it (the leader skips
-        // its own reward on lost chunks and marks rows __partial__).
+                                  calls, rewards, q.bridges, q.policies, q.checkpoints,
+                                  await this.finalizedPricesWithLocalProof(q.prices), q.tombstones);
+        // Mirror the leader's archive-publish reward (sender is signature-verified),
+        // on the BUNDLE_DONE rail. Only a COMPLETE publish earns it (the leader
+        // skips its own reward on lost chunks and marks rows __partial__).
         let partial = (d.matches || []).some(m => m && m.status === '__partial__') ||
                       calls.some(c => c && c.status === '__partial__');
         if(d.txid && !partial && Number.isFinite(Number(d.snapshot_block))){
@@ -91,6 +91,27 @@ module.exports = {
                                  'not on-chain verified (' + archiveVerified + '); NOT mirroring the archive reward');
             }
         }
+    },
+
+    async finalizedPricesWithLocalProof(prices){
+        const heldRounds = new Map();
+        const localPrices = [];
+        for(const price of (prices || [])){
+            const round = Number(price.round_number);
+            if(!heldRounds.has(round))
+                heldRounds.set(round, await this.db.findPriceSnapshotsForRound(round));
+            const held = (heldRounds.get(round) || []).find(row =>
+                String(row.coin_pair) === String(price.coin_pair));
+            if(!held) continue;
+            if(price.status === '__partial__'){
+                localPrices.push(price);
+                continue;
+            }
+            const proofSha = crypto.createHash('sha256')
+                .update(String(held.consensus_proof)).digest('hex');
+            localPrices.push(Object.assign({}, price, { proof_sha: proofSha }));
+        }
+        return localPrices;
     },
 
     // Queue an authenticated FINALIZED whose archive head is not yet buried. Keyed on
@@ -213,10 +234,8 @@ module.exports = {
             if(p.status === '__partial__') continue;
             const rows = await this.db.findPriceSnapshotsForRound(Number(p.round_number));
             const held = (rows || []).find(r => String(r.coin_pair) === String(p.coin_pair));
-            const proofSha = held && crypto.createHash('sha256').update(String(held.consensus_proof)).digest('hex');
             if(held && (String(held.status) !== String(p.status) ||
-                        Number(held.batch_block_time) !== Number(p.batch_block_time) ||
-                        proofSha !== String(p.proof_sha))) return false;
+                        Number(held.batch_block_time) !== Number(p.batch_block_time))) return false;
         }
         for(const t of q.tombstones)
             if(!t || t.round_number == null || t.coin_pair == null) return false;
