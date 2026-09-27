@@ -191,7 +191,7 @@ describe('archive_price_tombstones', function () {
         const db = stubbedDb();
         await db.insertPriceTombstonesForRetraction('DOGE', 5, 9, 2, true, true);
         let { sql, args } = lastCall(db);
-        expect(sql).to.match(/^INSERT IGNORE INTO archive_price_tombstones \(round_number, coin_pair\) SELECT round_number, coin_pair FROM price_snapshots WHERE source_chain = \? AND source_action_index >= \? AND source_action_index <= \? AND push_generation <= \? AND batch_seq IS NOT NULL$/);
+        expect(sql).to.match(/^INSERT INTO archive_price_tombstones \(round_number, coin_pair\) SELECT round_number, coin_pair FROM price_snapshots WHERE source_chain = \? AND source_action_index >= \? AND source_action_index <= \? AND push_generation <= \? AND batch_seq IS NOT NULL ON DUPLICATE KEY UPDATE archive_price_tombstones\.batch_seq = NULL$/);
         expect(args).to.deep.equal(['DOGE', 5, 9, 2]);
     });
 
@@ -199,7 +199,7 @@ describe('archive_price_tombstones', function () {
         const db = stubbedDb();
         await db.insertPriceTombstonesForRetraction('BTC', 5, undefined, undefined, false, false);
         let { sql, args } = lastCall(db);
-        expect(sql).to.match(/source_action_index >= \? AND batch_seq IS NOT NULL$/);
+        expect(sql).to.match(/source_action_index >= \? AND batch_seq IS NOT NULL ON DUPLICATE KEY UPDATE archive_price_tombstones\.batch_seq = NULL$/);
         expect(args).to.deep.equal(['BTC', 5]);
     });
 
