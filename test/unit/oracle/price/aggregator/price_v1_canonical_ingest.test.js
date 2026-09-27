@@ -61,11 +61,12 @@ describe('PriceAggregator.receiveOraclePrice() PRICE v1 honest values', function
 
 describe('PriceAggregator.receiveOraclePrice() PRICE v1 canonical gate on regtest', function () {
     const overlongValue = '0'.repeat(priceScale.PRICE_V1_VALUE_MAX_LENGTH - 2) + '1.5';
+    const overlongFee   = '0'.repeat(priceScale.PRICE_V1_FEE_MAX_LENGTH - 2) + '0.5';
     const cases = [
         ['01.5', '0.5', 'invalid value', 'leading-zero value'],
         ['1.5', '00.5', 'invalid fee', 'leading-zero fee'],
         [overlongValue, '0.5', 'invalid value', 'value one character over its cap'],
-        ['1.5', '0.0000000000000000001', 'invalid fee', 'fee one character over its cap']
+        ['1.5', overlongFee, 'invalid fee', 'fee one character over its cap']
     ];
 
     for (const [value, fee, reason, label] of cases) {
