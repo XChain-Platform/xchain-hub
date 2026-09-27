@@ -14,7 +14,7 @@ const fs         = require('fs');
 const path       = require('path');
 const { expect } = require('chai');
 
-const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
+const SQL_DIR = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql');
 const TABLE_COLUMNS = {
     consensus_state:      ['updated_at'],
     cross_chain_calls:     ['created_at'],
