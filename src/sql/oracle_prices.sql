@@ -21,7 +21,7 @@ CREATE TABLE oracle_prices (
     -- which is why every chain can read the row without a per-chain entry. effective_at stays
     -- the economic filter (the 24 h update window). NULL is the legacy row.
     admit_block     BIGINT UNSIGNED DEFAULT NULL,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_oracle_action (source_chain, action_index),
     KEY idx_oracle_tick (source_address, coin, tick, fiat),
     KEY idx_effective   (coin, tick, fiat, effective_at),

@@ -8,8 +8,8 @@ CREATE TABLE attestations (
     status                ENUM('pending','attested','rejected','expired') NOT NULL DEFAULT 'pending',
     validator_count       INT NOT NULL DEFAULT 0,
     consensus_proof       TEXT,
-    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_source (source_chain, source_action_index),
     KEY idx_status (status)
 );

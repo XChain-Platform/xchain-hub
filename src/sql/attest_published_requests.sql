@@ -1,8 +1,8 @@
 CREATE TABLE attest_published_requests (
     request_id    VARCHAR(80) NOT NULL,                -- ATTEST v1 request id
     txid          VARCHAR(80),                         -- BTC txid of the most recent ATTEST response tx (NULL until confirmed; may stay NULL if the broadcaster returns none)
-    intent_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- when broadcast intent was durably recorded (before the send)
-    sent_at       TIMESTAMP NULL DEFAULT NULL,         -- when the most recent broadcast completed (NULL = intent only)
+    intent_at     DATETIME DEFAULT CURRENT_TIMESTAMP, -- when broadcast intent was durably recorded (before the send)
+    sent_at       DATETIME NULL DEFAULT NULL,         -- when the most recent broadcast completed (NULL = intent only)
     sent_statuses VARCHAR(64) DEFAULT NULL,            -- comma-joined response statuses already broadcast for this request; NULL reads as EVERY status
     intent_status VARCHAR(32) DEFAULT NULL,            -- response status of the armed, unconfirmed broadcast; NULL when none is armed
     PRIMARY KEY (request_id),

@@ -196,8 +196,9 @@ class Database {
             // serialize/parse Dates as UTC and issue `SET time_zone='+00:00'` per
             // connection, so both sides agree no matter where the hub runs - which
             // also keeps a geographically-spread federation comparing like with like.
-            // Safe for existing data: every temporal column in src/sql is TIMESTAMP,
-            // which MariaDB already stores as UTC internally.
+            // Safe for existing data: every temporal column in src/sql is TIMESTAMP
+            // (UTC-normalized in storage) or DATETIME (stores the literal), and the
+            // session's UTC pin makes the two agree.
             timezone:           'Z',
             minDelayValidation: 3000,
             queryTimeout:       parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000
@@ -220,16 +221,17 @@ class Database {
 
     // Idempotent: safe to run every startup.
     //
-    // The steps themselves are the three lists in schema/migrations.js, awaited here
+    // The steps themselves are the four lists in schema/migrations.js, awaited here
     // in the order they ran when they were one method: reward and submission keys,
     // then the capability ENUM and the checkpoint/snapshot keys, then the column
-    // conversions, the price fence re-key and the admission columns. Splitting the
-    // list never reorders it, so a hub applies exactly the statements it applied
-    // before, in the same sequence.
+    // conversions, the price fence re-key and the admission columns, then every
+    // remaining TIMESTAMP column. Splitting the list never reorders it, so a hub
+    // applies exactly the statements it applied before, in the same sequence.
     async runMigrations(){
         await this.runRewardKeyMigrations();
         await this.runCapabilityAndCheckpointMigrations();
         await this.runColumnAndFenceMigrations();
+        await this.runDatetimeColumnMigrations();
     }
 
     async getConnection(){
