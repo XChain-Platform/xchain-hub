@@ -4,6 +4,6 @@ CREATE TABLE validators (
     addr            VARCHAR(255) NOT NULL,
     chains          VARCHAR(50) DEFAULT NULL,
     status          ENUM('active','suspended','removed') NOT NULL DEFAULT 'active',
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

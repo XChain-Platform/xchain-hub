@@ -11,7 +11,7 @@ CREATE TABLE telemetry_pings (
     docker_version VARCHAR(32),                  -- docker engine version, best-effort
     modules        JSON,                          -- [{module, coin, network, version, running}]
     event          VARCHAR(24),                  -- install | update | start | heartbeat
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_install (install_id),
     KEY idx_country (country),
     KEY idx_ip_hash (ip_hash),
