@@ -23,10 +23,40 @@
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
+const canonicalForms = require('./canonical_forms.js');
 const { ANCHOR_BUNDLE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { ANCHOR_SIG_PAIR_BYTES } = require('./constants.js');
+
+function orderedSections(sections){
+    return (sections || []).slice().sort((a, b) => {
+        let x = String(a.chain), y = String(b.chain);
+        return x < y ? -1 : (x > y ? 1 : 0);
+    });
+}
+
+function appendSections(ctx, parts, ordered){
+    for(let s of ordered){
+        let sigs = ctx.parseSigs(s.validator_signatures).slice().sort((a, b) => {
+            let x = String(a.pubkey), y = String(b.pubkey);
+            return x < y ? -1 : (x > y ? 1 : 0);
+        });
+        parts.push(String(s.chain), String(s.block_index), s.block_hash,
+                   s.ledger_hash, s.actions_hash, s.contract_hash,
+                   String(s.checkpoint_seq), String(s.snapshot_block),
+                   String(s.state_root || '').toLowerCase(), String(s.state_root_version),
+                   String(s.block_merkle_root || '').toLowerCase(), String(s.block_merkle_version),
+                   String(sigs.length));
+        for(let sig of sigs) parts.push(sig.pubkey, sig.sig);
+    }
+}
+
+function appendPublisherTail(parts, publisher, attestSigs){
+    parts.push(String(publisher || '').toLowerCase(), String((attestSigs || []).length));
+    for(let sig of (attestSigs || []))
+        parts.push(String(sig.pubkey).toLowerCase(), String(sig.sig).toLowerCase());
+}
 
 module.exports = {
 
@@ -172,6 +202,14 @@ module.exports = {
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
         let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
         let split = this.splitBundle(sections, me, attestTail);
+        let foldBlock = snapshotBlock;
+        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
+            try {
+                let resolved = await this.hub.resolveDogeLatestBlock();
+                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
+            } catch(_e){ foldBlock = snapshotBlock; }
+        }
+        let foldActive = canonicalForms.isAnchorFoldActive(foldBlock, network);
         for(let refused of split.oversize){
             this._bundlesOversize++;
             logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
@@ -182,7 +220,9 @@ module.exports = {
                           'signer count comes down');
         }
         for(let group of split.bundles)
-            await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped);
+            await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped,
+                                     { active: foldActive, block: foldBlock });
+        if(foldActive) this.suppressLegacyArchiveLeg();
     },
 
     // ONE ANCHOR v0 bundle per network per cycle: the LATEST un-anchored checkpoint of
@@ -199,6 +239,14 @@ module.exports = {
         let skipped  = { rows: 0 };
         for(let [network, sections] of this.groupSectionsByNetwork(rows))
             await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
+        let foldBlock = btcBlock;
+        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
+            try {
+                let resolved = await this.hub.resolveDogeLatestBlock();
+                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
+            } catch(_e){ foldBlock = btcBlock; }
+        }
+        if(this.network && canonicalForms.isAnchorFoldActive(foldBlock, this.network)) this.suppressLegacyArchiveLeg();
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
         // it walked candidates and published none, so the stand-down is visible in the
@@ -240,28 +288,50 @@ module.exports = {
     // round, the split arithmetic, the follower byte-match and the golden-vector suite
     // all drive, and renaming it would touch every one of them to say nothing new.
     buildV7Payload(sections, publisher, attestSigs){
-        let ordered = (sections || []).slice().sort((a, b) => {
-            let x = String(a.chain), y = String(b.chain);
-            return x < y ? -1 : (x > y ? 1 : 0);
-        });
+        let ordered = orderedSections(sections);
         let network = ordered.length > 0 ? String(ordered[0].network) : '';
         let snapshotBlock = ordered.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
         let parts = ['ANCHOR', '0', network, String(snapshotBlock), String(ordered.length)];
-        for(let s of ordered){
-            let sigs = this.parseSigs(s.validator_signatures).slice().sort((a, b) => {
-                let x = String(a.pubkey), y = String(b.pubkey);
-                return x < y ? -1 : (x > y ? 1 : 0);
-            });
-            parts.push(String(s.chain), String(s.block_index), s.block_hash,
-                       s.ledger_hash, s.actions_hash, s.contract_hash,
-                       String(s.checkpoint_seq), String(s.snapshot_block),
-                       String(s.state_root || '').toLowerCase(), String(s.state_root_version),
-                       String(s.block_merkle_root || '').toLowerCase(), String(s.block_merkle_version),
-                       String(sigs.length));
-            for(let sg of sigs) parts.push(sg.pubkey, sg.sig);
+        appendSections(this, parts, ordered);
+        appendPublisherTail(parts, publisher, attestSigs);
+        return parts.join('|');
+    },
+
+    orderedBundleSections(sections){
+        return orderedSections(sections);
+    },
+
+    appendBundleSections(parts, ordered){
+        appendSections(this, parts, ordered);
+    },
+
+    appendBundlePublisherTail(parts, publisher, attestSigs){
+        appendPublisherTail(parts, publisher, attestSigs);
+    },
+
+    buildV3Payload(header, sections, archiveSection, publisher, attestSigs){
+        let ordered = orderedSections(sections);
+        let network = String(header && header.network != null
+            ? header.network : (ordered[0] && ordered[0].network) || '');
+        let snapshotBlock = Number(header && header.snapshot_block != null
+            ? header.snapshot_block
+            : ordered.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0));
+        let parts = ['ANCHOR', '3', network, String(snapshotBlock), String(ordered.length)];
+        let wireSections = ordered;
+        if(archiveSection){
+            wireSections = ordered.map((section, index) => index === Number(archiveSection.wrapperSectionIndex)
+                ? Object.assign({}, section, { validator_signatures: JSON.stringify(archiveSection.signatures || []) })
+                : section);
         }
-        parts.push(String(publisher || '').toLowerCase(), String((attestSigs || []).length));
-        for(let s of (attestSigs || [])) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
+        appendSections(this, parts, wireSections);
+        parts.push(archiveSection ? '1' : '0');
+        if(archiveSection){
+            let chunks = Array.isArray(archiveSection.chunks) ? archiveSection.chunks : [];
+            parts.push(String(archiveSection.wrapperSectionIndex), String(archiveSection.batchSeq),
+                       String(archiveSection.count), String(archiveSection.crc).toLowerCase(),
+                       String(chunks.length), String(chunks[0] || ''));
+        }
+        appendPublisherTail(parts, publisher, attestSigs);
         return parts.join('|');
     },
 

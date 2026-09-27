@@ -30,6 +30,8 @@ const logger = getLogger();
 
 module.exports = {
 
+    ...canonicalForms.foldPublisherMethods,
+
     // Elect the publisher order for one bundle, or null when the oracle_publish set
     // at its own snapshot block will not resolve.
     async bundlePublisherOrder(network, snapshotBlock, chains){
@@ -80,7 +82,7 @@ module.exports = {
         return false;
     },
 
-    async bundleHeldByIntent(group, chains, network, snapshotBlock){
+    async bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive){
         // The durable at-most-once marker, consulted BEFORE building a fresh PSBT and
         // before the attestation round solicits a peer quorum. The existence check
         // reads mined state only, so it cannot see a send this hub made and then
@@ -94,7 +96,9 @@ module.exports = {
         }
         if(held){
             let mined = null;
-            try { mined = await this.findExistingBundle(group); }
+            try { mined = foldActive
+                ? await this.findExistingFoldedBundle(group, null)
+                : await this.findExistingBundle(group); }
             catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
             if(!(mined && mined.exists)){
                 logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
@@ -151,9 +155,12 @@ module.exports = {
         return { attested: attested, attestSigs: attestSigs };
     },
 
-    // The v0 payload this bundle will sign and send, or null when it does not fit.
-    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock){
-        let payload = this.buildV7Payload(group, me, attestSigs);
+    // The bundle payload this publisher will sign and send, or null when it does not fit.
+    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock, foldActive, archiveSection){
+        let payload = foldActive
+            ? this.buildV3Payload({ network: network, snapshot_block: snapshotBlock }, group,
+                                  archiveSection, me, attestSigs)
+            : this.buildV7Payload(group, me, attestSigs);
         // Last byte-budget gate, on the payload that will actually be signed and sent.
         // splitBundle sizes an ESTIMATED tail before the attestation round runs, and
         // after a split it estimates at the caller's network-wide oracle_publish set
@@ -165,7 +172,7 @@ module.exports = {
         let payloadBytes = Buffer.byteLength(payload, 'utf8');
         if(payloadBytes > ANCHOR_BUNDLE_MAX_BYTES){
             this._bundlesOversize++;
-            logger.error('StateAnchorPublisher: v0 bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+            logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') + ' bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
                           ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
                           ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
                           'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
@@ -175,16 +182,21 @@ module.exports = {
     },
 
     // One broadcast of a built bundle, through the retry ladder and its existence check.
-    async sendBundle(signer, group, payload){
+    async sendBundle(signer, group, payload, archiveSection){
         let broadcaster = signer && signer.broadcastFn
             ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer));
         for(let s of group) await this.recordAnchorIntent(s);
+        if(archiveSection) await this.recordArchiveIntent(String(group[0].network), archiveSection.batchSeq);
         // The existence check makes a lost ACK (this flush OR a previous one) adopt
         // the already-mined bundle instead of paying for a second one.
         let result;
         try {
             result = await this.broadcastWithRetry(broadcaster, payload, undefined,
-                () => this.findExistingBundle(group));
+                () => archiveSection
+                    ? this.findExistingFoldedBundle(group, archiveSection)
+                    : (String(payload).split('|')[1] === '3'
+                        ? this.findExistingFoldedBundle(group, null)
+                        : this.findExistingBundle(group)));
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
@@ -192,6 +204,8 @@ module.exports = {
             // send that never happened. An AMBIGUOUS send keeps its intents: that
             // case is exactly what the markers are for.
             if(!(e && e.anchorAmbiguousSend)) for(let s of group) await this.withdrawAnchorIntent(s);
+            if(archiveSection && !(e && e.anchorAmbiguousSend))
+                await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
             throw e;
         }
         return result;
@@ -242,7 +256,7 @@ module.exports = {
                         : ''));
     },
 
-    recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid){
+    recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid, anchorVersion){
         // At/above the anchor-reward flag-day the reward is DERIVED on-chain from the
         // v0 publisher attestation (the hub push is retired), and the indexer credits
         // NOTHING for a bundle whose tail carries no attestation. Recording the reward
@@ -266,7 +280,7 @@ module.exports = {
                     // (D21), resolved in recordRewardAttestation from the reward type.
                     chain: String(group[0].chain), network: network,
                     blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
-                    txid: txid, anchorVersion: 0,
+                    txid: txid, anchorVersion: Number(anchorVersion) || 0,
                     rewardType: 'anchor_bundle', roundReference: snapshotBlock,
                     snapshotBlock: snapshotBlock,
                     publisher: String(me).toLowerCase(), attestSigs: attestSigs,
@@ -296,15 +310,27 @@ module.exports = {
         }
     },
 
+    bundleResultTxid(result, network, snapshotBlock, chains, foldActive){
+        let txid = result && result.txid ? result.txid : null;
+        if(txid && !(result && result.exists))
+            this.notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
+        if(txid) return txid;
+        logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') +
+                     ' bundle broadcast returned no txid for ' + chains + '/' + network +
+                     ' @ ' + snapshotBlock + '; treating as failed publish (rows stay pending)');
+        return null;
+    },
+
     // Publish ONE bundle: election, marker check, attestation round, build, broadcast,
     // per-section stamp, reward, announcement. Split out of the selector so the byte
     // budget can hand it several bundles for one network in one flush, each electing
     // independently. Never throws past a mid-flush deferral; every other failure is
     // logged and leaves the sections pending for the next flush.
-    async publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped){
+    async publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped, fold){
         let chains = group.map(s => String(s.chain)).join(',');
         try {
             let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+            let foldActive = !!(fold && fold.active);
             let order = await this.bundlePublisherOrder(network, snapshotBlock, chains);
             if(!order) return;
             // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
@@ -313,42 +339,49 @@ module.exports = {
             // the ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             if(this.standsDownFromBundle(order, group, since, failoverOnly, skipped)) return;
-            if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock)) return;
+            if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
 
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+            let archiveSection = foldActive
+                ? await this.collectFoldArchive(group, network).catch(e => {
+                    logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
+                                '; publishing checkpoints without it: ' + (e && e.message));
+                    return null;
+                })
+                : null;
+            if(archiveSection) this.armFoldArchiveRound(archiveSection);
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
-            if(!attestation) return;
-            let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network, snapshotBlock);
-            if(payload === null) return;
-
-            let result = await this.sendBundle(signer, group, payload);
-            let txid = result && result.txid ? result.txid : null;
-            if(txid && !(result && result.exists))
-                this.notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
-            if(!txid){
-                // A confirmed DOGE broadcast always returns a txid; a null txid is a
-                // false/incomplete success (broadcastTx returned empty instead of
-                // throwing). Treat it as a failed publish: leave the sections pending
-                // (anchor_txid stays NULL) and do NOT stamp, reward, or announce.
-                // Stamping NULL keeps the rows matching the selector so the bundle
-                // re-anchors and re-burns DOGE every flush, and peers ignore a null-txid
-                // announcement anyway (handleBundleDone early-returns on !d.txid).
-                // The intents are NOT withdrawn: an empty return from broadcast_tx is not
-                // proof nothing was sent, so the markers hold the sections for the TTL.
-                logger.error('StateAnchorPublisher: v0 bundle broadcast returned no txid for ' + chains + '/' +
-                              network + ' @ ' + snapshotBlock + '; treating as failed publish (rows stay pending)');
+            if(!attestation){
+                if(archiveSection) this.finishFoldArchiveRound(archiveSection, null);
                 return;
             }
+            if(archiveSection) archiveSection = await archiveSection.result;
+            if(foldActive) this.suppressLegacyArchiveLeg();
+            let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
+                                               snapshotBlock, foldActive, archiveSection);
+            if(payload === null && archiveSection){
+                this._bundlesOversize--;
+                archiveSection = null;
+                payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
+                                               snapshotBlock, foldActive, null);
+            }
+            if(payload === null) return;
+
+            let result = await this.sendBundle(signer, group, payload, archiveSection);
+            let txid = this.bundleResultTxid(result, network, snapshotBlock, chains, foldActive);
+            if(!txid) return;
             await this.stampBundleSections(group, txid, anchored);
+            await this.completeFoldArchive(archiveSection, signer, txid);
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
-            this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result, network, snapshotBlock, txid);
+            this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
+                                    network, snapshotBlock, txid, foldActive ? 3 : 0);
             this.announceBundleDone(group, network, snapshotBlock, txid);
         } catch(e){
             // A mid-flush deferral: an earlier anchor in this same pass spent the last
             // confirmed output. Not a failure of anything; the sections stay pending and
             // the next wake retries them as a normal flush.
             if(e && e.anchorNoConfirmedUtxo) this.noteNoConfirmedUtxo('the ' + network + ' bundle');
-            else logger.error('StateAnchorPublisher: v0 bundle publish failed for ' + network + ': ' + (e && e.message));
+            else logger.error('StateAnchorPublisher: bundle publish failed for ' + network + ': ' + (e && e.message));
         }
     }
 
