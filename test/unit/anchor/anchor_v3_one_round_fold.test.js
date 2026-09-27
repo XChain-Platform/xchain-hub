@@ -38,6 +38,37 @@ function archiveCount(wire){
     return Number(parsed.fields[parsed.next]);
 }
 
+async function publishFoldedGroups(groups){
+    let pub = Object.create(StateAnchorPublisher.prototype);
+    let wires = [], archiveAvailable = true;
+    pub.identity = { getPubkeyHex: () => 'aa' };
+    pub.getActiveOraclePublishPubkeys = async () => ['aa'];
+    pub.splitBundle = () => ({ bundles: groups, oversize: [] });
+    pub.hub = { resolveDogeLatestBlock: async () => 0 };
+    pub.suppressLegacyArchiveLeg = () => {};
+    pub.bundlePublisherOrder = async () => ['aa'];
+    pub.standsDownFromBundle = () => false;
+    pub.bundleHeldByIntent = async () => false;
+    pub.collectFoldArchive = async () => archiveAvailable ? { result: Promise.resolve({
+        wrapperSectionIndex: 0, batchSeq: 0, count: 1, crc: '0', chunks: ['body'], signatures: []
+    }) } : null;
+    pub.armFoldArchiveRound = () => {};
+    pub.collectBundleAttestation = async () => ({ attested: false, attestSigs: [] });
+    pub.sendBundle = async (signer, group, payload) => {
+        wires.push(payload);
+        return { txid: 'txid' + wires.length };
+    };
+    pub.bundleResultTxid = result => result.txid;
+    pub.stampBundleSections = async () => {};
+    pub.completeFoldArchive = async archive => { if(archive) archiveAvailable = false; };
+    pub.noteBundlePublished = () => {};
+    pub.recordBundleReward = () => {};
+    pub.announceBundleDone = () => {};
+    let sections = groups.flat();
+    await pub.publishNetworkBundles({}, 'regtest', sections, 100, false, [], { rows: 0 });
+    return wires;
+}
+
 let priorFold;
 let priorReward;
 let priorDerive;
@@ -164,22 +195,18 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
         expect(node.db.matches[0].batch_seq).to.equal(null);
     });
 
-    it('emits one transaction per network per cycle even when the byte budget splits the sections', async function () {
-        let run = async (foldBlock) => {
-            let pub = Object.create(StateAnchorPublisher.prototype);
-            let calls = [];
-            pub.identity = null;
-            pub.getActiveOraclePublishPubkeys = async () => ['aa'];
-            pub.splitBundle = () => ({ bundles: [[section('BTC', 'b')], [section('LTC', 'l')]], oversize: [] });
-            pub.hub = { resolveDogeLatestBlock: async () => foldBlock };
-            pub.suppressLegacyArchiveLeg = () => {};
-            pub.publishBundle = async (signer, network, group) => { calls.push(group.map(x => x.chain)); };
-            await pub.publishNetworkBundles({}, 'regtest', [section('BTC', 'b'), section('LTC', 'l')], 100, false, [], { rows: 0 });
-            return calls;
-        };
-        expect(await run(0)).to.deep.equal([['BTC']]);
-        StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest = 1e9;
-        expect(await run(0)).to.deep.equal([['BTC'], ['LTC']]);
+    it('publishes every byte-budget group this cycle and folds the archive into exactly one', async function () {
+        let btc = section('BTC', 'b'), ltc = section('LTC', 'l');
+        let fitting = await publishFoldedGroups([[btc, ltc]]);
+        expect(fitting).to.have.length(1);
+        expect(walkSections(fitting[0]).sections.map(s => s.chain)).to.deep.equal(['BTC', 'LTC']);
+        expect(archiveCount(fitting[0])).to.equal(1);
+
+        let split = await publishFoldedGroups([[btc], [ltc]]);
+        expect(split).to.have.length(2);
+        expect(split.flatMap(wire => walkSections(wire).sections.map(s => s.chain)))
+            .to.deep.equal(['BTC', 'LTC']);
+        expect(split.map(archiveCount)).to.deep.equal([1, 0]);
     });
 });
 
