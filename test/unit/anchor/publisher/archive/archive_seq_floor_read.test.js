@@ -61,7 +61,9 @@ describe('archive sequence floor reader', () => {
             expect(result.warnings).to.have.length(0);
         });
     }
+});
 
+describe('archive sequence floor reader failures', () => {
     it('warns once and returns null when the lookup rejects', async () => {
         const result = await read(new Error('unreachable'));
 
