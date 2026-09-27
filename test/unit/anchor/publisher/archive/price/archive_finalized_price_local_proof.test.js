@@ -7,7 +7,7 @@
 
 const crypto = require('crypto');
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
 
 const LEADER_PROOF = '["aa","bb","cc"]';
 const FOLLOWER_PROOF = '["bb","aa","cc"]';
@@ -40,16 +40,19 @@ function publisher(db){
     });
 }
 
-describe('archive FINALIZED follower price proofs', function () {
+function heldPrice(extra){
+    return Object.assign({
+        coin_pair: 'BTC/USD',
+        status: 'finalized',
+        batch_block_time: 1234,
+        consensus_proof: FOLLOWER_PROOF
+    }, extra);
+}
+
+describe('verifyFinalizedAgainstLocal follower price proofs', function () {
     it('accepts a leader proof digest that differs from the follower proof', async function () {
         const pub = publisher({
-            findPriceSnapshotsForRound: async () => [{
-                round_number: 11,
-                coin_pair: 'BTC/USD',
-                status: 'finalized',
-                batch_block_time: 1234,
-                consensus_proof: FOLLOWER_PROOF
-            }]
+            findPriceSnapshotsForRound: async () => [heldPrice()]
         });
 
         const verified = await pub.verifyFinalizedAgainstLocal(
@@ -60,12 +63,7 @@ describe('archive FINALIZED follower price proofs', function () {
 
     it('rejects a status mismatch against the follower row', async function () {
         const pub = publisher({
-            findPriceSnapshotsForRound: async () => [{
-                coin_pair: 'BTC/USD',
-                status: 'pending',
-                batch_block_time: 1234,
-                consensus_proof: FOLLOWER_PROOF
-            }]
+            findPriceSnapshotsForRound: async () => [heldPrice({ status: 'pending' })]
         });
 
         const verified = await pub.verifyFinalizedAgainstLocal(
@@ -76,12 +74,7 @@ describe('archive FINALIZED follower price proofs', function () {
 
     it('rejects a batch block time mismatch against the follower row', async function () {
         const pub = publisher({
-            findPriceSnapshotsForRound: async () => [{
-                coin_pair: 'BTC/USD',
-                status: 'finalized',
-                batch_block_time: 1235,
-                consensus_proof: FOLLOWER_PROOF
-            }]
+            findPriceSnapshotsForRound: async () => [heldPrice({ batch_block_time: 1235 })]
         });
 
         const verified = await pub.verifyFinalizedAgainstLocal(
@@ -89,14 +82,13 @@ describe('archive FINALIZED follower price proofs', function () {
 
         expect(verified).to.equal(false);
     });
+});
 
+describe('applyFinalized follower price proof stamp', function () {
     it('stamps only held pairs with the follower proof digest', async function () {
         const stamps = [];
         const pub = publisher({
-            findPriceSnapshotsForRound: async () => [{
-                coin_pair: 'BTC/USD',
-                consensus_proof: FOLLOWER_PROOF
-            }],
+            findPriceSnapshotsForRound: async () => [heldPrice()],
             updatePriceSnapshotArchiveBatchSeq: async (...args) => stamps.push(args)
         });
         const prices = [
