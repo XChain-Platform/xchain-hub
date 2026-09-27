@@ -247,9 +247,9 @@ class Database {
 
         let connection  = null;
         let attempts    = 0;
-        let maxAttempts = 30;
-        let baseDelay   = 500;
-        let maxDelay    = 15000;
+        const maxAttempts = 30;
+        const baseDelay   = 500;
+        const maxDelay    = 15000;
 
         while(connection == null){
             try {
@@ -270,8 +270,8 @@ class Database {
                 }
                 if(attempts >= maxAttempts)
                     throw new Error('Could not connect to MariaDB after ' + maxAttempts + ' attempts');
-                let delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
-                let jitter = Math.floor(Math.random() * delay * 0.3);
+                const delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
+                const jitter = Math.floor(Math.random() * delay * 0.3);
                 logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
                 await this.sleep(delay + jitter);
