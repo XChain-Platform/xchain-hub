@@ -116,6 +116,10 @@ run_tier() {
   fi
 }
 # <<< ci-tier timer <<<
+fast_defer() {
+  DEFERRED="$DEFERRED [$1]"
+  echo; echo "ci:full ===== $1 DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
 need_sib() {
   local s
   for s in "$@"; do
@@ -145,7 +149,28 @@ need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-w
 run_tier "frozen carrier set (check:frozen-set)" npm run check:frozen-set
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
-run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+if [ "${CI_TIER:-full}" = "fast" ]; then
+  selector_plan=""
+  if selector_plan="$(node bin/ci_fast_select.js --plan 2>&1)"; then
+    echo "$selector_plan"
+    selector_consensus="${selector_plan%%$'\n'*}"
+    if [ "$selector_consensus" = "consensus 1" ]; then
+      run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+    else
+      run_tier "ci: guards (ci:guards)" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci:guards
+      run_tier "ci (changed tests)" env XCHAIN_REQUIRE_SIBLINGS=1 node bin/ci_fast_select.js --run
+      fast_defer "ci"
+    fi
+  else
+    selector_status=$?
+    selector_why="${selector_plan%%$'\n'*}"
+    selector_why="${selector_why:-exit $selector_status}"
+    echo "ci:full: fast selector unavailable ($selector_why); running the full unit tier"
+    run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+  fi
+else
+  run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
+fi
 
 # --- job: perf -------------------------------------------------------------
 # The workflow gives this job its own MariaDB service container; here the DB is
