@@ -15,11 +15,11 @@ const path        = require('path');
 const sinon       = require('sinon');
 const { expect }  = require('chai');
 
-const { DATETIME_COLUMNS }    = require('../../../src/db/schema/datetime_columns.js');
-const migrationSteps          = require('../../../src/db/schema/migrations.js');
-const Database                = require('../../../src/db');
+const { DATETIME_COLUMNS }    = require('../../../../src/db/schema/datetime_columns.js');
+const migrationSteps          = require('../../../../src/db/schema/migrations.js');
+const Database                = require('../../../../src/db');
 
-const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
+const SQL_DIR = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql');
 
 // Strips a src/sql `--` line comment so a trailing note never reads as DDL.
 function stripSqlComments(src) {
