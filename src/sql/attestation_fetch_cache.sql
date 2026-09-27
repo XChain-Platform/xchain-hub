@@ -5,7 +5,7 @@ CREATE TABLE attestation_fetch_cache (
     body        LONGBLOB,                               -- provider response bytes (empty on provider_error)
     meta        MEDIUMTEXT,                             -- provider meta string (empty on provider_error)
     model       VARCHAR(128),                           -- block-pinned fetch model id, for audit
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    -- fetch completion time; rows age out with the seen-window
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,    -- fetch completion time; rows age out with the seen-window
     PRIMARY KEY (request_id),
     KEY idx_created (created_at)
 );

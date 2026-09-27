@@ -7,7 +7,7 @@ CREATE TABLE capability_snapshots (
     amount         VARCHAR(250) NOT NULL,                   -- source AGGREGATE active stake at the block (weight under STAKE_WEIGHTED_QUORUM; informational pre-activation)
     source         VARCHAR(255) NOT NULL DEFAULT '',         -- staking address (source) this key signs for; quorum weight is per-source, NOT per-key (DELEGATE v0 additive). '' on pre-activation rows
     btc_chain_id   CHAR(64)     NULL,                        -- hash of BTC block 1 on the writing hub's chain; NULL accepted by every mirror; transport, not consensus
-    created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 
