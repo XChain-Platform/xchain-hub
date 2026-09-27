@@ -172,6 +172,8 @@ else
   run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci
 fi
 
+run_tier "boundary (test:boundary)" npm run test:boundary
+
 # --- job: perf -------------------------------------------------------------
 # The workflow gives this job its own MariaDB service container; here the DB is
 # the venue's (CI_DB_*), resolved above. SOAK_DURATION_MS mirrors the workflow's
