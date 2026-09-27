@@ -169,6 +169,7 @@ module.exports = {
         // restored a full allowance. Reload the saved window before anything anchors.
         this.spendGuard.persistTo();
         await this.resolveMissingIndexerUrls();
+        await this.seedArchiveSeqFloor();
         this.subscribeToAnchorSources();
         this.startFlushTimers();
         logger.info('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
