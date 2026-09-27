@@ -15,7 +15,7 @@
 'use strict';
 
 const assert = require('assert');
-const { setSourceLiveness } = require('../../../src/api/hub_metrics_source_liveness');
+const { setSourceLiveness } = require('../../../../src/api/hub_metrics_source_liveness');
 
 function recordingGauge() {
     const calls = [];
