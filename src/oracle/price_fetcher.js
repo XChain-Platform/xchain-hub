@@ -35,6 +35,7 @@ const axios = require('axios');
 const { PRICE_MAX } = require('../constants.js');
 const bcmath = require('../bcmath.js');
 const { KRAKEN_PAIRS, COIN_PAIRS } = require('./price_fetcher/pairs.js');
+const { summarizeSourceLiveness } = require('./price_fetcher/source_liveness.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
@@ -81,6 +82,7 @@ class PriceFetcher {
         // tests (mocked providers, timing assertions) can set it to 0.
         this.fetchJitterMs       = (config.PRICE_FETCH_JITTER_MS != null)
             ? parseInt(config.PRICE_FETCH_JITTER_MS) : 3000;
+        this.lastSourceLiveness  = null;
 
         // Count of consecutive rounds where CMC returned HTTP 400. Resets on
         // any successful CMC fetch. A persistent 400 most likely means the
@@ -189,33 +191,36 @@ class PriceFetcher {
         // which is why it stays opt-in rather than assumed.
         // Each fetcher fails soft (returns null on error), so one source erroring
         // never drops the others.
-        let fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken(), this.fetchFromCoinbase()];
+        const sourceKeys = ['coingecko', 'kraken', 'coinbase'];
+        const fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken(), this.fetchFromCoinbase()];
         if (this.coinmarketcapApiKey) {
+            sourceKeys.push('coinmarketcap');
             fetches.push(this.fetchFromCoinMarketCap());
         }
 
-        let sourceResults = await Promise.allSettled(fetches);
+        const sourceResults = await Promise.allSettled(fetches);
+        const sourceLiveness = summarizeSourceLiveness(sourceKeys, sourceResults, COIN_PAIRS);
+        this.lastSourceLiveness = { ...sourceLiveness, at: Date.now() };
 
         // Count sources that returned at least one usable price this round, so we
         // can warn when fewer than two live sources are active (a single correlated
         // upstream is exactly the failure mode the second keyless provider closes).
-        let liveSources = 0;
         for (let result of sourceResults) {
             if (result.status === 'fulfilled' && result.value) {
-                let contributed = false;
                 for (let pair of COIN_PAIRS) {
                     if (result.value[pair] !== undefined && result.value[pair] !== null) {
                         results[pair].push(result.value[pair]);
-                        contributed = true;
                     }
                 }
-                if (contributed) liveSources++;
             }
         }
 
-        if (liveSources < 2) {
-            logger.warn('PriceFetcher: only ' + liveSources + ' live price source(s) this round ' +
-                '(need at least 2 uncorrelated sources for a healthy oracle). ' +
+        if (sourceLiveness.live.length < 2) {
+            logger.warn('PriceFetcher: only ' + sourceLiveness.live.length +
+                ' live price source(s) this round (live: ' +
+                (sourceLiveness.live.join(', ') || 'none') + '; dead: ' +
+                (sourceLiveness.dead.join(', ') || 'none') +
+                '; need at least 2 uncorrelated sources for a healthy oracle). ' +
                 'Check CoinGecko / Kraken / Coinbase reachability' +
                 (this.coinmarketcapApiKey ? ' / CoinMarketCap API key.' : '.'));
         }
