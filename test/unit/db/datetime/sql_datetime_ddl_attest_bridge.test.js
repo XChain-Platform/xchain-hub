@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { expect } = require('chai');
 
-const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
+const SQL_DIR = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql');
 const EXPECTED_COLUMNS = {
     'attest_published_batches.sql': ['intent_at', 'sent_at', 'landed_at'],
     'attest_published_requests.sql': ['intent_at', 'sent_at'],
