@@ -57,7 +57,7 @@ describe('price scale gate registry rows', function () {
     });
 
     it('keeps all uppercase gate exports and all price scale registry rows in lockstep', function () {
-        const exports = Object.keys(gate).filter((name) => /^[A-Z_]+$/.test(name));
+        const exports = Object.keys(gate).filter((name) => /^[A-Z][A-Z0-9_]*$/.test(name));
         const rows = registry.keys()
             .filter((key) => key.startsWith(PREFIX))
             .map((key) => key.slice(PREFIX.length));
