@@ -5,8 +5,8 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const finalizeRoundMethods = require('../../../../src/oracle/consensus/finalize_round.js');
-const { singleSourcePairs } = require('../../../../src/oracle/consensus/source_diversity.js');
+const finalizeRoundMethods = require('../../../../../src/oracle/consensus/finalize_round.js');
+const { singleSourcePairs } = require('../../../../../src/oracle/consensus/source_diversity.js');
 
 function submissions(rows) {
     return new Map(rows.map(row => [row.submitter, { prices: row.prices }]));
