@@ -19,7 +19,7 @@
  * finds migrations where the style guide says they are and the sequence is one
  * list rather than a method long enough to hide a step.
  *
- * ORDER IS THE CONTRACT ACROSS ALL THREE. src/db/index.js awaits them in the
+ * ORDER IS THE CONTRACT ACROSS ALL FOUR. src/db/index.js awaits them in the
  * order below and each is a prefix of the old single pass, so a hub applies
  * exactly the statements it applied before, in the same sequence: a backfill
  * before the widen that needs it, a column before the key that names it.
@@ -29,6 +29,8 @@
  * pass at boot, so a throw takes every later migration and the boot with it.
  *
  ********************************************************************/
+
+const { DATETIME_COLUMNS } = require('./datetime_columns.js');
 
 module.exports = {
 
@@ -181,6 +183,14 @@ module.exports = {
         await this.migrateIndex('price_snapshots', 'idx_status_block_round', '(status, reference_block, round_number)');
         await this.migrateIndex('price_snapshots', 'idx_status_timestamp_round', '(status, block_timestamp, round_number)');
         await this.migrateIndex('price_snapshots', 'idx_status_created', '(status, created_at)');
+    },
+
+    // Every remaining TIMESTAMP column, converted to DATETIME for the same 2038
+    // epoch-bound reason governance_proposals.voting_start/voting_end were.
+    // Idempotent, so this is safe alongside the two migrateColumnType already ran.
+    async runDatetimeColumnMigrations(){
+        for(const entry of DATETIME_COLUMNS)
+            await this.migrateColumnType(entry.table, entry.column, 'datetime', entry.columnDef);
     }
 
 };
