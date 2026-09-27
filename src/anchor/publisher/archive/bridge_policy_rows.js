@@ -75,6 +75,14 @@ module.exports = {
     // XPOLICY canonical of an archived policy snapshot.
     policySnapshotCanonical(r){
         return CrossChainBridgeEngine.prototype.canonicalMatch.call(null, r, r.finalizing_view);
+    },
+
+    async backfillBridgePolicyRows(batchSeq, txid, bridgeIds, policyIds){
+        for(const bridge of (bridgeIds || []))
+            await this.db.updateBridgeTransferArchiveBatchSeq(
+                batchSeq, bridge.status, txid, bridge.transfer_id);
+        for(const policy of (policyIds || []))
+            await this.db.updatePolicySnapshotArchiveBatchSeq(batchSeq, txid, policy.snapshot_id);
     }
 
 };

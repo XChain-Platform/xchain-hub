@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "f69861138e062d4feb1dc7f9975fd28284a1f297e7e8375e6d870c020f3d97fd",
+  "consensus_rules_digest": "e507f00a7adf06b8e3a663a4ed2247f62423b6bdf0da20e74cb2e53073ba8694",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -34,7 +34,7 @@
     "mirror_admission_activation.decodeAdmitBlocks": "<function>",
     "mirror_admission_activation.isAdmissionEra": "<function>",
     "mirror_admission_activation.admissionCanonicalField": "<function>",
-    "token_bridge_activation.TOKEN_BRIDGE_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
+    "token_bridge_activation.TOKEN_BRIDGE_ACTIVATION": "{\"BTC:testnet\":9999999999,\"DOGE:testnet\":9999999999,\"LTC:testnet\":9999999999,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
   },
   "gate_key_count": 34,
   "absent_gates": [],

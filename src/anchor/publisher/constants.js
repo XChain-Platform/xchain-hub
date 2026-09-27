@@ -130,10 +130,21 @@ const POLICY_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
     'finalizing_view', 'validator_signatures', 'status'];
 
+const CHECKPOINT_KEYS = ['id', 'chain', 'network', 'block_index', 'block_hash',
+    'ledger_hash', 'actions_hash', 'contract_hash', 'checkpoint_seq', 'snapshot_block',
+    'state_root', 'state_root_version', 'block_merkle_root', 'block_merkle_version',
+    'validator_signatures'];
+
+const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block',
+    'reference_chain', 'block_timestamp', 'validator_count', 'consensus_round',
+    'consensus_proof', 'status', 'source_chain', 'source_action_index', 'batch_block_time',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
+
 // One policy list can reach 10000 members, so a round carries at most this many policy
 // rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
 // decompress cap every verifier enforces.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
+const ARCHIVE_MAX_PRICE_ROUNDS = 288;
 const ARCHIVE_MAX_JSON_BYTES = 8 * 1024 * 1024;
 
 module.exports = {
@@ -158,6 +169,9 @@ module.exports = {
     CALL_KEYS,
     BRIDGE_KEYS,
     POLICY_KEYS,
+    CHECKPOINT_KEYS,
+    PRICE_KEYS,
     ARCHIVE_MAX_POLICY_ROWS,
+    ARCHIVE_MAX_PRICE_ROUNDS,
     ARCHIVE_MAX_JSON_BYTES
 };

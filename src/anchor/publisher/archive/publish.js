@@ -57,7 +57,9 @@ module.exports = {
         let onChainValid = this.archiveOnChainValid(round, sigs);
         let noTxid = !txid;
         let ids = this.archiveBackfillIds(round, lostChunks, onChainValid, noTxid);
-        await this.backfillBatch(round.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds);
+        await this.backfillBatch(round.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
+                                 ids.bridgeIds, ids.policyIds, ids.checkpointIds,
+                                 ids.priceIds, ids.tombstoneIds);
         // Bookkeeping is done, so the crash window this marker covers is closed: settle it
         // and let the next round start immediately. Settling is gated on a real txid
         // because a null one is a false/incomplete broadcast success, NOT proof that
@@ -263,10 +265,18 @@ module.exports = {
     // the '__partial__' sentinel (and no rewards) when it did not.
     archiveBackfillIds(round, lostChunks, onChainValid, noTxid){
         let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
+        let bridgeIds = round.bridgeIds || [], policyIds = round.policyIds || [];
+        let checkpointIds = round.checkpointIds || [], priceIds = round.priceIds || [];
+        let tombstoneIds = round.tombstoneIds || [];
         if(lostChunks > 0 || !onChainValid || noTxid){
             matchIds  = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
             callIds   = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
+            bridgeIds = bridgeIds.map(b => Object.assign({}, b, { status: '__partial__' }));
+            priceIds  = priceIds.map(p => Object.assign({}, p, { status: '__partial__' }));
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
+            policyIds = [];
+            checkpointIds = [];
+            tombstoneIds = [];
             if(lostChunks > 0)
                 logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
                               ' chunk(s) on-chain; rows stay pending and re-archive under a new batch seq' +
@@ -279,7 +289,8 @@ module.exports = {
                 logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive v1 broadcast returned no ' +
                               'txid; rows stay pending and re-archive under a new batch seq');
         }
-        return { matchIds, callIds, rewardIds };
+        return { matchIds, callIds, rewardIds, bridgeIds, policyIds,
+                 checkpointIds, priceIds, tombstoneIds };
     },
 
     // Tell every peer the batch is spent, so a rotated leader does not re-archive it.
@@ -290,6 +301,11 @@ module.exports = {
                 batch_seq: round.batchSeq, txid: txid, matches: matchIds,
                 calls: callIds,
                 rewards: rewardIds,
+                bridges: ids.bridgeIds || [],
+                policies: ids.policyIds || [],
+                checkpoints: ids.checkpointIds || [],
+                prices: ids.priceIds || [],
+                tombstones: ids.tombstoneIds || [],
                 snapshot_block: Number(round.cp.snapshot_block),
                 sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
                 sig: this.identity.sign(this.finalizedCanonical(round.batchSeq, txid, matchIds.length))

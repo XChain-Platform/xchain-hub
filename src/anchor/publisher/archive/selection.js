@@ -23,7 +23,8 @@
 'use strict';
 
 const zlib = require('zlib');
-const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE } = require('../constants.js');
+const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
+        ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -78,14 +79,81 @@ module.exports = {
         return (rewards || []).filter(r => !this.isChainDerivedReward(r));
     },
 
-    // The three row sets normalized to arrays, or null (with the pending counter cleared)
-    // when there is nothing at all to archive.
-    archiveRows(matches, calls, rewards){
-        if((!matches || matches.length === 0) && (!calls || calls.length === 0) && (!rewards || rewards.length === 0)){ this._pendingMatches = 0; return null; }
-        matches = matches || [];
-        calls   = calls   || [];
-        rewards = rewards || [];
-        return { matches, calls, rewards };
+    // Every pending archive stream, with sentinel reads for the two protocol caps.
+    async gatherArchiveRows(){
+        if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
+            let [matches, calls, rewards] = await Promise.all([
+                this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
+                this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+                this.pendingArchiveRewards()
+            ]);
+            return this.archiveRows(matches, calls, this.dropChainDerivedRewards(rewards));
+        }
+        let [matches, calls, rewards, bridges, policies, checkpoints, priceRounds, tombstones] = await Promise.all([
+            this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
+            this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+            this.pendingArchiveRewards(),
+            this.db.findBridgeTransfersByBatchSeq(this.maxBatch),
+            this.db.findPolicySnapshotsByBatchSeq(ARCHIVE_MAX_POLICY_ROWS + 1),
+            this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
+            this.db.findPriceSnapshotRoundsByBatchSeq(ARCHIVE_MAX_PRICE_ROUNDS + 1),
+            this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
+        ]);
+        rewards = this.dropChainDerivedRewards(rewards);
+        let capped = policies.length > ARCHIVE_MAX_POLICY_ROWS || priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
+        policies = policies.slice(0, ARCHIVE_MAX_POLICY_ROWS);
+        priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
+        let prices = await this.db.findPriceSnapshotsForArchiveRounds(priceRounds);
+        return this.archiveRows(matches, calls, rewards, {
+            bridges, policies, checkpoints, prices, tombstones, cappedOrTrimmed: capped
+        });
+    },
+
+    // All row sets normalized to arrays, or null when no stream has archive cargo.
+    archiveRows(matches, calls, rewards, quorumRows){
+        quorumRows = quorumRows || {};
+        let rows = {
+            matches: matches || [], calls: calls || [], rewards: rewards || [],
+            bridges: this.sortedArchiveRows(quorumRows.bridges, 'transfer_id'),
+            policies: this.sortedArchiveRows(quorumRows.policies, 'snapshot_id'),
+            checkpoints: this.sortedStateCheckpoints(quorumRows.checkpoints),
+            prices: this.sortedPriceSnapshots(quorumRows.prices),
+            tombstones: this.sortedPriceTombstones(quorumRows.tombstones),
+            cappedOrTrimmed: quorumRows.cappedOrTrimmed === true
+        };
+        if(this.archiveRowCount(rows) === 0){ this._pendingMatches = 0; return null; }
+        return rows;
+    },
+
+    archiveRowCount(rows){
+        return ['matches', 'calls', 'rewards', 'bridges', 'policies', 'checkpoints', 'prices', 'tombstones']
+            .reduce((count, key) => count + ((rows[key] || []).length), 0);
+    },
+
+    // Build repeatedly because removing a quorum row can also remove its capability set.
+    async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows){
+        let archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
+            rows.calls, rewardRows, rows);
+        while(Buffer.byteLength(archive.json, 'utf8') > ARCHIVE_MAX_JSON_BYTES){
+            if(!this.trimTrailingArchiveRows(rows))
+                throw new Error('archive JSON exceeds ' + ARCHIVE_MAX_JSON_BYTES + ' bytes after eligible rows were trimmed');
+            rows.cappedOrTrimmed = true;
+            archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
+                rows.calls, rewardRows, rows);
+        }
+        return archive;
+    },
+
+    trimTrailingArchiveRows(rows){
+        if(rows.prices.length){
+            let trailingRound = String(rows.prices[rows.prices.length - 1].round_number);
+            rows.prices = rows.prices.filter(row => String(row.round_number) !== trailingRound);
+            return true;
+        }
+        for(let key of ['policies', 'checkpoints', 'bridges']){
+            if(rows[key].length){ rows[key].pop(); return true; }
+        }
+        return false;
     },
 
     // The checkpoint wrapper: latest checkpoint (prefer BTC; its height also
@@ -170,8 +238,9 @@ module.exports = {
     // federation re-derivation invariant), so we suppress the empty PUBLISH,
     // not the record. Real federations are unaffected: a staked publisher's
     // rewards resolve, so rewardRows is non-empty whenever rewards are.
-    archiveEmptyAfterResolution(matches, calls, rewardRows){
-        if(matches.length === 0 && calls.length === 0 && rewardRows.length === 0){
+    archiveEmptyAfterResolution(rows, rewardRows){
+        let resolvedRows = Object.assign({}, rows, { rewards: rewardRows || [] });
+        if(this.archiveRowCount(resolvedRows) === 0){
             this._pendingMatches = 0;
             return true;
         }

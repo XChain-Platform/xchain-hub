@@ -172,9 +172,15 @@ module.exports = {
         rewards = rewards || [];
         let bridges  = this.sortedArchiveRows((quorumRows || {}).bridges, 'transfer_id');
         let policies = this.sortedArchiveRows((quorumRows || {}).policies, 'snapshot_id');
+        const checkpoints = this.sortedStateCheckpoints((quorumRows || {}).checkpoints);
+        const prices = this.sortedPriceSnapshots((quorumRows || {}).prices);
+        const tombstones = this.sortedPriceTombstones((quorumRows || {}).tombstones);
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
             .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
             .concat(bridges.concat(policies).map(r => ({ block: Number(r.snapshot_block), capability: 'cross_chain' })))
+            .concat(checkpoints.map(r => ({ block: Number(r.snapshot_block), capability: 'oracle_publish' })))
+            .concat(prices.filter(r => this.isSignatureProofedPrice(r))
+                .map(r => ({ block: Number(r.reference_block), capability: 'price' })))
             // oracle_publish set at each reward's earn block; verifiers (and
             // recovery) check the rewarded pubkey was an eligible publisher.
             .concat(rewards.map(({row}) => ({ block: Number(row.block_index), capability: 'oracle_publish' })));
@@ -212,6 +218,9 @@ module.exports = {
         // one built before these tables were carried.
         if(bridges.length) obj.bridge_transfers = bridges.map(r => this.serializeBridgeTransfer(r));
         if(policies.length) obj.policy_snapshots = policies.map(r => this.serializePolicySnapshot(r));
+        if(checkpoints.length) obj.state_checkpoints = checkpoints.map(r => this.serializeStateCheckpoint(r));
+        if(prices.length) obj.price_snapshots = prices.map(r => this.serializePriceSnapshot(r));
+        if(tombstones.length) obj.price_tombstones = tombstones.map(r => this.serializePriceTombstone(r));
         obj.capability_snapshots = snaps;
         return { json: JSON.stringify(obj), count: matches.length };
     },

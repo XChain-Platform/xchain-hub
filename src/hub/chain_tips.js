@@ -246,6 +246,8 @@ class ChainTips {
             this._admissionTipSeen.set(c, { height: Number(tip), atMs: nowMs });
             return true;
         }
+        // Keep a quiet regtest chain usable without requiring a manually mined block.
+        if(String(this.network).toLowerCase() === 'regtest' && Number(tip) === Number(prev.height)) return true;
         let maxAgeS = Number(hubConfig.ADMISSION_TIP_MAX_AGE_S);
         if(!Number.isFinite(maxAgeS) || maxAgeS <= 0)
             maxAgeS = ChainTips.ADMISSION_TIP_STALL_BLOCKS * blockIntervalS(c);
