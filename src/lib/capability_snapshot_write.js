@@ -62,11 +62,9 @@ function normalizeCapabilitySnapshotRows(capability, block, validators){
         source:         String(v.source != null ? v.source : '')
     }));
 
-    // XC-2981: two engines racing concurrent multi-row INSERT IGNORE statements over an
-    // overlapping (snapshot_block, capability) key range, each in a different pubkey
-    // order, meet InnoDB's gap-lock precondition for a 1213 deadlock. A fixed insert
-    // order removes that precondition without changing which rows are written; the write
-    // remains one unchunked INSERT IGNORE as required above.
+    // Prevent InnoDB 1213 deadlocks by giving concurrent engines one insert order.
+    // Different orders over an overlapping key range can conflict on gap locks.
+    // Keep one unchunked INSERT IGNORE; ordering does not change the rows written.
     rows.sort((a, b) => {
         if(a.signing_pubkey < b.signing_pubkey) return -1;
         if(a.signing_pubkey > b.signing_pubkey) return 1;
