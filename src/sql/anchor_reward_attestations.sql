@@ -64,7 +64,7 @@ CREATE TABLE anchor_reward_attestations (
     -- is the existing ANCHOR_REWARD_MIRROR_MATURITY of 144, already frozen fleet-wide, so
     -- no producer value changes here. NULL is the legacy row: see attestation_responses.sql.
     admit_block_btc        BIGINT UNSIGNED DEFAULT NULL,
-    created_at             TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at             DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Hub-mirrored (hub_db_sync HUB_STATE_TABLES), like state_checkpoints: INSERT-IGNORE
     -- apply, never retracted. Written only AFTER the XANCPUB quorum resolves for a
     -- FINALIZED checkpoint, so there is no un-finalize to retract; a DOGE reorg cannot

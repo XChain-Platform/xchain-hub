@@ -7,6 +7,6 @@ CREATE TABLE archive_price_tombstones (
     round_number BIGINT NOT NULL,
     coin_pair    VARCHAR(20) NOT NULL,
     batch_seq    BIGINT UNSIGNED DEFAULT NULL,   -- ANCHOR v1 archive batch that carried the tombstone; NULL = still owed
-    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (round_number, coin_pair)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
