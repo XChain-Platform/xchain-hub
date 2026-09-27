@@ -69,25 +69,26 @@ async function publishFoldedGroups(groups){
     return wires;
 }
 
-let priorFold;
+const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
+let priorFoldEnv;
 let priorReward;
 let priorDerive;
 
 function registerFoldHooks(){
-    registerMeshHooks();
-    beforeEach(function () {
-        priorFold = StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest;
-        priorReward = ar.ANCHOR_REWARD_ACTIVATION.regtest;
-        priorDerive = ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest;
-        StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest = 0;
-        ar.ANCHOR_REWARD_ACTIVATION.regtest = 0;
-        ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest = 0;
-    });
-
     afterEach(function () {
-        StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest = priorFold;
+        if(priorFoldEnv === undefined) delete process.env[FOLD_ENV];
+        else process.env[FOLD_ENV] = priorFoldEnv;
         ar.ANCHOR_REWARD_ACTIVATION.regtest = priorReward;
         ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest = priorDerive;
+    });
+    registerMeshHooks();
+    beforeEach(function () {
+        priorFoldEnv = process.env[FOLD_ENV];
+        priorReward = ar.ANCHOR_REWARD_ACTIVATION.regtest;
+        priorDerive = ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest;
+        process.env[FOLD_ENV] = 'armed';
+        ar.ANCHOR_REWARD_ACTIVATION.regtest = 0;
+        ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest = 0;
     });
 }
 

@@ -30,17 +30,12 @@ const eq = require('../../consensus/equivocation_header.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
+const { activeAt } = require('../../consensus/gate_registry.js');
 
-const anchorFoldHeights = {
-    mainnet: null,
-    testnet: null,
-    regtest: null
-};
+const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 
 function isAnchorFoldActive(blockIndex, network){
-    let threshold = anchorFoldHeights[String(network || '')];
-    return threshold !== null && threshold !== undefined &&
-           Number.isFinite(Number(blockIndex)) && Number(blockIndex) >= Number(threshold);
+    return activeAt(ANCHOR_FOLD_GATE, String(network || ''), null, blockIndex, null);
 }
 
 function isArchiveAnchorRow(row){
@@ -281,7 +276,6 @@ const foldPublisherMethods = {
 
 module.exports = {
 
-    ANCHOR_FOLD_ACTIVATION: anchorFoldHeights,
     isAnchorFoldActive,
     isArchiveAnchorRow,
     isCheckpointAnchorRow,
