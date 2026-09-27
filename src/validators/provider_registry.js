@@ -241,12 +241,6 @@ class ProviderRegistry {
         return { blocks, providerId };
     }
 
-    isRedundancyAllowed(providerId, redundancy){
-        let p = this.providers.get(providerId);
-        if (!p) return false;
-        return Array.isArray(p.allowed_redundancy) && p.allowed_redundancy.indexOf(Number(redundancy)) !== -1;
-    }
-
     isPayloadSizeAllowed(providerId, byteLength){
         let p = this.providers.get(providerId);
         if (!p) return false;
