@@ -12,6 +12,7 @@
 
 const { expect }       = require('chai');
 const PriceAggregator  = require('../../../../../src/oracle/price_aggregator');
+const priceScale       = require('../../../../../src/consensus/gates/price_scale_gate.js');
 const { createMockHub } = require('../../../../helpers/mockHub');
 
 const PADDED_VALUE = '0'.repeat(297) + '1.5';
@@ -55,5 +56,22 @@ describe('PriceAggregator.receiveOraclePrice() PRICE v1 honest values', function
                 expect(result).to.deep.equal({ accepted: true });
             });
         }
+    }
+});
+
+describe('PriceAggregator.receiveOraclePrice() PRICE v1 canonical gate on regtest', function () {
+    const overlongValue = '1'.repeat(priceScale.PRICE_V1_VALUE_MAX_LENGTH + 1);
+    const cases = [
+        ['01.5', '0.5', 'invalid value', 'leading-zero value'],
+        ['1.5', '00.5', 'invalid fee', 'leading-zero fee'],
+        [overlongValue, '0.5', 'invalid value', 'value one character over its cap'],
+        ['1.5', '0.0000000000000000001', 'invalid fee', 'fee one character over its cap']
+    ];
+
+    for (const [value, fee, reason, label] of cases) {
+        it('rejects ' + label, async function () {
+            const result = await receivePrice('regtest', 'TBTC', value, fee);
+            expect(result).to.deep.equal({ accepted: false, reason });
+        });
     }
 });
