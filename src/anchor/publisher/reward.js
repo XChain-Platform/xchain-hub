@@ -254,7 +254,7 @@ module.exports = {
         if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return null;
         if(![0, 1, 3].includes(version)) return null;                             // only the attestation-bearing ANCHOR versions carry a reward
         if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return null;
-        // BIND the two: v1 is the archive leg, v0 the checkpoint-bundle leg, which is the
+        // BIND the two: v1 is the archive leg, v0/v3 the checkpoint-bundle leg, which is the
         // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
         // "a v0 can never prove an archive reward and vice versa"). Checked
         // independently, a mis-paired tuple still passes everything downstream: the
