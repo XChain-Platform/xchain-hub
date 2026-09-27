@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const archiveBookkeeping = require('../../../src/db/prices/archive_bookkeeping.js');
+const archiveBookkeeping = require('../../../../src/db/prices/archive_bookkeeping.js');
 
 function stubbedDb() {
     return Object.assign({ doQuery: sinon.stub().resolves([]) }, archiveBookkeeping);
