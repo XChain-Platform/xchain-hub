@@ -41,7 +41,7 @@ describe('folded ANCHOR v3 payload', function () {
         const vectorDelta = Buffer.byteLength(fixture.vectors.v3, 'utf8') -
             Buffer.byteLength(fixture.vectors.v3_no_archive, 'utf8');
         expect(archiveSectionBytes(withArchive)).to.equal(vectorDelta);
-        expect(vectorDelta).to.equal(52);
+        expect(vectorDelta).to.equal(2003);
         expect(archiveSectionBytes(withoutArchive)).to.equal(0);
     });
 

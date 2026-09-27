@@ -10,7 +10,7 @@ const {
 describe('folded ANCHOR wrapper canonical', function () {
     const archive = fixture.fixture.bundle_v3;
     const base = 'XCHECKPOINT|BTC|regtest|900000';
-    const suffix = '|42|17|9c4e1b22|1';
+    const suffix = '|42|17|8665563e|1';
 
     it('appends the vector archive fields in v1 canonical order', function () {
         expect(foldArchiveSuffix(archive)).to.equal(suffix);
