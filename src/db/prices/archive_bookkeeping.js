@@ -30,6 +30,8 @@ const PENDING_PRICE_PREDICATE =
     '(batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time ' +
     'OR archived_proof_sha <> SHA2(consensus_proof, 256))';
 
+const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'consensus_proof NOT LIKE \'["%\'';
+
 const NO_LIVE_PRICE_ROW =
     'NOT EXISTS (SELECT 1 FROM price_snapshots p WHERE p.round_number = archive_price_tombstones.round_number ' +
     'AND p.coin_pair = archive_price_tombstones.coin_pair)';
@@ -40,7 +42,7 @@ module.exports = {
     async findPriceSnapshotRoundsByBatchSeq(limit) {
         return this.doQuery(
             'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + PENDING_PRICE_PREDICATE +
-            ' ORDER BY round_number ASC LIMIT ?', [limit]);
+            ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' ORDER BY round_number ASC LIMIT ?', [limit]);
     },
 
     // Every row of the given rounds, pending or not, so a round is archived whole.
@@ -48,7 +50,7 @@ module.exports = {
         if (!rounds || rounds.length === 0) return [];
         return this.doQuery(
             'SELECT * FROM price_snapshots WHERE round_number IN (' + rounds.map(() => '?').join(', ') + ') ' +
-            'ORDER BY round_number ASC, coin_pair ASC', rounds);
+            'AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' ORDER BY round_number ASC, coin_pair ASC', rounds);
     },
 
     // Stamps one price row with the batch and the values the archive carried. Guarded
