@@ -44,7 +44,7 @@ CREATE TABLE cross_chain_matches (
     a_push_generation    BIGINT       NOT NULL DEFAULT 0,          -- A-leg source-chain reorg fence (item 5308): stamped from a_chain's indexer generation
     b_push_generation    BIGINT       NOT NULL DEFAULT 0,          -- B-leg source-chain reorg fence (item 5308): stamped from b_chain's indexer generation
     btc_chain_id         CHAR(64)     NULL,                        -- hash of BTC block 1 on the writing hub's chain; NULL accepted by every mirror; transport, not consensus
-    created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at           DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 
