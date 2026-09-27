@@ -88,7 +88,7 @@ describe('runDatetimeColumnMigrations()', function () {
 });
 
 describe('Database.prototype.runMigrations()', function () {
-    it('runs the datetime column migration last', async function () {
+    it('runs all four migration steps in order', async function () {
         const calls = [];
         const fakeDb = {
             runRewardKeyMigrations:              sinon.stub().callsFake(async () => calls.push('reward')),
@@ -98,7 +98,6 @@ describe('Database.prototype.runMigrations()', function () {
         };
         await Database.prototype.runMigrations.call(fakeDb);
 
-        expect(fakeDb.runDatetimeColumnMigrations.calledOnce).to.equal(true);
-        expect(calls[calls.length - 1]).to.equal('datetime');
+        expect(calls).to.deep.equal(['reward', 'capability', 'column', 'datetime']);
     });
 });
