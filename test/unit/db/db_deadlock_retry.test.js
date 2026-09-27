@@ -14,9 +14,9 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-describe('Database doQuery deadlock retry', function () {
-    let mockPool, mockConn, Database, db, deadlock;
+let mockPool, mockConn, Database, db, deadlock;
 
+function registerDatabaseHooks() {
     beforeEach(function () {
         mockConn = {
             query:   sinon.stub(),
@@ -47,7 +47,9 @@ describe('Database doQuery deadlock retry', function () {
     afterEach(function () {
         sinon.restore();
     });
+}
 
+function registerRetryTests() {
     it('retries two deadlocks and returns the third result', async function () {
         mockConn.query.onCall(0).rejects(deadlock);
         mockConn.query.onCall(1).rejects(deadlock);
@@ -76,7 +78,9 @@ describe('Database doQuery deadlock retry', function () {
         expect(mockConn.query.callCount).to.equal(3);
         expect(mockPool.getConnection.callCount).to.equal(3);
     });
+}
 
+function registerNoRetryTests() {
     it('does not retry a non-deadlock error', async function () {
         const nonDeadlock = Object.assign(new Error('Unknown column'), { errno: 1054 });
         mockConn.query.rejects(nonDeadlock);
@@ -108,4 +112,10 @@ describe('Database doQuery deadlock retry', function () {
         expect(mockConn.query.called).to.be.false;
         expect(mockPool.getConnection.called).to.be.false;
     });
+}
+
+describe('Database doQuery deadlock retry', function () {
+    registerDatabaseHooks();
+    registerRetryTests();
+    registerNoRetryTests();
 });
