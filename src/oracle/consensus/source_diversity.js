@@ -12,7 +12,7 @@ function singleSourcePairs(submissions, capablePairs, limit = 5) {
         for (let price of submission.prices) {
             if (!price || typeof price.coinPair !== 'string') continue;
             if (capablePairs && !capablePairs.has(price.coinPair)) continue;
-            if (!Number.isFinite(Number(price.sources)) || Number(price.sources) > 1) continue;
+            if (!Number.isFinite(price.sources) || price.sources > 1) continue;
             if (!submittersByPair.has(price.coinPair)) submittersByPair.set(price.coinPair, new Set());
             submittersByPair.get(price.coinPair).add(String(submitter).slice(0, 12));
         }

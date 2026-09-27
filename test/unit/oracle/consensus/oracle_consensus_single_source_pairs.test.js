@@ -21,7 +21,7 @@ describe('singleSourcePairs()', function () {
                 { coinPair: 'BTC/USD', sources: 0 }
             ] },
             { submitter: 'aaaaaaaaaaaa-extra', prices: [
-                { coinPair: 'BTC/USD', sources: '1' },
+                { coinPair: 'BTC/USD', sources: 1 },
                 { coinPair: 'DOGE/USD', sources: 1 },
                 { coinPair: 'ETH/USD', sources: 2 }
             ] }
@@ -58,10 +58,22 @@ describe('singleSourcePairs()', function () {
             ['A/USD', 'B/USD', 'C/USD', 'D/USD', 'E/USD']);
         expect(result.total).to.equal(6);
     });
+});
 
+describe('singleSourcePairs() empty and invalid input', function () {
     it('returns no pairs when submissions carry no source counts', function () {
         let result = singleSourcePairs(submissions([
             { submitter: 'submitter', prices: [{ coinPair: 'BTC/USD' }] }
+        ]));
+        expect(result).to.deep.equal({ pairs: [], total: 0 });
+    });
+
+    it('ignores non-numeric source counts', function () {
+        let result = singleSourcePairs(submissions([
+            { submitter: 'submitter', prices: [
+                { coinPair: 'BTC/USD', sources: '1' },
+                { coinPair: 'ETH/USD', sources: null }
+            ] }
         ]));
         expect(result).to.deep.equal({ pairs: [], total: 0 });
     });
