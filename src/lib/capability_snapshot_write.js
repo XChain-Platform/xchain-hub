@@ -54,13 +54,26 @@ const logger = getLogger();
  *                  amount:string, source:string}>}
  */
 function normalizeCapabilitySnapshotRows(capability, block, validators){
-    return (validators || []).map(v => ({
+    let rows = (validators || []).map(v => ({
         snapshot_block: block,
         capability:     capability,
         signing_pubkey: String(v.pubkey).toLowerCase(),
         amount:         String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')),
         source:         String(v.source != null ? v.source : '')
     }));
+
+    // Give racing engines one fixed pubkey and source order for their unchunked INSERT IGNORE.
+    // Two multi-row writes in different orders over the same block-capability key range meet
+    // InnoDB's gap-lock precondition for a 1213 deadlock; sorting changes no rows.
+    rows.sort((a, b) => {
+        if(a.signing_pubkey < b.signing_pubkey) return -1;
+        if(a.signing_pubkey > b.signing_pubkey) return 1;
+        if(a.source < b.source) return -1;
+        if(a.source > b.source) return 1;
+        return 0;
+    });
+
+    return rows;
 }
 
 /**

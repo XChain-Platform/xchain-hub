@@ -292,22 +292,31 @@ class Database {
                     }
                 }
             }
-            let tx = this.transactionConnection != null;
-            let db = await this.getConnection();
-            try {
-                results = await db.query(query, args);
-            } catch (error){
-                // Always rethrow. Swallowing non-transactional errors returned [] to
-                // callers that write consensus/coordination rows (mirrors, configs,
-                // prices), so a failed INSERT/UPDATE read as success and the row was
-                // silently missing downstream. An empty result must mean a genuinely
-                // empty SELECT, never a failed query.
-                logger.error(nodeUtil.format('Error running database query:', error));
-                throw error;
-            } finally {
-                // Release in finally so an error no longer leaks the pooled
-                // connection. Transaction connections are owned by the caller.
-                if(!tx) await db.release();
+            let attempt = 0;
+            while(attempt < 3){
+                attempt++;
+                const tx = this.transactionConnection != null;
+                const db = await this.getConnection();
+                try {
+                    results = await db.query(query, args);
+                    break;
+                } catch (error){
+                    // Rethrow final failures so failed writes cannot look successful.
+                    // Reserve empty results for genuinely empty SELECT statements.
+                    // Preserve the driver's error object for caller handling.
+                    logger.error(nodeUtil.format('Error running database query:', error));
+                    const deadlock = error && (error.errno === 1213 || error.code === 'ER_LOCK_DEADLOCK');
+                    if(tx || !deadlock || attempt >= 3)
+                        throw error;
+                } finally {
+                    // Release in finally so an error no longer leaks the pooled
+                    // connection. Transaction connections are owned by the caller.
+                    if(!tx) await db.release();
+                }
+                // Retry autocommit deadlocks because InnoDB rolls the whole statement back.
+                // Treat the statement as the transaction under autocommit.
+                // Rerun it without risking partial state.
+                await this.sleep(25 * attempt);
             }
         }
         return results;
