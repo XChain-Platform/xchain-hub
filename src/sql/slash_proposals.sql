@@ -5,7 +5,7 @@ CREATE TABLE slash_proposals (
     round_number     BIGINT,
     evidence         TEXT,
     status           ENUM('pending','approved','rejected','expired') NOT NULL DEFAULT 'pending',
-    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_validator (validator_pubkey),
     KEY idx_status (status)
 );

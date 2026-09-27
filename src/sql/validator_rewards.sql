@@ -7,7 +7,7 @@ CREATE TABLE validator_rewards (
     block_index      BIGINT NULL,
     batch_seq        BIGINT NULL,
     claimed          TINYINT(1) NOT NULL DEFAULT 0,
-    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     -- Ledger-key qualifier: snapshot_block for anchor_archive, 0 for every other reward
     -- type (src/anchor_reward_key.js). The archive leg keys on MATCH_BATCH_SEQ, which a
     -- wipe-and-replay rebase reissues, so round_number alone cannot tell two genuinely
