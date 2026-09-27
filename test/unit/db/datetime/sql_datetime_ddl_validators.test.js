@@ -15,7 +15,7 @@ const DEFINITIONS = {
 };
 
 function readDefinition(file) {
-    const filename = path.join(__dirname, '..', '..', '..', 'src', 'sql', file);
+    const filename = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql', file);
     return fs.readFileSync(filename, 'utf8')
         .replace(/--.*$/gm, '')
         .split('\n')
