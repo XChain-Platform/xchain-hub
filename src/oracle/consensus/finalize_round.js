@@ -25,6 +25,7 @@
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const ocr               = require('../../oracle_clamp_reference_activation.js');
 const { takeSeat }      = require('./seats.js');
+const { singleSourcePairs } = require('./source_diversity.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -64,6 +65,12 @@ function noteSourceDiversity(round, submissions) {
         ? this.oracleRound.priceFetcher.multiSourceCapablePairs() : null;
     let minRoundSources = this.computeMinRoundSources(submissions, capablePairs);
     if (Number.isFinite(minRoundSources) && minRoundSources <= 1) {
+        let singleSource = singleSourcePairs(submissions, capablePairs);
+        let pairNames = singleSource.pairs
+            .map(pair => pair.coinPair + ' (by ' + pair.submitters.join(', ') + ')')
+            .join(', ');
+        let remainder = singleSource.total > singleSource.pairs.length
+            ? ', and ' + (singleSource.total - singleSource.pairs.length) + ' more' : '';
         // Count it as well as logging it. The warn reaches one hub's stdout, which is
         // below every threshold the dashboard can act on, so a fleet-wide loss of the
         // second upstream was observable only to whoever was tailing that hub.
@@ -74,7 +81,8 @@ function noteSourceDiversity(round, submissions) {
             'on a normally-multi-source pair (minimum source count across the ' + submissions.size +
             ' submissions, restricted to multi-source-capable pairs = ' + minRoundSources +
             '); the federation lost its second uncorrelated price source this round. PRICE v0 is ' +
-            'still quorum-signed but its outlier-rejection resilience is gone.');
+            'still quorum-signed but its outlier-rejection resilience is gone; pairs: ' +
+            pairNames + remainder + '.');
     }
 }
 
@@ -270,6 +278,8 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
 }
 
 module.exports = {
+
+    noteSourceDiversity,
 
     // Minimum per-pair provider count observed across all of a round's submissions
     // (Infinity when no submission carries a per-pair `sources` count). A result of
