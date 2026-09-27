@@ -10,8 +10,8 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const OracleConsensus = require('../../../../src/oracle/consensus');
-const { createMockHub } = require('../../../helpers/mockHub');
+const OracleConsensus = require('../../../../../src/oracle/consensus');
+const { createMockHub } = require('../../../../helpers/mockHub');
 
 const ROUND = 17;
 const SIGNATURES = [
