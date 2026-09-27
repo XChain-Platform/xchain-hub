@@ -75,8 +75,9 @@ module.exports = {
         if (bounded) args.push(to);
         if (fenced) args.push(gen);
         return this.doQuery(
-            'INSERT IGNORE INTO archive_price_tombstones (round_number, coin_pair) ' +
-            'SELECT round_number, coin_pair FROM price_snapshots WHERE ' + where + ' AND batch_seq IS NOT NULL', args);
+            'INSERT INTO archive_price_tombstones (round_number, coin_pair) ' +
+            'SELECT round_number, coin_pair FROM price_snapshots WHERE ' + where + ' AND batch_seq IS NOT NULL ' +
+            'ON DUPLICATE KEY UPDATE archive_price_tombstones.batch_seq = NULL', args);
     },
 
     // Tombstones the archive still owes: unstamped, and no live row holds the key, since a
