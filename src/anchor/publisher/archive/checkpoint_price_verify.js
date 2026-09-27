@@ -23,14 +23,24 @@ const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
-function withoutId(row){
+function withoutKeys(row, keys){
     const out = Object.assign({}, row);
-    delete out.id;
+    for(const key of keys) delete out[key];
     return out;
 }
 
+function sameRowExcept(local, archived, keys){
+    return JSON.stringify(withoutKeys(local, keys)) ===
+        JSON.stringify(withoutKeys(archived, keys));
+}
+
 function sameRow(local, archived){
-    return JSON.stringify(withoutId(local)) === JSON.stringify(withoutId(archived));
+    return sameRowExcept(local, archived, ['id']);
+}
+
+function samePriceRow(local, archived, signatureProofed){
+    const keys = signatureProofed ? ['id', 'consensus_proof', 'validator_count'] : ['id'];
+    return sameRowExcept(local, archived, keys);
 }
 
 function priceGroupKey(row){
@@ -94,10 +104,11 @@ module.exports = {
             return false;
         }
         const held = await this.db.findPriceSnapshotsForRound(Number(first.round_number));
+        const signatureProofed = this.isSignatureProofedPrice(first);
         for(const row of group){
             const local = (held || []).find(candidate =>
                 String(candidate.coin_pair) === String(row.coin_pair));
-            if(local && !sameRow(this.serializePriceSnapshot(local), row)){
+            if(local && !samePriceRow(this.serializePriceSnapshot(local), row, signatureProofed)){
                 logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
                             row.coin_pair + ' differs from our row; NOT signing');
                 return false;
@@ -108,7 +119,7 @@ module.exports = {
                 return false;
             }
         }
-        if(!this.isSignatureProofedPrice(first)) return true;
+        if(!signatureProofed) return true;
         const block = Number(first.reference_block);
         const network = resolveQuorumNetwork(archive, this.network);
         const set = await this.resolveCapabilitySet('price', block, network);

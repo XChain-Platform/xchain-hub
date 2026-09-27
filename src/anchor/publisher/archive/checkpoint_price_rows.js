@@ -56,14 +56,6 @@ function compareInteger(a, b){
     return x < y ? -1 : x > y ? 1 : 0;
 }
 
-function signatureProof(proof){
-    if(typeof proof === 'string'){
-        try { proof = JSON.parse(proof); }
-        catch(e) { return false; }
-    }
-    return Array.isArray(proof) && proof.length > 0;
-}
-
 module.exports = {
 
     serializeStateCheckpoint(row){
@@ -94,7 +86,7 @@ module.exports = {
     },
 
     isSignatureProofedPrice(row){
-        return signatureProof(row && row.consensus_proof);
+        return this.parseSigs(row && row.consensus_proof).length > 0;
     },
 
     stateCheckpointCanonical(row){
