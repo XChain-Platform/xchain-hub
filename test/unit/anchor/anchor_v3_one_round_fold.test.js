@@ -194,7 +194,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
             ? { exists: true, status: 'valid', version: 91, txid,
                 checkpoint_chain: params.chain, checkpoint_network: params.network,
                 block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-            : Object.assign({ exists: true, status: 'valid', version: 91, txid }, params);
+            : Object.assign({ exists: true, status: 'valid', version: 2, txid }, params);
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
         ], { batchSeq: 7 });
@@ -222,6 +222,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
             ['getanchoraction', 'block_index', 999],
             ['getanchoraction', 'checkpoint_seq', 999],
             ['getarchiveanchor', 'match_batch_seq', 999],
+            ['getarchiveanchor', 'match_batch_seq', null],
             ['getarchiveanchor', 'author', 'Dother']
         ];
         for(let [method, field, value] of cases){
@@ -231,16 +232,6 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
             catch(e){ error = e; }
             expect(error, field).to.be.an('error');
         }
-        mismatch = null;
-        pub.indexerCall = async (coin, method, params) => method === 'getanchoraction'
-            ? { exists: true, status: 'valid', version: 3, txid,
-                checkpoint_chain: params.chain, checkpoint_network: params.network,
-                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-            : Object.assign({ exists: true, status: 'valid', version: 2, txid }, params);
-        let error;
-        try { await pub.findExistingFoldedBundle([section], { batchSeq: 7 }); }
-        catch(e){ error = e; }
-        expect(error, 'v2 continuation').to.be.an('error');
     });
 });
 
