@@ -22,6 +22,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
@@ -202,16 +203,8 @@ module.exports = {
     async buildFoldArchiveSection(group, network){
         if(!this.db || typeof this.db.findCrossChainMatchesByBatchSeq !== 'function' ||
            typeof this.db.findCrossChainCallsByBatchSeq !== 'function') return null;
-        let matches = await this.db.findCrossChainMatchesByBatchSeq(this.maxBatch);
-        let calls = await this.db.findCrossChainCallsByBatchSeq(this.maxBatch);
-        let rewards = [];
-        if(typeof this.pendingArchiveRewards === 'function')
-            rewards = this.dropChainDerivedRewards(await this.pendingArchiveRewards());
-        let rows = this.archiveRows(matches, calls, rewards);
+        let rows = await this.gatherArchiveRows();
         if(!rows) return null;
-        matches = rows.matches;
-        calls = rows.calls;
-        rewards = rows.rewards;
 
         let ordered = this.orderedBundleSections(group);
         let wrapperSectionIndex = ordered.findIndex(s => String(s.chain) === 'BTC');
@@ -220,9 +213,10 @@ module.exports = {
         let wrapper = ordered[wrapperSectionIndex];
         let cp = this.cpFromRow(wrapper);
         let batchSeq = await this.getNextBatchSeq();
-        let rewardRows = await this.resolveArchiveRewardSources(rewards);
-        if(this.archiveEmptyAfterResolution(matches, calls, rewardRows)) return null;
-        let archive = await this.buildArchive(network, batchSeq, matches, cp.snapshot_block, calls, rewardRows);
+        let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
+        if(this.archiveEmptyAfterResolution(rows, rewardRows)) return null;
+        let archive = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
+        if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
         let wire = this.archiveWire(archive.json);
         let canonical = canonicalForms.foldArchiveCanonical(wrapper, batchSeq, archive.count,
                                                             wire.crc, wire.chunks.length);
@@ -238,12 +232,28 @@ module.exports = {
             validators: signingSet,
             weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
                                                        resolveQuorumNetwork(cp, this.network)),
-            matchIds: matches.map(m => ({ match_id: m.match_id, status: m.status })),
-            callIds: calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
+            matchIds: rows.matches.map(m => ({ match_id: m.match_id, status: m.status })),
+            callIds: rows.calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds: rewardRows.map(({row}) => ({
                 reward_type: String(row.reward_type), round_number: Number(row.round_number),
                 validator_pubkey: String(row.validator_pubkey).toLowerCase(),
                 round_qualifier: Number(row.round_qualifier || 0)
+            })),
+            bridgeIds: rows.bridges.map(r => ({
+                transfer_id: String(r.transfer_id), status: String(r.status)
+            })),
+            policyIds: rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
+            checkpointIds: rows.checkpoints.map(r => ({
+                chain: String(r.chain), network: String(r.network),
+                checkpoint_seq: Number(r.checkpoint_seq)
+            })),
+            priceIds: rows.prices.map(r => ({
+                round_number: Number(r.round_number), coin_pair: String(r.coin_pair),
+                status: String(r.status), batch_block_time: Number(r.batch_block_time),
+                proof_sha: crypto.createHash('sha256').update(String(r.consensus_proof)).digest('hex')
+            })),
+            tombstoneIds: rows.tombstones.map(r => ({
+                round_number: Number(r.round_number), coin_pair: String(r.coin_pair)
             }))
         };
         return round;
@@ -458,7 +468,9 @@ module.exports = {
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
                                                            broadcaster, archiveSection.cp);
         let ids = this.archiveBackfillIds(archiveSection, lostChunks, true, false);
-        await this.backfillBatch(archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds);
+        await this.backfillBatch(archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
+                                 ids.bridgeIds, ids.policyIds, ids.checkpointIds,
+                                 ids.priceIds, ids.tombstoneIds);
         await this.settleArchiveIntent(String(archiveSection.cp.network), archiveSection.batchSeq);
         this.announceArchiveFinalized(archiveSection, txid, ids);
     },

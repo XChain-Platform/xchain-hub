@@ -83,6 +83,28 @@ describe('ANCHOR v3 one-round archive fold', function () {
             .to.equal('ANCHOR|3|regtest|321|0|0|pub|0');
     });
 
+    it('backfills every row family carried by the folded archive', async function () {
+        let pub = Object.create(StateAnchorPublisher.prototype);
+        let forwarded;
+        let ids = {
+            matchIds: ['matches'], callIds: ['calls'], rewardIds: ['rewards'],
+            bridgeIds: ['bridges'], policyIds: ['policies'], checkpointIds: ['checkpoints'],
+            priceIds: ['prices'], tombstoneIds: ['tombstones']
+        };
+        pub.markArchiveSent = async () => {};
+        pub.broadcastArchiveChunks = async () => 0;
+        pub.archiveBackfillIds = () => ids;
+        pub.backfillBatch = async (...args) => { forwarded = args; };
+        pub.settleArchiveIntent = async () => {};
+        pub.announceArchiveFinalized = () => {};
+        await pub.completeFoldArchive(
+            { cp: { network: 'regtest' }, batchSeq: 4 }, { broadcastFn: async () => {} }, 'txid4');
+        expect(forwarded).to.deep.equal([
+            4, ids.matchIds, 'txid4', ids.callIds, ids.rewardIds,
+            ids.bridgeIds, ids.policyIds, ids.checkpointIds, ids.priceIds, ids.tombstoneIds
+        ]);
+    });
+
     it('publishes one folded transaction and retires the separate archive reward', async function () {
         let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
         let node = bus.nodes[0];
