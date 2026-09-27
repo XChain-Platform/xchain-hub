@@ -23,11 +23,7 @@ function stubSources(fetcher, values) {
     }
 }
 
-describe('PriceFetcher source liveness', function () {
-    afterEach(function () {
-        sinon.restore();
-    });
-
+describe('source liveness summary', function () {
     it('classifies fulfilled, rejected, null and empty source results', function () {
         const keys = ['fulfilled', 'rejected', 'null', 'empty'];
         const sourceResults = [
@@ -41,6 +37,12 @@ describe('PriceFetcher source liveness', function () {
             live: ['fulfilled'],
             dead: ['rejected', 'null', 'empty']
         });
+    });
+});
+
+describe('PriceFetcher source liveness reporting', function () {
+    afterEach(function () {
+        sinon.restore();
     });
 
     it('records the keyless source list when CMC is not configured', async function () {
