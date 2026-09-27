@@ -38,12 +38,12 @@ function archiveCount(wire){
     return Number(parsed.fields[parsed.next]);
 }
 
-describe('ANCHOR v3 one-round archive fold', function () {
-    registerMeshHooks();
-    let priorFold;
-    let priorReward;
-    let priorDerive;
+let priorFold;
+let priorReward;
+let priorDerive;
 
+function registerFoldHooks(){
+    registerMeshHooks();
     beforeEach(function () {
         priorFold = StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest;
         priorReward = ar.ANCHOR_REWARD_ACTIVATION.regtest;
@@ -58,6 +58,10 @@ describe('ANCHOR v3 one-round archive fold', function () {
         ar.ANCHOR_REWARD_ACTIVATION.regtest = priorReward;
         ar.ANCHOR_REWARD_DERIVE_ACTIVATION.regtest = priorDerive;
     });
+}
+
+describe('ANCHOR v3 one-round archive fold wire', function () {
+    registerFoldHooks();
 
     it('builds the v3 archive fields after the sections and replaces only the wrapper signatures', function () {
         let pub = Object.create(StateAnchorPublisher.prototype);
@@ -104,6 +108,10 @@ describe('ANCHOR v3 one-round archive fold', function () {
             ids.bridgeIds, ids.policyIds, ids.checkpointIds, ids.priceIds, ids.tombstoneIds
         ]);
     });
+});
+
+describe('ANCHOR v3 one-round archive fold publication', function () {
+    registerFoldHooks();
 
     it('publishes one folded transaction and retires the separate archive reward', async function () {
         let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
@@ -137,6 +145,10 @@ describe('ANCHOR v3 one-round archive fold', function () {
         expect(requests[0].data.archive).to.include({ batch_seq: 0, wrapper_section_index: 0 });
         expect(walkSections(leader.published[0]).sections[0].sigs).to.have.length(3);
     });
+});
+
+describe('ANCHOR v3 one-round archive fold liveness', function () {
+    registerFoldHooks();
 
     it('ships checkpoints on the archive sub-deadline with ARCHIVE_COUNT 0', async function () {
         let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
@@ -169,19 +181,71 @@ describe('ANCHOR v3 one-round archive fold', function () {
         StateAnchorPublisher.ANCHOR_FOLD_ACTIVATION.regtest = 1e9;
         expect(await run(0)).to.deep.equal([['BTC'], ['LTC']]);
     });
+});
+
+describe('ANCHOR v3 one-round archive fold guard', function () {
+    registerFoldHooks();
 
     it('guards a folded spend by row attributes rather than the version byte', async function () {
         let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
         let txid = 'ab'.repeat(32);
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub.indexerCall = async (coin, method) => method === 'getanchoraction'
-            ? { exists: true, status: 'valid', version: 91, chain: 'BTC', match_batch_seq: null, txid }
-            : { exists: true, status: 'valid', version: 2, chain: null, match_batch_seq: 7, txid };
+        pub.indexerCall = async (coin, method, params) => method === 'getanchoraction'
+            ? { exists: true, status: 'valid', version: 91, txid,
+                checkpoint_chain: params.chain, checkpoint_network: params.network,
+                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
+            : Object.assign({ exists: true, status: 'valid', version: 91, txid }, params);
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
         ], { batchSeq: 7 });
         expect(found).to.deep.equal({ exists: true, txid });
     });
+
+    it('rejects indexer rows that do not match the requested folded row attributes', async function () {
+        let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+        let txid = 'ab'.repeat(32);
+        let section = { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 };
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        let mismatch;
+        pub.indexerCall = async (coin, method, params) => {
+            let row = method === 'getanchoraction'
+                ? { exists: true, status: 'valid', version: 3, txid,
+                checkpoint_chain: params.chain, checkpoint_network: params.network,
+                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
+                : Object.assign({ exists: true, status: 'valid', version: 3, txid }, params);
+            if(mismatch && mismatch.method === method) row[mismatch.field] = mismatch.value;
+            return row;
+        };
+        let cases = [
+            ['getanchoraction', 'checkpoint_chain', 'LTC'],
+            ['getanchoraction', 'checkpoint_network', 'mainnet'],
+            ['getanchoraction', 'block_index', 999],
+            ['getanchoraction', 'checkpoint_seq', 999],
+            ['getarchiveanchor', 'match_batch_seq', 999],
+            ['getarchiveanchor', 'author', 'Dother']
+        ];
+        for(let [method, field, value] of cases){
+            mismatch = { method, field, value };
+            let error;
+            try { await pub.findExistingFoldedBundle([section], { batchSeq: 7 }); }
+            catch(e){ error = e; }
+            expect(error, field).to.be.an('error');
+        }
+        mismatch = null;
+        pub.indexerCall = async (coin, method, params) => method === 'getanchoraction'
+            ? { exists: true, status: 'valid', version: 3, txid,
+                checkpoint_chain: params.chain, checkpoint_network: params.network,
+                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
+            : Object.assign({ exists: true, status: 'valid', version: 2, txid }, params);
+        let error;
+        try { await pub.findExistingFoldedBundle([section], { batchSeq: 7 }); }
+        catch(e){ error = e; }
+        expect(error, 'v2 continuation').to.be.an('error');
+    });
+});
+
+describe('ANCHOR v3 one-round archive fold reward', function () {
+    registerFoldHooks();
 
     it('accepts v3 only for the surviving anchor_bundle reward family', function () {
         let pub = new StateAnchorPublisher({ db: {}, p2pConfig: {} });
