@@ -212,6 +212,24 @@ module.exports = {
         this.dogeConfirmations = coins.resolveConfirmations(cfg, this.network).DOGE;
     },
 
+    async seedArchiveSeqFloor(){
+        const ix = this.indexers && this.indexers.DOGE;
+        if(!this.dogeAddress || !ix || !ix.url){
+            logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE address or indexer is not configured');
+            return;
+        }
+        try {
+            const res = await this.indexerCall('DOGE', 'getarchiveanchor', { author: this.dogeAddress });
+            if(!res || !res.exists){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer found no archive');
+                return;
+            }
+            this.noteConsumedBatchSeq(res.match_batch_seq, 'boot-time floor seed from the DOGE indexer');
+        } catch(err){
+            logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + (err && err.message ? err.message : String(err)));
+        }
+    },
+
     initDeferralQueues(cfg){
         // XANC_BUNDLE_DONE is broadcast the instant broadcastWithRetry
         // returns a txid, i.e. while the DOGE anchor is still in the mempool, but the
