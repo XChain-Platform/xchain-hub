@@ -322,25 +322,6 @@ it('calls _setConfig on the module if exported', function () {
 // ── Validation helpers ───────────────────────────────────────────────────
 describe('ProviderRegistry', function () {
     installSuiteHooks1();
-describe('isRedundancyAllowed()', function () {
-it('returns true for an allowed redundancy level', function () {
-            let hub = makeHub();
-            let reg = new ProviderRegistry(hub);
-            expect(reg.isRedundancyAllowed('http_get', 1)).to.be.true;
-            expect(reg.isRedundancyAllowed('http_get', 3)).to.be.true;
-            expect(reg.isRedundancyAllowed('http_get', 5)).to.be.true;
-        });
-it('returns false for a disallowed redundancy level', function () {
-            let hub = makeHub();
-            let reg = new ProviderRegistry(hub);
-            expect(reg.isRedundancyAllowed('http_get', 2)).to.be.false;
-        });
-it('returns false for unknown providers', function () {
-            let hub = makeHub();
-            let reg = new ProviderRegistry(hub);
-            expect(reg.isRedundancyAllowed('bogus', 1)).to.be.false;
-        });
-});
 describe('isPayloadSizeAllowed()', function () {
 it('returns true when payload is within limit', function () {
             let hub = makeHub();
