@@ -33,8 +33,8 @@ CREATE TABLE governance_proposals (
     -- this column (tallied against the live set, legacy behaviour). Added to
     -- existing tables by the startup drift-reconciler.
     validator_snapshot MEDIUMTEXT NULL DEFAULT NULL,
-    applied_at      TIMESTAMP NULL DEFAULT NULL,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    applied_at      DATETIME NULL DEFAULT NULL,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     KEY idx_parameter (parameter),
     KEY idx_status (status)
 );
