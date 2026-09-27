@@ -54,13 +54,28 @@ const logger = getLogger();
  *                  amount:string, source:string}>}
  */
 function normalizeCapabilitySnapshotRows(capability, block, validators){
-    return (validators || []).map(v => ({
+    let rows = (validators || []).map(v => ({
         snapshot_block: block,
         capability:     capability,
         signing_pubkey: String(v.pubkey).toLowerCase(),
         amount:         String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')),
         source:         String(v.source != null ? v.source : '')
     }));
+
+    // XC-2981: two engines racing concurrent multi-row INSERT IGNORE statements over an
+    // overlapping (snapshot_block, capability) key range, each in a different pubkey
+    // order, meet InnoDB's gap-lock precondition for a 1213 deadlock. A fixed insert
+    // order removes that precondition without changing which rows are written; the write
+    // remains one unchunked INSERT IGNORE as required above.
+    rows.sort((a, b) => {
+        if(a.signing_pubkey < b.signing_pubkey) return -1;
+        if(a.signing_pubkey > b.signing_pubkey) return 1;
+        if(a.source < b.source) return -1;
+        if(a.source > b.source) return 1;
+        return 0;
+    });
+
+    return rows;
 }
 
 /**
