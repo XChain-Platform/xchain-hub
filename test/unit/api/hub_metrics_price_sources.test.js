@@ -99,7 +99,54 @@ function registerPriceSourceBoundRejectMetricsSuitePart2() {
   });
 }
 
-describe('hub oracle price source bound-rejection metrics', function () {
+function registerPriceSourceLivenessMetricsSuite() {
+  it('renders live and dead price source samples', function () {
+    const observability = realObservability();
+    installHubOracleMetrics(observability, {
+      getOracle: () => ({
+        priceFetcher: {
+          lastSourceLiveness: {
+            live: ['coingecko', 'coinbase'],
+            dead: ['kraken']
+          }
+        }
+      })
+    });
+
+    const out = observability.registry.render();
+    expect(out).to.match(/xchain_oracle_price_source_live\{source="coingecko"\} 1\b/);
+    expect(out).to.match(/xchain_oracle_price_source_live\{source="coinbase"\} 1\b/);
+    expect(out).to.match(/xchain_oracle_price_source_live\{source="kraken"\} 0\b/);
+  });
+
+  it('renders no liveness sample before the first fetch', function () {
+    const observability = realObservability();
+    installHubOracleMetrics(observability, {
+      getOracle: () => ({
+        priceFetcher: { lastSourceLiveness: null }
+      })
+    });
+
+    expect(observability.registry.render()).to.not.match(/xchain_oracle_price_source_live\{/);
+  });
+
+  it('moves a price source from dead to live between scrapes', function () {
+    const observability = realObservability();
+    let summary = { live: [], dead: ['kraken'] };
+    installHubOracleMetrics(observability, {
+      getOracle: () => ({
+        priceFetcher: { lastSourceLiveness: summary }
+      })
+    });
+
+    expect(observability.registry.render()).to.match(/xchain_oracle_price_source_live\{source="kraken"\} 0\b/);
+    summary = { live: ['kraken'], dead: [] };
+    expect(observability.registry.render()).to.match(/xchain_oracle_price_source_live\{source="kraken"\} 1\b/);
+  });
+}
+
+describe('hub oracle price source metrics', function () {
   registerPriceSourceBoundRejectMetricsSuitePart1.call(this);
   registerPriceSourceBoundRejectMetricsSuitePart2.call(this);
+  registerPriceSourceLivenessMetricsSuite.call(this);
 });
