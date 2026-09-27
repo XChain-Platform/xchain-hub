@@ -31,7 +31,7 @@ CREATE TABLE price_snapshots (
     archived_status           VARCHAR(20) DEFAULT NULL,
     archived_batch_block_time BIGINT DEFAULT NULL,
     archived_proof_sha        CHAR(64) DEFAULT NULL,
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_round_pair (round_number, coin_pair),
     KEY idx_pair_block (coin_pair, reference_block),
     KEY idx_pair_timestamp (coin_pair, block_timestamp),

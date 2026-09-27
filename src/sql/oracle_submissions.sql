@@ -5,7 +5,7 @@ CREATE TABLE oracle_submissions (
     validator_pubkey CHAR(64) NOT NULL,
     price            VARCHAR(40) NOT NULL,
     sources          INT NOT NULL DEFAULT 0,
-    submitted_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    submitted_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_submission (round_number, coin_pair, validator_pubkey),
     KEY idx_round (round_number, coin_pair),
     KEY idx_validator (validator_pubkey)
