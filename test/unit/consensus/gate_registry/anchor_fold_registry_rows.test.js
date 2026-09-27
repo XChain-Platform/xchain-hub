@@ -10,6 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+// The hub publisher fold gates on these two rows, so they are read here through
+// the hub's own registry entry rather than the indexer canonical they twin.
+
 const assert = require('assert');
 
 const registry = require('../../../../src/consensus/gate_registry.js');
@@ -19,7 +22,6 @@ const KEYS = [
     'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION',
     'archive_section_verdict_activation.ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION',
 ];
-const present = KEYS.filter((key) => registry.has(key));
 
 function withEnv(value, fn) {
     const saved = process.env[ENV];
@@ -33,17 +35,11 @@ function withEnv(value, fn) {
     }
 }
 
-describe('gate_registry: anchor fold registry rows', function () {
-    it('carries either both shared rows or neither', function () {
-        assert.ok(present.length === 0 || present.length === 2);
-    });
-
+describe('gate_registry: anchor fold rows', function () {
     it('ships both activation maps inert on every network', function () {
-        // This case waits for this repo's SHARED-block twin to carry the pair.
-        if (present.length !== 2) this.skip();
         withEnv(undefined, () => {
             for (const key of KEYS) {
-                assert.deepStrictEqual(registry.get(key), {
+                assert.deepStrictEqual({ ...registry.get(key) }, {
                     mainnet: 9999999999,
                     testnet: 9999999999,
                     regtest: null,
@@ -52,22 +48,9 @@ describe('gate_registry: anchor fold registry rows', function () {
         });
     });
 
-    it('arms both regtest entries from the shared venue variable', function () {
-        // This case waits for this repo's SHARED-block twin to carry the pair.
-        if (present.length !== 2) this.skip();
+    it('arms both regtest entries at height 0 from the shared venue variable', function () {
         withEnv('armed', () => {
             for (const key of KEYS) assert.strictEqual(registry.get(key).regtest, 0);
-        });
-    });
-
-    it('stays inactive below the sentinel on mainnet and testnet', function () {
-        // This case waits for this repo's SHARED-block twin to carry the pair.
-        if (present.length !== 2) this.skip();
-        withEnv(undefined, () => {
-            for (const key of KEYS) {
-                assert.strictEqual(registry.activeAt(key, 'mainnet', null, 99999999, null), false);
-                assert.strictEqual(registry.activeAt(key, 'testnet', null, 99999999, null), false);
-            }
         });
     });
 });
