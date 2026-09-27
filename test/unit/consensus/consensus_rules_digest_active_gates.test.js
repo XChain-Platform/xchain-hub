@@ -36,9 +36,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 35 entries, and contains the gates the last trains append', function () {
+    it('is sorted, has 38 entries, and contains the gates the last trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(35, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(38, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -65,7 +65,10 @@ function registerGateInventoryTest() {
             'mirror_admission_activation.admissionCanonicalField',
             // The token leg gate this hub loads per bridge leg.
             'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
-            'anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION'
+            'anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION',
+            'price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION',
+            'price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH',
+            'price_scale_activation.PRICE_V1_FEE_MAX_LENGTH'
         ]);
     });
 }
@@ -99,7 +102,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('9b65c9a7da2ed2eb358d17f2078d2d29fca1c230a456681d85ecf4ed20c2dcea',
+                .to.equal('82b52b64b59c7161e5ff8b5401593287ddcd3a438e3dab37aab7d4a2fb297ae0',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -135,7 +138,7 @@ function registerGateOrderingTest() {
         expect(mods.slice(PRE_EXISTING.length),
             'the family must follow the bridge gate, then the token and anchor bundle gates must remain appended')
             .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation',
-                'token_bridge_activation', 'anchor_bundle_order_activation']);
+                'token_bridge_activation', 'anchor_bundle_order_activation', 'price_scale_activation']);
     });
 }
 
