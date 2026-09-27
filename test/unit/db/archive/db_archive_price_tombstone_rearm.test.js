@@ -6,7 +6,7 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const bookkeeping = require('../../../src/db/prices/archive_bookkeeping');
+const bookkeeping = require('../../../../src/db/prices/archive_bookkeeping');
 
 function stubbedDb() {
     return { doQuery: sinon.stub().resolves([]) };
