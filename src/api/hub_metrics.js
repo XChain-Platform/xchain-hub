@@ -87,11 +87,30 @@ function registerOracleSeries(registry){
         name: 'xchain_oracle_single_source_rounds_total',
         help: 'Oracle rounds finalized with one uncorrelated price source on a normally-multi-source pair'
     });
-    return { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds };
+    const priceSourceBoundRejects = registry.counter({
+        name: 'xchain_oracle_price_source_bound_rejects_total',
+        help: 'Count of upstream values dropped on the ingest bound per source',
+        labelNames: ['source']
+    });
+    return {
+        lastFinalizedTs,
+        currentRound,
+        skippedStreak,
+        roundTimeouts,
+        singleSourceRounds,
+        priceSourceBoundRejects
+    };
 }
 
 // One scrape of the oracle-round series from live in-memory OracleRound state.
-function collectOracleSeries(hub, { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds }){
+function collectOracleSeries(hub, {
+    lastFinalizedTs,
+    currentRound,
+    skippedStreak,
+    roundTimeouts,
+    singleSourceRounds,
+    priceSourceBoundRejects
+}){
     const oracle = hub.getOracle();
     if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
     // lastSuccessfulRoundTime is stamped by markRoundFinalized on a genuine
@@ -116,6 +135,12 @@ function collectOracleSeries(hub, { lastFinalizedTs, currentRound, skippedStreak
     }
     if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
         singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
+    }
+    const boundRejects = oracle.priceFetcher && oracle.priceFetcher['_boundRejects'];
+    if(boundRejects) {
+        for(const [source, count] of Object.entries(boundRejects)) {
+            if(Number.isFinite(count)) priceSourceBoundRejects.setMonotonic({ source }, count);
+        }
     }
 }
 
