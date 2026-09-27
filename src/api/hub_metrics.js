@@ -25,6 +25,8 @@
 
 'use strict';
 
+const { setSourceLiveness } = require('./hub_metrics_source_liveness');
+
 /**
  * Register the hub's oracle-round heartbeat on an installed registry.
  *
@@ -92,13 +94,19 @@ function registerOracleSeries(registry){
         help: 'Count of upstream values dropped on the ingest bound per source',
         labelNames: ['source']
     });
+    const priceSourceLive = registry.gauge({
+        name: 'xchain_oracle_price_source_live',
+        help: '1 when the source returned at least one usable price on this hub\'s last fetch, 0 when it did not',
+        labelNames: ['source']
+    });
     return {
         lastFinalizedTs,
         currentRound,
         skippedStreak,
         roundTimeouts,
         singleSourceRounds,
-        priceSourceBoundRejects
+        priceSourceBoundRejects,
+        priceSourceLive
     };
 }
 
@@ -109,7 +117,8 @@ function collectOracleSeries(hub, {
     skippedStreak,
     roundTimeouts,
     singleSourceRounds,
-    priceSourceBoundRejects
+    priceSourceBoundRejects,
+    priceSourceLive
 }){
     const oracle = hub.getOracle();
     if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
@@ -142,6 +151,8 @@ function collectOracleSeries(hub, {
             if(Number.isFinite(count)) priceSourceBoundRejects.setMonotonic({ source }, count);
         }
     }
+    const sourceLiveness = oracle.priceFetcher && oracle.priceFetcher.lastSourceLiveness;
+    setSourceLiveness(priceSourceLive, sourceLiveness);
 }
 
 

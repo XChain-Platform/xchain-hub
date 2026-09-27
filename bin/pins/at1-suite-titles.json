@@ -7112,6 +7112,9 @@
       "59a9f916343a8b0edd698070b0864ab4aededf09631352dee9839c2dab023597",
       "cefbeb40393649afe2e887da391aeed23b2a8148624ea6edca2841c178dd24ac"
     ],
+    "c0fdb0edb04f3f4f": [
+      "c0fdb0edb04f3f4fe667745e09b9dc54d6a1a337c2146ff4456ed78e676634b9"
+    ],
     "c11d6f3a87c0c2e4": [
       "b7c7e38481d7f19c6a8163453c911780c4329a17bab295c5e490bac0d6381ba3",
       "192d88f8383c17d775adfb994674641cda23cae8213c326d02594b99188fbe01",
@@ -10364,8 +10367,8 @@
       }
     },
     "test:all": {
-      "fileCount": 696,
-      "titleCount": 7325,
+      "fileCount": 697,
+      "titleCount": 7326,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -10402,6 +10405,7 @@
         "test/integration/crosschain/attestation.test.js": "349b6cff72d04841",
         "test/integration/crosschain/reorg.test.js": "e6242d9f6959b91a",
         "test/integration/db/config_cursor.test.js": "cd6fc21361cc1abb",
+        "test/integration/db/db_datetime_retype_real.test.js": "c0fdb0edb04f3f4f",
         "test/integration/db/db_widen_unique_key.test.js": "a24de959ac61b628",
         "test/integration/db/oracle_prices_latest.test.js": "8fdc774d4dd17c7e",
         "test/integration/governance/governance.test.js": "b1b9d82b90e50b13",
@@ -11134,8 +11138,8 @@
       }
     },
     "test:integration": {
-      "fileCount": 17,
-      "titleCount": 98,
+      "fileCount": 18,
+      "titleCount": 99,
       "files": {
         "test/integration/anchor/archive_seq_divergence.test.js": "f1ffe523fac316d9",
         "test/integration/api/jsonrpc.test.js": "b77bbdfced921d0e",
@@ -11144,6 +11148,7 @@
         "test/integration/crosschain/attestation.test.js": "349b6cff72d04841",
         "test/integration/crosschain/reorg.test.js": "e6242d9f6959b91a",
         "test/integration/db/config_cursor.test.js": "cd6fc21361cc1abb",
+        "test/integration/db/db_datetime_retype_real.test.js": "c0fdb0edb04f3f4f",
         "test/integration/db/db_widen_unique_key.test.js": "a24de959ac61b628",
         "test/integration/db/oracle_prices_latest.test.js": "8fdc774d4dd17c7e",
         "test/integration/governance/governance.test.js": "b1b9d82b90e50b13",
