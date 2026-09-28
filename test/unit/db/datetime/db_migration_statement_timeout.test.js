@@ -44,11 +44,11 @@ async function migrate(context){
     );
 }
 
-describe('Database.prototype.migrateColumnType() statement timeout', function () {
+let logger;
+
+function installTimeoutEnvironmentHooks(){
     let originalTimeout;
     let hadOriginalTimeout;
-    let logger;
-
     beforeEach(function () {
         hadOriginalTimeout = Object.prototype.hasOwnProperty.call(process.env, 'MIGRATE_QUERY_TIMEOUT');
         originalTimeout = process.env.MIGRATE_QUERY_TIMEOUT;
@@ -63,6 +63,10 @@ describe('Database.prototype.migrateColumnType() statement timeout', function ()
         if(hadOriginalTimeout) process.env.MIGRATE_QUERY_TIMEOUT = originalTimeout;
         else delete process.env.MIGRATE_QUERY_TIMEOUT;
     });
+}
+
+describe('migrateColumnType() configured statement timeout', function () {
+    installTimeoutEnvironmentHooks();
 
     it('uses one hour for the ALTER and restores the pool timeout before release', async function () {
         const { calls, context, db } = fakeMigration();
@@ -107,6 +111,10 @@ describe('Database.prototype.migrateColumnType() statement timeout', function ()
 
         expect(calls[3].params).to.deep.equal([0]);
     });
+});
+
+describe('migrateColumnType() failure handling', function () {
+    installTimeoutEnvironmentHooks();
 
     it('restores and releases after a swallowed ALTER failure', async function () {
         const { calls, context, db } = fakeMigration('timestamp', { alterError: new Error('alter failed') });
