@@ -150,7 +150,7 @@ describe('price_snapshots pending predicate', function () {
         const db = stubbedDb();
         await db.findPriceSnapshotsForArchiveRounds([4, 5, 9]);
         let { sql, args } = lastCall(db);
-        expect(sql).to.match(/WHERE round_number IN \(\?, \?, \?\) AND consensus_proof NOT LIKE '\["%' ORDER BY round_number ASC, coin_pair ASC$/);
+        expect(sql).to.match(/WHERE round_number IN \(\?, \?, \?\) AND status <> 'skipped' AND consensus_proof NOT LIKE '\["%' ORDER BY round_number ASC, coin_pair ASC$/);
         expect(sql).to.not.include('batch_seq');
         expect(args).to.deep.equal([4, 5, 9]);
     });
