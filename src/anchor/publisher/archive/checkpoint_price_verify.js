@@ -43,6 +43,13 @@ function samePriceRow(local, archived, signatureProofed){
     return sameRowExcept(local, archived, keys);
 }
 
+function findHeldPriceRow(held, archived, signatureProofed){
+    const local = (held || []).find(candidate =>
+        String(candidate.coin_pair) === String(archived.coin_pair));
+    if(signatureProofed && local && String(local.status) === 'skipped') return null;
+    return local;
+}
+
 function priceGroupKey(row){
     return JSON.stringify([Number(row.round_number), row.consensus_proof]);
 }
@@ -106,8 +113,7 @@ module.exports = {
         const held = await this.db.findPriceSnapshotsForRound(Number(first.round_number));
         const signatureProofed = this.isSignatureProofedPrice(first);
         for(const row of group){
-            const local = (held || []).find(candidate =>
-                String(candidate.coin_pair) === String(row.coin_pair));
+            const local = findHeldPriceRow(held, row, signatureProofed);
             if(local && !samePriceRow(this.serializePriceSnapshot(local), row, signatureProofed)){
                 logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
                             row.coin_pair + ' differs from our row; NOT signing');
