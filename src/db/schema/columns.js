@@ -35,6 +35,40 @@ const logger = getLogger();
 // MAX_TICK_LENGTH: a raised gate constant must not widen the hub past its mirrors unasked.
 const ORACLE_TICK_WIDTH = 250;
 const ORACLE_TICK_DEF   = 'VARCHAR(250) NOT NULL';
+const DEFAULT_MIGRATION_STATEMENT_TIMEOUT_MS = 3600000;
+
+function migrationStatementTimeoutMs(){
+    const raw = hubConfig.MIGRATE_QUERY_TIMEOUT;
+    if(raw === undefined || raw === null || String(raw).trim() === '')
+        return DEFAULT_MIGRATION_STATEMENT_TIMEOUT_MS;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0
+        ? parsed
+        : DEFAULT_MIGRATION_STATEMENT_TIMEOUT_MS;
+}
+
+function setSessionStatementTime(db, ms){
+    return db.query('SET SESSION max_statement_time = ?', [ms / 1000]);
+}
+
+async function releaseAfterColumnTypeMigration(db, timeoutChanged, runtimeTimeoutMs){
+    if(timeoutChanged){
+        try {
+            await setSessionStatementTime(db, runtimeTimeoutMs);
+        } catch(e){
+            logger.error(nodeUtil.format('MIGRATION CLEANUP FAILED: could not restore max_statement_time:', e));
+            if(typeof db.destroy === 'function'){
+                try {
+                    await db.destroy();
+                } catch(destroyError){
+                    logger.error(nodeUtil.format('MIGRATION CLEANUP FAILED: could not destroy connection:', destroyError));
+                }
+            }
+            return;
+        }
+    }
+    await db.release();
+}
 
 module.exports = {
 
@@ -211,6 +245,7 @@ module.exports = {
     // (connectionPoolParams), so no host's local zone can shift a stored value here.
     async migrateColumnType(table, column, targetType, columnDef){
         let db = await this.getConnection();
+        let timeoutChanged = false;
         try {
             let rows = await db.query(
                 "SELECT DATA_TYPE FROM information_schema.columns " +
@@ -220,6 +255,8 @@ module.exports = {
             if(!rows[0]) return; // table/column not present yet; CREATE TABLE covers it
             let liveType = String(rows[0].DATA_TYPE || '').toLowerCase();
             if(liveType === String(targetType).toLowerCase()) return; // already converted
+            timeoutChanged = true;
+            await setSessionStatementTime(db, migrationStatementTimeoutMs());
             await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
             logger.info('Migration: converted ' + table + '.' + column + ' ' + liveType + ' -> ' + targetType);
         } catch(e){
@@ -233,7 +270,8 @@ module.exports = {
                 'limit (2038-01-19 03:14:07 UTC) cannot be stored. Run by hand: ' +
                 'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e));
         } finally {
-            await db.release();
+            const runtimeTimeoutMs = (this.connectionPoolParams && this.connectionPoolParams.queryTimeout) || 0;
+            await releaseAfterColumnTypeMigration(db, timeoutChanged, runtimeTimeoutMs);
         }
     },
 

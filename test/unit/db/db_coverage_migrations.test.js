@@ -54,6 +54,18 @@ function makeDb(fsOverrides) {
 
 function fatalErr(code) { const e = new Error(code); e.code = code; return e; }
 
+function assertColumnMigrationQueryOrder(mockConn) {
+    const queries = mockConn.query.getCalls();
+    const alterIndex = queries.findIndex(call => call.args[0].startsWith('ALTER TABLE'));
+    const setIndexes = queries
+        .map((call, index) => call.args[0].startsWith('SET SESSION') ? index : -1)
+        .filter(index => index >= 0);
+    expect(setIndexes.map(index => queries[index].args[1])).to.deep.equal([[3600], [30]]);
+    expect(setIndexes[0]).to.be.lessThan(alterIndex);
+    expect(setIndexes[1]).to.be.greaterThan(alterIndex);
+    return queries[alterIndex].args[0];
+}
+
 
 function registerDatabaseHooks() {
         beforeEach(function () {
@@ -86,11 +98,9 @@ function registerMigrateColumnTypeTests() {
 
         it('converts the column in place when the live type differs', async function () {
             const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
-                .onCall(1).resolves([]); // ALTER MODIFY
+            mockConn.query.onCall(0).resolves([{ DATA_TYPE: 'timestamp' }]);
             await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
-            const alter = mockConn.query.getCall(1).args[0];
+            const alter = assertColumnMigrationQueryOrder(mockConn);
             expect(alter).to.include('ALTER TABLE `governance_proposals` MODIFY `voting_end`');
             expect(alter).to.include('DATETIME NOT NULL');
             expect(console.log.calledWithMatch(/converted governance_proposals\.voting_end timestamp -> datetime/)).to.be.true;
@@ -110,9 +120,11 @@ function registerMigrateColumnTypeTests() {
         // statement an operator runs to finish the job by hand.
         it('catches a failed ALTER, says what it costs, and still releases the connection', async function () {
             const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
-                .onCall(1).rejects(new Error('alter failed'));
+            mockConn.query.callsFake(async sql => {
+                if(sql.startsWith('SELECT DATA_TYPE')) return [{ DATA_TYPE: 'timestamp' }];
+                if(sql.startsWith('ALTER TABLE')) throw new Error('alter failed');
+                return [];
+            });
             await db.migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
             expect(console.error.calledWithMatch(/MIGRATION FAILED: governance_proposals\.voting_end/)).to.be.true;
             expect(console.error.calledWithMatch(/2038-01-19/)).to.be.true;
@@ -216,4 +228,3 @@ describe('Database: extended coverage', function () {
     registerMigrateEnumColumnTests();
     registerMigrateIndexTests();
 });
-
