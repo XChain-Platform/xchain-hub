@@ -50,6 +50,12 @@ function findHeldPriceRow(held, archived, signatureProofed){
     return local;
 }
 
+function hasHeldLivePriceRow(held, archived){
+    return (held || []).some(candidate =>
+        String(candidate.coin_pair) === String(archived.coin_pair) &&
+        String(candidate.status) !== 'skipped');
+}
+
 function priceGroupKey(row){
     return JSON.stringify([Number(row.round_number), row.consensus_proof]);
 }
@@ -141,7 +147,7 @@ module.exports = {
 
     async verifyArchivedPriceTombstone(row){
         const held = await this.db.findPriceSnapshotsForRound(Number(row.round_number));
-        if((held || []).some(candidate => String(candidate.coin_pair) === String(row.coin_pair))){
+        if(hasHeldLivePriceRow(held, row)){
             logger.warn('StateAnchorPublisher: archive price tombstone ' + row.round_number + '/' +
                         row.coin_pair + ' conflicts with our live row; NOT signing');
             return false;
