@@ -102,7 +102,7 @@ module.exports = {
                 heldRounds.set(round, await this.db.findPriceSnapshotsForRound(round));
             const held = (heldRounds.get(round) || []).find(row =>
                 String(row.coin_pair) === String(price.coin_pair));
-            if(!held) continue;
+            if(!held || String(held.status) === 'skipped') continue;
             if(price.status === '__partial__'){
                 localPrices.push(price);
                 continue;
@@ -234,7 +234,9 @@ module.exports = {
             if(p.status === '__partial__') continue;
             const rows = await this.db.findPriceSnapshotsForRound(Number(p.round_number));
             const held = (rows || []).find(r => String(r.coin_pair) === String(p.coin_pair));
-            if(held && (String(held.status) !== String(p.status) ||
+            const ignoredSkip = held && String(held.status) === 'skipped' &&
+                String(p.status) !== 'skipped';
+            if(held && !ignoredSkip && (String(held.status) !== String(p.status) ||
                         Number(held.batch_block_time) !== Number(p.batch_block_time))) return false;
         }
         for(const t of q.tombstones)
