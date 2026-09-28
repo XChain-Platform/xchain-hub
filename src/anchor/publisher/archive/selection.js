@@ -24,7 +24,9 @@
 
 const zlib = require('zlib');
 const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
-        ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES } = require('../constants.js');
+        ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES,
+        ARCHIVE_MAX_WIRE_B64_BYTES, ARCHIVE_MAX_CHAIN_TXS,
+        ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -134,24 +136,55 @@ module.exports = {
     async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows){
         let archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
             rows.calls, rewardRows, rows);
-        while(Buffer.byteLength(archive.json, 'utf8') > ARCHIVE_MAX_JSON_BYTES){
-            if(!this.trimTrailingArchiveRows(rows))
+        while(true){
+            const jsonBytes = Buffer.byteLength(archive.json, 'utf8');
+            const wire = this.archiveWire(archive.json);
+            const maxChunks = this.maxArchiveChunks();
+            const ratios = [jsonBytes / ARCHIVE_MAX_JSON_BYTES,
+                wire.b64.length / ARCHIVE_MAX_WIRE_B64_BYTES,
+                wire.chunks.length / maxChunks];
+            const jsonOver = jsonBytes > ARCHIVE_MAX_JSON_BYTES;
+            const wireOver = wire.b64.length > ARCHIVE_MAX_WIRE_B64_BYTES || wire.chunks.length > maxChunks;
+            if(!jsonOver && !wireOver) return archive;
+            if(!this.trimTrailingArchiveRows(rows, Math.max(...ratios))){
+                if(!jsonOver){
+                    logger.warn('StateAnchorPublisher: archive wire exceeds transport budget with only legacy rows; returning it untrimmed');
+                    return archive;
+                }
                 throw new Error('archive JSON exceeds ' + ARCHIVE_MAX_JSON_BYTES + ' bytes after eligible rows were trimmed');
+            }
             rows.cappedOrTrimmed = true;
             archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
                 rows.calls, rewardRows, rows);
         }
-        return archive;
     },
 
-    trimTrailingArchiveRows(rows){
+    maxArchiveChunks(){
+        return Math.max(1, Math.min(ARCHIVE_MAX_CHAIN_TXS,
+            Math.floor(ARCHIVE_CHAIN_BYTES_BUDGET / (this.chunkMaxBytes + 1000))));
+    },
+
+    trimTrailingPriceRounds(rows, removeCount){
+        let cut = Math.max(0, rows.prices.length - removeCount);
+        if(cut === 0){ rows.prices = []; return; }
+        const trailingRound = String(rows.prices[cut].round_number);
+        while(cut > 0 && String(rows.prices[cut - 1].round_number) === trailingRound) cut--;
+        rows.prices = rows.prices.slice(0, cut);
+    },
+
+    trimTrailingArchiveRows(rows, ratio){
+        ratio = Math.max(1, Number(ratio) || 1);
         if(rows.prices.length){
-            let trailingRound = String(rows.prices[rows.prices.length - 1].round_number);
-            rows.prices = rows.prices.filter(row => String(row.round_number) !== trailingRound);
+            const removeCount = Math.max(1, Math.ceil(rows.prices.length * (1 - 1 / ratio)));
+            this.trimTrailingPriceRounds(rows, removeCount);
             return true;
         }
-        for(let key of ['policies', 'checkpoints', 'bridges']){
-            if(rows[key].length){ rows[key].pop(); return true; }
+        for(const key of ['policies', 'checkpoints', 'bridges', 'tombstones']){
+            if(rows[key].length){
+                const removeCount = Math.max(1, Math.ceil(rows[key].length * (1 - 1 / ratio)));
+                rows[key].splice(rows[key].length - removeCount, removeCount);
+                return true;
+            }
         }
         return false;
     },
