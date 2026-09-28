@@ -30,7 +30,7 @@ const PENDING_PRICE_PREDICATE =
     '(batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time ' +
     'OR archived_proof_sha <> SHA2(consensus_proof, 256))';
 
-const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'consensus_proof NOT LIKE \'["%\'';
+const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'status <> \'skipped\' AND consensus_proof NOT LIKE \'["%\'';
 
 const NO_LIVE_PRICE_ROW =
     'NOT EXISTS (SELECT 1 FROM price_snapshots p WHERE p.round_number = archive_price_tombstones.round_number ' +
