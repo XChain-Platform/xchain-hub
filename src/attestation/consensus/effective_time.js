@@ -129,6 +129,27 @@ module.exports = {
             && effectiveTime <= expected + ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_AHEAD_S;
     },
 
+    // Hold winner establishment until the ELECTED LEADER's proposal is in, while it
+    // still can be. resolveRoundEffectiveTime reads the leader's stamp only from the
+    // proposals already held, and `need` is min(REDUNDANCY, responsible.length); once
+    // zero-conf widening makes the responsible set larger than REDUNDANCY, a hub can
+    // reach `need` without the leader and settle on its OWN stamp, which is its own
+    // wall-clock second. A hub that proposed a second earlier than its peers then signs
+    // a canonical no peer can rebuild, counts no PREPARE, never finalizes, and pays its
+    // provider again when the request is pending again (ZC2 on a GitHub runner,
+    // 2026-09-29). Waiting ends the moment the leader proposes or every responsible
+    // hub has, so a silent leader still falls through to the fallback below, now only
+    // with the whole set in hand. judge_model is excluded: its followers never settle
+    // a winner of their own (awaitsJudgeLeader), and it stamps at establishment.
+    awaitsLeaderStamp(pending){
+        if(!pending.mirrorEra || pending.pinnedConsensusStrategy === 'judge_model') return false;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        if(!leader || pending.proposals.has(leader)) return false;
+        let responsible = pending.responsible || [];
+        let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
+        return leaderResponsible && pending.proposals.size < responsible.length;
+    },
+
     // Settle the round's single effective_time at the moment a winner is
     // established locally, preferring the ELECTED LEADER's proposed value over this
     // hub's own candidate.
@@ -140,8 +161,8 @@ module.exports = {
     // and the round would run to timeout with all honest hubs agreeing on the body.
     // Reading the leader's proposal instead gives every hub the same bytes from
     // data it already holds: the leader is a member of the responsible set
-    // (AttestationRound.js:460), and a hub only reaches a winner after collecting
-    // `need` proposals, so in a healthy round the leader's is among them.
+    // (AttestationRound.js:460), and awaitsLeaderStamp holds a hub short of a winner
+    // until the leader's proposal is in or the whole responsible set has proposed.
     //
     // Falls back to this hub's own candidate when the leader's proposal is absent
     // (a failed leader fetch, or gossip loss). That round then reaches quorum only

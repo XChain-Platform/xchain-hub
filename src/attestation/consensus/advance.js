@@ -60,6 +60,7 @@ module.exports = {
         // failed must still advance (to a non-ok outcome), not stall.
         let need = Math.min(pending.redundancy, pending.responsible.length);
         if(pending.proposals.size < need) return;
+        if(this.awaitsLeaderStamp(pending)) return;
         let proposalsArr = this.okProposalsForRound(rid, pending);
         if(!proposalsArr) return;
         let providerModule = this.roundProviderModule(rid, pending);
