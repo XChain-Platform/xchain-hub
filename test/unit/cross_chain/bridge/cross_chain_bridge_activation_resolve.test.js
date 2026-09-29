@@ -106,7 +106,7 @@ function itHandsTheCoinToTheRegistryAheadOfTheBareKey() {
 const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'DOGE:testnet': 67902062 };
 // The v0.21.0 cut arms both token rows per testnet chain at the heights its freeze plan sized;
 // the bare testnet fallback and every mainnet slot stay dark.
-const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DOGE:testnet': 67949959 };
+const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DOGE:testnet': 67951140 };
 const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
