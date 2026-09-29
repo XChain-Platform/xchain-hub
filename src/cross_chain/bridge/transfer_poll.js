@@ -58,7 +58,9 @@ module.exports = {
         // Resolved origin chain per `<network>|<tick>`. A tick's origin is the chain its
         // native row lives on; bridge_transfers carries the chains but never the direction
         // (D19), so it is learned from the pending read's transfer_kind (a lock's src_chain
-        // is the origin) and cached for the policy poll after a restart.
+        // is the origin). It lives in memory only: start() seeds it from the finalized
+        // policy snapshots (seedTickOrigins, policy_poll.js), which is what lets the policy
+        // poll and the invariant read pair an already-bridged tick after a restart.
         this._tickOrigin = new Map();
 
         // Escrow and supply come from chain state, which no hub table holds. Null means "use

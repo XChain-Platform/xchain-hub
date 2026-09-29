@@ -219,6 +219,8 @@ class CrossChainBridgeEngine extends EventEmitter {
         }
         await this.transferConsensus.start();
         await this.policyConsensus.start();
+        // Before the first poll: a restarted hub must pair every tick it already bridged.
+        await this.seedTickOrigins(this.network);
         this._pollTimer = setInterval(() => {
             this.poll().catch(err => logger.error(nodeUtil.format('CrossChainBridge: poll error:', err && err.message)));
         }, this.pollMs);

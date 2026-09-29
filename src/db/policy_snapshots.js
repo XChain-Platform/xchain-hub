@@ -54,6 +54,17 @@ module.exports = {
         return Number.isFinite(n) ? n : 0;
     },
 
+    // Every (origin_chain, tick) this hub has FINALIZED a policy snapshot for on `network`.
+    // The bridge engine seeds its tick-origin map from it at start, because a snapshot row
+    // is the one durable place a tick's origin is recorded (bridge_transfers carries the
+    // chains but never the direction, D19).
+    async getPolicyTickOrigins(network){
+        let rows = await this.doQuery(
+            "SELECT DISTINCT origin_chain, tick FROM policy_snapshots WHERE network = ? AND status = 'finalized'",
+            [String(network || '')]);
+        return rows || [];
+    },
+
     // The finalized snapshot a follower would be equivocating against: our own row at
     // the same (network, origin_chain, tick, policy_seq), or null when we hold none.
     async getPolicySnapshotAtSeq(network, originChain, tick, policySeq){

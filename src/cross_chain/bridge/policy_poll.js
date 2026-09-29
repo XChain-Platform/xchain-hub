@@ -31,6 +31,43 @@ module.exports = {
     // Policy snapshots (policy spec section 3 step 2)
     // ---------------------------------------------------------------------------
 
+    // Seed the tick-origin map from the policy snapshots this hub already finalized, so a
+    // restarted hub still pairs every bridged tick. The map was filled only from live pending
+    // legs, so after a restart (every fleet roll) policyPairs skipped each tick until its next
+    // transfer, and a LIST, BLOCK or SLEEP edit on a bridged token was never signed. A finalized
+    // snapshot is quorum-signed and names the origin directly, so it is the one durable record
+    // to trust here. An origin already learned from a live leg is kept; a tick finalized under
+    // two origins is left unseeded rather than guessed, and waits for its next leg as before. A
+    // failed read seeds nothing and never stops the engine from starting.
+    async seedTickOrigins(network){
+        let rows;
+        try { rows = await this.db.getPolicyTickOrigins(network); }
+        catch(e){
+            logger.warn('CrossChainBridge: could not seed tick origins from finalized policy snapshots: ' + (e && e.message));
+            return 0;
+        }
+        let found = new Map();
+        for(let r of (rows || [])){
+            let tick = String(r.tick || ''), origin = String(r.origin_chain || '');
+            if(!tick || !origin) continue;
+            if(!found.has(tick)) found.set(tick, new Set());
+            found.get(tick).add(origin);
+        }
+        let seeded = 0;
+        for(let [tick, origins] of found){
+            let key = network + '|' + tick;
+            if(this._tickOrigin.has(key)) continue;
+            if(origins.size !== 1){
+                logger.warn('CrossChainBridge: tick ' + tick + ' has finalized policy snapshots under ' +
+                            [...origins].sort().join(' and ') + '; its origin waits for its next leg');
+                continue;
+            }
+            this._tickOrigin.set(key, [...origins][0]);
+            seeded++;
+        }
+        return seeded;
+    },
+
     // Every (origin_chain, tick) pair this hub should hold a current policy for: the pairs
     // its own finalized transfers name, plus any tick seen with a pending leg this cycle,
     // so a token's FIRST snapshot is signed in the same cycle its first lock is seen.
