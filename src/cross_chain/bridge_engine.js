@@ -67,6 +67,7 @@ const validatePart     = require('./bridge/validate.js');
 const persistPart      = require('./bridge/persist.js');
 const invariantPart    = require('./bridge/invariant.js');
 const plumbingPart     = require('./bridge/plumbing.js');
+const { relayMarginFloorS } = require('../lib/relay_margin.js');
 
 // Activation gates. The tables are rows of the activation registry (the SHARED block in
 // src/consensus/gate_registry.js, a byte twin of the indexer's), read by their literal
@@ -289,6 +290,17 @@ class CrossChainBridgeEngine extends EventEmitter {
             table,
             readSet: ah.admissionReadSet(table, r, hasPolicy ? ah.ADMIT_COLUMN_CHAINS : undefined)
         };
+    }
+
+    effectiveTimeMarginS(row){
+        let r = row || {};
+        if(r.transfer_id) return relayMarginFloorS(r.dest_chain);
+        if(!r.snapshot_id) return null;
+        return Promise.resolve(this.policyPairs(r.network)).then(pairs => {
+            let pair = (pairs || []).find(p => String(p.origin_chain) === String(r.origin_chain) &&
+                String(p.tick) === String(r.tick));
+            return pair ? this.policyMarginS(pair.copies, r.origin_chain) : null;
+        });
     }
 
     canonicalMatch(r, view){
