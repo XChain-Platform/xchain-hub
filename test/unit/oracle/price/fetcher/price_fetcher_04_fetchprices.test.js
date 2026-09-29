@@ -123,12 +123,29 @@ const testCase5 = async function () {
             }
         };
 
+const testCase6 = async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'key' });
+            sinon.stub(pf, 'fetchFromCoinGecko').resolves(null);
+            sinon.stub(pf, 'fetchFromKraken').rejects(new Error('Kraken down'));
+            sinon.stub(pf, 'fetchFromCoinbase').resolves(null);
+            sinon.stub(pf, 'fetchFromCoinMarketCap').resolves(null);
+
+            await pf.fetchPrices();
+            expect(pf._fetchAttempts).to.deep.equal({
+                coingecko: 1,
+                kraken: 1,
+                coinbase: 1,
+                coinmarketcap: 1
+            });
+        };
+
 function registerSuite1() {
     it('returns median from both sources', testCase1);
     it('returns prices from single source when other fails', testCase2);
     it('returns empty array when all sources fail', testCase3);
     it('fetches CoinGecko + Kraken + Coinbase when no CMC key', testCase4);
     it('returns 8-decimal fixed-point prices', testCase5);
+    it('counts every dispatched source including a rejected fetch', testCase6);
 }
 
 function registerOuterSuite4() {

@@ -145,8 +145,34 @@ function registerPriceSourceLivenessMetricsSuite() {
   });
 }
 
+function registerPriceSourceFetchAttemptMetricsSuite() {
+  it('renders cumulative fetch attempts for every price source across scrapes', function () {
+    const observability = realObservability();
+    const fetchAttempts = {
+      coingecko: 1,
+      kraken: 1
+    };
+    installHubOracleMetrics(observability, {
+      getOracle: () => ({
+        priceFetcher: { _fetchAttempts: fetchAttempts }
+      })
+    });
+
+    let out = observability.registry.render();
+    expect(out).to.match(/xchain_oracle_price_source_fetch_attempts_total\{source="coingecko"\} 1\b/);
+    expect(out).to.match(/xchain_oracle_price_source_fetch_attempts_total\{source="kraken"\} 1\b/);
+
+    fetchAttempts.coingecko = 2;
+    fetchAttempts.kraken = 2;
+    out = observability.registry.render();
+    expect(out).to.match(/xchain_oracle_price_source_fetch_attempts_total\{source="coingecko"\} 2\b/);
+    expect(out).to.match(/xchain_oracle_price_source_fetch_attempts_total\{source="kraken"\} 2\b/);
+  });
+}
+
 describe('hub oracle price source metrics', function () {
   registerPriceSourceBoundRejectMetricsSuitePart1.call(this);
   registerPriceSourceBoundRejectMetricsSuitePart2.call(this);
   registerPriceSourceLivenessMetricsSuite.call(this);
+  registerPriceSourceFetchAttemptMetricsSuite.call(this);
 });
