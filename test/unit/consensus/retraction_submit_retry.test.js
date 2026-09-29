@@ -107,6 +107,24 @@ describe('RetractionConsensus submit retry', function () {
         }
     });
 
+    it('still broadcasts a quorum-class table unsigned when the hub has no identity', async function () {
+        let hub = makeHub({
+            resolveBlock: async () => { throw new Error('snapshot resolution must not run'); },
+            resolveValidators: async () => { throw new Error('validator resolution must not run'); }
+        });
+        hub.identity = null;
+        let consensus = new RetractionConsensus(hub);
+
+        try {
+            await consensus.submitLocal(event());
+            assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
+            assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures, undefined);
+            assert.strictEqual(hasSignRequest(hub), false);
+        } finally {
+            consensus.stop();
+        }
+    });
+
     it('still broadcasts a table outside the quorum class unsigned', async function () {
         let hub = makeHub({
             resolveBlock: async () => null,
