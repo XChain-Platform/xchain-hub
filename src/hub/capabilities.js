@@ -97,6 +97,14 @@ function logGenesisMinStakes(hub) {
     } catch (e) { /* best-effort operator log */ }
 }
 
+// A watcher that declines to start (no operator staking sources configured) is
+// dropped rather than kept, so getstakeshare, /health and the metrics read it as
+// off instead of `active: true` with zero passes, which reads as healthy.
+function armStakeShareWatcher(hub, StakeShareWatcher) {
+    const watcher = new StakeShareWatcher(hub);
+    return watcher.start() ? watcher : null;
+}
+
 class Capabilities {
 
     // Merge the capability config JSON into p2pConfig so the self-test modules and
@@ -189,8 +197,7 @@ class Capabilities {
         // 18 hours of dead price rounds found by a tester). Started here rather
         // than with the stake poll above because it needs no identity: a
         // read-only hub can watch the federation just as well.
-        this.stakeShareWatcher = new StakeShareWatcher(this);
-        this.stakeShareWatcher.start();
+        this.stakeShareWatcher = armStakeShareWatcher(this, StakeShareWatcher);
     }
 
     // In-flight guard: _stakePollTimer fires on a bare setInterval while the pass awaits
@@ -241,4 +248,4 @@ class Capabilities {
     }
 }
 
-module.exports = Capabilities;
+module.exports = Object.assign(Capabilities, { armStakeShareWatcher });
