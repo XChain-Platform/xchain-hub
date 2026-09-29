@@ -30,7 +30,11 @@ const XRETRACT_FINALIZED = 'XRETRACT_FINALIZED';
 // the quorum-signed relay rows this consensus protects). Price-table retractions stay
 // on the fence-guarded legacy path: their insertions are not quorum-signed
 // either, so signing their deletions would claim a trust tier the data lacks.
-const QUORUM_CLASS_TABLES = new Set(['cross_chain_calls', 'cross_chain_matches']);
+const QUORUM_CLASS_TABLES = new Set([
+    'cross_chain_calls',
+    'cross_chain_matches',
+    'bridge_transfers'
+]);
 
 module.exports = {
     XRETRACT_SIGN_REQ,
