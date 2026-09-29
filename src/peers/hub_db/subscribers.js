@@ -129,6 +129,7 @@ class HubDbSubscribers {
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
             ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() }));
+            this.replayDeletions(ws);
         } catch (e) { /* ignore */ }
     }
 
