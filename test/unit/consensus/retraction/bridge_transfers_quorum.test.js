@@ -56,77 +56,82 @@ function makeHub(identity, identities){
     };
 }
 
-describe('bridge transfer retraction quorum', function () {
-    afterEach(function () { sinon.restore(); });
-
-    it('opens a signed round for a bridge_transfers retraction and never broadcasts unsigned', async function () {
-        const identities = Array.from({ length: 7 }, makeIdentity);
-        const hub = makeHub(identities[0], identities);
-        const consensus = new RetractionConsensus(hub);
-        try {
-            const evt = {
-                table: 'bridge_transfers',
-                source_chain: 'BTC',
-                from_action_index: 2049,
-                retraction_generation: 2
-            };
-            await consensus.submitLocal(evt);
-
-            assert.strictEqual(consensus.pending.size, 1, 'the signed round must remain open below quorum');
-            assert.ok(hub.peerManager.broadcasts.some(item => item.type === 'XRETRACT_SIGN_REQ'));
-            assert.strictEqual(hub.hubDbBroadcaster.broadcastDeletion.callCount, 0);
-        } finally {
-            consensus.stop();
-        }
-    });
-
-    it('co-signs a bridge transfer request over the consumer canonical bytes', async function () {
-        const leader = makeIdentity();
-        const follower = makeIdentity();
-        const hub = makeHub(follower, [leader, follower]);
-        const consensus = new RetractionConsensus(hub);
-        try {
-            assert.strictEqual(RetractionConsensus.canonicalRetraction(BRIDGE_EVT), BRIDGE_CANONICAL);
-            consensus.localIntents.set(RetractionConsensus.intentKey(BRIDGE_EVT), Date.now());
-            await consensus.handleSignReq({ data: {
-                retraction: BRIDGE_EVT,
-                sig_pubkey: leader.getPubkeyHex().toLowerCase(),
-                sig: leader.sign(BRIDGE_CANONICAL)
-            }});
-
-            const signed = hub.peerManager.broadcasts.find(item => item.type === 'XRETRACT_SIGN');
-            assert.ok(signed, 'the follower must co-sign the locally observed bridge retraction');
-            assert.ok(ValidatorIdentity.verify(
-                BRIDGE_CANONICAL,
-                signed.data.sig,
-                follower.getPubkeyHex().toLowerCase()
-            ));
-        } finally {
-            consensus.stop();
-        }
-    });
-
-    it('keeps price tables unsigned and warns once per intent', async function () {
-        const identity = makeIdentity();
-        const hub = makeHub(identity, [identity]);
-        const consensus = new RetractionConsensus(hub);
-        const warn = sinon.stub(getLogger(), 'warn');
+async function opensSignedBridgeRetractionRound(){
+    const identities = Array.from({ length: 7 }, makeIdentity);
+    const hub = makeHub(identities[0], identities);
+    const consensus = new RetractionConsensus(hub);
+    try {
         const evt = {
-            table: 'price_snapshots',
+            table: 'bridge_transfers',
             source_chain: 'BTC',
             from_action_index: 2049,
             retraction_generation: 2
         };
-        try {
-            await consensus.submitLocal(evt);
-            await consensus.submitLocal(evt);
+        await consensus.submitLocal(evt);
 
-            assert.strictEqual(hub.hubDbBroadcaster.broadcastDeletion.callCount, 2);
-            assert.strictEqual(warn.callCount, 1);
-            assert.match(String(warn.firstCall.args[0]), /broadcasting UNSIGNED retraction/);
-            assert.match(String(warn.firstCall.args[0]), /price_snapshots\|BTC\|2049/);
-        } finally {
-            consensus.stop();
-        }
-    });
+        assert.strictEqual(consensus.pending.size, 1, 'the signed round must remain open below quorum');
+        assert.ok(hub.peerManager.broadcasts.some(item => item.type === 'XRETRACT_SIGN_REQ'));
+        assert.strictEqual(hub.hubDbBroadcaster.broadcastDeletion.callCount, 0);
+    } finally {
+        consensus.stop();
+    }
+}
+
+async function cosignsBridgeRetraction(){
+    const leader = makeIdentity();
+    const follower = makeIdentity();
+    const hub = makeHub(follower, [leader, follower]);
+    const consensus = new RetractionConsensus(hub);
+    try {
+        assert.strictEqual(RetractionConsensus.canonicalRetraction(BRIDGE_EVT), BRIDGE_CANONICAL);
+        consensus.localIntents.set(RetractionConsensus.intentKey(BRIDGE_EVT), Date.now());
+        await consensus.handleSignReq({ data: {
+            retraction: BRIDGE_EVT,
+            sig_pubkey: leader.getPubkeyHex().toLowerCase(),
+            sig: leader.sign(BRIDGE_CANONICAL)
+        }});
+
+        const signed = hub.peerManager.broadcasts.find(item => item.type === 'XRETRACT_SIGN');
+        assert.ok(signed, 'the follower must co-sign the locally observed bridge retraction');
+        assert.ok(ValidatorIdentity.verify(
+            BRIDGE_CANONICAL,
+            signed.data.sig,
+            follower.getPubkeyHex().toLowerCase()
+        ));
+    } finally {
+        consensus.stop();
+    }
+}
+
+async function warnsOnceForUnsignedPriceRetraction(){
+    const identity = makeIdentity();
+    const hub = makeHub(identity, [identity]);
+    const consensus = new RetractionConsensus(hub);
+    const warn = sinon.stub(getLogger(), 'warn');
+    const evt = {
+        table: 'price_snapshots',
+        source_chain: 'BTC',
+        from_action_index: 2049,
+        retraction_generation: 2
+    };
+    try {
+        await consensus.submitLocal(evt);
+        await consensus.submitLocal(evt);
+
+        assert.strictEqual(hub.hubDbBroadcaster.broadcastDeletion.callCount, 2);
+        assert.strictEqual(warn.callCount, 1);
+        assert.match(String(warn.firstCall.args[0]), /broadcasting UNSIGNED retraction/);
+        assert.match(String(warn.firstCall.args[0]), /price_snapshots\|BTC\|2049/);
+    } finally {
+        consensus.stop();
+    }
+}
+
+describe('bridge transfer retraction quorum', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('opens a signed round for a bridge_transfers retraction and never broadcasts unsigned',
+        opensSignedBridgeRetractionRound);
+    it('co-signs a bridge transfer request over the consumer canonical bytes', cosignsBridgeRetraction);
+    it('keeps price tables unsigned and warns once per intent', warnsOnceForUnsignedPriceRetraction);
 });
