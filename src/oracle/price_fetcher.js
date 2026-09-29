@@ -111,6 +111,7 @@ class PriceFetcher {
         // self-initialises now (see reportBoundRejects), so this list documents the
         // reporting sources rather than gating them.
         this._boundRejects = { coingecko: 0, coinbase: 0, kraken: 0, coinmarketcap: 0 };
+        this._fetchAttempts = {};
     }
 
     // Emit ONE aggregated warn per source per fetch for the values that source's
@@ -192,9 +193,15 @@ class PriceFetcher {
         // Each fetcher fails soft (returns null on error), so one source erroring
         // never drops the others.
         const sourceKeys = ['coingecko', 'kraken', 'coinbase'];
-        const fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken(), this.fetchFromCoinbase()];
         if (this.coinmarketcapApiKey) {
             sourceKeys.push('coinmarketcap');
+        }
+        for (const sourceKey of sourceKeys) {
+            this._fetchAttempts[sourceKey] = (this._fetchAttempts[sourceKey] || 0) + 1;
+        }
+
+        const fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken(), this.fetchFromCoinbase()];
+        if (this.coinmarketcapApiKey) {
             fetches.push(this.fetchFromCoinMarketCap());
         }
 

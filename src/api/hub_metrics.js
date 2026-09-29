@@ -99,6 +99,11 @@ function registerOracleSeries(registry){
         help: '1 when the source returned at least one usable price on this hub\'s last fetch, 0 when it did not',
         labelNames: ['source']
     });
+    const priceSourceFetchAttempts = registry.counter({
+        name: 'xchain_oracle_price_source_fetch_attempts_total',
+        help: 'Cumulative fetch dispatches attempted per upstream price source',
+        labelNames: ['source']
+    });
     return {
         lastFinalizedTs,
         currentRound,
@@ -106,7 +111,8 @@ function registerOracleSeries(registry){
         roundTimeouts,
         singleSourceRounds,
         priceSourceBoundRejects,
-        priceSourceLive
+        priceSourceLive,
+        priceSourceFetchAttempts
     };
 }
 
@@ -118,7 +124,8 @@ function collectOracleSeries(hub, {
     roundTimeouts,
     singleSourceRounds,
     priceSourceBoundRejects,
-    priceSourceLive
+    priceSourceLive,
+    priceSourceFetchAttempts
 }){
     const oracle = hub.getOracle();
     if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
@@ -149,6 +156,12 @@ function collectOracleSeries(hub, {
     if(boundRejects) {
         for(const [source, count] of Object.entries(boundRejects)) {
             if(Number.isFinite(count)) priceSourceBoundRejects.setMonotonic({ source }, count);
+        }
+    }
+    const fetchAttempts = oracle.priceFetcher && oracle.priceFetcher['_fetchAttempts'];
+    if(fetchAttempts) {
+        for(const [source, count] of Object.entries(fetchAttempts)) {
+            if(Number.isFinite(count)) priceSourceFetchAttempts.setMonotonic({ source }, count);
         }
     }
     const sourceLiveness = oracle.priceFetcher && oracle.priceFetcher.lastSourceLiveness;
