@@ -110,6 +110,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // emitting VIEW_CHANGEs; peers that finalized ignore the round, so
         // without state transfer the straggler's mirror NEVER gets the row.
         this.finalizedRows   = new Map();
+        this._roundHoldWarnings = new Set();
 
         this.initEarlyBuffer();
 
@@ -144,7 +145,10 @@ class CrossChainDexConsensus extends EventEmitter {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
         }
-        for(let [, p] of this.pending){ if(p.timer) clearTimeout(p.timer); }
+        for(let [, p] of this.pending){
+            if(p.timer) clearTimeout(p.timer);
+            if(p.cleanupTimer) clearTimeout(p.cleanupTimer);
+        }
         this.pending.clear();
         this.earlyMessages.clear();
         this.earlyMessageTtl.clear();
@@ -207,6 +211,23 @@ class CrossChainDexConsensus extends EventEmitter {
             return false;
         }
         return true;
+    }
+
+    logRoundHeld(rid, phase, reason){
+        let id = String(rid || 'unknown').toLowerCase();
+        let key = id + '|' + phase + '|' + reason;
+        if(this._roundHoldWarnings.has(key)) return;
+        if(this._roundHoldWarnings.size >= 10000)
+            this._roundHoldWarnings.delete(this._roundHoldWarnings.values().next().value);
+        this._roundHoldWarnings.add(key);
+        logger.warn('CrossChainDexConsensus: holding ' + phase + ' for ' + id.substring(0, 16) +
+            '... (' + reason + ')');
+    }
+
+    clearRoundHeld(rid){
+        let prefix = String(rid || '').toLowerCase() + '|';
+        for(let key of this._roundHoldWarnings)
+            if(key.startsWith(prefix)) this._roundHoldWarnings.delete(key);
     }
 
 }
