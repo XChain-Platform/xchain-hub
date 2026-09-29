@@ -14,22 +14,24 @@
  *
  * XChain Hub - StakeShareWatcher
  *
- * Polls each chain's indexer for the stake-weight snapshot behind
+ * Polls the BTC indexer for the stake-weight snapshot behind
  * STAKE_WEIGHTED_QUORUM and feeds StakeShareMonitor, so the operator's own
  * share of active stake is measured against the two-thirds commit gate BEFORE
  * a round has to fail to reveal it, learned from a prior outage.
  *
- * Per chain, because stake is per chain: a staking address on BTC is not the
- * same set as one on DOGE, and one chain can be a single new staker away from a
- * halt while the others are comfortable. The chain's own indexer is the source
- * of truth for its own stake, exactly as CapabilitySnapshot uses the BTC
- * indexer for BTC-anchored rounds.
+ * BTC only, because capability staking is BTC-only at the protocol level (the
+ * DOGE and LTC coin modules declare no capabilities) and the gate reads no
+ * other chain's stake. A DOGE or LTC row could never predict a halt.
  *
- * It reads the SAME RPC the consensus path reads (getstakeweightsbycapability)
- * at the SAME buried height (tip minus the reorg buffer) with the SAME
- * MIN_STAKE, and hands the rows to the quorum predicate's own denominator. A
- * monitor that computed the share its own way could report a comfortable margin
- * for a set the gate reads differently, which is worse than no monitor.
+ * It reads through the gate's OWN code: CapabilitySnapshot.getWeightSnapshot,
+ * so the coin-verified indexer URL, the buried height, the MIN_STAKE fallback
+ * and refusal, the row checks and the echo guards are the gate's, not a copy.
+ * A monitor that computed the share its own way could report a comfortable
+ * margin for a set the gate reads differently, which is worse than no monitor.
+ *
+ * The reader is a PRIVATE CapabilitySnapshot with a silent monitor: the hub's
+ * shared one feeds the consensus-input alarm on /health, and a watcher success
+ * there would reset a failure streak the gate is building.
  *
  * Read-only and best-effort: a failed poll records `unavailable` and changes no
  * hub state. It never votes, never writes, and never gates a round.
@@ -42,25 +44,24 @@ const axios = require('axios');
 const coins = require('../coins');
 const hubConfig = require('../config');
 const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('./stake_share_monitor.js');
+const CapabilitySnapshot = require('./capability_snapshot.js');
+const { ConsensusInputMonitor } = require('./consensus_input_monitor.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
-// Capabilities whose weighted gate can halt a user-visible rail. `price` is the
-// commit gate for oracle price rounds (a prior halt) and `oracle_publish`
-// gates the publisher election that puts a finalized PRICE on chain, so a
-// federation can hold a healthy price share and still be unable to publish it.
-const DEFAULT_CAPABILITIES = ['price', 'oracle_publish'];
+// The one chain whose capability stake any gate reads.
+const GATE_CHAIN = 'BTC';
+
+// Capabilities whose weighted gate can halt a user-visible rail: `price` rounds (a prior
+// halt), the `oracle_publish` election that puts a finalized PRICE on chain (a healthy price
+// share can still fail to publish), `attestation` rounds and `cross_chain` settlement, all
+// under the same two-thirds predicate. Kept equal to DERIVED_CAPABILITIES by test.
+const DEFAULT_CAPABILITIES = ['price', 'oracle_publish', 'attestation', 'cross_chain'];
 
 // Five minutes. Stake moves at block cadence and the alert is a forecast with
 // hours of lead time, so a tighter loop only adds indexer load; ten polls still
 // cross an hour of an operator's response window.
 const DEFAULT_POLL_MS = 5 * 60 * 1000;
-
-// Reorg depth to step back from the tip when the hub exposes no snapshot buffer
-// of its own. Matches CapabilitySnapshot's default (the BTC confirmation depth
-// the platform already treats as buried), so the monitor measures the same
-// height the consensus snapshot locks.
-const DEFAULT_REORG_BUFFER = 6;
 
 // Split a comma/whitespace list from the environment; empty -> [].
 function envList(value) {
@@ -70,9 +71,11 @@ function envList(value) {
 class StakeShareWatcher {
 
     /**
-     * @param {object} hub   XChainHub (needs resolveIndexerUrl, btcIndexerHeaders;
-     *                       capabilityRegistry and capabilitySnapshot are used when present).
-     * @param {object} [opts] test seams: env, now, log, axios, monitor, pollMs.
+     * @param {object} hub   XChainHub (needs resolveBtcIndexerUrl and btcIndexerHeaders;
+     *                       capabilityRegistry, stakeWeightFeed and capabilitySnapshot are
+     *                       read the way the gate reads them).
+     * @param {object} [opts] test seams: env, now, log, axios, monitor, pollMs,
+     *                       CapabilitySnapshot (the reader class).
      */
     constructor(hub, opts) {
         opts = opts || {};
@@ -80,12 +83,13 @@ class StakeShareWatcher {
         this.env  = hubConfig.env(opts.env);
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
         this._axios = opts.axios || axios;
+        this._SnapshotClass = opts.CapabilitySnapshot || CapabilitySnapshot;
+        this._reader = null;
 
         this.pollMs = Number.isFinite(opts.pollMs) ? opts.pollMs
             : (parseInt(this.env.HUB_STAKE_SHARE_POLL_MS, 10) || DEFAULT_POLL_MS);
-        this.chains = (opts.chains && opts.chains.length ? opts.chains : envList(this.env.HUB_STAKE_SHARE_CHAINS))
-            .map(c => String(c).toUpperCase());
-        if (this.chains.length === 0) this.chains = coins.ALLOWED_COINS.slice();
+        this.chains = [GATE_CHAIN];
+        this.noteIgnoredChains(opts.chains && opts.chains.length ? opts.chains : envList(this.env.HUB_STAKE_SHARE_CHAINS));
         this.capabilities = (opts.capabilities && opts.capabilities.length)
             ? opts.capabilities.slice()
             : (envList(this.env.HUB_STAKE_SHARE_CAPABILITIES).length
@@ -107,17 +111,29 @@ class StakeShareWatcher {
         this.lastPassAt = null;
     }
 
-    // Operator staking sources for one chain. The per-chain form is the correct
-    // one (addresses are chain-specific); the bare form is the union fallback for
-    // a single-chain deployment. Both are read so a hub can name only the chains
-    // it actually stakes on without listing foreign addresses that can never match.
+    // Say once which named chains and chain-scoped source lists are ignored, so an
+    // operator who configured DOGE or LTC learns why no row for them appears.
+    noteIgnoredChains(requested) {
+        let dropped = requested.map(c => String(c).toUpperCase()).filter(c => c !== GATE_CHAIN);
+        let scoped  = coins.ALLOWED_COINS.filter(c => c !== GATE_CHAIN &&
+            envList(this.env['HUB_OPERATOR_STAKE_SOURCES_' + c]).length > 0);
+        if (dropped.length === 0 && scoped.length === 0) return;
+        this._log('Stake-share monitor watches ' + GATE_CHAIN + ' only: capability staking is ' +
+            'BTC-only and the stake-weighted gate reads no other chain. Ignoring ' +
+            (dropped.length ? 'HUB_STAKE_SHARE_CHAINS entries ' + dropped.join(',') : '') +
+            (dropped.length && scoped.length ? ' and ' : '') +
+            (scoped.length ? scoped.map(c => 'HUB_OPERATOR_STAKE_SOURCES_' + c).join(', ') : '') + '.');
+    }
+
+    // Operator staking sources for a chain: its scoped list plus the bare
+    // HUB_OPERATOR_STAKE_SOURCES. Only BTC is ever asked for.
     operatorSourcesFor(chain) {
         let scoped = envList(this.env['HUB_OPERATOR_STAKE_SOURCES_' + String(chain).toUpperCase()]);
         let shared = envList(this.env.HUB_OPERATOR_STAKE_SOURCES);
         return normalizeSources(scoped.concat(shared));
     }
 
-    // True when at least one chain has an operator source list. With none, the
+    // True when the watched chain has an operator source list. With none, the
     // watcher has nothing to measure and says so once at start rather than
     // polling forever to report `unconfigured`.
     isConfigured() {
@@ -131,7 +147,7 @@ class StakeShareWatcher {
             this._log('Stake-share monitor DISABLED: no operator staking sources configured. ' +
                 'Nothing is watching this federation\'s share of active stake against the ' +
                 'STAKE_WEIGHTED_QUORUM two-thirds commit gate, so a single new community STAKE can ' +
-                'halt price rounds with no warning. Set HUB_OPERATOR_STAKE_SOURCES_<COIN> ' +
+                'halt price, publish, attestation or cross-chain rounds with no warning. Set HUB_OPERATOR_STAKE_SOURCES_<COIN> ' +
                 '(or HUB_OPERATOR_STAKE_SOURCES) to the staking addresses this operator controls.');
             return false;
         }
@@ -175,14 +191,17 @@ class StakeShareWatcher {
     }
 
     async pollChain(chain, sources) {
+        // Resolve the URL the gate resolves: null when none is set OR when the
+        // configured BTC indexer positively reports serving another coin.
         let url;
-        try { url = await this.hub.resolveIndexerUrl(chain); }
+        try { url = await this.hub.resolveBtcIndexerUrl(); }
         catch (err) { url = null; }
         if (!url) {
             for (let cap of this.capabilities) {
                 this.monitor.recordUnavailable(chain, cap,
-                    'no ' + chain + ' indexer URL could be resolved (' + chain + '_INDEXER_API_URL, ' +
-                    chain + '_INDEXER_URL, or the configs table), so this chain\'s stake share is unmeasured.');
+                    'no usable BTC indexer: either no URL resolved (BTC_INDEXER_API_URL, BTC_INDEXER_URL, ' +
+                    'or the configs table) or the configured one reports serving another coin. The gate\'s ' +
+                    'capability snapshots are disabled by the same check, so rounds cannot lock a validator set.');
             }
             return;
         }
@@ -196,50 +215,43 @@ class StakeShareWatcher {
             }
             return;
         }
-        let block = Math.max(0, tip - this.reorgBuffer());
 
         for (let cap of this.capabilities) {
-            await this.pollCapability(chain, cap, url, block, sources);
+            await this.pollCapability(chain, cap, tip, sources);
         }
     }
 
-    async pollCapability(chain, capability, url, block, sources) {
-        let minStake = this.minStakeFor(capability, block);
-        let params = { capability: capability, block_index: block };
-        if (minStake !== null) params.min_stake = minStake;
-
-        let result;
+    // Read one capability's stake set through the gate's getWeightSnapshot. It
+    // takes the RAW tip because it buries by the reorg buffer itself.
+    async pollCapability(chain, capability, tip, sources) {
+        let reader, snap, failuresBefore;
         try {
-            let res = await this._axios.post(url, {
-                jsonrpc: '2.0', id: Date.now(), method: 'getstakeweightsbycapability', params: params
-            }, { headers: this.headers(), timeout: 5000 });
-            result = res && res.data && res.data.result;
+            reader = this.reader();
+            failuresBefore = reader.monitor.failures;
+            snap = await reader.getWeightSnapshot(capability, tip);
         } catch (err) {
-            let status = err && err.response && err.response.status;
             return this.monitor.recordUnavailable(chain, capability,
-                'the ' + chain + ' indexer at ' + url + ' could not be read' +
-                (status ? ' (HTTP ' + status + (status === 401 || status === 403
-                    ? ': the hub\'s BTC_INDEXER_API_KEY does not match the indexer\'s INDEXER_API_KEY' : '') + ')'
-                    : ' (' + ((err && err.message) || 'transport error') + ')') +
-                ', so this chain\'s stake share is unmeasured.');
+                'the gate\'s stake-weight read threw (' + ((err && err.message) || err) +
+                '), so this chain\'s stake share is unmeasured.');
         }
-        if (!result || result.error) {
+        if (!snap) {
+            // The reader's monitor holds why the gate would have refused this read.
+            let last = reader.monitor.failures > failuresBefore ? reader.monitor.lastFailure : null;
             return this.monitor.recordUnavailable(chain, capability,
-                'the ' + chain + ' indexer refused the stake-weight read at block ' + block + ': ' +
-                ((result && result.error) || 'no result'));
-        }
-        if (!Array.isArray(result.validators)) {
-            return this.monitor.recordUnavailable(chain, capability,
-                'the ' + chain + ' indexer answered the stake-weight read at block ' + block +
-                ' with no validators array.');
+                'the gate\'s stake-weight read refused the snapshot' +
+                (last ? ' (' + last.reason + '): ' + last.detail : '.'));
         }
 
-        // Carry `truncated` onto the ARRAY, which is where the quorum predicate
-        // looks for it. A truncated set is one meetsStakeThreshold() fails closed
-        // on, so it must reach the evaluator as such rather than be summed.
-        let rows = result.validators;
-        if (result.truncated === true) rows.truncated = true;
+        // Copy the snapshot's rows and carry `truncated` onto the ARRAY, which
+        // is where the quorum predicate looks for it and fails closed.
+        let rows = snap.validators.slice();
+        if (snap.truncated === true) rows.truncated = true;
 
+        // Size the margin unit off the same threshold the read just used.
+        let blockIndex = Number(snap.blockIndex);
+        let minStake;
+        try { minStake = reader.resolveMinStake(capability, blockIndex); }
+        catch (err) { minStake = null; }
         let evaluation = evaluateStakeShare({
             validators:       rows,
             operatorSources:  sources,
@@ -247,8 +259,25 @@ class StakeShareWatcher {
             warnAtStakes:     this.warnAtStakes,
             criticalAtStakes: this.criticalAtStakes
         });
-        evaluation.blockIndex = block;
+        evaluation.blockIndex = blockIndex;
         return this.monitor.record(chain, capability, evaluation);
+    }
+
+    // The watcher's own CapabilitySnapshot, built on first use. Its monitor is
+    // silent so a monitoring read never logs as a consensus-input failure, it
+    // caches nothing so every pass sees fresh stake, and it buries by the hub's
+    // live buffer so the monitor and the gate can never read different heights.
+    reader() {
+        if (this._reader) return this._reader;
+        let reader = new this._SnapshotClass(this.hub);
+        reader.monitor = new ConsensusInputMonitor({ log: () => {} });
+        reader.cacheTtlMs = 0;
+        // Adopt the live buffer only when it is a real integer (no Number() coercion, which
+        // turns null into 0); otherwise the reader keeps CANONICAL_REORG_BUFFER.
+        let live = this.hub && this.hub.capabilitySnapshot && this.hub.capabilitySnapshot.reorgBufferBlocks;
+        if (Number.isInteger(live) && live >= 0) reader.reorgBufferBlocks = live;
+        this._reader = reader;
+        return reader;
     }
 
     // One shared hub-to-indexer key covers every chain (btcIndexerHeaders is the
@@ -273,30 +302,6 @@ class StakeShareWatcher {
         } catch (err) {
             return null;
         }
-    }
-
-    // The same buried-height offset the consensus snapshot uses, read off the
-    // live CapabilitySnapshot when there is one so an operator override cannot
-    // put the monitor and the gate on different heights.
-    reorgBuffer() {
-        let snap = this.hub && this.hub.capabilitySnapshot;
-        let buf = snap && Number(snap.reorgBufferBlocks);
-        return Number.isInteger(buf) && buf >= 0 ? buf : DEFAULT_REORG_BUFFER;
-    }
-
-    // The capability's MIN_STAKE at this height, from the same registry the
-    // consensus snapshot resolves it from. Null (omit the param) when no registry
-    // is live, which lets the indexer apply its own local threshold; the
-    // evaluator then sizes the margin off the smallest stake present instead.
-    minStakeFor(capability, block) {
-        let reg = this.hub && this.hub.capabilityRegistry;
-        if (!reg || typeof reg.getMinStake !== 'function') return null;
-        let v;
-        try { v = reg.getMinStake(capability, block); }
-        catch (err) { return null; }
-        if (v === null || v === undefined) return null;
-        let s = String(v).trim();
-        return /^\d+\.?\d*$/.test(s) ? s : null;
     }
 
     // Body-only telemetry for /health and the operator RPC.

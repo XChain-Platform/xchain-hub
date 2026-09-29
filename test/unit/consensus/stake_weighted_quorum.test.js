@@ -9,7 +9,15 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 const { expect } = require('chai');
+const fs = require('node:fs');
+const path = require('node:path');
 const swq = require('../../../src/consensus/stake_weighted_quorum.js');
+
+// Resolve the docs sibling the way the conformance gate and the sibling-coverage census do.
+const REPO_ROOT = path.join(__dirname, '..', '..', '..');
+const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');
+const DOCS_DIR = process.env.XCHAIN_DOCS_DIR || path.join(SIBLING_ROOT, 'xchain-documentation');
+const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
 // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
@@ -148,13 +156,18 @@ function registerStakeUtilityTests() {
     // flip stake-weighting on different blocks → guaranteed ledger fork.
     describe('cross-service activation parity', function () {
         it('hub activation map == canonical constants.js', function () {
-            // Monorepo-relative: the canonical doc is present in the monorepo/aggregator
-            // checkout but NOT in single-repo CI, where this skips. The authoritative
-            // cross-repo byte-identity is enforced by the dedicated consensus-primitive
-            // conformance gate, so the skip is not a false green on this fork-class invariant.
-            let canonical;
-            try { canonical = require('../../../../xchain-documentation/protocol/constants.js').STAKE_WEIGHTED_QUORUM_ACTIVATION; }
-            catch (e) { return this.skip(); }
+            // Skip only when the docs sibling is absent in a permissive single-repo run; a strict
+            // run (XCHAIN_REQUIRE_SIBLINGS=1) fails on absence, and a present canon that throws fails.
+            const canonPath = path.join(DOCS_DIR, 'protocol', 'constants.js');
+            if (!fs.existsSync(canonPath)) {
+                if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical xchain-documentation/protocol/constants.js is absent at ' + canonPath);
+                return this.skip();
+            }
+            // Keep this case even though the heights also live in gate_registry/shared_rows_3.js:
+            // the conformance gate byte-compares only the carrier files, which read the map from the
+            // registry, and the registry's cross-repo backstop is gate_registry.test.js's twin compare.
+            const canonical = require(canonPath).STAKE_WEIGHTED_QUORUM_ACTIVATION;
+            expect(canonical, canonPath + ' exports no STAKE_WEIGHTED_QUORUM_ACTIVATION').to.be.an('object');
             expect(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION).to.deep.equal(canonical);
         });
     });

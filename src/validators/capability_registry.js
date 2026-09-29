@@ -55,6 +55,7 @@ function parseCapabilityMinStakeParam(parameter) {
 // seeded from HUB_CAPABILITY_CONFIG (which must equal the indexer constant). Pre-launch,
 // thresholds move only via a coordinated fleet upgrade of configs/<COIN>.js +
 // HUB_CAPABILITY_CONFIG. Flip to false when the indexer flag-day ships.
+// Keep test/unit/capabilities/capability_min_stake_parity.test.js green before flipping it.
 const MIN_STAKE_GOVERNANCE_DISABLED = true;
 
 class CapabilityRegistry {
@@ -135,8 +136,8 @@ class CapabilityRegistry {
     //     qualifying validator set (and quorum N) is federation-deterministic.
     //   getMinStake(cap)           -> the latest configured threshold (no block context). Used by
     //     non-consensus callers (operator status display, self-test/qualification gossip).
-    // Returns null when the capability has no configured threshold (preserve fail-closed
-    // semantics in refreshOwnQualification; never default to '0').
+    // Returns null when the capability has no configured threshold, or none in effect yet at
+    // blockIndex (preserve fail-closed semantics in refreshOwnQualification; never default to '0').
     getMinStake(capability, blockIndex) {
         let hist = this.minStakeHistory[capability];
         if (!hist || hist.length === 0) return null;
@@ -146,9 +147,10 @@ class CapabilityRegistry {
             if (e.activation_block <= blockIndex) resolved = e.value;
             else break; // ascending; no later entry can be in effect at blockIndex
         }
-        // blockIndex before the genesis entry (activation_block 0) cannot happen for a real
-        // block, but fall back to genesis rather than null to stay fail-safe.
-        return resolved !== null ? resolved : hist[0].value;
+        // Answer null for a block before the first entry: a configured capability always has a
+        // block-0 genesis entry, and a config-free hub must not apply a governance value below
+        // its activation block, or it would qualify a different set than its configured peers.
+        return resolved;
     }
 
     // Whether the operator has opted out of serving this capability

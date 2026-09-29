@@ -83,7 +83,7 @@ function registerHubStakeShareMetricsSuite2Part1() {
     expect(out).to.match(/xchain_stake_share_meets_gate\{chain="BTC",capability="price"\} 1\b/);
     expect(out).to.match(/xchain_stake_share_headroom\{chain="BTC",capability="price"\} 12500\b/);
     expect(out).to.match(/xchain_stake_share_ratio\{chain="BTC",capability="price"\} 0\.71/);
-    expect(out).to.match(/xchain_stake_share_alerting 1\b/);
+    expect(out).to.match(/^xchain_stake_share_alerting 1$/m);
   });
   it('drops meets_gate to 0 once the federation is under the two-thirds bar', function () {
     const observability = realObservability();
@@ -168,6 +168,33 @@ function registerHubStakeShareMetricsSuite2Part3() {
     expect(mixed).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="BTC"/);
   });
 }
+function registerHubStakeShareMetricsSuite2HeldAlert() {
+  it('keeps alerting at 1 through a failed read of a lost gate, with the unmeasured series still absent', function () {
+    // A failed read re-measures nothing, so a standing alert must not resolve on it.
+    const observability = realObservability();
+    const {
+      hub,
+      monitor
+    } = hubStakeShareMetricsSuite2HubWithShare([{
+      chain: 'BTC',
+      capability: 'price',
+      input: {
+        validators: hubStakeShareMetricsSuite2Rows([['ours1', 25000], ['c1', 25000]]),
+        operatorSources: ['ours1'],
+        minStake: '25000'
+      }
+    }]);
+    installHubStakeShareMetrics(observability, hub);
+    expect(observability.registry.render()).to.match(/^xchain_stake_share_alerting 1$/m);
+    monitor.recordUnavailable('BTC', 'price', 'indexer unreachable');
+    const held = observability.registry.render();
+    expect(held).to.match(/^xchain_stake_share_alerting 1$/m);
+    expect(held).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="BTC"/);
+    expect(held).to.not.match(/xchain_stake_share_ratio\{[^}]*chain="BTC"/);
+    expect(held).to.not.match(/xchain_stake_share_headroom\{[^}]*chain="BTC"/);
+    expect(held).to.not.match(/xchain_stake_share_stakes_to_halt\{[^}]*chain="BTC"/);
+  });
+}
 function registerHubStakeShareMetricsSuite2Part4() {
   it('stops rendering stake-share series once the hub loses its watcher', function () {
     const observability = realObservability();
@@ -219,5 +246,6 @@ describe('hub stake-share metrics', function () {
   registerHubStakeShareMetricsSuite2Part1.call(this);
   registerHubStakeShareMetricsSuite2Part2.call(this);
   registerHubStakeShareMetricsSuite2Part3.call(this);
+  registerHubStakeShareMetricsSuite2HeldAlert.call(this);
   registerHubStakeShareMetricsSuite2Part4.call(this);
 });

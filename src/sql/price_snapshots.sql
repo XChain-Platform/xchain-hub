@@ -27,6 +27,12 @@ CREATE TABLE price_snapshots (
     -- finalized row flips to disputed), so a stamped row is pending again whenever its
     -- status, batch_block_time or SHA2(consensus_proof, 256) no longer equals what the
     -- archive carried.
+    -- RETENTION: archived rows are kept, deliberately. getNextAnchorBatchSeq takes
+    -- MAX(batch_seq)+1 across the archive tables, so deleting stamped rows can reissue a
+    -- spent seq; indexer and explorer mirrors copy this table unfiltered and, after a
+    -- complete drain, delete local finalized rounds the hub no longer serves; and a row
+    -- must stay re-archivable when it changes in place. A retention sweep first needs a
+    -- durable seq high-water mark and a mirror contract that tolerates purged history.
     batch_seq                 BIGINT UNSIGNED DEFAULT NULL,
     archived_status           VARCHAR(20) DEFAULT NULL,
     archived_batch_block_time BIGINT DEFAULT NULL,

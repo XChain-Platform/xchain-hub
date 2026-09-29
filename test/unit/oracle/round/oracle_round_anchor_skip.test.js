@@ -1,0 +1,113 @@
+'use strict';
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+//
+// scheduleFinalization and the round-number anchor: a federated leader must
+// refuse to lock a price snapshot at the round-number stand-in, the same height
+// its followers refuse in a PROPOSE, while a single-node hub keeps the fallback.
+
+const sinon             = require('sinon');
+const { expect }        = require('chai');
+const proxyquire        = require('proxyquire');
+const { createMockHub } = require('../../../helpers/mockHub');
+const { waitUntil }     = require('../../../helpers/waitUntil');
+
+let or;
+
+// Build a round with a short submission window and a stubbed consensus engine.
+function arm(quorum, height, fallbackActive) {
+    or.submissionWindow = 10;
+    or.roundInterval    = 60000;
+    or.chainTipFallbackActive = fallbackActive;
+    or.lastSuccessfulChainTipFetchAt = Date.now();
+    or.currentBtcBlockHeight = height;
+    let consensus = {
+        finalizeRound:     sinon.stub().resolves(),
+        storeSkippedRound: sinon.stub().resolves(),
+        getQuorum:         () => quorum
+    };
+    or.oracleConsensus = consensus;
+    return consensus;
+}
+
+// Resolve once the round's finalization timer has either finalized or skipped it.
+function timerFired(consensus) {
+    return waitUntil(() => consensus.finalizeRound.called || consensus.storeSkippedRound.called,
+        { label: 'the finalization timer' });
+}
+
+function registerAnchorSkipHooks() {
+    beforeEach(function () {
+        const OracleRound = proxyquire('../../../../src/oracle/round', {
+            './price_fetcher': function () { return { fetchPrices: sinon.stub().resolves([]) }; }
+        });
+        or = new OracleRound(createMockHub({
+            p2pConfig: { ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '30000' }
+        }));
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        for (let t of or.finalizationTimers.values()) clearTimeout(t);
+        or.finalizationTimers.clear();
+    });
+}
+
+function registerFederatedTests() {
+    it('skips a round-number anchor on a federated hub inside the first interval', async function () {
+        let consensus = arm(2, 77, true);
+        or.scheduleFinalization(77);
+        await timerFired(consensus);
+        expect(consensus.finalizeRound.called).to.equal(false);
+        expect(consensus.storeSkippedRound.calledOnce).to.equal(true);
+        expect(consensus.storeSkippedRound.firstCall.args[0]).to.equal(77);
+        expect(consensus.storeSkippedRound.firstCall.args[3]).to.match(/round-number anchor/);
+    });
+
+    // Reliability is judged when the height was captured, so a tip that recovers
+    // before the timer fires does not bless the stale stand-in height.
+    it('still skips when the tip recovers after a round-number anchor was captured', async function () {
+        let consensus = arm(2, 78, true);
+        or.scheduleFinalization(78);
+        or.chainTipFallbackActive = false;
+        or.currentBtcBlockHeight  = 900000;
+        await timerFired(consensus);
+        expect(consensus.finalizeRound.called).to.equal(false);
+        expect(consensus.storeSkippedRound.calledOnce).to.equal(true);
+    });
+
+    it('finalizes a real BTC anchor on a federated hub', async function () {
+        let consensus = arm(2, 900000, false);
+        or.scheduleFinalization(80);
+        await timerFired(consensus);
+        expect(consensus.storeSkippedRound.called).to.equal(false);
+        expect(consensus.finalizeRound.calledOnce).to.equal(true);
+        expect(consensus.finalizeRound.firstCall.args.slice(0, 2)).to.deep.equal([80, 900000]);
+    });
+}
+
+function registerSingleNodeTests() {
+    // A single-node or regtest hub has no follower to disagree with.
+    it('keeps the round-number fallback on a single-node hub (quorum 0)', async function () {
+        let consensus = arm(0, 79, true);
+        or.scheduleFinalization(79);
+        await timerFired(consensus);
+        expect(consensus.storeSkippedRound.called).to.equal(false);
+        expect(consensus.finalizeRound.calledOnce).to.equal(true);
+        expect(consensus.finalizeRound.firstCall.args.slice(0, 2)).to.deep.equal([79, 79]);
+    });
+}
+
+describe('OracleRound scheduleFinalization: round-number anchor', function () {
+    registerAnchorSkipHooks();
+    describe('on a federated hub', registerFederatedTests);
+    describe('on a single-node hub', registerSingleNodeTests);
+});

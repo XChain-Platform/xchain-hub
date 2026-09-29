@@ -48,9 +48,17 @@ const criticalEval = () => evaluateStakeShare({
     validators: outageMinusOne(), operatorSources: OURS, minStake: '25000'
 });
 
+const haltedEval = () => evaluateStakeShare({
+    validators: outageMinusOne().concat(rows([{ source: 'c3', weight: 25000 }])),
+    operatorSources: OURS, minStake: '25000'
+});
+
 describe('StakeShareMonitor', function () {
     registerMonitorAlertTests();
     registerMonitorSnapshotTests();
+    registerMonitorHoldTests();
+    registerMonitorHoldShapeTests();
+    registerMonitorRecoveryLogTests();
 });
 
 function registerMonitorAlertTests() {
@@ -137,5 +145,97 @@ function registerMonitorSnapshotTests() {
         monitor.record('BTC', 'price', okEval());
         clock.t += 900000;
         expect(monitor.snapshot().chains.BTC.price.age_s).to.equal(900);
+    });
+}
+
+function registerMonitorHoldTests() {
+    it('holds a standing alert through one failed read instead of announcing it cleared', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.record('BTC', 'price', criticalEval());
+        monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+        expect(monitor.isAlerting()).to.equal(true);
+        expect(lines.filter(l => l.includes('CLEARED'))).to.deep.equal([]);
+        expect(lines).to.have.lengthOf(2);
+        expect(lines[1]).to.contain('STAKE SHARE CRITICAL UNCONFIRMED [BTC/price]');
+        expect(lines[1]).to.contain('indexer timed out');
+        const snap = monitor.snapshot();
+        expect(snap.alerting).to.equal(true);
+        expect(snap.chains.BTC.price.level).to.equal(LEVELS.UNAVAILABLE);
+        expect(snap.chains.BTC.price.held_level).to.equal(LEVELS.CRITICAL);
+        expect(snap.chains.BTC.price.meets_gate).to.equal(null);
+    });
+
+    it('clears a held alert only on a real reading, aged from the original measurement', function () {
+        const { monitor, lines, clock } = makeMonitor();
+        monitor.record('BTC', 'price', criticalEval());
+        for (let i = 0; i < 3; i++) {
+            clock.t += 60000;
+            monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+            expect(monitor.isAlerting()).to.equal(true);
+        }
+        expect(monitor.snapshot().chains.BTC.price.held_age_s).to.equal(180);
+        monitor.record('BTC', 'price', okEval());
+        expect(monitor.isAlerting()).to.equal(false);
+        const cleared = lines.filter(l => l.includes('CLEARED'));
+        expect(cleared).to.have.lengthOf(1);
+        expect(lines[lines.length - 1]).to.contain('STAKE SHARE ALERT CLEARED [BTC/price]');
+        expect(monitor.snapshot().chains.BTC.price.held_level).to.equal(null);
+    });
+
+    it('never logs CLEARED while a flapping indexer interrupts a standing alert', function () {
+        const { monitor, lines } = makeMonitor();
+        let steps = [criticalEval, null, criticalEval, null, criticalEval];
+        for (let step of steps) {
+            if (step) monitor.record('BTC', 'price', step());
+            else monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+            expect(monitor.isAlerting()).to.equal(true);
+        }
+        expect(lines.filter(l => l.includes('CLEARED'))).to.deep.equal([]);
+    });
+}
+
+function registerMonitorHoldShapeTests() {
+    it('reports a held HALTED as the worst level, flagged as held', function () {
+        const { monitor } = makeMonitor();
+        monitor.record('BTC', 'price', haltedEval());
+        monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+        const snap = monitor.snapshot();
+        expect(snap.chains.BTC.price.held_level).to.equal(LEVELS.HALTED);
+        expect(snap.worst).to.deep.equal({ level: LEVELS.HALTED, chain: 'BTC', capability: 'price', held: true });
+    });
+
+    it('does not hold a warning, which was never an alert', function () {
+        const { monitor } = makeMonitor();
+        monitor.record('BTC', 'price', { level: LEVELS.WARNING, reason: 'two stakes of headroom' });
+        monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+        expect(monitor.isAlerting()).to.equal(false);
+        expect(monitor.snapshot().chains.BTC.price.held_level).to.equal(null);
+    });
+}
+
+function registerMonitorRecoveryLogTests() {
+    it('announces recovery to ok from a warning', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.record('BTC', 'price', { level: LEVELS.WARNING, reason: 'two stakes of headroom' });
+        monitor.record('BTC', 'price', okEval());
+        expect(lines).to.have.lengthOf(2);
+        expect(lines[1]).to.contain('Stake share ok [BTC/price] (was warning)');
+        expect(monitor.isAlerting()).to.equal(false);
+    });
+
+    it('announces recovery to ok from an unreadable snapshot', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.recordUnavailable('BTC', 'price', 'no indexer');
+        monitor.record('BTC', 'price', okEval());
+        expect(lines).to.have.lengthOf(2);
+        expect(lines[1]).to.contain('Stake share ok [BTC/price] (was unavailable)');
+    });
+
+    it('stays quiet on a repeated ok reading, even past the throttle window', function () {
+        const { monitor, lines, clock } = makeMonitor();
+        monitor.record('BTC', 'price', okEval());
+        clock.t += 300001;
+        monitor.record('BTC', 'price', okEval());
+        expect(lines).to.deep.equal([]);
     });
 }

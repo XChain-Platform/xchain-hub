@@ -85,6 +85,8 @@ module.exports = {
     //
     // A configured threshold always wins (this is only reached once the registry
     // answered null), and a hub with no feed keeps the refusal byte for byte.
+    // Below a config-free hub's first governance activation the registry answers
+    // null too, and the floor is then the genesis value every configured peer uses.
     feedMinStake(capability) {
         let feed = this.hub && this.hub.stakeWeightFeed;
         if (!feed || typeof feed.minStake !== 'function') return null;

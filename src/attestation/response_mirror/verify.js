@@ -126,9 +126,9 @@ module.exports = {
             // this request agree about which era they are in.
             // The ROW's own admission map, passed explicitly: this hub has no open round
             // for a peer's finalized row, so the round-pinned default would read null and
-            // rebuild legacy bytes for an admission-era row. Passing the row's map is also
-            // what makes the era gate a real check here, since it refuses when the row's
-            // map and the request's era disagree.
+            // rebuild legacy bytes for an admission-era row. When the row's map and the
+            // request's era disagree the gate does not throw: it builds legacy bytes and
+            // the row fails the signature check below.
             canonical = consensus.buildCanonical(
                 rid, String(row.provider_id), bodyBytes, String(row.status),
                 String(row.meta == null ? '' : row.meta), declaredBlock, Number(row.effective_time),

@@ -69,12 +69,19 @@ describe('oracle band constants conformance (#1299)', () => {
         expect(constants.ORACLE_DEVIATION_THRESHOLD).to.equal(0.05);
     });
 
-    // api.js sources the SLASH_DEVIATION_THRESHOLD default from
-    // ORACLE_DEVIATION_THRESHOLD rather than re-declaring the 0.05 literal, so the
-    // default string must equal the constant's string form. Guards against the two
-    // drifting apart if either is edited in isolation.
-    it('api.js default binds to the constant (String(ORACLE_DEVIATION_THRESHOLD) === "0.05")', () => {
-        expect(String(constants.ORACLE_DEVIATION_THRESHOLD)).to.equal('0.05');
+    // Read api.js itself: its SLASH_DEVIATION_THRESHOLD fallback must name ORACLE_DEVIATION_THRESHOLD,
+    // never a literal, or lowering the constant would leave the hub slashing on a looser band.
+    it('api.js sources the SLASH_DEVIATION_THRESHOLD default from ORACLE_DEVIATION_THRESHOLD, not a literal', () => {
+        const fs   = require('fs');
+        const path = require('path');
+        const src  = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        // Require exactly one key line, so a renamed or duplicated key fails instead of passing on nothing.
+        const lines = src.split('\n').filter(line => /^\s*SLASH_DEVIATION_THRESHOLD\s*:/.test(line));
+        expect(lines, 'src/api.js SLASH_DEVIATION_THRESHOLD key lines').to.have.lengthOf(1);
+        expect(lines[0], 'src/api.js fallback must be String(ORACLE_DEVIATION_THRESHOLD): ' + lines[0])
+            .to.match(/\|\|\s*String\(\s*ORACLE_DEVIATION_THRESHOLD\s*\)/);
+        expect(lines[0], 'src/api.js re-declares a numeric fallback literal: ' + lines[0])
+            .to.not.match(/\|\|\s*['"`]?\d/);
     });
 
     // #2490: ORACLE_MAX_CHANGE_PER_ROUND is a frozen 0.25 literal whose comment

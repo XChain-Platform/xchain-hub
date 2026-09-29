@@ -253,14 +253,22 @@ chain/capability series **absent** rather than repeating the last healthy number
 rules above therefore go quiet on a gap: pair them with an
 `absent(xchain_stake_share_meets_gate{...})` clause if a missing measurement should also
 be visible, and note that the underlying indexer outage is `ConsensusInputMonitor`'s
-alarm, deliberately not paged twice here.
+alarm, deliberately not paged twice here. An unreadable snapshot never raises an alert,
+but it does not clear one either: a standing CRITICAL, HALTED or BLOCKED reading holds
+(`xchain_stake_share_alerting` stays 1, the log says `UNCONFIRMED`, and `/health` shows
+`held_level` and `held_age_s`) until a real reading replaces it.
+
+The monitor reads stake through the gate's own snapshot code, so a read the gate would
+refuse (a BTC indexer that reports another coin, a capability with no `MIN_STAKE` and no
+feed floor, an answer for the wrong block or capability) shows as `unavailable` with the
+gate's reason rather than as a margin.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_OPERATOR_STAKE_SOURCES_<COIN>` | No | `` | Comma-separated staking addresses this operator controls **on that chain** (`_BTC`, `_LTC`, `_DOGE`). The correct form: staking addresses are chain-specific. |
-| `HUB_OPERATOR_STAKE_SOURCES` | No | `` | Union fallback applied to every watched chain, for a single-chain deployment. |
-| `HUB_STAKE_SHARE_CHAINS` | No | every registered coin | Chains to watch, comma-separated ticks. |
-| `HUB_STAKE_SHARE_CAPABILITIES` | No | `price,oracle_publish` | Capabilities to watch. These two gate the price rail: one the round's commit quorum, the other the publisher election that puts the result on chain. |
+| `HUB_OPERATOR_STAKE_SOURCES_<COIN>` | No | `` | Comma-separated staking addresses this operator controls **on that chain**. Only `_BTC` is read, because capability staking is BTC-only; `_LTC` and `_DOGE` are ignored with one log line at boot. |
+| `HUB_OPERATOR_STAKE_SOURCES` | No | `` | Fallback list, merged with `HUB_OPERATOR_STAKE_SOURCES_BTC`. |
+| `HUB_STAKE_SHARE_CHAINS` | No | `BTC` | Only `BTC` is watched, the one chain the stake-weighted gate reads; any other tick is ignored with one log line at boot. |
+| `HUB_STAKE_SHARE_CAPABILITIES` | No | `price,oracle_publish,attestation,cross_chain` | Capabilities to watch: every one whose rounds pass the same two-thirds weighted gate. `price` is the price round's commit quorum, `oracle_publish` the publisher election that puts the result on chain, `attestation` the attestation rounds and their publisher, and `cross_chain` DEX, call and bridge settlement, retraction and the state-anchor archive. A capability this operator has not staked for reads as `unconfigured` (not alerting); one nobody has staked for reads as `blocked` (alerting), because its weighted gate fails closed on an empty set. Narrow the list here for a rail this federation does not run. |
 | `HUB_STAKE_SHARE_POLL_MS` | No | `300000` | Poll cadence. Stake moves at block cadence and the warning has hours of lead time. |
 | `HUB_STAKE_SHARE_CRITICAL_STAKES` | No | `1` | Margin, in new stakes, that counts as CRITICAL (alerting). `1` means "the next community staker halts rounds". One stake is sized as the largest third-party stake already on that chain, floored at the capability MIN_STAKE. |
 | `HUB_STAKE_SHARE_WARN_STAKES` | No | `2` | Margin, in new stakes, that counts as WARNING (logged, not alerting). |
