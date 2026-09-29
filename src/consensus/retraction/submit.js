@@ -47,8 +47,10 @@ module.exports = {
         this.pruneIntents();
         this.localIntents.set(retractionClass().intentKey(evt), Date.now());
 
-        if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this.broadcastUnsigned(evt);
-        if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
+        if(!QUORUM_CLASS_TABLES.has(String(evt.table)))
+            return broadcastUnsigned(this, evt, 'the table is outside the quorum class');
+        if(!this.identity || !this.peerManager || !this.capSnapshot)
+            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable');
 
         return submitQuorumRetraction(this, evt, null);
     }
@@ -64,7 +66,7 @@ async function submitQuorumRetraction(self, evt, deferral){
         if(deferral)
             logger.info(retryLabel(deferral) + 'resolved below the signing gate; broadcasting unsigned');
         clearDeferral(self, evt, deferral);
-        return self.broadcastUnsigned(evt);
+        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock);
     }
 
     let validators = await self.resolveCapabilityValidators('cross_chain', snapshotBlock, self.network);
@@ -201,12 +203,23 @@ function openSigningRound(self, ctx){
             // Liveness over the signature tier: mirrors past the gate refuse the
             // unsigned event anyway (fail closed there), mirrors below it still
             // converge under the activation fences. Never silently drop a retraction.
-            logger.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
-                pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
-            self.broadcastUnsigned(evt);
+            broadcastUnsigned(self, evt, 'round ' + id.substring(0, 16) + '... timed out at ' +
+                pending.signatures.size + '/' + pending.quorum + ' signatures');
         }
     }, self.roundTimeoutMs);
     if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
 
     self.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
+}
+
+function broadcastUnsigned(self, evt, reason){
+    if(!self.unsignedRetractionWarnings) self.unsignedRetractionWarnings = new Set();
+    const key = retractionClass().intentKey(evt);
+    if(!self.unsignedRetractionWarnings.has(key)){
+        self.unsignedRetractionWarnings.add(key);
+        if(self.unsignedRetractionWarnings.size > 512)
+            self.unsignedRetractionWarnings.delete(self.unsignedRetractionWarnings.values().next().value);
+        logger.warn('RetractionConsensus: broadcasting UNSIGNED retraction ' + key + ' because ' + reason);
+    }
+    return self.broadcastUnsigned(evt);
 }
