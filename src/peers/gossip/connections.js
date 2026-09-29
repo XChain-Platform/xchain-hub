@@ -147,6 +147,15 @@ class PeerConnections {
         this.httpServer = http.createServer((req, res) => serveFeedRequest(this, req, res));
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: this.config.P2P_MAX_PAYLOAD || 1048576 });
 
+        // Every raw socket, so stop() can destroy the ones httpServer.close() cannot
+        // see: a WebSocket upgrade leaves the HTTP connection list but still counts
+        // against close(), which then waits on a peer or mirror client that never hangs up.
+        this.rawSockets = new Set();
+        this.httpServer.on('connection', (socket) => {
+            this.rawSockets.add(socket);
+            socket.once('close', () => this.rawSockets.delete(socket));
+        });
+
         this.httpServer.on('upgrade', (req, socket, head) => {
             // Mirror subscribers are handed to the API's own upgrade path (auth,
             // then HubDbBroadcaster). They never enter the gossip WebSocket server,
@@ -196,11 +205,24 @@ class PeerConnections {
         this.peers.clear();
 
         if (this.wss) {
+            // Inbound sockets are not always in this.peers; close whatever the server tracks.
+            for (let ws of this.wss.clients) {
+                if (ws.readyState <= WebSocket.OPEN) ws.close(1000, 'shutdown');
+            }
             this.wss.close();
             this.wss = null;
         }
         if (this.httpServer) {
-            await new Promise((resolve) => this.httpServer.close(resolve));
+            // close() resolves only once every connection is gone. Stop accepting, then
+            // drop what is left instead of waiting on remote peers, which would hold a
+            // SIGTERM open until the 10 s forced exit.
+            let closed = new Promise((resolve) => this.httpServer.close(resolve));
+            // Short grace so the 1000 'shutdown' close frames reach responsive peers.
+            let grace = new Promise((resolve) => setTimeout(resolve, 500).unref());
+            await Promise.race([closed, grace]);
+            if (typeof this.httpServer.closeAllConnections === 'function') this.httpServer.closeAllConnections();
+            for (let socket of this.rawSockets || []) socket.destroy();
+            await closed;
             this.httpServer = null;
         }
     }
