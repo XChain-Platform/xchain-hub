@@ -31,7 +31,10 @@ module.exports = {
     // leader's PROPOSE). quorum 0 -> single-node immediate self-sign + finalize.
     async propose(matchId, ctx){
         let rid = String(matchId).toLowerCase();
-        if(this.finalized.has(rid) || this.pending.has(rid)) return;
+        if(this.finalized.has(rid))
+            return this.logRoundHeld(rid, 'local proposal', 'the round id is still finalized');
+        if(this.pending.has(rid))
+            return this.logRoundHeld(rid, 'local proposal', 'the round id already has a live round');
         if(!this.identity) throw new Error('no validator identity: cannot run cross-chain match consensus');
 
         let row        = ctx.row;
@@ -123,7 +126,8 @@ module.exports = {
             viewChanges:  new Map(),     // view -> Set<pubkey>
             finalized:    false,
             _commitSent:  false,
-            timer:        null
+            timer:        null,
+            cleanupTimer: null
         };
         this.pending.set(rid, pending);
         return pending;
