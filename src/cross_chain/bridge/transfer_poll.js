@@ -312,8 +312,10 @@ module.exports = {
             return this.logHeld(coin, t, 'below depth ' + this.effectiveDepth(coin, t.min_depth));
 
         // The origin chain of this tick, learned from the leg's own kind: a lock is mined on
-        // the chain the token is native to, a burn on a chain that holds a copy.
-        this._tickOrigin.set(network + '|' + tick, kind === 'lock' ? coin : destChain);
+        // the chain the token is native to, a burn on a chain that holds a copy. Keyed by the
+        // NATIVE name: a burn carries the copy's name ('BTC.FUFU'), and every reader of this map
+        // (the policy poll, the invariant) looks the token up under 'FUFU'.
+        this._tickOrigin.set(network + '|' + this.nativeTick(tick), kind === 'lock' ? coin : destChain);
 
         let transferId = this.deriveTransferId(network, coin, srcActionIndex, destChain, String(t.dest_address || ''));
         if(this._inflight.has(transferId)) return this.logHeld(coin, t, 'round ' + transferId.substring(0, 16) + '... still in flight');

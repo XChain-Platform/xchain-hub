@@ -66,9 +66,16 @@ module.exports = {
         let reader = (typeof this.chainStateReader === 'function')
             ? this.chainStateReader
             : (c, n, t) => this.readBridgeBalances(c, n, t);
+        // Each chain is asked for the tick under the name it carries THERE (chainTickName): a
+        // copy chain holds origin + '.' + tick, and asking it for the native name reads a tick
+        // it never saw, whose supply the indexer reports as 0 (a permanent surplus of the whole
+        // copy supply). The escrow half is the native tick read on the origin, as before.
+        let origins  = {};
+        for(let t of Object.keys(out))
+            origins[t] = this._tickOrigin.get(network + '|' + t) || (t === 'XCHAIN' ? 'BTC' : null);
         let readings = {};
         for(let c of ALLOWED_CHAINS){
-            let ticks = Object.keys(out).filter(t => out[t][c]);
+            let ticks = Object.keys(out).filter(t => out[t][c]).map(t => this.chainTickName(t, origins[t], c));
             if(!ticks.length) continue;
             try { readings[c] = await reader(c, network, ticks); }
             catch(e){ readings[c] = null; }
@@ -79,11 +86,11 @@ module.exports = {
             // so its origin is known before this hub has seen a single leg. A token whose
             // origin is not learned yet reports escrow and delta as null rather than reading
             // a backing balance off a chain that does not hold the escrow.
-            let origin     = this._tickOrigin.get(network + '|' + t) || (t === 'XCHAIN' ? 'BTC' : null);
+            let origin     = origins[t];
             let originRead = (origin && readings[origin]) ? readings[origin][t] : null;
             for(let c of Object.keys(out[t])){
                 let e   = out[t][c];
-                let own = readings[c] ? readings[c][t] : null;
+                let own = readings[c] ? readings[c][this.chainTickName(t, origin, c)] : null;
                 if(own && own.supply != null) e.supply = String(own.supply);
                 // The origin holds the asset itself; nothing escrows it there, so it carries
                 // no escrow and no delta. Every other chain holds a copy backed by BRIDGE_<c>
@@ -116,36 +123,50 @@ module.exports = {
             for(let c of ALLOWED_CHAINS) entry('XCHAIN', c);
         }
 
+        // Every row and pending key is folded onto the NATIVE tick before it is filtered or
+        // keyed: a burn is recorded under the copy name it burned ('BTC.FUFU'), and keeping that
+        // name opened a phantom tick and never charged the burn's in_flight to FUFU.
+        let wanted = tick ? this.nativeTick(String(tick)) : null;
         let pairs = [];
         try { pairs = await this.db.getBridgeTransferChainPairs(network); }
         catch(e){ pairs = []; }
         for(let p of pairs){
-            if(tick && String(p.tick) !== String(tick)) continue;
-            entry(String(p.tick), String(p.src_chain));
-            entry(String(p.tick), String(p.dest_chain));
+            let t = this.nativeTick(String(p.tick));
+            if(wanted && t !== wanted) continue;
+            entry(t, String(p.src_chain));
+            entry(t, String(p.dest_chain));
         }
 
-        // Signed-but-not-yet-applyable records.
+        // Signed-but-not-yet-applyable records. Read unfiltered and filtered here, after the
+        // fold: the SQL tick filter would miss a burn recorded under the copy name.
         let flight = [];
-        try { flight = await this.db.getInFlightBridgeTransfers(network, now, tick || null); }
+        try { flight = await this.db.getInFlightBridgeTransfers(network, now, null); }
         catch(e){ flight = []; }
         for(let f of flight){
-            let e = entry(String(f.tick), String(f.dest_chain));
+            let t = this.nativeTick(String(f.tick));
+            if(wanted && t !== wanted) continue;
+            let e = entry(t, String(f.dest_chain));
             e.in_flight = bc.bcstr(bc.bcadd(e.in_flight, this.normalizeAmount(f.amount) || '0', AMOUNT_SCALE));
         }
         // Mined-but-not-yet-finalized legs, from the last completed poll.
         for(let [key, amounts] of this._pendingInFlight){
             let sep = key.lastIndexOf('|');
-            let t   = key.slice(0, sep);
+            let t   = this.nativeTick(key.slice(0, sep));
             let c   = key.slice(sep + 1);
-            if(tick && t !== String(tick)) continue;
+            if(wanted && t !== wanted) continue;
             let e = entry(t, c);
             for(let a of amounts)
                 e.in_flight = bc.bcstr(bc.bcadd(e.in_flight, this.normalizeAmount(a) || '0', AMOUNT_SCALE));
         }
 
-        // Latest FINALIZED policy seq per tick. The hub knows only what it finalized; the
-        // APPLIED seq is read per destination through the indexer's getappliedpolicy.
+        await this.stampFinalizedPolicySeqs(out, network);
+        return out;
+    },
+
+    // Latest FINALIZED policy seq per tick, onto every chain entry of that tick. The hub knows
+    // only what it finalized; the APPLIED seq is read per destination through the indexer's
+    // getappliedpolicy.
+    async stampFinalizedPolicySeqs(out, network){
         for(let t of Object.keys(out)){
             let origin = this._tickOrigin.get(network + '|' + t);
             if(!origin) continue;
@@ -155,7 +176,25 @@ module.exports = {
             if(!seq) continue;
             for(let c of Object.keys(out[t])) out[t][c].finalized_policy_seq = seq;
         }
-        return out;
+    },
+
+    // The native tick behind a bridged copy's name: '<CHAIN>.<tick>' with CHAIN a bridge chain
+    // is the copy of <tick> native on CHAIN (the indexer names a copy origin + '.' + tick,
+    // bridge_settle/policy.js). Any other name is returned unchanged. No native tick can carry
+    // such a name: the coin roots are reserved and a child of one is refused by the parent gate.
+    nativeTick(tick){
+        let s = String(tick || '');
+        let dot = s.indexOf('.');
+        if(dot <= 0) return s;
+        return ALLOWED_CHAINS.includes(s.slice(0, dot)) ? s.slice(dot + 1) : s;
+    },
+
+    // The name native tick `tick` carries on `chain`: itself on its origin, origin + '.' + tick
+    // on every copy chain. XCHAIN is the same name everywhere, and with no origin known the
+    // native name is used, which is what the invariant read did before the origin was learned.
+    chainTickName(tick, origin, chain){
+        if(tick === 'XCHAIN' || !origin || chain === origin) return tick;
+        return origin + '.' + tick;
     },
 
     // The balance a getbridgebalances answer reports for one destination chain's escrow. The
