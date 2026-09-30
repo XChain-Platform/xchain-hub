@@ -71,6 +71,7 @@ const configsMixin             = require('./configs.js');
 const consensusStateMixin      = require('./consensus_state.js');
 const crossChainMixin          = require('./cross_chain.js');
 const governanceMixin          = require('./governance.js');
+const listSnapshotsMixin       = require('./list_snapshots.js');
 const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
 const policySnapshotsMixin     = require('./policy_snapshots.js');
@@ -115,6 +116,7 @@ const MIXINS = [
     consensusStateMixin,
     crossChainMixin,
     governanceMixin,
+    listSnapshotsMixin,
     oracleMixin,
     p2pPeersMixin,
     policySnapshotsMixin,
@@ -342,6 +344,10 @@ class Database {
 
     static get POLICY_SNAPSHOT_COLUMNS(){
         return mirrorColumns.POLICY_SNAPSHOT_COLUMNS.slice();
+    }
+
+    static get LIST_SNAPSHOT_COLUMNS(){
+        return mirrorColumns.LIST_SNAPSHOT_COLUMNS.slice();
     }
 
     async close(){
