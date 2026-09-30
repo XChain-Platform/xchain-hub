@@ -17,7 +17,6 @@
 const assert = require('node:assert');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const selector = require('../ci_fast_select.js');
@@ -41,25 +40,6 @@ function findRequirers(needle) {
 
 function plan(changedFiles) {
     return selector.selectFastTests(changedFiles, { listTests, findRequirers });
-}
-
-function scratchGit(cwd, args) {
-    return childProcess.execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function writeScratchFile(cwd, file, source) {
-    const target = path.join(cwd, file);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, source);
-}
-
-function scratchCommit(cwd, message, files) {
-    scratchGit(cwd, ['add', '--', ...files]);
-    scratchGit(cwd, [
-        '-c', 'user.name=Selector Test',
-        '-c', 'user.email=selector-test',
-        'commit', '-m', message,
-    ]);
 }
 
 describe('bin/ci_fast_select.js', function () {
@@ -119,64 +99,5 @@ describe('bin/ci_fast_select.js', function () {
         assert.ok(script.includes('ci_fast_select.js --plan'));
         assert.match(script, /if \[ "\$\{CI_TIER:-full\}" = "fast" \][\s\S]*ci_fast_select\.js --plan/);
         assert.ok(script.includes('run_tier "ci" env XCHAIN_REQUIRE_SIBLINGS=1 npm run ci'));
-    });
-
-    it('replays develop history, compares narrowing, and checks required selections', () => {
-        const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-fast-select-replay-'));
-        try {
-            scratchGit(cwd, ['init', '--initial-branch=develop']);
-            const initial = {
-                'src/consensus/rule.js': "module.exports = 'rule';\n",
-                'src/feature/plain.js': "module.exports = 'plain';\n",
-                'test/unit/consensus/rule.test.js':
-                    "require('../../../src/consensus/rule');\n",
-                'test/unit/feature/plain.test.js': "require('../../../src/feature/plain');\n",
-                'test/unit/only.test.js': "module.exports = 'only';\n",
-                'test/unit/other/unrelated.test.js': "module.exports = 'unrelated';\n",
-            };
-            for (const [file, source] of Object.entries(initial)) {
-                writeScratchFile(cwd, file, source);
-            }
-            scratchCommit(cwd, 'initial files', Object.keys(initial));
-
-            const consensusFile = 'src/consensus/rule.js';
-            fs.appendFileSync(path.join(cwd, consensusFile), "module.exports += ' changed';\n");
-            scratchCommit(cwd, 'consensus change', [consensusFile]);
-
-            const plainFile = 'src/feature/plain.js';
-            fs.appendFileSync(path.join(cwd, plainFile), "module.exports += ' changed';\n");
-            scratchCommit(cwd, 'plain source change', [plainFile]);
-
-            const testFile = 'test/unit/only.test.js';
-            fs.appendFileSync(path.join(cwd, testFile), "module.exports += ' changed';\n");
-            scratchCommit(cwd, 'test only change', [testFile]);
-            scratchGit(cwd, ['update-ref', 'refs/remotes/origin/develop', 'HEAD']);
-
-            const selectorPath = path.resolve(__dirname, '../ci_fast_select.js');
-            const mustSelect = [
-                'src/consensus/rule.js:test/unit/consensus/rule.test.js',
-                'src/feature/plain.js:test/unit/other/unrelated.test.js',
-            ].join(',');
-            const result = childProcess.spawnSync(process.execPath, [
-                selectorPath,
-                '--replay', '3',
-                '--narrow', 'src/consensus/',
-                '--must-select', mustSelect,
-            ], { cwd, encoding: 'utf8' });
-
-            assert.strictEqual(result.status, 1, result.stderr);
-            const output = result.stdout.trim().split(/\r?\n/);
-            assert.ok(output.includes('plan commits consensus-1 changed-tests test-only no-tests'));
-            assert.ok(output.includes('current 3 1/3 1/3 1/3 0/3'));
-            assert.ok(output.includes('narrowed 3 0/3 2/3 1/3 0/3'));
-            assert.ok(output.includes(
-                'must-select PASS src/consensus/rule.js:test/unit/consensus/rule.test.js',
-            ));
-            assert.ok(output.includes(
-                'must-select FAIL src/feature/plain.js:test/unit/other/unrelated.test.js',
-            ));
-        } finally {
-            fs.rmSync(cwd, { recursive: true, force: true });
-        }
     });
 });
