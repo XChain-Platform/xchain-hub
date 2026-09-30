@@ -60,16 +60,20 @@ const coins      = require('../../../src/coins');
 // even though XCHAIN_BRIDGE_ACTIVATION is unarmed on mainnet and testnet. Same
 // one-wave rollout rule as every regeneration above: every vendoring service ships
 // the new pins together and a straggler fail-closes on verifyConsensusPin().
+// REGENERATED 2026-09-30: GAS_SCHEDULE gains LIST_SHARE,
+// LIST_SHARED_EDIT_BASE and LIST_SHARED_EDIT_PER_ITEM. GAS_SCHEDULE is hashed whole,
+// so all nine hashes move even though nothing charges the keys below
+// LIST_SHARE_ACTIVATION. The same one-wave rollout rule applies.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '242cf3cfcb4ff494d43b3d39775938f822f03a45326beff3b125ca102648e6ad',
-            testnet: 'fcff7c1f46a8f7a75ddb7e1e4fb30f9e0c72d72f307a75a9d9357ffad29452c0',
-            regtest: '63ee757834f6f815045321090fd89b446e784f442e3e7abf84b8c0fb3b479324' },
-    LTC:  { mainnet: '5fd9f1dda65b55faf6a5e507a4a81bd2a5ba6813d8a3ed1f04cd27b99fec03c3',
-            testnet: '57373962a5c562f8ceb98fceb482c586741ecf8dd6335965c76f9b8e61a4eb87',
-            regtest: 'ab30c1d1fd444ca3dca1a9ec855bd587422e87d5e5e5e6b6f9ddadd1d2fb587d' },
-    DOGE: { mainnet: '78c298463e586fed8daa1979d9dfe58f4d6de32efd01ae45024b9490e871b1cc',
-            testnet: '5276c0a0fb161bbfd4e8b0acaabf38751dded4370ecce86455c57eb5de0e9bb2',
-            regtest: '34f8dafeff36f7c8ca3b327c3c915251e78e64448742860620522a92a69368a0' },
+    BTC:  { mainnet: '91fc64bc20c9615ad7a12d4dff70d43eb258daf0419dde16633eb7ed41b528b9',
+            testnet: '5d076adf982dc81c21c6e6855325265e0320f58f0dd61b938adaf42544895535',
+            regtest: '603b402538620934ad2b81fd3013b5c1651c32cf62cc56bea8dc53ddc247ec9a' },
+    LTC:  { mainnet: '90470750d9635d9f6e505105da027f9e20f73ef8377b2b3beabaa2e37d083fd1',
+            testnet: '2083cb4b90fa59172bc46a65eecff29a4f803e8d913a1c8d269ec7f17e4d4062',
+            regtest: '68a3751176e9a2b3857d5ea34cacfc1f0b2d88c17d46b8ccaf477c2a3baa7ffc' },
+    DOGE: { mainnet: 'cf0918fec0f99159b11e0cb3d2e58a9edb2e89388768089c3a71d9c9e45d5bab',
+            testnet: '3eebc68bca5024a757fae7170a98b9e2b8307ca0f2f037c4c6025dfd94e45128',
+            regtest: 'ab3c2ce46d3ac6eff3f12d6dca037b05dd27e456369124f48928598fcdb72173' },
 };
 
 function registerRegistryBasics() {
