@@ -60,7 +60,8 @@ module.exports = {
         // writing the leader's and our own signature are one synchronous step.
         let adopted = false;
         if(canonical !== pending.canonical){
-            if(this.committedToOtherValue(pending, canonical, view)) return;
+            if(this.committedToOtherValue(pending, canonical, view))
+                return this.logRoundHeld(rid, 'PROPOSE', 'this hub already committed to another value');
             let rebound = await this.rebindSnapshot(pending, row);
             if(!this.adoptLeaderRow(proposal, rebound)) return;
             adopted = true;
@@ -79,25 +80,36 @@ module.exports = {
     leaderProposal(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
-        if(!rid || this.finalized.has(rid)) return;
+        if(!rid) return this.logRoundHeld(rid, 'PROPOSE', 'the message has no round id');
+        if(this.finalized.has(rid))
+            return this.logRoundHeld(rid, 'PROPOSE', 'the round id is still finalized');
         let pending = this.pending.get(rid);
-        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){
+            this.logRoundHeld(rid, 'PROPOSE', 'the local round has not opened');
+            this.bufferEarlyMessage(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         let view = Number(d.view) || 0;
-        if(view < pending.view) return;                                   // stale leader
+        if(view < pending.view)
+            return this.logRoundHeld(rid, 'PROPOSE', 'the leader view is stale');
 
         // Sender must be the designated leader for the claimed (matchId, view).
-        if(senderPubkey !== this.leaderFor(rid, pending.validators, view)) return;
-        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+        if(senderPubkey !== this.leaderFor(rid, pending.validators, view))
+            return this.logRoundHeld(rid, 'PROPOSE', 'the sender is not the designated leader');
+        if(!pending.validators.some(v => v.pubkey === senderPubkey))
+            return this.logRoundHeld(rid, 'PROPOSE', 'the leader is outside the validator set');
 
         // The proposed row must hash to this round's id.
         let row = d.row;
-        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid)
+            return this.logRoundHeld(rid, 'PROPOSE', 'the row does not carry the round id');
         let canonical = this.engine.canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
 
         // Verify the leader's signature over THEIR canonical.
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey))
+            return this.logRoundHeld(rid, 'PROPOSE', 'the leader signature does not verify');
         return { d, rid, pending, senderPubkey, view, row, canonical };
     },
 
@@ -140,11 +152,17 @@ module.exports = {
         if(rebound === false) return false;
         // The resolve the caller awaited is a real await, so re-check the round is still
         // the one we started on before mutating it.
-        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending) return false;
+        if(this.finalized.has(rid) || pending.finalized || this.pending.get(rid) !== pending){
+            this.logRoundHeld(rid, 'PROPOSE adoption', 'the round changed during validation');
+            return false;
+        }
         // The proposing leader has to be a member of the set the row declares. Its
         // signature is one of the ones the indexer will measure, and a signature
         // from outside the declared set is discarded there.
-        if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)) return false;
+        if(rebound && !rebound.validators.some(v => v.pubkey === senderPubkey)){
+            this.logRoundHeld(rid, 'PROPOSE adoption', 'the leader is outside the declared validator set');
+            return false;
+        }
         pending.row       = row;
         pending.canonical = canonical;
         if(rebound){
@@ -185,17 +203,25 @@ module.exports = {
     handlePrepare(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
-        if(!rid || this.finalized.has(rid)) return;
+        if(!rid) return this.logRoundHeld(rid, 'PREPARE', 'the message has no round id');
+        if(this.finalized.has(rid))
+            return this.logRoundHeld(rid, 'PREPARE', 'the round id is still finalized');
         let pending = this.pending.get(rid);
-        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){
+            this.logRoundHeld(rid, 'PREPARE', 'the local round has not opened');
+            this.bufferEarlyMessage(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
-        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+        if(!pending.validators.some(v => v.pubkey === senderPubkey))
+            return this.logRoundHeld(rid, 'PREPARE', 'the signer is outside the validator set');
         if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
             // A vote only counts with a verifying signature over the round
             // canonical. A mismatch usually means this vote raced ahead of the
             // leader's PROPOSE (we still hold our pre-built canonical); buffer
             // it for replay after adoption rather than losing it.
+            this.logRoundHeld(rid, 'PREPARE', 'the signature does not match the current canonical');
             this.bufferEarlyMessage(rid, envelope);
             return;
         }
@@ -232,17 +258,25 @@ module.exports = {
     handleCommit(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
-        if(!rid || this.finalized.has(rid)) return;
+        if(!rid) return this.logRoundHeld(rid, 'COMMIT', 'the message has no round id');
+        if(this.finalized.has(rid))
+            return this.logRoundHeld(rid, 'COMMIT', 'the round id is still finalized');
         let pending = this.pending.get(rid);
-        if(!pending){ this.bufferEarlyMessage(rid, envelope); return; }
+        if(!pending){
+            this.logRoundHeld(rid, 'COMMIT', 'the local round has not opened');
+            this.bufferEarlyMessage(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
-        if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
+        if(!pending.validators.some(v => v.pubkey === senderPubkey))
+            return this.logRoundHeld(rid, 'COMMIT', 'the signer is outside the validator set');
         if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
             // Unverified commits must NOT count toward quorum: counting them let a
             // node whose canonical diverged "finalize" with zero collected
             // signatures and persist an unverifiable mirror row. Buffer for
             // replay in case the leader's PROPOSE (and adoption) is still racing.
+            this.logRoundHeld(rid, 'COMMIT', 'the signature does not match the current canonical');
             this.bufferEarlyMessage(rid, envelope);
             return;
         }
@@ -287,8 +321,12 @@ module.exports = {
         // (WI-2 bump 2); below the EQUIV flag-day it is stored but unused.
         this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs, view: pending.view });
 
-        let cleanup = setTimeout(() => this.pending.delete(rid), PENDING_EVICT_MS);
-        if(cleanup.unref) cleanup.unref();             // housekeeping timer; never pin process liveness
+        // A retraction can reopen this id during the grace window. The old round's
+        // callback may only evict the exact pending object that scheduled it.
+        pending.cleanupTimer = setTimeout(() => {
+            if(this.pending.get(rid) === pending) this.pending.delete(rid);
+        }, PENDING_EVICT_MS);
+        if(pending.cleanupTimer.unref) pending.cleanupTimer.unref();
     },
 
     // Reorg support (deepdive M-13): drop a round id from the finalized ring so a
@@ -305,6 +343,7 @@ module.exports = {
     // so at most one live row exists per confirmed action.
     forgetFinalized(rid){
         rid = String(rid).toLowerCase();
+        this.clearRoundHeld(rid);
         let had = this.finalized.delete(rid);
         this.finalizedRows.delete(rid);
         if(had){
@@ -314,6 +353,7 @@ module.exports = {
         let p = this.pending.get(rid);
         if(p){
             if(p.timer) clearTimeout(p.timer);
+            if(p.cleanupTimer) clearTimeout(p.cleanupTimer);
             this.pending.delete(rid);
         }
         return had;

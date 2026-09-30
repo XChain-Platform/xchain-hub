@@ -58,7 +58,9 @@ module.exports = {
         // Resolved origin chain per `<network>|<tick>`. A tick's origin is the chain its
         // native row lives on; bridge_transfers carries the chains but never the direction
         // (D19), so it is learned from the pending read's transfer_kind (a lock's src_chain
-        // is the origin) and cached for the policy poll after a restart.
+        // is the origin). It lives in memory only: start() seeds it from the finalized
+        // policy snapshots (seedTickOrigins, policy_poll.js), which is what lets the policy
+        // poll and the invariant read pair an already-bridged tick after a restart.
         this._tickOrigin = new Map();
 
         // Escrow and supply come from chain state, which no hub table holds. Null means "use
@@ -280,8 +282,10 @@ module.exports = {
         // A general-token leg needs the token-bridge gate as well as the bridge gate; the
         // base spec's own legs are XCHAIN and ride the bridge gate alone. The parity test
         // pins TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key, so
-        // this can never arm v3/v4 without an engine behind it. The token map is
-        // network-keyed and the snapshot block is BTC's, so the coin travels with the height.
+        // this can never arm v3/v4 without an engine behind it. The token map is keyed per
+        // chain and the snapshot block is a BTC height, so it is read at BTC's slot. That is
+        // sound only while BTC arms last in wall clock, so an arming cut sizes BTC's slot
+        // after the two destination chains'.
         if(tick !== 'XCHAIN' && !this.gateActive('token', snapshotBlock, 'BTC'))
             return this.logHeld(coin, t, 'token bridge not active at snapshot_block ' + snapshotBlock);
 
@@ -308,8 +312,10 @@ module.exports = {
             return this.logHeld(coin, t, 'below depth ' + this.effectiveDepth(coin, t.min_depth));
 
         // The origin chain of this tick, learned from the leg's own kind: a lock is mined on
-        // the chain the token is native to, a burn on a chain that holds a copy.
-        this._tickOrigin.set(network + '|' + tick, kind === 'lock' ? coin : destChain);
+        // the chain the token is native to, a burn on a chain that holds a copy. Keyed by the
+        // NATIVE name: a burn carries the copy's name ('BTC.FUFU'), and every reader of this map
+        // (the policy poll, the invariant) looks the token up under 'FUFU'.
+        this._tickOrigin.set(network + '|' + this.nativeTick(tick), kind === 'lock' ? coin : destChain);
 
         let transferId = this.deriveTransferId(network, coin, srcActionIndex, destChain, String(t.dest_address || ''));
         if(this._inflight.has(transferId)) return this.logHeld(coin, t, 'round ' + transferId.substring(0, 16) + '... still in flight');

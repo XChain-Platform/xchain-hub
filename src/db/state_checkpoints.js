@@ -40,6 +40,24 @@ const PENDING_ANCHOR_CHECKPOINTS_SQL =
     'WHERE sc.anchor_txid IS NULL';
 
 module.exports = {
+    // Checkpoints the ANCHOR archive still owes a batch to. The table is append-only (a
+    // reorged height gets a new row at a higher checkpoint_seq), so an unstamped row is
+    // the whole pending predicate. Ordered as the archive array is.
+    async findStateCheckpointsByBatchSeq(limit) {
+        return this.doQuery(
+            'SELECT * FROM state_checkpoints WHERE batch_seq IS NULL ' +
+            'ORDER BY chain ASC, network ASC, checkpoint_seq ASC LIMIT ?', [limit]);
+    },
+
+    // Stamps the archive batch a checkpoint was published in, once. Guarded on
+    // batch_seq IS NULL so a row an earlier round already covered keeps its seq.
+    async updateStateCheckpointArchiveBatchSeq(batchSeq, chain, network, checkpointSeq) {
+        return this.doQuery(
+            'UPDATE state_checkpoints SET batch_seq = ? ' +
+            'WHERE chain = ? AND network = ? AND checkpoint_seq = ? AND batch_seq IS NULL',
+            [batchSeq, chain, network, checkpointSeq]);
+    },
+
     // Inserts a row into state_checkpoints.
     // Moved here from src/anchor/checkpoint_engine.js:907.
     async createStateCheckpoint(chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) {

@@ -65,12 +65,12 @@ function registerPriceaggregatorRetractfromactionindex1Tests1() {
 
         let result = await agg.retractFromActionIndex('BTC', 500);
 
-        // Two DELETE statements issued
+        // Tombstone insert, then two DELETE statements
         let calls = hub.db.doQuery.getCalls();
-        expect(calls.length).to.equal(2);
+        expect(calls.length).to.equal(3);
 
-        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
-        let oracleCall = calls.find(c => /oracle_prices/.test(c.args[0]));
+        let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /^DELETE FROM oracle_prices/.test(c.args[0]));
         expect(snapCall, 'price_snapshots delete issued').to.exist;
         expect(oracleCall, 'oracle_prices delete issued').to.exist;
 
@@ -117,8 +117,8 @@ function registerPriceaggregatorRetractfromactionindex1Tests4() {
         await agg.retractFromActionIndex('BTC', 50, 75);
 
         let calls = hub.db.doQuery.getCalls();
-        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
-        let oracleCall = calls.find(c => /oracle_prices/.test(c.args[0]));
+        let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /^DELETE FROM oracle_prices/.test(c.args[0]));
         expect(snapCall.args[0]).to.match(/source_action_index >= \? AND source_action_index <= \?/);
         expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 75]);
         expect(oracleCall.args[0]).to.match(/action_index >= \? AND action_index <= \?/);
@@ -138,8 +138,8 @@ function registerPriceaggregatorRetractfromactionindex1Tests4() {
         await agg.retractFromActionIndex('BTC', 50, 75, 5);
 
         let calls = hub.db.doQuery.getCalls();
-        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
-        let oracleCall = calls.find(c => /oracle_prices/.test(c.args[0]));
+        let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /^DELETE FROM oracle_prices/.test(c.args[0]));
         expect(snapCall.args[0]).to.match(/source_action_index >= \? AND source_action_index <= \? AND push_generation <= \?/);
         expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 75, 5]);
         expect(oracleCall.args[0]).to.match(/action_index >= \? AND action_index <= \? AND push_generation <= \?/);
@@ -162,7 +162,7 @@ function registerPriceaggregatorRetractfromactionindex1Tests6() {
         await agg.retractFromActionIndex('BTC', 50, null, 7);
 
         let calls = hub.db.doQuery.getCalls();
-        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
+        let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
         expect(snapCall.args[0]).to.match(/source_action_index >= \? AND push_generation <= \?/);
         expect(snapCall.args[0]).to.not.match(/<= \? AND push_generation/);   // no closed-range clause
         expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 7]);

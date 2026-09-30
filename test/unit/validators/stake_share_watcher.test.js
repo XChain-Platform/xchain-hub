@@ -20,87 +20,37 @@ const { expect } = require('chai');
 
 const StakeShareWatcher = require('../../../src/validators/stake_share_watcher.js');
 const { LEVELS } = require('../../../src/validators/stake_share_monitor.js');
+const { OURS, makeVenue, makeWatcher } = require('../../helpers/stakeShareVenue.js');
+const proxyquire = require('proxyquire');
 
-const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];
-
-function stakeRows(sources, weight) {
-    return sources.map((s, i) => ({ pubkey: 'pk' + i, source: s, weight: String(weight) }));
-}
-
-// A stand-in indexer whose stake set the test can mutate between polls, which is
-// exactly what a real drill does by broadcasting a competing STAKE.
-function makeVenue(opts) {
-    opts = opts || {};
-    const venue = {
-        tip:        150000,
-        sources:    OURS.concat(['community1']),
-        weight:     25000,
-        truncated:  false,
-        error:      null,
-        throwOn:    null,          // 'getlatestblock' | 'getstakeweightsbycapability'
-        httpStatus: null,
-        calls:      []
-    };
-    venue.axios = {
-        post: async (url, body) => {
-            venue.calls.push({ url, method: body.method, params: body.params });
-            if (venue.throwOn === body.method) {
-                const err = new Error('boom');
-                if (venue.httpStatus) err.response = { status: venue.httpStatus };
-                throw err;
-            }
-            if (body.method === 'getlatestblock') return { data: { result: { block_index: venue.tip } } };
-            if (body.method === 'getstakeweightsbycapability') {
-                if (venue.error) return { data: { result: { error: venue.error } } };
-                return { data: { result: {
-                    capability:   body.params.capability,
-                    block_index:  body.params.block_index,
-                    count:        venue.sources.length,
-                    source_count: venue.sources.length,
-                    truncated:    venue.truncated,
-                    validators:   stakeRows(venue.sources, venue.weight)
-                } } };
-            }
-            return { data: { result: {} } };
-        }
-    };
-    Object.assign(venue, opts);
-    return venue;
-}
-
-function makeHub(venue, opts) {
-    opts = opts || {};
-    return {
-        capabilitySnapshot: { reorgBufferBlocks: opts.reorgBuffer === undefined ? 6 : opts.reorgBuffer },
-        capabilityRegistry: opts.noRegistry ? null : {
-            getMinStake: () => opts.minStake === undefined ? '25000' : opts.minStake
-        },
-        btcIndexerHeaders: () => ({ 'Content-Type': 'application/json', 'x-api-key': 'k' }),
-        resolveIndexerUrl: async (coin) => (opts.urls === undefined ? 'http://indexer/' + coin : opts.urls[coin] || null)
-    };
-}
-
-function makeWatcher(venue, env, hubOpts, opts) {
-    const lines = [];
-    const hub = makeHub(venue, hubOpts);
-    const watcher = new StakeShareWatcher(hub, Object.assign({
-        env:    Object.assign({ HUB_OPERATOR_STAKE_SOURCES: OURS.join(',') }, env || {}),
-        axios:  venue.axios,
-        log:    (m) => lines.push(m),
-        chains: ['BTC'],
-        capabilities: ['price']
-    }, opts || {}));
-    return { watcher, lines, hub };
+// The real CapabilitySnapshot over the venue's indexer, with the canonical buffer stubbed.
+function snapshotClassWithCanonical(venue, canonical) {
+    const bootSettings = proxyquire('../../../src/validators/capability_snapshot/boot_settings.js',
+        { '../../consensus/snapshot_reorg_buffer.js': { CANONICAL_REORG_BUFFER: canonical } });
+    return proxyquire('../../../src/validators/capability_snapshot',
+        { axios: venue.axios, './capability_snapshot/boot_settings.js': bootSettings });
 }
 
 describe('StakeShareWatcher', function () {
 
     registerStakeShareDrillTests();
     registerStakeShareReadTests();
+    registerStakeShareBufferFallbackTests();
     registerStakeShareChainTests();
     registerStakeShareFailureTests();
     registerStakeShareLifecycleTests();
+    registerStakeShareDefaultCapabilityTests();
 });
+
+function registerStakeShareDefaultCapabilityTests() {
+    it('watches by default every capability whose rounds lock a weighted snapshot', function () {
+        // A capability added to the snapshot writers but not here would halt with no forecast.
+        const { DERIVED_CAPABILITIES } = require('../../../src/oracle/price_aggregator/derived_capabilities.js');
+        expect(DERIVED_CAPABILITIES.length).to.be.above(0);
+        expect(StakeShareWatcher.DEFAULT_CAPABILITIES.slice().sort())
+            .to.deep.equal(DERIVED_CAPABILITIES.slice().sort());
+    });
+}
 
 function registerStakeShareDrillTests() {
 
@@ -201,44 +151,87 @@ function registerStakeShareReadTests() {
             expect(entry.level).to.equal(LEVELS.BLOCKED);
             expect(watcher.monitor.isAlerting()).to.equal(true);
         });
+
+        it('buries by the gate\'s live reorg buffer, not a default of its own', async function () {
+            const venue = makeVenue();
+            const { watcher } = makeWatcher(venue, null, { reorgBuffer: 3 });
+            await watcher.pollOnce();
+            const read = venue.calls.find(c => c.method === 'getstakeweightsbycapability');
+            expect(read.params.block_index).to.equal(149997);
+        });
+
+        it('labels the reading with the height the indexer answered for', async function () {
+            const venue = makeVenue();
+            const { watcher } = makeWatcher(venue);
+            await watcher.pollOnce();
+            expect(watcher.monitor.entries.get('BTC:price').blockIndex).to.equal(149994);
+        });
+    });
+}
+
+function registerStakeShareBufferFallbackTests() {
+
+    describe('burying with no usable live buffer', function () {
+
+        // A stand-in canonical of 4 (not today's 6) so a copied literal cannot pass.
+        for (const [label, mutate] of [
+            ['the hub has no snapshot', (hub) => { delete hub.capabilitySnapshot; }],
+            ['the live buffer is null', (hub) => { hub.capabilitySnapshot.reorgBufferBlocks = null; }]
+        ]) {
+            it('falls back to CANONICAL_REORG_BUFFER when ' + label, async function () {
+                const saved = process.env.HUB_SNAPSHOT_REORG_BUFFER;
+                delete process.env.HUB_SNAPSHOT_REORG_BUFFER;
+                try {
+                    const venue = makeVenue();
+                    const { watcher, hub } = makeWatcher(venue, null, null,
+                        { CapabilitySnapshot: snapshotClassWithCanonical(venue, 4) });
+                    mutate(hub);
+                    await watcher.pollOnce();
+                    const read = venue.calls.find(c => c.method === 'getstakeweightsbycapability');
+                    expect(read.params.block_index).to.equal(149996);
+                } finally {
+                    if (saved === undefined) delete process.env.HUB_SNAPSHOT_REORG_BUFFER;
+                    else process.env.HUB_SNAPSHOT_REORG_BUFFER = saved;
+                }
+            });
+        }
     });
 }
 
 function registerStakeShareChainTests() {
 
-    describe('per chain', function () {
+    describe('BTC only, because capability staking is BTC-only', function () {
 
-        it('watches every configured chain and capability separately', async function () {
+        it('watches the BTC set alone and says once which named chains it dropped', async function () {
             const venue = makeVenue();
-            const { watcher } = makeWatcher(venue, null, null,
+            const { watcher, lines } = makeWatcher(venue, null, null,
                 { chains: ['BTC', 'DOGE'], capabilities: ['price', 'oracle_publish'] });
             await watcher.pollOnce();
             const stats = watcher.getStats();
-            expect(Object.keys(stats.chains).sort()).to.deep.equal(['BTC', 'DOGE']);
+            expect(Object.keys(stats.chains)).to.deep.equal(['BTC']);
             expect(Object.keys(stats.chains.BTC).sort()).to.deep.equal(['oracle_publish', 'price']);
-            expect(stats.watched_chains).to.deep.equal(['BTC', 'DOGE']);
+            expect(stats.watched_chains).to.deep.equal(['BTC']);
+            expect(venue.calls.every(c => c.url === 'http://indexer/BTC')).to.equal(true);
+            expect(lines.filter(l => l.indexOf('DOGE') !== -1)).to.have.length(1);
         });
 
-        it('scopes operator sources per chain, because staking addresses are chain-specific', function () {
+        it('reads BTC operator sources from the scoped and the bare lists', function () {
             const venue = makeVenue();
             const { watcher } = makeWatcher(venue, {
+                HUB_OPERATOR_STAKE_SOURCES: 'shared1',
+                HUB_OPERATOR_STAKE_SOURCES_BTC: 'btc1, btc2'
+            });
+            expect(watcher.operatorSourcesFor('BTC')).to.deep.equal(['btc1', 'btc2', 'shared1']);
+        });
+
+        it('ignores sources scoped to another chain, and is unconfigured with only those', function () {
+            const venue = makeVenue();
+            const { watcher, lines } = makeWatcher(venue, {
                 HUB_OPERATOR_STAKE_SOURCES: '',
-                HUB_OPERATOR_STAKE_SOURCES_BTC: 'btc1, btc2',
                 HUB_OPERATOR_STAKE_SOURCES_DOGE: 'doge1'
-            }, null, { chains: ['BTC', 'DOGE', 'LTC'] });
-            expect(watcher.operatorSourcesFor('BTC')).to.deep.equal(['btc1', 'btc2']);
-            expect(watcher.operatorSourcesFor('DOGE')).to.deep.equal(['doge1']);
-            expect(watcher.operatorSourcesFor('LTC')).to.deep.equal([]);
-        });
-
-        it('skips a chain this operator does not stake on rather than filing a finding', async function () {
-            const venue = makeVenue();
-            const { watcher } = makeWatcher(venue, {
-                HUB_OPERATOR_STAKE_SOURCES: '',
-                HUB_OPERATOR_STAKE_SOURCES_BTC: OURS.join(',')
-            }, null, { chains: ['BTC', 'LTC'] });
-            await watcher.pollOnce();
-            expect(Object.keys(watcher.getStats().chains)).to.deep.equal(['BTC']);
+            });
+            expect(watcher.isConfigured()).to.equal(false);
+            expect(lines.join('\n')).to.contain('HUB_OPERATOR_STAKE_SOURCES_DOGE');
         });
     });
 }
@@ -328,15 +321,15 @@ function registerStakeShareLifecycleTests() {
             expect(watcher.pollMs).to.equal(90000);
             expect(watcher.warnAtStakes).to.equal(5);
             expect(watcher.criticalAtStakes).to.equal(3);
-            expect(watcher.chains).to.deep.equal(['DOGE']);
+            expect(watcher.chains).to.deep.equal(['BTC']);
             expect(watcher.capabilities).to.deep.equal(['price']);
         });
 
-        it('defaults to every registered coin and the price rails', function () {
+        it('defaults to the BTC stake set and every weighted-gate rail', function () {
             const venue = makeVenue();
             const { watcher } = makeWatcher(venue, null, null, { chains: null, capabilities: null });
-            expect(watcher.chains).to.deep.equal(['BTC', 'LTC', 'DOGE']);
-            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish']);
+            expect(watcher.chains).to.deep.equal(['BTC']);
+            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish', 'attestation', 'cross_chain']);
             expect(watcher.pollMs).to.equal(StakeShareWatcher.DEFAULT_POLL_MS);
         });
     });

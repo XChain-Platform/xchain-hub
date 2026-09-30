@@ -10,6 +10,6 @@ CREATE TABLE governance_votes (
     -- replayed to reinstate a superseded vote. DEFAULT 0 so rows predating
     -- this fence backfill to a value that any real seq beats.
     vote_seq        BIGINT NOT NULL DEFAULT 0,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_proposal_voter (proposal_id, voter_pubkey)
 );

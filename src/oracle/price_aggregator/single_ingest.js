@@ -23,6 +23,8 @@
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('../../constants.js');
 const { bcgt }          = require('../../bcmath.js');
+const { isPriceV1CanonicalActive, isCanonicalPriceV1Value,
+        isCanonicalPriceV1Fee } = require('../../consensus/gates/price_scale_gate.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -65,9 +67,13 @@ function validateOraclePriceIdentity(priceData) {
 }
 
 // The value and the optional FEE, on the indexer's own bounds.
-function validateOraclePriceValue(priceData) {
+function validateOraclePriceValue(priceData, network) {
     if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
         !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
+        return 'invalid value';
+    }
+    if (isPriceV1CanonicalActive(priceData.block_time, network) &&
+        !isCanonicalPriceV1Value(priceData.value)) {
         return 'invalid value';
     }
     // FEE upper bound uses exact bcmath, not parseFloat: an unbounded-precision
@@ -76,6 +82,11 @@ function validateOraclePriceValue(priceData) {
     // Mirrors the indexer's price-action FEE validation (wire-format parity).
     if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
         (!/^[0-9]+(\.[0-9]{1,18})?$/.test(String(priceData.fee)) || bcgt(String(priceData.fee), '1'))) {
+        return 'invalid fee';
+    }
+    if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
+        isPriceV1CanonicalActive(priceData.block_time, network) &&
+        !isCanonicalPriceV1Fee(priceData.fee)) {
         return 'invalid fee';
     }
     return null;
@@ -211,7 +222,7 @@ module.exports = {
         let identityReason = validateOraclePriceIdentity(priceData);
         if (identityReason) return { accepted: false, reason: identityReason };
 
-        let valueReason = validateOraclePriceValue(priceData);
+        let valueReason = validateOraclePriceValue(priceData, this.hub && this.hub.network);
         if (valueReason) return { accepted: false, reason: valueReason };
 
         let wire = validateOraclePriceWireFields(priceData);

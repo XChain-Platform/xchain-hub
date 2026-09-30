@@ -154,6 +154,16 @@ describe('XChainHub.admissionTipFresh: per chain, and a refusal is not a guess',
         expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
         expect(h.admissionTipFresh('DOGE', 501)).to.equal(true);
     });
+
+    it('keeps an unchanged regtest tip usable while testnet still refuses it', () => {
+        const regtest = Object.assign(freshnessHubStub(), { network: 'regtest' });
+        const testnet = Object.assign(freshnessHubStub(), { network: 'testnet' });
+        const stale = { height: 500, atMs: Date.now() - 4000 * 1000 };
+        regtest._admissionTipSeen.set('DOGE', stale);
+        testnet._admissionTipSeen.set('DOGE', stale);
+        expect(regtest.admissionTipFresh('DOGE', 500)).to.equal(true);
+        expect(testnet.admissionTipFresh('DOGE', 500)).to.equal(false);
+    });
 });
 
 function registerArmedCanonicalBuilderSuite() {

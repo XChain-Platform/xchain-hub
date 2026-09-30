@@ -107,15 +107,15 @@ function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Tests1() 
         expect(console.error.calledOnce).to.equal(true);
     });
 
-    it('issues no extra query and stays a two-statement path when no publisher is wired', async function () {
+    it('records tombstones then deletes, with no marker query, when no publisher is wired', async function () {
         delete hub.oraclePublisher;
         hub.db.doQuery.resolves({ affectedRows: 1 });
 
         await agg.retractFromActionIndex('LTC', 10);
 
         let calls = hub.db.doQuery.getCalls();
-        expect(calls.length).to.equal(2);
-        expect(calls.every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
+        expect(calls.length).to.equal(3);
+        expect(calls.slice(1).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
     });
 }
 

@@ -67,6 +67,12 @@ const { projectCompetingStake } = require('./stake_share/margin.js');
 // rather than one per level re-evaluation.
 const DEFAULT_THROTTLE_MS = 5 * 60 * 1000;
 
+// The level an entry counts as: a held alert while the snapshot is unreadable,
+// otherwise the level it was recorded at.
+function effectiveLevel(entry) {
+    return entry.heldLevel || entry.level;
+}
+
 /**
  * Alarm surface over evaluateStakeShare(), one entry per (chain, capability).
  *
@@ -100,10 +106,21 @@ class StakeShareMonitor {
         let now  = this._now();
         let prev = this.entries.get(key);
         let entry = Object.assign({ chain: String(chain), capability: String(capability), at: now }, evaluation);
+
+        // Hold a standing alert through an unreadable snapshot: nothing was re-measured,
+        // so the last real reading stands until a real one replaces it. No expiry, which
+        // would clear an alert nobody re-measured; /health shows its age as held_age_s.
+        let holdStarts = false;
+        if (entry.level === LEVELS.UNAVAILABLE && prev && isAlertLevel(effectiveLevel(prev))) {
+            holdStarts           = !prev.heldLevel;
+            entry.heldLevel      = prev.heldLevel || prev.level;
+            entry.heldReason     = prev.heldLevel ? prev.heldReason : prev.reason;
+            entry.heldMeasuredAt = prev.heldLevel ? prev.heldMeasuredAt : prev.at;
+        }
         this.entries.set(key, entry);
 
-        let was = prev ? prev.level : null;
-        let is  = entry.level;
+        let was = prev ? effectiveLevel(prev) : null;
+        let is  = effectiveLevel(entry);
         let alerting = isAlertLevel(is);
 
         // A level CHANGE always prints, throttle or not: the transition is the
@@ -112,7 +129,16 @@ class StakeShareMonitor {
         let changed = was !== is;
         let due     = now - (this._warnAt[key] || 0) > this.throttleMs;
 
-        if (alerting && (changed || due)) {
+        if (entry.heldLevel) {
+            // Say the alert is unconfirmed, never cleared: the read failed, the federation did not recover.
+            if (holdStarts || due) {
+                this._warnAt[key] = now;
+                this._log('STAKE SHARE ' + is.toUpperCase() + ' UNCONFIRMED [' + chain + '/' + capability + ']: ' +
+                    'the stake snapshot could not be read, so the last reading (' +
+                    Math.round((now - entry.heldMeasuredAt) / 1000) + 's ago) still stands: ' +
+                    entry.heldReason + ' Read failure: ' + entry.reason);
+            }
+        } else if (alerting && (changed || due)) {
             this._warnAt[key] = now;
             this._log('STAKE SHARE ' + is.toUpperCase() + ' [' + chain + '/' + capability + ']: ' + entry.reason);
         } else if (!alerting && isAlertLevel(was)) {
@@ -121,32 +147,36 @@ class StakeShareMonitor {
         } else if (!alerting && is !== LEVELS.OK && (changed || due)) {
             this._warnAt[key] = now;
             this._log('Stake share ' + is + ' [' + chain + '/' + capability + ']: ' + entry.reason);
+        } else if (changed && was !== null) {
+            // Announce recovery to ok from warning, unconfigured or unavailable, so every change prints.
+            this._warnAt[key] = now;
+            this._log('Stake share ' + is + ' [' + chain + '/' + capability + '] (was ' + was + '): ' + entry.reason);
         }
         return entry;
     }
 
     // The snapshot could not be read this pass. Kept distinct from BLOCKED (a
-    // snapshot that WAS read and is unusable) and non-alerting, because indexer
-    // reachability is already ConsensusInputMonitor's alarm and double-paging one
-    // outage on two surfaces trains operators to mute both.
+    // snapshot that WAS read and is unusable) and never raises an alert (record()
+    // holds a standing one), because indexer reachability is ConsensusInputMonitor's
+    // alarm and double-paging one outage on two surfaces trains operators to mute both.
     recordUnavailable(chain, capability, reason) {
         return this.record(chain, capability,
             Object.assign(emptyResult(LEVELS.UNAVAILABLE, reason)));
     }
 
-    // Worst entry currently held, or null when nothing has been recorded.
+    // Worst entry currently held, ranked by its effective level, or null when nothing has been recorded.
     worst() {
         let worst = null;
         for (let e of this.entries.values()) {
-            if (!worst || (LEVEL_RANK[e.level] || 0) > (LEVEL_RANK[worst.level] || 0)) worst = e;
+            if (!worst || (LEVEL_RANK[effectiveLevel(e)] || 0) > (LEVEL_RANK[effectiveLevel(worst)] || 0)) worst = e;
         }
         return worst;
     }
 
-    // True while any (chain, capability) sits at CRITICAL or worse. Side-effect
-    // free, so /health can read it on every probe.
+    // True while any (chain, capability) sits at CRITICAL or worse, a held alert
+    // included. Side-effect free, so /health can read it on every probe.
     isAlerting() {
-        for (let e of this.entries.values()) if (isAlertLevel(e.level)) return true;
+        for (let e of this.entries.values()) if (isAlertLevel(effectiveLevel(e))) return true;
         return false;
     }
 
@@ -173,13 +203,22 @@ class StakeShareMonitor {
                 source_count:            e.sourceCount,
                 operator_source_count:   e.operatorSourceCount,
                 configured_source_count: e.configuredSourceCount,
-                age_s:                   Math.round((now - e.at) / 1000)
+                age_s:                   Math.round((now - e.at) / 1000),
+                held_level:              e.heldLevel || null,
+                held_reason:             e.heldLevel ? e.heldReason : null,
+                held_age_s:              e.heldLevel ? Math.round((now - e.heldMeasuredAt) / 1000) : null
             };
+        }
+        let worstBody = null;
+        if (worst) {
+            worstBody = { level: effectiveLevel(worst), chain: worst.chain, capability: worst.capability };
+            // Flag a worst level that is held rather than measured this pass.
+            if (worst.heldLevel) worstBody.held = true;
         }
         return {
             gate:      '3*tally > 2*S (two-thirds of source-deduped active stake)',
             alerting:  this.isAlerting(),
-            worst:     worst ? { level: worst.level, chain: worst.chain, capability: worst.capability } : null,
+            worst:     worstBody,
             chains:    chains
         };
     }

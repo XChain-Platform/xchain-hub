@@ -75,6 +75,7 @@ const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
 const policySnapshotsMixin     = require('./policy_snapshots.js');
 const pricesMixin              = require('./prices/index.js');
+const priceArchiveMixin        = require('./prices/archive_bookkeeping.js');
 const reorgAttestationsMixin   = require('./reorg_attestations.js');
 const slashProposalsMixin      = require('./slash_proposals.js');
 const stateCheckpointsMixin    = require('./state_checkpoints.js');
@@ -118,6 +119,7 @@ const MIXINS = [
     p2pPeersMixin,
     policySnapshotsMixin,
     pricesMixin,
+    priceArchiveMixin,
     reorgAttestationsMixin,
     slashProposalsMixin,
     stateCheckpointsMixin,
@@ -194,8 +196,9 @@ class Database {
             // serialize/parse Dates as UTC and issue `SET time_zone='+00:00'` per
             // connection, so both sides agree no matter where the hub runs - which
             // also keeps a geographically-spread federation comparing like with like.
-            // Safe for existing data: every temporal column in src/sql is TIMESTAMP,
-            // which MariaDB already stores as UTC internally.
+            // Safe for existing data: every temporal column in src/sql is TIMESTAMP
+            // (UTC-normalized in storage) or DATETIME (stores the literal), and the
+            // session's UTC pin makes the two agree.
             timezone:           'Z',
             minDelayValidation: 3000,
             queryTimeout:       parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000
@@ -218,16 +221,17 @@ class Database {
 
     // Idempotent: safe to run every startup.
     //
-    // The steps themselves are the three lists in schema/migrations.js, awaited here
+    // The steps themselves are the four lists in schema/migrations.js, awaited here
     // in the order they ran when they were one method: reward and submission keys,
     // then the capability ENUM and the checkpoint/snapshot keys, then the column
-    // conversions, the price fence re-key and the admission columns. Splitting the
-    // list never reorders it, so a hub applies exactly the statements it applied
-    // before, in the same sequence.
+    // conversions, the price fence re-key and the admission columns, then every
+    // remaining TIMESTAMP column. Splitting the list never reorders it, so a hub
+    // applies exactly the statements it applied before, in the same sequence.
     async runMigrations(){
         await this.runRewardKeyMigrations();
         await this.runCapabilityAndCheckpointMigrations();
         await this.runColumnAndFenceMigrations();
+        await this.runDatetimeColumnMigrations();
     }
 
     async getConnection(){
@@ -243,9 +247,9 @@ class Database {
 
         let connection  = null;
         let attempts    = 0;
-        let maxAttempts = 30;
-        let baseDelay   = 500;
-        let maxDelay    = 15000;
+        const maxAttempts = 30;
+        const baseDelay   = 500;
+        const maxDelay    = 15000;
 
         while(connection == null){
             try {
@@ -266,8 +270,8 @@ class Database {
                 }
                 if(attempts >= maxAttempts)
                     throw new Error('Could not connect to MariaDB after ' + maxAttempts + ' attempts');
-                let delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
-                let jitter = Math.floor(Math.random() * delay * 0.3);
+                const delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
+                const jitter = Math.floor(Math.random() * delay * 0.3);
                 logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
                 await this.sleep(delay + jitter);
@@ -290,22 +294,31 @@ class Database {
                     }
                 }
             }
-            let tx = this.transactionConnection != null;
-            let db = await this.getConnection();
-            try {
-                results = await db.query(query, args);
-            } catch (error){
-                // Always rethrow. Swallowing non-transactional errors returned [] to
-                // callers that write consensus/coordination rows (mirrors, configs,
-                // prices), so a failed INSERT/UPDATE read as success and the row was
-                // silently missing downstream. An empty result must mean a genuinely
-                // empty SELECT, never a failed query.
-                logger.error(nodeUtil.format('Error running database query:', error));
-                throw error;
-            } finally {
-                // Release in finally so an error no longer leaks the pooled
-                // connection. Transaction connections are owned by the caller.
-                if(!tx) await db.release();
+            let attempt = 0;
+            while(attempt < 3){
+                attempt++;
+                const tx = this.transactionConnection != null;
+                const db = await this.getConnection();
+                try {
+                    results = await db.query(query, args);
+                    break;
+                } catch (error){
+                    // Rethrow final failures so failed writes cannot look successful.
+                    // Reserve empty results for genuinely empty SELECT statements.
+                    // Preserve the driver's error object for caller handling.
+                    logger.error(nodeUtil.format('Error running database query:', error));
+                    const deadlock = error && (error.errno === 1213 || error.code === 'ER_LOCK_DEADLOCK');
+                    if(tx || !deadlock || attempt >= 3)
+                        throw error;
+                } finally {
+                    // Release in finally so an error no longer leaks the pooled
+                    // connection. Transaction connections are owned by the caller.
+                    if(!tx) await db.release();
+                }
+                // Retry autocommit deadlocks because InnoDB rolls the whole statement back.
+                // Treat the statement as the transaction under autocommit.
+                // Rerun it without risking partial state.
+                await this.sleep(25 * attempt);
             }
         }
         return results;

@@ -21,6 +21,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
@@ -56,12 +57,8 @@ module.exports = {
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return 'none';
 
-        let matches = await this.db.findCrossChainMatchesByBatchSeq(this.maxBatch);
-        let calls = await this.db.findCrossChainCallsByBatchSeq(this.maxBatch);
-        let rewards = this.dropChainDerivedRewards(await this.pendingArchiveRewards());
-        let rows = this.archiveRows(matches, calls, rewards);
+        let rows = await this.gatherArchiveRows();
         if(!rows) return 'none';
-        ({ matches, calls, rewards } = rows);
 
         let cps = await this.latestArchiveWrapperRows();
         if(!cps || cps.length === 0){
@@ -76,10 +73,10 @@ module.exports = {
 
         let batchSeq = await this.getNextBatchSeq();
         if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly)) return 'none';
-        let rewardRows = await this.resolveArchiveRewardSources(rewards);
-        if(this.archiveEmptyAfterResolution(matches, calls, rewardRows)) return 'none';
+        let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
+        if(this.archiveEmptyAfterResolution(rows, rewardRows)) return 'none';
 
-        let archive  = await this.buildArchive(network, batchSeq, matches, cp.snapshot_block, calls, rewardRows);
+        let archive  = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
         let wire      = this.archiveWire(archive.json);
 
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
@@ -89,7 +86,8 @@ module.exports = {
 
         let signingSet = await this.archiveSigningSet(cp);
         if(this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return 'none';
-        let round = this.openArchiveRound({ cp, batchSeq, wire, canonical, signer, electionBlock, archive, matches, calls, rewardRows, signingSet, myPubkey, mySig });
+        let round = this.openArchiveRound({ cp, batchSeq, wire, canonical, signer, electionBlock, archive, rows, rewardRows, signingSet, myPubkey, mySig });
+        if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
 
         if(signingSet.length <= 1){                                          // single-node: self-sign suffices
             if(this.singleMemberCannotSelfSign(round, cp, batchSeq)) return 'none';
@@ -220,7 +218,7 @@ module.exports = {
     // The round record a leader holds while signatures arrive: the quorum rule for the
     // signing set, the leader's own seed signature, and the ids the back-fill stamps.
     openArchiveRound(o){
-        let { cp, batchSeq, wire, canonical, signer, electionBlock, archive, matches, calls, rewardRows, signingSet, myPubkey, mySig } = o;
+        let { cp, batchSeq, wire, canonical, signer, electionBlock, archive, rows, rewardRows, signingSet, myPubkey, mySig } = o;
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
@@ -257,9 +255,14 @@ module.exports = {
         let round = {
             cp, batchSeq, crc: wire.crc, b64: wire.b64, chunks: wire.chunks, canonical, quorum, weighted, signer, electionBlock,
             count:      archive.count,
-            matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
-            callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
+            matchIds:   rows.matches.map(m => ({ match_id: m.match_id, status: m.status })),
+            callIds:    rows.calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase(), round_qualifier: Number(row.round_qualifier || 0) })),
+            bridgeIds:  rows.bridges.map(r => ({ transfer_id: String(r.transfer_id), status: String(r.status) })),
+            policyIds:  rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
+            checkpointIds: rows.checkpoints.map(r => ({ chain: String(r.chain), network: String(r.network), checkpoint_seq: Number(r.checkpoint_seq) })),
+            priceIds: rows.prices.map(r => ({ round_number: Number(r.round_number), coin_pair: String(r.coin_pair), status: String(r.status), batch_block_time: Number(r.batch_block_time), proof_sha: crypto.createHash('sha256').update(String(r.consensus_proof)).digest('hex') })),
+            tombstoneIds: rows.tombstones.map(r => ({ round_number: Number(r.round_number), coin_pair: String(r.coin_pair) })),
             validators: roundValidators,
             signatures: signatures,
             done:       false,

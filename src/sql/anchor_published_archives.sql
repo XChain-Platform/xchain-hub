@@ -2,9 +2,9 @@ CREATE TABLE anchor_published_archives (
     network     VARCHAR(20)     NOT NULL,             -- mainnet/testnet/regtest (the wrapper checkpoint's network)
     batch_seq   BIGINT UNSIGNED NOT NULL,             -- the archive round's batch_seq (its on-chain identity)
     txid        VARCHAR(64),                          -- DOGE txid of the v1 head once the broadcast returned one (NULL while intent-only)
-    intent_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- when broadcast intent was durably recorded, BEFORE the v1 send
-    sent_at     TIMESTAMP NULL DEFAULT NULL,          -- when the v1 broadcast returned a txid; NULL = intent only
-    settled_at  TIMESTAMP NULL DEFAULT NULL,          -- when the round's bookkeeping finished; NULL = still in flight
+    intent_at   DATETIME DEFAULT CURRENT_TIMESTAMP,  -- when broadcast intent was durably recorded, BEFORE the v1 send
+    sent_at     DATETIME NULL DEFAULT NULL,          -- when the v1 broadcast returned a txid; NULL = intent only
+    settled_at  DATETIME NULL DEFAULT NULL,          -- when the round's bookkeeping finished; NULL = still in flight
     PRIMARY KEY (network, batch_seq),
     KEY idx_open_intent (network, settled_at, intent_at)
 );

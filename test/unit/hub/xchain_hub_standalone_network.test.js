@@ -100,7 +100,8 @@ const REFUSAL = 'Invalid optional environment variable: HUB_NETWORK';
 // Ceiling, NOT a budget: nothing waits it out on a healthy run. It exists so a
 // hung boot fails in finite time, and it is named in the assertion messages so a
 // venue-speed failure cannot be misread as a gate regression.
-const BOOT_CEILING_MS = 20000;
+// Venue-scale: a child node boot on a CI host under concurrent suites has been seen to exceed 20 s.
+const BOOT_CEILING_MS = 60000;
 
 // Wait for a DECISIVE SIGNAL, never for a slice of wall clock. The two
 // boots-past-the-gate cases never exit on their own (a valid boot blocks on a
@@ -269,7 +270,7 @@ function registerStandaloneApiTests() {
     // api.js is the only place HUB_NETWORK is validated, so this drives the real
     // entrypoint as a subprocess rather than re-implementing the check.
     describe('api.js validates an optional HUB_NETWORK in standalone mode', function () {
-        this.timeout(30000);
+        this.timeout(BOOT_CEILING_MS + 30000);   // stays above the boot ceiling so the ceiling message wins
 
         it('refuses to boot on a network name that is not mainnet|testnet|regtest', async function () {
             const r = await boot('tesnet');

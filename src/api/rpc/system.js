@@ -25,6 +25,14 @@ const configRedaction = require('../config_redaction.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
 const { makeAdmissionTipProbe, raceTimeout } = require('./health_probes.js');
 const { validateChain } = require('../validate');
+const carrierLogicPin = require('../../../bin/lib/carrier_logic_pin.js');
+
+// sha256 over the shipped bin/pins/carrier-logic.json, read once at load since
+// the pin is static for a deployed image. Published in /health so an operator
+// can tell which consensus-logic build a running process carries without a
+// shell into the container; see bin/consensus-identity.js for the fuller
+// identity this is one field of.
+const CARRIER_LOGIC_DIGEST = carrierLogicPin.digest(carrierLogicPin.readPin(carrierLogicPin.REPO_ROOT));
 
 function buildSystemRpc(ctx) {
     return Object.assign({}, systemReads(ctx), capabilityThresholdsRpc(ctx), configsRpc(ctx), healthRpc(ctx));
@@ -268,6 +276,7 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayS
         status:    healthy ? "healthy" : "degraded",
         db:        dbOk,
         dbCircuit: dbCircuit,
+        carrier_logic_digest: CARRIER_LOGIC_DIGEST,
         oracle_last_finalized_age_s:  oracleAgeS,
         oracle_stale:                 oracleStale,
         oracle_staleness_threshold_s: oracleThresholdS,

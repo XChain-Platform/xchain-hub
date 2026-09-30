@@ -25,6 +25,8 @@
 
 'use strict';
 
+const { setSourceLiveness } = require('./hub_metrics_source_liveness');
+
 /**
  * Register the hub's oracle-round heartbeat on an installed registry.
  *
@@ -87,11 +89,44 @@ function registerOracleSeries(registry){
         name: 'xchain_oracle_single_source_rounds_total',
         help: 'Oracle rounds finalized with one uncorrelated price source on a normally-multi-source pair'
     });
-    return { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds };
+    const priceSourceBoundRejects = registry.counter({
+        name: 'xchain_oracle_price_source_bound_rejects_total',
+        help: 'Count of upstream values dropped on the ingest bound per source',
+        labelNames: ['source']
+    });
+    const priceSourceLive = registry.gauge({
+        name: 'xchain_oracle_price_source_live',
+        help: '1 when the source returned at least one usable price on this hub\'s last fetch, 0 when it did not',
+        labelNames: ['source']
+    });
+    const priceSourceFetchAttempts = registry.counter({
+        name: 'xchain_oracle_price_source_fetch_attempts_total',
+        help: 'Cumulative fetch dispatches attempted per upstream price source',
+        labelNames: ['source']
+    });
+    return {
+        lastFinalizedTs,
+        currentRound,
+        skippedStreak,
+        roundTimeouts,
+        singleSourceRounds,
+        priceSourceBoundRejects,
+        priceSourceLive,
+        priceSourceFetchAttempts
+    };
 }
 
 // One scrape of the oracle-round series from live in-memory OracleRound state.
-function collectOracleSeries(hub, { lastFinalizedTs, currentRound, skippedStreak, roundTimeouts, singleSourceRounds }){
+function collectOracleSeries(hub, {
+    lastFinalizedTs,
+    currentRound,
+    skippedStreak,
+    roundTimeouts,
+    singleSourceRounds,
+    priceSourceBoundRejects,
+    priceSourceLive,
+    priceSourceFetchAttempts
+}){
     const oracle = hub.getOracle();
     if(!oracle) return;   // config-only hub: no rounds, so no series rather than a false zero
     // lastSuccessfulRoundTime is stamped by markRoundFinalized on a genuine
@@ -117,6 +152,20 @@ function collectOracleSeries(hub, { lastFinalizedTs, currentRound, skippedStreak
     if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
         singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
     }
+    const boundRejects = oracle.priceFetcher && oracle.priceFetcher['_boundRejects'];
+    if(boundRejects) {
+        for(const [source, count] of Object.entries(boundRejects)) {
+            if(Number.isFinite(count)) priceSourceBoundRejects.setMonotonic({ source }, count);
+        }
+    }
+    const fetchAttempts = oracle.priceFetcher && oracle.priceFetcher['_fetchAttempts'];
+    if(fetchAttempts) {
+        for(const [source, count] of Object.entries(fetchAttempts)) {
+            if(Number.isFinite(count)) priceSourceFetchAttempts.setMonotonic({ source }, count);
+        }
+    }
+    const sourceLiveness = oracle.priceFetcher && oracle.priceFetcher.lastSourceLiveness;
+    setSourceLiveness(priceSourceLive, sourceLiveness);
 }
 
 

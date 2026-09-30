@@ -58,9 +58,9 @@ CREATE TABLE attest_published_batches (
     row_count      INT UNSIGNED    NOT NULL DEFAULT 0,       -- terminal rows the published batch carried; 0 is a legitimate coverage head
     txid           VARCHAR(80)     DEFAULT NULL,             -- DOGE txid of the v5 head (NULL until sent, and may stay NULL if the broadcaster returns none)
     status         VARCHAR(16)     NOT NULL DEFAULT 'intent',-- intent | sent | landed; see the header for what each one licenses
-    intent_at      TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,-- when intent was durably recorded, before the send
-    sent_at        TIMESTAMP       NULL DEFAULT NULL,        -- when the broadcast returned; a NULL here on an `intent` row is the quarantine marker
-    landed_at      TIMESTAMP       NULL DEFAULT NULL,        -- when a batch for this window was seen on chain through pushattestbatch
+    intent_at      DATETIME       DEFAULT CURRENT_TIMESTAMP,-- when intent was durably recorded, before the send
+    sent_at        DATETIME       NULL DEFAULT NULL,        -- when the broadcast returned; a NULL here on an `intent` row is the quarantine marker
+    landed_at      DATETIME       NULL DEFAULT NULL,        -- when a batch for this window was seen on chain through pushattestbatch
     PRIMARY KEY (network, window_start)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 

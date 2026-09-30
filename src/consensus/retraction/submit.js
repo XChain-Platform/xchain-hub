@@ -47,37 +47,133 @@ module.exports = {
         this.pruneIntents();
         this.localIntents.set(retractionClass().intentKey(evt), Date.now());
 
-        if(!QUORUM_CLASS_TABLES.has(String(evt.table))) return this.broadcastUnsigned(evt);
-        if(!this.identity || !this.peerManager || !this.capSnapshot) return this.broadcastUnsigned(evt);
+        if(!QUORUM_CLASS_TABLES.has(String(evt.table)))
+            return broadcastUnsigned(this, evt, 'the table is outside the quorum class');
+        if(!this.identity || !this.peerManager || !this.capSnapshot)
+            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable');
 
-        let snapshotBlock = await this.resolveSnapshotBlock();
-        if(snapshotBlock == null || !gateRegistry.activeAt(RETRACTION_SIGNING_KEY, this.network, null, snapshotBlock, null))
-            return this.broadcastUnsigned(evt);
-
-        let validators = await this.resolveCapabilityValidators('cross_chain', snapshotBlock, this.network);
-        if(!validators.length) return this.broadcastUnsigned(evt);
-
-        let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
-        let canonical = retractionClass().canonicalRetraction(signedEvt);
-        let id        = this.roundId(canonical);
-        if(this.pending.has(id) || this.finalized.has(id)) return;   // duplicate submit (e.g. per-row DEX loop)
-
-        let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
-        let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, this.network);
-        let snapCount = validators.length;
-        let quorum   = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
-
-        if(snapCount <= 1){
-            await this.finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
-            return;
-        }
-
-        openSigningRound(this, { evt, signedEvt, canonical, id, myPubkey, mySig,
-            quorum, weighted, validators });
-        this.checkQuorum(id);
+        return submitQuorumRetraction(this, evt, null);
     }
 };
+
+async function submitQuorumRetraction(self, evt, deferral){
+    let snapshotBlock = await self.resolveSnapshotBlock();
+    if(snapshotBlock == null){
+        deferSigningRound(self, evt, 'snapshot block is unavailable', deferral);
+        return;
+    }
+    if(!gateRegistry.activeAt(RETRACTION_SIGNING_KEY, self.network, null, snapshotBlock, null)){
+        if(deferral)
+            logger.info(retryLabel(deferral) + 'resolved below the signing gate; broadcasting unsigned');
+        clearDeferral(self, evt, deferral);
+        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock);
+    }
+
+    let validators = await self.resolveCapabilityValidators('cross_chain', snapshotBlock, self.network);
+    if(!validators.length){
+        deferSigningRound(self, evt, 'validator set is empty', deferral);
+        return;
+    }
+    clearDeferral(self, evt, deferral);
+
+    let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
+    let canonical = retractionClass().canonicalRetraction(signedEvt);
+    let id        = self.roundId(canonical);
+    if(self.pending.has(id) || self.finalized.has(id)){
+        if(deferral) logger.info(retryLabel(deferral) + 'resolved to an existing signed round');
+        return;
+    }
+
+    let myPubkey = self.identity.getPubkeyHex().toLowerCase();
+    let mySig    = self.identity.sign(canonical);
+    let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, self.network);
+    let snapCount = validators.length;
+    let quorum   = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
+
+    if(snapCount <= 1){
+        if(deferral) logger.info(retryLabel(deferral) + 'resolved; finalizing a single-validator signed round');
+        await self.finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
+        return;
+    }
+
+    openSigningRound(self, { evt, signedEvt, canonical, id, myPubkey, mySig,
+        quorum, weighted, validators });
+    self.checkQuorum(id);
+    if(deferral) logger.info(retryLabel(deferral) + 'resolved; opened signed round ' + id.substring(0, 16) + '...');
+}
+
+function deferSigningRound(self, evt, reason, deferral){
+    if(deferral){
+        deferral.reason = reason;
+        logger.warn(retryLabel(deferral) + 'still deferred because the ' + reason);
+        scheduleDeferredRetry(self, deferral);
+        return;
+    }
+
+    if(!self._retractionSubmitDeferrals) self._retractionSubmitDeferrals = new Map();
+    let key = retractionClass().intentKey(evt);
+    let existing = self._retractionSubmitDeferrals.get(key);
+    if(existing && self.pending.get(existing.id) === existing){
+        existing.evt = evt;
+        return;
+    }
+    if(existing) self._retractionSubmitDeferrals.delete(key);
+
+    let state = {
+        id: 'deferred:' + key,
+        key,
+        evt,
+        reason,
+        attempts: 0,
+        done: true,
+        validators: [],
+        signatures: new Map(),
+        retryTimer: null,
+        timeoutTimer: null
+    };
+    self._retractionSubmitDeferrals.set(key, state);
+    self.pending.set(state.id, state);
+    logger.warn('RetractionConsensus: deferring signed retraction ' + key + ' because the ' + reason);
+    scheduleDeferredRetry(self, state);
+}
+
+function scheduleDeferredRetry(self, state){
+    if(state.retryTimer || self.pending.get(state.id) !== state) return;
+    let base = Number.isFinite(self.retrySignReqMs) && self.retrySignReqMs > 0 ? self.retrySignReqMs : 15000;
+    let ceiling = Number.isFinite(self.roundTimeoutMs) && self.roundTimeoutMs > 0
+        ? Math.max(base, self.roundTimeoutMs) : 180000;
+    let delay = Math.min(ceiling, base * Math.pow(2, Math.min(state.attempts, 16)));
+    state.retryTimer = setTimeout(() => {
+        state.retryTimer = null;
+        if(self.pending.get(state.id) !== state) return;
+        state.attempts++;
+        submitQuorumRetraction(self, state.evt, state).catch(error => {
+            logger.warn(retryLabel(state) + 'failed: ' + (error && error.message));
+            scheduleDeferredRetry(self, state);
+        });
+    }, delay);
+    if(state.retryTimer.unref) state.retryTimer.unref();
+}
+
+function clearDeferral(self, evt, deferral){
+    let state = deferral;
+    if(!state && self._retractionSubmitDeferrals){
+        let key = retractionClass().intentKey(evt);
+        state = self._retractionSubmitDeferrals.get(key);
+    }
+    if(!state) return;
+    if(state.retryTimer){
+        clearTimeout(state.retryTimer);
+        state.retryTimer = null;
+    }
+    if(self.pending.get(state.id) === state) self.pending.delete(state.id);
+    if(self._retractionSubmitDeferrals && self._retractionSubmitDeferrals.get(state.key) === state)
+        self._retractionSubmitDeferrals.delete(state.key);
+}
+
+function retryLabel(state){
+    return 'RetractionConsensus: signed retraction retry ' + state.attempts + ' for ' + state.key + ' ';
+}
 
 // Record the round, arm the re-ask and the timeout that falls back to the legacy
 // unsigned broadcast, and ask the federation to sign. `evt` is the caller's own
@@ -107,12 +203,23 @@ function openSigningRound(self, ctx){
             // Liveness over the signature tier: mirrors past the gate refuse the
             // unsigned event anyway (fail closed there), mirrors below it still
             // converge under the activation fences. Never silently drop a retraction.
-            logger.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
-                pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
-            self.broadcastUnsigned(evt);
+            broadcastUnsigned(self, evt, 'round ' + id.substring(0, 16) + '... timed out at ' +
+                pending.signatures.size + '/' + pending.quorum + ' signatures');
         }
     }, self.roundTimeoutMs);
     if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
 
     self.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
+}
+
+function broadcastUnsigned(self, evt, reason){
+    if(!self.unsignedRetractionWarnings) self.unsignedRetractionWarnings = new Set();
+    const key = retractionClass().intentKey(evt);
+    if(!self.unsignedRetractionWarnings.has(key)){
+        self.unsignedRetractionWarnings.add(key);
+        if(self.unsignedRetractionWarnings.size > 512)
+            self.unsignedRetractionWarnings.delete(self.unsignedRetractionWarnings.values().next().value);
+        logger.warn('RetractionConsensus: broadcasting UNSIGNED retraction ' + key + ' because ' + reason);
+    }
+    return self.broadcastUnsigned(evt);
 }

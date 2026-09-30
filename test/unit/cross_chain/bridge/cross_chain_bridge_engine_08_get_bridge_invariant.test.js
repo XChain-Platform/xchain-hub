@@ -251,11 +251,62 @@ function registerFeature10getBridgeInvariantPart3() {
     expect(inv.XCHAIN.BTC.escrow).to.equal(null);
   });
 }
+// A bridged token's copy is a DIFFERENT tick on every chain but its origin: the child of the
+// origin's coin root, origin + '.' + tick (xchain-indexer bridge_settle/policy.js). The at7_at8
+// rail leg read FUFU's DOGE copy under 'FUFU', found no such tick, and reported its whole copy
+// supply as a permanent surplus; its burn row, keyed 'BTC.FUFU', opened a phantom tick.
+function registerFeature10getBridgeInvariantCopyNames() {
+  it('reads a copy chain under origin.tick, so a balanced token reads delta 0', async function () {
+    const { engine, db } = makeEngine();
+    db.state.pairs = [{ tick: 'FUFU', src_chain: 'BTC', dest_chain: 'DOGE' }];
+    engine._tickOrigin.set('regtest|FUFU', 'BTC');
+    const asked = {};
+    engine.chainStateReader = async (coin, network, ticks) => {
+      asked[coin] = ticks;
+      if (coin === 'BTC') return { FUFU: { supply: '100', escrow: { DOGE: '18' } } };
+      if (coin === 'DOGE') return { FUFU: { supply: '0', escrow: {} }, 'BTC.FUFU': { supply: '18', escrow: {} } };
+      return null;
+    };
+    const inv = await engine.getBridgeInvariant('FUFU');
+    expect(asked.BTC).to.deep.equal(['FUFU']);
+    expect(asked.DOGE).to.deep.equal(['BTC.FUFU']);
+    expect(inv.FUFU.DOGE.escrow).to.equal('18');
+    expect(inv.FUFU.DOGE.supply).to.equal('18');
+    expect(inv.FUFU.DOGE.delta).to.equal('0');
+    expect(inv.FUFU.BTC.supply).to.equal('100');
+  });
+  it('folds a burn keyed by the copy name onto the native tick, with no phantom tick', async function () {
+    const { engine, db } = makeEngine();
+    db.state.pairs = [{ tick: 'FUFU', src_chain: 'BTC', dest_chain: 'DOGE' },
+                      { tick: 'BTC.FUFU', src_chain: 'DOGE', dest_chain: 'BTC' }];
+    db.state.inflight = [{ tick: 'BTC.FUFU', dest_chain: 'BTC', amount: '2' }];
+    engine._pendingInFlight = new Map([['BTC.FUFU|BTC', ['1']]]);
+    engine._tickOrigin.set('regtest|FUFU', 'BTC');
+    engine.chainStateReader = async () => null;
+    const inv = await engine.getBridgeInvariant('FUFU');
+    expect(Object.keys(inv)).to.deep.equal(['FUFU']);
+    expect(Number(inv.FUFU.BTC.in_flight)).to.equal(3);
+    const all = await engine.getBridgeInvariant(null);
+    expect(Object.keys(all).sort()).to.deep.equal(['FUFU', 'XCHAIN']);
+  });
+  it('reads XCHAIN under the same name on every chain', async function () {
+    const { engine } = makeEngine();
+    const asked = {};
+    engine.chainStateReader = async (coin, network, ticks) => {
+      asked[coin] = ticks;
+      return coin === 'BTC' ? { XCHAIN: { supply: '10', escrow: { DOGE: '4' } } } : { XCHAIN: { supply: '4', escrow: {} } };
+    };
+    const inv = await engine.getBridgeInvariant('XCHAIN');
+    expect(asked).to.deep.equal({ BTC: ['XCHAIN'], LTC: ['XCHAIN'], DOGE: ['XCHAIN'] });
+    expect(inv.XCHAIN.DOGE.delta).to.equal('0');
+  });
+}
 function registerFeature10getBridgeInvariant() {
   describe('getBridgeInvariant', function () {
     registerFeature10getBridgeInvariantPart1();
     registerFeature10getBridgeInvariantPart2();
     registerFeature10getBridgeInvariantPart3();
+    registerFeature10getBridgeInvariantCopyNames();
   });
 }
 describe('CrossChainBridgeEngine', function () {

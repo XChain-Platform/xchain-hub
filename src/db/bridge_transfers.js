@@ -168,5 +168,25 @@ module.exports = {
         if(fenced)  params.push(gen);
         return this.doQuery(
             'SELECT transfer_id FROM bridge_transfers WHERE ' + where, params);
+    },
+
+    // Rows the ANCHOR archive still owes a batch to: never archived, or archived at a
+    // status a later retraction has since moved past. The same pending predicate
+    // cross_chain_matches uses.
+    async findBridgeTransfersByBatchSeq(limit) {
+        return this.doQuery(
+            'SELECT * FROM bridge_transfers WHERE batch_seq IS NULL OR archived_status <> status ' +
+            'ORDER BY transfer_id ASC LIMIT ?', [limit]);
+    },
+
+    // Stamps the ANCHOR archive batch a transfer was published in. Guarded on the same
+    // pending predicate the read above uses, so a transfer a later archive round already
+    // covered (or a stamp raced against a status change) is left untouched rather than
+    // overwritten with a stale batch_seq.
+    async updateBridgeTransferArchiveBatchSeq(batchSeq, status, txid, transferId) {
+        return this.doQuery(
+            'UPDATE bridge_transfers SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
+            'WHERE transfer_id = ? AND (batch_seq IS NULL OR archived_status <> status)',
+            [batchSeq, status, txid, transferId]);
     }
 };

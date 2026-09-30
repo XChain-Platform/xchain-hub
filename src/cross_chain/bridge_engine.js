@@ -67,6 +67,7 @@ const validatePart     = require('./bridge/validate.js');
 const persistPart      = require('./bridge/persist.js');
 const invariantPart    = require('./bridge/invariant.js');
 const plumbingPart     = require('./bridge/plumbing.js');
+const { relayMarginFloorS } = require('../lib/relay_margin.js');
 
 // Activation gates. The tables are rows of the activation registry (the SHARED block in
 // src/consensus/gate_registry.js, a byte twin of the indexer's), read by their literal
@@ -87,9 +88,9 @@ const BRIDGE_GATE_KEYS = {
 };
 
 // The predicate shape every bridge part calls through gateActive: (block, network, coin).
-// Only the bridge map is keyed '<COIN>:<network>' today; the registry's own resolution
-// order (coin-keyed entry first, then the bare network) is the one the retired
-// predicates used, and it ignores the coin for a map that has no such key.
+// All three maps are keyed '<COIN>:<network>' with a bare network fallback; the registry
+// resolves the coin-keyed entry first, then the bare network, so the coin a caller passes
+// must be the chain whose height `block` is (BTC for the BTC-anchored snapshot block).
 function loadActivation(key){
     registry.get(key);
     return (block, network, coin) => registry.activeAt(key, network, coin, block, null);
@@ -218,6 +219,8 @@ class CrossChainBridgeEngine extends EventEmitter {
         }
         await this.transferConsensus.start();
         await this.policyConsensus.start();
+        // Before the first poll: a restarted hub must pair every tick it already bridged.
+        await this.seedTickOrigins(this.network);
         this._pollTimer = setInterval(() => {
             this.poll().catch(err => logger.error(nodeUtil.format('CrossChainBridge: poll error:', err && err.message)));
         }, this.pollMs);
@@ -272,6 +275,34 @@ class CrossChainBridgeEngine extends EventEmitter {
         }
         Object.assign(row, ah.admitBlocksToColumns(map));
         return true;
+    }
+
+    // The shared consensus follower gate cannot infer which of this engine's two mirror
+    // tables a proposal belongs to. Require the same exclusive row discriminator as the
+    // canonical builder, then derive the table's measured read set.
+    admissionScope(row){
+        let r = row || {};
+        if(!ah.isAdmissionEra(r.network, r.snapshot_block)) return null;
+        let hasTransfer = !!r.transfer_id;
+        let hasPolicy   = !!r.snapshot_id;
+        if(hasTransfer === hasPolicy)
+            throw new Error('CrossChainBridge: a row must carry exactly one of transfer_id / snapshot_id');
+        let table = hasTransfer ? 'bridge_transfers' : 'policy_snapshots';
+        return {
+            table,
+            readSet: ah.admissionReadSet(table, r, hasPolicy ? ah.ADMIT_COLUMN_CHAINS : undefined)
+        };
+    }
+
+    effectiveTimeMarginS(row){
+        let r = row || {};
+        if(r.transfer_id) return relayMarginFloorS(r.dest_chain);
+        if(!r.snapshot_id) return null;
+        return Promise.resolve(this.policyPairs(r.network)).then(pairs => {
+            let pair = (pairs || []).find(p => String(p.origin_chain) === String(r.origin_chain) &&
+                String(p.tick) === String(r.tick));
+            return pair ? this.policyMarginS(pair.copies, r.origin_chain) : null;
+        });
     }
 
     canonicalMatch(r, view){

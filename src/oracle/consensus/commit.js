@@ -35,6 +35,12 @@ const logger = getLogger();
 const FINALIZE_RETRY_BASE_MS = 1000;
 const FINALIZE_RETRY_MAX_MS  = 30000;
 
+function sortedSignatures(pending) {
+    return [...pending.signatures]
+        .map(([pubkey, sig]) => ({ pubkey, sig }))
+        .sort((a, b) => a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : 0);
+}
+
 // Announce a durably stored round: mark it finalized, drop its in-memory state and emit
 // round:finalized with the signatures the quorum collected.
 function announceCommittedRound(round, pending, attempt) {
@@ -48,12 +54,6 @@ function announceCommittedRound(round, pending, attempt) {
         pending.commits.size + ' commits)' +
         (attempt > 1 ? ' after ' + attempt + ' store attempts' : ''));
 
-    // Convert collected signatures to the [{pubkey, sig}, ...] array format used by OraclePublisher
-    let sigsArray = [];
-    for (let [pubkey, sig] of pending.signatures) {
-        sigsArray.push({ pubkey: pubkey, sig: sig });
-    }
-
     this.emit('round:finalized', {
         round:          round,
         btcBlockHeight: pending.btcBlockHeight,
@@ -66,7 +66,7 @@ function announceCommittedRound(round, pending, attempt) {
         // so a validator the chain attributes but the registry never saw
         // is payable for the round it just helped finalize.
         participants:   [...pending.prepares],
-        signatures:     sigsArray,
+        signatures:     sortedSignatures(pending),
         submissions:    this.oracleRound.getSubmissions(round)
     });
 }
@@ -171,7 +171,7 @@ module.exports = {
         // persisted, mirrored and API-served validator_count above the endorsers that
         // cleared quorum (item 4941).
         let validatorCount = this.countDistinctMembers(pending, pending.prepares);
-        let proof = JSON.stringify([...pending.commits]);
+        let proof = JSON.stringify(sortedSignatures(pending));
 
         const maxAttempts = 3;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {

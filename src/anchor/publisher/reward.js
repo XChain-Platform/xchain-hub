@@ -27,9 +27,51 @@ const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
-const { XANCREWARD } = require('./constants.js');
+const { XANCREWARD, XANCPUB_SIGN_REQ, XANCPUB_SIGN } = require('./constants.js');
+const attestRoundMethods = require('./attest_round.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+function installFoldAttestHooks(){
+    let openRound = attestRoundMethods.openAttestRound;
+    let handleReq = attestRoundMethods.handleAttestSignReq;
+    let handleSign = attestRoundMethods.handleAttestSign;
+    attestRoundMethods.openAttestRound = function(...args){
+        let peerManager = this.peerManager;
+        let broadcast = peerManager && peerManager.broadcast;
+        if(!broadcast || !this._foldArchiveRound) return openRound.apply(this, args);
+        peerManager.broadcast = (type, data) => {
+            if(type === XANCPUB_SIGN_REQ) data.archive = this.foldArchiveRequest(this._foldArchiveRound);
+            return broadcast.call(peerManager, type, data);
+        };
+        try { return openRound.apply(this, args); }
+        finally { peerManager.broadcast = broadcast; }
+    };
+    attestRoundMethods.handleAttestSignReq = async function(envelope){
+        let archiveReply = this.coSignFoldArchiveRequest(envelope).catch(() => null);
+        let peerManager = this.peerManager;
+        let broadcast = peerManager && peerManager.broadcast;
+        let accepted = false;
+        if(broadcast) peerManager.broadcast = (type, data) => {
+            if(type === XANCPUB_SIGN && data && data.sig) accepted = true;
+            return broadcast.call(peerManager, type, data);
+        };
+        try { await handleReq.call(this, envelope); }
+        finally { if(broadcast) peerManager.broadcast = broadcast; }
+        let signed = await archiveReply;
+        if(accepted && signed && peerManager){
+            this.recordObservedArchiveLeader(signed.batchSeq, signed.sender, signed.cp);
+            this.recordObservedArchiveContent(signed.batchSeq, signed.sender, signed.archive);
+            peerManager.broadcast(XANCPUB_SIGN, signed.reply);
+        }
+    };
+    attestRoundMethods.handleAttestSign = async function(envelope){
+        this.acceptFoldArchiveSignature(envelope && envelope.data);
+        await handleSign.call(this, envelope);
+    };
+}
+
+installFoldAttestHooks();
 
 module.exports = {
 
@@ -210,9 +252,9 @@ module.exports = {
         if(!chain || !publisher || !sender) return null;
         if(!/^[0-9a-f]{64}$/.test(txid)) return null;
         if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return null;
-        if(![0, 1].includes(version)) return null;                                // only the attestation-bearing ANCHOR versions carry a reward
+        if(![0, 1, 3].includes(version)) return null;                             // only the attestation-bearing ANCHOR versions carry a reward
         if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return null;
-        // BIND the two: v1 is the archive leg, v0 the checkpoint-bundle leg, which is the
+        // BIND the two: v1 is the archive leg, v0/v3 the checkpoint-bundle leg, which is the
         // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
         // "a v0 can never prove an archive reward and vice versa"). Checked
         // independently, a mis-paired tuple still passes everything downstream: the
@@ -223,6 +265,7 @@ module.exports = {
         // never retracted, and the derive path rejects it forever: consensus-table
         // pollution and a permanently stranded credit. Reject at ingress instead.
         if((rewardType === 'anchor_archive') !== (version === 1)) return null;
+        if(rewardType === 'anchor_bundle' && version !== 0 && version !== 3) return null;
         if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return null;
         if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return null;   // our own broadcast echoing back
             return { network, snapshotBlock, rewardType, chain, publisher, txid, sender, roundRef, version, blockIndex, cpSeq };

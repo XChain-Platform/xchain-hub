@@ -137,7 +137,7 @@ function registerNonMemberFollowerCase() {
         let selects = 0;
         let origQuery = follower.pub.db.doQuery.bind(follower.pub.db);
         follower.pub.db.doQuery = (sql, params) => {
-            if (/state_checkpoints/i.test(String(sql))) selects++;
+            if (/state_checkpoints/i.test(String(sql)) && !/AS next_seq/.test(String(sql))) selects++;
             return origQuery(sql, params);
         };
 

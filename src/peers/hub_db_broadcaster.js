@@ -37,6 +37,7 @@ const { getLogger } = require('../observability');
 const logger = getLogger();
 const { AdmissionHeightWatermark, ADMISSION_WATERMARK_TABLES } = require('./hub_db/admission_height_watermark.js');
 const HubDbAdmissionSampling = require('./hub_db/admission_sampling.js');
+const HubDbDeletionReplay = require('./hub_db/deletion_replay.js');
 const HubDbSubscribers = require('./hub_db/subscribers.js');
 
 // The cadence half of the constructor: how late a watermark tick may be, and
@@ -267,7 +268,6 @@ class HubDbBroadcaster {
     // fence their mirrored delete to rows with push_generation <= it, so a re-published row at a
     // recycled action_index survives. Absent => no fence (older hub/indexer == prior behavior).
     broadcastDeletion(event) {
-        if (this.subscribers.size === 0) return;
         let message;
         try {
             let payload = {
@@ -295,6 +295,8 @@ class HubDbBroadcaster {
             logger.error(nodeUtil.format('HubDbBroadcaster: serialization error:', e));
             return;
         }
+        this.recordDeletionForReplay(event, message);
+        if (this.subscribers.size === 0) return;
         for (let ws of this.subscribers) {
             this.send(ws, message);
         }
@@ -330,7 +332,7 @@ class HubDbBroadcaster {
 // Installed from the part files rather than written in the class body above:
 // each part holds one behaviour of this class, and its members land here with
 // the descriptors a class body would give them.
-for (const Part of [HubDbAdmissionSampling, HubDbSubscribers]) {
+for (const Part of [HubDbAdmissionSampling, HubDbDeletionReplay, HubDbSubscribers]) {
     for (const [from, to] of [[Part.prototype, HubDbBroadcaster.prototype], [Part, HubDbBroadcaster]]) {
         for (const key of Object.getOwnPropertyNames(from)) {
             if (key === 'constructor' || key === 'length' || key === 'name' || key === 'prototype') continue;

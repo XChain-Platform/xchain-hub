@@ -54,6 +54,17 @@ module.exports = {
         return Number.isFinite(n) ? n : 0;
     },
 
+    // Every (origin_chain, tick) this hub has FINALIZED a policy snapshot for on `network`.
+    // The bridge engine seeds its tick-origin map from it at start, because a snapshot row
+    // is the one durable place a tick's origin is recorded (bridge_transfers carries the
+    // chains but never the direction, D19).
+    async getPolicyTickOrigins(network){
+        let rows = await this.doQuery(
+            "SELECT DISTINCT origin_chain, tick FROM policy_snapshots WHERE network = ? AND status = 'finalized'",
+            [String(network || '')]);
+        return rows || [];
+    },
+
     // The finalized snapshot a follower would be equivocating against: our own row at
     // the same (network, origin_chain, tick, policy_seq), or null when we hold none.
     async getPolicySnapshotAtSeq(network, originChain, tick, policySeq){
@@ -75,5 +86,23 @@ module.exports = {
     // or bridge_transfers through one statement built from the table name.
     async getPolicySnapshotBySnapshotId(snapshotId) {
         return this.doQuery('SELECT * FROM policy_snapshots WHERE snapshot_id = ? LIMIT 1', [snapshotId]);
+    },
+
+    // Rows the ANCHOR archive still owes a batch to. Append-only, so there is no
+    // archived_status to re-check: a snapshot the archive already covered never
+    // changes, and a superseding policy arrives as a NEW row at a higher policy_seq.
+    async findPolicySnapshotsByBatchSeq(limit) {
+        return this.doQuery(
+            'SELECT * FROM policy_snapshots WHERE batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?', [limit]);
+    },
+
+    // Stamps the ANCHOR archive batch a snapshot was published in. Guarded on
+    // batch_seq IS NULL, since the append-only table gives an archived row nothing to
+    // re-check a later mutation against.
+    async updatePolicySnapshotArchiveBatchSeq(batchSeq, txid, snapshotId) {
+        return this.doQuery(
+            'UPDATE policy_snapshots SET batch_seq = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
+            'WHERE snapshot_id = ? AND batch_seq IS NULL',
+            [batchSeq, txid, snapshotId]);
     }
 };

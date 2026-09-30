@@ -31,6 +31,7 @@ const XChainHub = require('../../../src/XChainHub.js');
 const { buildSystemRpc } = require('../../../src/api/rpc/system.js');
 const { ADMISSION_PROBE_TTL_MS, makeAdmissionTipProbe, raceTimeout } = require('../../../src/api/rpc/health_probes.js');
 const { ADMIT_COLUMN_CHAINS } = require('../../../src/consensus/gates/mirror_admission_gate.js');
+const carrierLogicPin = require('../../../bin/lib/carrier_logic_pin.js');
 
 let server = null;
 let url = '';
@@ -184,8 +185,20 @@ function timerSuite() {
     });
 }
 
+function identitySuite() {
+    it('carries the carrier_logic_digest computed from the shipped pins', async function () {
+        const hub = indexerBackedHub();
+        hub.resolveAdmissionTips = async () => ({ BTC: 1, LTC: 2, DOGE: 3 });
+        const rpc = healthRpcFor(hub);
+        const body = await rpc.health({}, { res: RES });
+        const expected = carrierLogicPin.digest(carrierLogicPin.readPin(carrierLogicPin.REPO_ROOT));
+        expect(body.carrier_logic_digest).to.equal(expected);
+    });
+}
+
 describe('hub health probes', function () {
     this.timeout(10000);
     describe('admission-tip single flight', singleFlightSuite);
     describe('deadlines', timerSuite);
+    describe('consensus identity', identitySuite);
 });

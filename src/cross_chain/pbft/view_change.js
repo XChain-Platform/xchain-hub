@@ -22,8 +22,15 @@
 
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
+const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+function applyEffectiveTimeMargin(pending, currentSecond, margin){
+    let seconds = Number(margin);
+    if(Number.isFinite(seconds) && seconds > 0)
+        pending.row.effective_time = currentSecond + seconds;
+}
 
 module.exports = {
     initiateViewChange(rid){
@@ -72,6 +79,21 @@ module.exports = {
 
     // On 2f+1 view-change votes for `view`, the rotated leader announces NEW_VIEW
     // and re-proposes so the round can make progress under a fresh leader.
+    restampEffectiveTime(pending){
+        let effectiveTime = Number(pending.row && pending.row.effective_time);
+        if(!Number.isFinite(effectiveTime)) return;
+        let currentSecond = typeof this.engine.nowSeconds === 'function'
+            ? this.engine.nowSeconds() : Math.floor(new Date().getTime() / 1000);
+        if(effectiveTime - currentSecond >= RELAY_MIN_FUTURE_S) return;
+        if(typeof this.engine.effectiveTimeMarginS !== 'function') return;
+        let margin;
+        try { margin = this.engine.effectiveTimeMarginS(pending.row); }
+        catch(_){ return; }
+        if(margin && typeof margin.then === 'function')
+            return margin.then(value => applyEffectiveTimeMargin(pending, currentSecond, value)).catch(() => {});
+        applyEffectiveTimeMargin(pending, currentSecond, margin);
+    },
+
     maybeAssumeLeadership(rid, view){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
@@ -80,27 +102,37 @@ module.exports = {
         if(view > pending.view) pending.view = view;
         let newLeader = this.leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
-            // Rebuild the round canonical for the NEW view before signing (H-8):
-            // once the EQUIV header is active the view is folded into the
-            // canonical, so re-signing the view-0 bytes under a new-view PROPOSE
-            // fails every follower's verification (they recompute at d.view) and
-            // failover can never make progress. Votes collected so far covered
-            // the OLD canonical, so they are dropped with it; below the EQUIV
-            // flag-day the rebuild is byte-identical and this is a no-op that
-            // preserves collected votes.
-            let canonical = this.engine.canonicalMatch(pending.row, pending.view);
-            if(canonical !== pending.canonical){
-                pending.canonical = canonical;
-                pending.signatures.clear();
-                pending.prepares.clear();
-                pending.commits.clear();
-                pending._commitSent = false;
-            }
-            if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
-                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.nv, rid, view)
+            let restamp = this.restampEffectiveTime(pending);
+            if(restamp && typeof restamp.then === 'function') return restamp.then(() => {
+                if(pending.finalized || this.pending.get(rid) !== pending || pending.view !== view) return;
+                this.reproposeAsLeader(pending, view);
             });
-            this.broadcastPropose(pending).catch(e => logger.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
+            this.reproposeAsLeader(pending, view);
         }
+    },
+
+    reproposeAsLeader(pending, view){
+        // Rebuild the round canonical for the NEW view before signing (H-8):
+        // once the EQUIV header is active the view is folded into the
+        // canonical, so re-signing the view-0 bytes under a new-view PROPOSE
+        // fails every follower's verification (they recompute at d.view) and
+        // failover can never make progress. Votes collected so far covered
+        // the OLD canonical, so they are dropped with it; below the EQUIV
+        // flag-day the rebuild is byte-identical and this is a no-op that
+        // preserves collected votes.
+        let rid = pending.matchId;
+        let canonical = this.engine.canonicalMatch(pending.row, pending.view);
+        if(canonical !== pending.canonical){
+            pending.canonical = canonical;
+            pending.signatures.clear();
+            pending.prepares.clear();
+            pending.commits.clear();
+            pending._commitSent = false;
+        }
+        if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
+            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this.signControl(this.controlTags.nv, rid, view)
+        });
+        this.broadcastPropose(pending).catch(e => logger.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
     },
 
     // FINAL_SYNC (straggler catch-up): a peer answered our VIEW_CHANGE for a

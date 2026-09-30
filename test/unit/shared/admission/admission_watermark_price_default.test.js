@@ -21,7 +21,7 @@ const WATERMARK_PATH = '../../../../src/peers/hub_db/admission_height_watermark.
 const { AdmissionHeightWatermark } = require(WATERMARK_PATH);
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../../../src/constants.js');
 
-const ENV_KEYS = ['ORACLE_ROUND_INTERVAL', 'ADMISSION_ORACLE_INGEST_WINDOW_MS'];
+const ENV_KEYS = ['ORACLE_ROUND_INTERVAL', 'ADMISSION_ORACLE_INGEST_WINDOW_MS', 'HUB_NETWORK'];
 
 // Build with the oracle knobs absent from the environment, so config alone decides.
 function withCleanEnv(fn) {
@@ -41,6 +41,23 @@ describe('admission height watermark: the price rail window default', function (
     it('falls back to the shared oracle round default when ORACLE_ROUND_INTERVAL is unset', function () {
         let w = withCleanEnv(() => new AdmissionHeightWatermark({}));
         expect(w.roundTerminalMs('price_snapshots')).to.equal(DEFAULT_ORACLE_ROUND_INTERVAL_MS);
+    });
+
+    it('uses a short oracle ingest default only on regtest', function () {
+        const mainnet = withCleanEnv(() => new AdmissionHeightWatermark({ HUB_NETWORK: 'mainnet' }));
+        const testnet = withCleanEnv(() => new AdmissionHeightWatermark({ HUB_NETWORK: 'testnet' }));
+        const regtest = withCleanEnv(() => new AdmissionHeightWatermark({ HUB_NETWORK: 'regtest' }));
+        expect(mainnet.roundTerminalMs('oracle_prices')).to.equal(600000);
+        expect(testnet.roundTerminalMs('oracle_prices')).to.equal(600000);
+        expect(regtest.roundTerminalMs('oracle_prices')).to.equal(10000);
+    });
+
+    it('lets the existing ingest window override the regtest default', function () {
+        const w = withCleanEnv(() => {
+            process.env.ADMISSION_ORACLE_INGEST_WINDOW_MS = '23000';
+            return new AdmissionHeightWatermark({ HUB_NETWORK: 'regtest' });
+        });
+        expect(w.roundTerminalMs('oracle_prices')).to.equal(23000);
     });
 
     it('follows a retuned shared default rather than a local copy of it', function () {

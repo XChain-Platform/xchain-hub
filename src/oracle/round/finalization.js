@@ -25,6 +25,22 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// True when the consensus engine reports a peer quorum, the same federation test
+// the follower uses before refusing a PROPOSE with no real BTC height.
+function isFederated(consensus) {
+    return typeof consensus.getQuorum === 'function' && consensus.getQuorum() > 0;
+}
+
+// Store the round's durable skipped row instead of finalizing it; a rejected
+// write still leaves a round_lost record rather than only a prose error line.
+function storeAnchorSkip(consensus, round, btcBlockHeight, btcBlockTime, reason) {
+    consensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason).catch(err => {
+        logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
+        noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
+            err: err && err.message ? err.message : String(err) });
+    });
+}
+
 module.exports = {
 
     // Schedule finalization for a round after the submission window
@@ -32,6 +48,9 @@ module.exports = {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
         let btcBlockTime   = this.currentBtcBlockTime;
+        // Remember whether that height is the round-number stand-in rather than a
+        // real BTC tip; the flag and the stand-in height are always set together.
+        let anchorIsRoundNumber = !!this.chainTipFallbackActive;
         let prior = this.finalizationTimers.get(round);
         if (prior) clearTimeout(prior);
         // Every exit below that is neither a finalizeRound call nor a skipped row
@@ -52,14 +71,21 @@ module.exports = {
                         // durable, which is what advances the streak (item 4942); a
                         // local increment here would double-count a round whose fetch
                         // had already failed.
-                        this.oracleConsensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
-                            'chain-tip fallback active, anchor unreliable').catch(err => {
-                            logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
-                            noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
-                                err: err && err.message ? err.message : String(err) });
-                        });
+                        storeAnchorSkip(this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
+                            'chain-tip fallback active, anchor unreliable');
                         return;
                     }
+                }
+                // Skip a round-number anchor on a federated hub, even inside the first interval:
+                // followers drop a PROPOSE pinned at a non-BTC height, so locking a snapshot there
+                // only wastes the round. Single-node and regtest (quorum 0) keep the fallback.
+                if (anchorIsRoundNumber && isFederated(this.oracleConsensus)) {
+                    logger.warn('Oracle: Skipping finalization for round ' + round +
+                        '; btcBlockHeight is the round-number fallback, not a BTC block, ' +
+                        'and followers refuse a PROPOSE anchored there');
+                    storeAnchorSkip(this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
+                        'round-number anchor on a federated hub');
+                    return;
                 }
                 this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
                     logger.error(nodeUtil.format('Oracle: Finalization error for round ' + round + ':', err.message));

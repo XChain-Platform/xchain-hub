@@ -16,7 +16,7 @@ CREATE TABLE attestation_validator_stats (
     request_id       VARCHAR(128) NOT NULL,
     block_index      BIGINT NOT NULL DEFAULT 0,
     passed           TINYINT(1) NOT NULL,
-    checked_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    checked_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_check (validator_pubkey, request_id),
     KEY idx_validator_pass (validator_pubkey, passed),
     KEY idx_block (block_index)

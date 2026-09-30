@@ -12,11 +12,19 @@
 
 const { expect }       = require('chai');
 const { execFileSync } = require('child_process');
+const fs               = require('fs');
 const path             = require('path');
 
 const testDb           = require('../helpers/testDb');
 
 const API_ENTRY = path.resolve(__dirname, '../../src/api.js');
+const SQL_DIR   = path.resolve(__dirname, '../../src/sql');
+
+function schemaTableCount() {
+    return fs.readdirSync(SQL_DIR)
+        .filter(name => name.endsWith('.sql'))
+        .length;
+}
 
 // ── Test Suite ───────────────────────────────────────────────────
 
@@ -26,7 +34,7 @@ function environmentValidationSuite() {
 
         // Build a complete valid env set (values don't matter; the process exits before connecting)
         // All values must be truthy: api.js checks !process.env[key] which treats '' as missing
-        let validEnv = {
+        const validEnv = {
             HUB_DB_HOST: '127.0.0.1',
             HUB_DB_PORT: '3306',
             HUB_DB_NAME: 'smoke_test_dummy',
@@ -37,9 +45,9 @@ function environmentValidationSuite() {
             HOME:        process.env.HOME
         };
 
-        for (let envVar of REQUIRED) {
+        for (const envVar of REQUIRED) {
             it('exits with error when ' + envVar + ' is missing', function () {
-                let env = Object.assign({}, validEnv);
+                const env = Object.assign({}, validEnv);
                 delete env[envVar];
 
                 let threw = false;
@@ -91,19 +99,19 @@ function databaseInitSuite() {
             await testDb.teardown();
         });
 
-        it('creates and verifies all 13 tables', async function () {
+        it('creates and verifies every table declared in src/sql', async function () {
             if (!testDb.isAvailable()) return this.skip();
-            let db = testDb.getDb();
-            let rows = await db.doQuery(
+            const db = testDb.getDb();
+            const rows = await db.doQuery(
                 'SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema = ?',
                 [process.env.TEST_DB_NAME || 'xchain_hub_test']
             );
-            expect(rows).to.have.lengthOf(13);
+            expect(rows).to.have.lengthOf(schemaTableCount());
         });
 
         it('circuit breaker is in closed state after init (SMOKE-HUB-009)', function () {
             if (!testDb.isAvailable()) return this.skip();
-            let db = testDb.getDb();
+            const db = testDb.getDb();
             expect(db.circuitState).to.equal('closed');
             expect(db.circuitFailures).to.equal(0);
         });

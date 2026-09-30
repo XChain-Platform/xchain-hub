@@ -71,8 +71,9 @@ module.exports = {
     // OPEN ROUND's pinned map for this rid, which is what every in-round signing site
     // wants and why none of them had to grow an eighth argument; a verifier rebuilding
     // the canonical from a stored row has no round and passes the row's own map
-    // explicitly. Its era gate is inside admissionCanonicalField and refuses in both
-    // directions exactly as the effective_time gate above does.
+    // explicitly. Unlike the effective_time gate above, the admission era gate never
+    // throws: an admission-era request with no map, or a legacy one handed a map, gets
+    // the legacy bytes, and a signature made over other bytes then fails to verify.
     buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime, admitBlocks){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
         let et = (effectiveTime === undefined) ? null : effectiveTime;
@@ -124,9 +125,9 @@ module.exports = {
     },
 
     // The admission map pinned on this rid's OPEN round, or null when no round is open
-    // for it. Null is the LEGACY value, which is correct at every height below the
-    // activation and fails closed above it: admissionCanonicalField refuses to build
-    // admission-era bytes without a map rather than inventing one.
+    // for it. Null is the LEGACY value, correct below the activation. Above it the only
+    // refusal is propose(), which will not open a round without a map; any other null
+    // (an evicted round) silently builds legacy bytes no admission-era signature covers.
     roundAdmitBlocks(requestId){
         let p = this.pending && this.pending.get(String(requestId).toLowerCase());
         return (p && p.admitBlocks !== undefined) ? p.admitBlocks : null;

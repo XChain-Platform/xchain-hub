@@ -116,6 +116,10 @@ module.exports = {
     // Returns { status, rows }: 'written', 'empty' (read fine, nobody qualified),
     // 'unresolved' (the Bitcoin view failed), 'truncated' or 'error'.
     async persistDerivedCapabilitySnapshot(capability, block) {
+        if (!this.hub || !this.hub.network) {
+            return { status: 'unresolved', rows: 0,
+                detail: 'HUB_NETWORK is unset; capability snapshot derivation refused' };
+        }
         let validators = await this.resolveDerivedCapabilityValidators(capability, block);
         if (validators === null) return { status: 'unresolved', rows: 0, detail: 'Bitcoin view unreachable or degraded' };
         // SWQ-TRUNC-MIRROR, held exactly as OracleConsensus states it: never mirror a
