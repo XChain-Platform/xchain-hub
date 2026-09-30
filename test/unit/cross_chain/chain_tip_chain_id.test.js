@@ -239,6 +239,40 @@ it('stores a valid chain_id with the tip', async function () {
     });
 }
 
+function registerSnapshotTableTests(getEnv) {
+    for (const table of CROSS_CHAIN_TABLES) {
+        it(table + ': the envelope carries btc_chain_id', async function () {
+            const { routes, db } = getEnv();
+            const res = fakeRes();
+            await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
+            const env = res.parsed();
+            expect(env.table).to.equal(table);
+            expect(env.btc_chain_id).to.equal(LOCAL_ID);
+            // The identity is read for BITCOIN on the hub's own network: a DOGE mirror
+            // must be told the BTC chain the rows are anchored to, not its own.
+            expect(db.lastTipArgs).to.deep.equal(['bitcoin', 'regtest']);
+        });
+
+        it(table + ': btc_chain_id is null when no indexer has reported one', async function () {
+            const { routes, db } = getEnv();
+            db.chainTip = null;
+            const res = fakeRes();
+            await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
+            expect(res.parsed().btc_chain_id).to.equal(null);
+        });
+
+        it(table + ': an unreadable identity serves null, never a 500', async function () {
+            const { routes, db } = getEnv();
+            db.chainTipThrows = true;
+            const res = fakeRes();
+            await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
+            expect(res.statusCode).to.equal(200);
+            expect(res.parsed().btc_chain_id).to.equal(null);
+            expect(res.parsed().rows).to.have.lengthOf(1);
+        });
+    }
+}
+
 function registerSnapshotEnvelopeSuite() {
 describe('snapshot envelopes advertise the hub chain identity', function () {
         let routes, db;
@@ -258,34 +292,7 @@ describe('snapshot envelopes advertise the hub chain identity', function () {
             db.chainTipThrows = false;
             db.seenSql.length = 0;
         });
-        for (const table of CROSS_CHAIN_TABLES) {
-            it(table + ': the envelope carries btc_chain_id', async function () {
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                const env = res.parsed();
-                expect(env.table).to.equal(table);
-                expect(env.btc_chain_id).to.equal(LOCAL_ID);
-                // The identity is read for BITCOIN on the hub's own network: a DOGE mirror
-                // must be told the BTC chain the rows are anchored to, not its own.
-                expect(db.lastTipArgs).to.deep.equal(['bitcoin', 'regtest']);
-            });
-
-            it(table + ': btc_chain_id is null when no indexer has reported one', async function () {
-                db.chainTip = null;
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                expect(res.parsed().btc_chain_id).to.equal(null);
-            });
-
-            it(table + ': an unreadable identity serves null, never a 500', async function () {
-                db.chainTipThrows = true;
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                expect(res.statusCode).to.equal(200);
-                expect(res.parsed().btc_chain_id).to.equal(null);
-                expect(res.parsed().rows).to.have.lengthOf(1);
-            });
-        }
+        registerSnapshotTableTests(() => ({ routes, db }));
 
         // cross_chain_calls is the one route with an explicit column list; a column left
         // out there is silently dropped for every bootstrapped row while the streamed
