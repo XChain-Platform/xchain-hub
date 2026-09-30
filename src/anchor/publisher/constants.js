@@ -67,7 +67,7 @@ const XANCREWARD = 'XANCREWARD';
 // loudly. Local copy so the hub can measure without a sibling checkout.
 const MAX_ACTION_DATA_LENGTH = 8192;
 // The encoder compiles the raw payload text into a push whose prefix costs 3 bytes
-// (xchain-encoder/src/validator.js), so compiled size IS raw text + 3.
+// (xchain-encoder/src/common/validator/constants.js), so compiled size IS raw text + 3.
 const OP_RETURN_PUSH_OVERHEAD = 3;
 // The byte budget a v0 bundle's raw text must stay within (D10). Overflow is SPLIT
 // chain-ascending, never dropped; a single section that cannot fit with the attestation

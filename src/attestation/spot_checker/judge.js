@@ -35,11 +35,12 @@ const REJUDGE_MAX_ATTEMPTS       = 5;
 // Which inconclusive reasons can change on a later attempt. Only a reason whose
 // cause is the JUDGE being unavailable is retried: the provider is paused
 // (llm.js markInconclusive 'provider_paused'), its endpoint is unreachable, or
-// its rolling spend window is spent ('budget_exhausted', heals when the window rolls).
+// its rolling spend window is spent ('budget_exhausted', heals when the window rolls),
+// or agree()'s wall-clock budget ran out before any judge answered ('judge_timeout').
 // Every other reason is a property of the round's own bytes (meta_unrecognized,
 // meta_uncorroborated, no_proposals, unparseable, empty_verdict, truncated_pick)
 // so re-asking returns the same neutral verdict; those keep today's drop.
-const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable', 'budget_exhausted'];
+const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable', 'budget_exhausted', 'judge_timeout'];
 
 module.exports = {
 
@@ -148,7 +149,7 @@ module.exports = {
     // spot-check has been dealt with here and must not be scored.
     heldForReJudge(rid, verdict, outcome, deferRecord){
         if (!verdict && outcome.inconclusive && TRANSIENT_INCONCLUSIVE.indexOf(String(outcome.reason)) >= 0) {
-            // The judge was unavailable (paused provider, unreachable endpoint), which
+            // The judge was unavailable (paused, unreachable, spent window, timed out), which
             // says nothing about the round. Dropping it here lost the check for good:
             // llm.js pauses deliberately, and no later consensus event re-judges a
             // finalized request. Hold it and let the sweep score it once the judge is

@@ -23,7 +23,7 @@ CREATE TABLE bridge_transfers (
     src_address          VARCHAR(255) NOT NULL,                    -- the locking/burning source address
     dest_chain           VARCHAR(10)  NOT NULL,                    -- chain the credit lands on
     dest_address         VARCHAR(255) NOT NULL,                    -- address credited by the XBRIDGE v2/v5 settle leg
-    tick                 VARCHAR(250) NOT NULL,                    -- the asset's NATIVE tick (never the rooted <ORIGIN>.<NAME> form); XCHAIN for every base-spec row. Signed from the first row (base D66) because the mirror drops unknown columns silently, so a general-token extension could never add it later
+    tick                 VARCHAR(250) NOT NULL,                    -- the action's tick: the bare native tick on a lock (XCHAIN for every base-spec row), the dest-rooted <ORIGIN>.<NAME> on a v4 burn (the destination reads the direction from it). Signed from the first row (base D66) because the mirror drops unknown columns silently, so a general-token extension could never add it later
     decimals             TINYINT UNSIGNED NOT NULL,                -- the token's DECIMALS (8 for XCHAIN); signed for the same reason as `tick`, and the precision `amount` is formatted at
     amount               VARCHAR(250) NOT NULL,                    -- decimal string at `decimals` fractional digits; VARCHAR because amounts are bignumber math, never a DB numeric (the a_amount/b_amount precedent)
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- protocol-time instant every indexer applies at: now + relayMarginFloorS(dest_chain); a follower refuses to co-sign a row less than 60 s or more than 3600 s ahead of its own clock

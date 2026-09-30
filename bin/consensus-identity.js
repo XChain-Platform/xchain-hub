@@ -54,10 +54,10 @@
  * network would average over three chains and hide a single moved chain; the
  * pair map cannot.
  *
- * WHY NO LEDGER READ. The indexer's copy of this tool takes a fifth reading
- * from its blocks table. The hub has no chain of its own to read: it is the
- * config oracle, so its identity is entirely code-derived and this script opens
- * no socket, reads no .env and needs no database.
+ * WHY NO LEDGER READ. The indexer's copy of this tool also reads the tip
+ * state_hash from its blocks table. The hub has no chain of its own to read: it
+ * is the config oracle, so its identity is entirely code-derived and this
+ * script opens no socket, reads no .env and needs no database.
  *
  * ONE OF THE FIVE IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
  * hashes gate VALUES, and a regtest venue arms some gates from its own

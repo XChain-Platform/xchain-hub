@@ -169,8 +169,8 @@ class CapabilitySnapshot {
             this.prune(now);
             return snapshot;
         } catch (err) {
-            // Indexer unreachable / down (or 401/403 auth mismatch): caller falls
-            // back to local validator set; onFetchError surfaces an auth misconfig.
+            // Return null on indexer down or 401/403 (onFetchError surfaces an auth misconfig):
+            // federated round callers fail closed on it; only single-node / regtest hubs use the live set.
             return this.onFetchError('getcapabilityvalidators', err);
         }
     }

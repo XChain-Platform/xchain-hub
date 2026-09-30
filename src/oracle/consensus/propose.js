@@ -128,7 +128,8 @@ module.exports = {
     // Propose a round (used both by the real leader and the fallback proposer).
     // snapshot + quorum are captured in finalizeRound() at the block boundary
     // and threaded through so the entire round uses the same locked validator
-    // set. Without the snapshot, falls back to live getQuorum() per legacy.
+    // set. A null snapshot does not reach here: finalizeOnSnapshot skips the round on a
+    // federated hub and finalizes solo when live getQuorum() is 0.
     //
     // Async only for the admission era: the leader pins the round's admission map from
     // this hub's own tips before it signs, and that read is the ONE await in here. Below
@@ -139,6 +140,8 @@ module.exports = {
     async proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys) {
         let aggregated = this.aggregateAll(submissions);
         if (aggregated.length === 0) {
+            logger.warn('Oracle: Round ' + round + ' aggregation yielded no prices from ' + (submissions ? submissions.size : 0) +
+                ' submission(s); every pair was dropped or none was submitted; skipping');
             this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
                 logger.error(nodeUtil.format('Oracle: Error storing skipped round ' + round + ':', err.message)));
             return;

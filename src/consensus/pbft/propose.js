@@ -135,9 +135,9 @@ module.exports = {
         // every hub in the federation computes the same quorum for this
         // config-change round. Whole-federation snapshot (not capability-
         // scoped) because config changes affect every staker equally.
-        // Falls back to live getQuorum() when the indexer or BTC tip
-        // can't be resolved (graceful degradation; same behavior as before
-        // the snapshot wiring landed).
+        // With no deterministic snapshot, proposeRoundQuorum refuses on a
+        // federated hub; only a non-federated hub falls back to live getQuorum()
+        // and the single-node apply path.
         let { snapshot, weighted, requestedBlockIndex } = await this.lockSnapshot();
         let round = proposeRoundQuorum(this, snapshot, weighted);
         if (round.applyDirect) {

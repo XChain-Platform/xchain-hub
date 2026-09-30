@@ -46,7 +46,7 @@ let realWarn;
 
 function registerForwardingLimitTests() {
     it('pins the cap to the encoder validator MAX_UTXO_COUNT', function () {
-        // Duplicated from xchain-encoder/src/validator.js by design (the encoder is a
+        // Duplicated from xchain-encoder/src/common/validator/constants.js by design (the encoder is a
         // separate service over JSON-RPC). A silent drift here re-opens the -32602 loop.
         assert.strictEqual(ENCODER_MAX_UTXO_COUNT, 500);
     });

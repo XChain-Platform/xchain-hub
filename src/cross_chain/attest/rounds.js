@@ -203,8 +203,9 @@ module.exports = {
         if (!this.pendingAttestations.has(attestationId)) {
             // Lock quorum from the same block-boundary cross_chain snapshot the
             // leader used (btcBlockHeight carried in the envelope) so every hub
-            // freezes the same N for this round. Falls back to the live set when
-            // the indexer is unreachable or the envelope predates this field.
+            // freezes the same N for this round. With no snapshot (indexer down or no
+            // btcBlockHeight), resolveQuorum throws on a federated hub and the catch drops
+            // the PROPOSE; only single-node / regtest hubs fall back to the live set.
             let quorum;
             try {
                 quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);

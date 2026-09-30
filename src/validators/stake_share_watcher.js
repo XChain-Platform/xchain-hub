@@ -23,7 +23,9 @@
  * DOGE and LTC coin modules declare no capabilities) and the gate reads no
  * other chain's stake. A DOGE or LTC row could never predict a halt.
  *
- * It reads through the gate's OWN code: CapabilitySnapshot.getWeightSnapshot,
+ * It reads through the gate's OWN code: hub.resolveBtcLatestBlock for the tip
+ * (pushed-tip preference, lag and frozen-height refusals) and
+ * CapabilitySnapshot.getWeightSnapshot / getActiveWeightSnapshot for the set,
  * so the coin-verified indexer URL, the buried height, the MIN_STAKE fallback
  * and refusal, the row checks and the echo guards are the gate's, not a copy.
  * A monitor that computed the share its own way could report a comfortable
@@ -40,7 +42,6 @@
 
 'use strict';
 
-const axios = require('axios');
 const coins = require('../coins');
 const hubConfig = require('../config');
 const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('./stake_share_monitor.js');
@@ -52,11 +53,16 @@ const logger = getLogger();
 // The one chain whose capability stake any gate reads.
 const GATE_CHAIN = 'BTC';
 
-// Capabilities whose weighted gate can halt a user-visible rail: `price` rounds (a prior
-// halt), the `oracle_publish` election that puts a finalized PRICE on chain (a healthy price
-// share can still fail to publish), `attestation` rounds and `cross_chain` settlement, all
-// under the same two-thirds predicate. Kept equal to DERIVED_CAPABILITIES by test.
-const DEFAULT_CAPABILITIES = ['price', 'oracle_publish', 'attestation', 'cross_chain'];
+// Key for the whole-federation set (every staker, no capability filter) that
+// config-change consensus locks; it matches the `capability` the snapshot carries.
+const WHOLE_FEDERATION = '*';
+
+// Stake sets whose weighted gate can halt a rail: `price` rounds (a prior halt), the
+// `oracle_publish` election that puts a finalized PRICE on chain (a healthy price share can
+// still fail to publish), `attestation` rounds, `cross_chain` settlement, and the
+// whole-federation set config-change consensus tallies, all under the same two-thirds
+// predicate. Kept equal to DERIVED_CAPABILITIES plus WHOLE_FEDERATION by test.
+const DEFAULT_CAPABILITIES = ['price', 'oracle_publish', 'attestation', 'cross_chain', WHOLE_FEDERATION];
 
 // Five minutes. Stake moves at block cadence and the alert is a forecast with
 // hours of lead time, so a tighter loop only adds indexer load; ten polls still
@@ -71,10 +77,10 @@ function envList(value) {
 class StakeShareWatcher {
 
     /**
-     * @param {object} hub   XChainHub (needs resolveBtcIndexerUrl and btcIndexerHeaders;
-     *                       capabilityRegistry, stakeWeightFeed and capabilitySnapshot are
-     *                       read the way the gate reads them).
-     * @param {object} [opts] test seams: env, now, log, axios, monitor, pollMs,
+     * @param {object} hub   XChainHub (needs resolveBtcIndexerUrl, resolveBtcLatestBlock and
+     *                       btcIndexerHeaders; capabilityRegistry, stakeWeightFeed and
+     *                       capabilitySnapshot are read the way the gate reads them).
+     * @param {object} [opts] test seams: env, now, log, monitor, pollMs,
      *                       CapabilitySnapshot (the reader class).
      */
     constructor(hub, opts) {
@@ -82,7 +88,6 @@ class StakeShareWatcher {
         this.hub  = hub;
         this.env  = hubConfig.env(opts.env);
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
-        this._axios = opts.axios || axios;
         this._SnapshotClass = opts.CapabilitySnapshot || CapabilitySnapshot;
         this._reader = null;
 
@@ -147,7 +152,7 @@ class StakeShareWatcher {
             this._log('Stake-share monitor DISABLED: no operator staking sources configured. ' +
                 'Nothing is watching this federation\'s share of active stake against the ' +
                 'STAKE_WEIGHTED_QUORUM two-thirds commit gate, so a single new community STAKE can ' +
-                'halt price, publish, attestation or cross-chain rounds with no warning. Set HUB_OPERATOR_STAKE_SOURCES_<COIN> ' +
+                'halt price, publish, attestation, cross-chain or config-change rounds with no warning. Set HUB_OPERATOR_STAKE_SOURCES_<COIN> ' +
                 '(or HUB_OPERATOR_STAKE_SOURCES) to the staking addresses this operator controls.');
             return false;
         }
@@ -206,12 +211,14 @@ class StakeShareWatcher {
             return;
         }
 
-        let tip = await this.latestBlock(chain, url);
+        let tip = await this.committedTip();
         if (tip === null) {
             for (let cap of this.capabilities) {
                 this.monitor.recordUnavailable(chain, cap,
-                    'the ' + chain + ' indexer at ' + url + ' did not report a latest block, so no stake ' +
-                    'snapshot height could be resolved.');
+                    'the gate\'s own ' + chain + ' tip resolver returned no height (pushed tip stale or ' +
+                    'missing, and the direct read at ' + url + ' failed, lagged past MAX_INDEXER_LAG_BLOCKS ' +
+                    'or re-served a height older than MAX_DIRECT_TIP_AGE_S), so rounds cannot lock a ' +
+                    'stake-weighted set either; the hub log names the check that refused.');
             }
             return;
         }
@@ -221,14 +228,16 @@ class StakeShareWatcher {
         }
     }
 
-    // Read one capability's stake set through the gate's getWeightSnapshot. It
-    // takes the RAW tip because it buries by the reorg buffer itself.
+    // Read one stake set through the gate's own snapshot read: getWeightSnapshot for a
+    // capability, getActiveWeightSnapshot for WHOLE_FEDERATION. Both take the RAW tip.
     async pollCapability(chain, capability, tip, sources) {
+        let whole = capability === WHOLE_FEDERATION;
         let reader, snap, failuresBefore;
         try {
             reader = this.reader();
             failuresBefore = reader.monitor.failures;
-            snap = await reader.getWeightSnapshot(capability, tip);
+            snap = whole ? await reader.getActiveWeightSnapshot(tip)
+                : await reader.getWeightSnapshot(capability, tip);
         } catch (err) {
             return this.monitor.recordUnavailable(chain, capability,
                 'the gate\'s stake-weight read threw (' + ((err && err.message) || err) +
@@ -247,11 +256,14 @@ class StakeShareWatcher {
         let rows = snap.validators.slice();
         if (snap.truncated === true) rows.truncated = true;
 
-        // Size the margin unit off the same threshold the read just used.
+        // Size the margin unit off the same threshold the read just used; the
+        // whole-federation set has none, so its unit comes from the stakes present.
         let blockIndex = Number(snap.blockIndex);
-        let minStake;
-        try { minStake = reader.resolveMinStake(capability, blockIndex); }
-        catch (err) { minStake = null; }
+        let minStake = null;
+        if (!whole) {
+            try { minStake = reader.resolveMinStake(capability, blockIndex); }
+            catch (err) { minStake = null; }
+        }
         let evaluation = evaluateStakeShare({
             validators:       rows,
             operatorSources:  sources,
@@ -280,28 +292,15 @@ class StakeShareWatcher {
         return reader;
     }
 
-    // One shared hub-to-indexer key covers every chain (btcIndexerHeaders is the
-    // hub's single header builder, despite the name). Tolerates a hub stub that
-    // does not define it so a read never dies on a missing header.
-    headers() {
-        if (this.hub && typeof this.hub.btcIndexerHeaders === 'function') return this.hub.btcIndexerHeaders();
-        return { 'Content-Type': 'application/json' };
-    }
-
-    // Latest committed height on a chain's indexer. Null when unreadable; the
-    // caller turns that into `unavailable` rather than guessing a height.
-    async latestBlock(chain, url) {
-        try {
-            let res = await this._axios.post(url, {
-                jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {}
-            }, { headers: this.headers(), timeout: 5000 });
-            let result = res && res.data && res.data.result;
-            if (!result || result.error) return null;
-            let blk = Number(result.block_index);
-            return Number.isInteger(blk) && blk >= 0 ? blk : null;
-        } catch (err) {
-            return null;
-        }
+    // The committed BTC tip every round anchors on, from the gate's own resolver so
+    // its refusals are the watcher's too. Null when it refuses or is absent; never a
+    // direct read of the watcher's own, which would re-open the gap it closes.
+    async committedTip() {
+        if (!this.hub || typeof this.hub.resolveBtcLatestBlock !== 'function') return null;
+        let tip;
+        try { tip = await this.hub.resolveBtcLatestBlock(); }
+        catch (err) { return null; }
+        return Number.isInteger(tip) && tip >= 0 ? tip : null;
     }
 
     // Body-only telemetry for /health and the operator RPC.
@@ -320,6 +319,7 @@ class StakeShareWatcher {
 
 module.exports = Object.assign(StakeShareWatcher, {
     DEFAULT_CAPABILITIES,
+    WHOLE_FEDERATION,
     DEFAULT_POLL_MS,
     LEVELS
 });

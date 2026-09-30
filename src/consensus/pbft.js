@@ -235,8 +235,8 @@ class Consensus {
     // tallied by stake; below activation, the count snapshot (byte-identical to
     // the legacy path). `weighted` is gated on the BTC block boundary + network so
     // the hub and every other hub flip on the same anchor. Returns
-    // { snapshot: null, weighted } when no snapshot can be acquired (the caller
-    // then falls back to live getQuorum(), as before).
+    // { snapshot: null, weighted } when no snapshot can be acquired (a federated
+    // caller then refuses the round; only a non-federated hub uses live getQuorum()).
     //
     // `requestedBlockIndex` is the height this call ASKED for, before
     // CapabilitySnapshot buried it by HUB_SNAPSHOT_REORG_BUFFER; the returned

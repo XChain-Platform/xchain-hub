@@ -268,7 +268,8 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // Same class as P2P_SIGNER_SET_REFRESH_MS above: without this line the env knob
     // never reached p2pConfig and retention was permanently pinned to the default.
     ORACLE_SUBMISSIONS_RETENTION_ROUNDS: hubConfig.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
-    // Attestation round cadence (AttestationRound.js:100, AttestationConsensus.js:295).
+    // Attestation round cadence (pollMs in attestation/round/options.js, roundTimeoutMs
+    // in attestation/consensus/options.js).
     // Same dead-knob class as P2P_SIGNER_SET_REFRESH_MS above: without these two lines
     // the env vars never reached p2pConfig and a real api.js child stayed pinned to the
     // 15s poll / 120s round-timeout defaults regardless of what the operator set.

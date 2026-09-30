@@ -28,6 +28,7 @@ async function pollEntry(venue, hubOpts) {
 describe('StakeShareWatcher gate parity', function () {
 
     registerIndexerTests();
+    registerTipTests();
     registerThresholdTests();
     registerEchoTests();
     registerAlarmIsolationTests();
@@ -48,6 +49,53 @@ function registerIndexerTests() {
         it('records unavailable when a row carries no weight', async function () {
             const entry = await pollEntry(makeVenue({ dropWeight: true }));
             expect(entry.level).to.equal(LEVELS.UNAVAILABLE);
+        });
+    });
+}
+
+function stakeReads(venue) {
+    return venue.calls.filter(c => c.method === 'getstakeweightsbycapability');
+}
+
+function registerTipTests() {
+
+    describe('the committed tip', function () {
+
+        it('records unavailable, and reads no stake, when the indexer lags past the gate\'s bound', async function () {
+            const venue = makeVenue({ lag: 350 });
+            const entry = await pollEntry(venue);
+            expect(entry.level).to.equal(LEVELS.UNAVAILABLE);
+            expect(entry.reason).to.contain('MAX_INDEXER_LAG_BLOCKS');
+            expect(stakeReads(venue)).to.have.length(0);
+        });
+
+        it('reads at a fresh pushed tip, not the direct height', async function () {
+            const venue = makeVenue();
+            await pollEntry(venue, { pushedTip: { blockHeight: 140000, blockTime: Math.floor(Date.now() / 1000) } });
+            expect(stakeReads(venue)[0].params.block_index).to.equal(139994);
+        });
+
+        it('records unavailable on a direct height frozen behind a stale pushed tip', async function () {
+            const venue = makeVenue();
+            const stale = { blockHeight: 150000, blockTime: Math.floor(Date.now() / 1000) - 8000 };
+            const entry = await pollEntry(venue, { pushedTip: stale });
+            expect(entry.level).to.equal(LEVELS.UNAVAILABLE);
+            expect(stakeReads(venue)).to.have.length(0);
+        });
+
+        it('measures once the direct height moves past a stale pushed tip', async function () {
+            const venue = makeVenue();
+            const stale = { blockHeight: 149000, blockTime: Math.floor(Date.now() / 1000) - 8000 };
+            const entry = await pollEntry(venue, { pushedTip: stale });
+            expect(entry.level).to.equal(LEVELS.WARNING);
+            expect(entry.blockIndex).to.equal(149994);
+        });
+
+        it('records unavailable, and reads no tip of its own, on a hub with no tip resolver', async function () {
+            const venue = makeVenue();
+            const entry = await pollEntry(venue, { noTipResolver: true });
+            expect(entry.level).to.equal(LEVELS.UNAVAILABLE);
+            expect(venue.calls).to.have.length(0);
         });
     });
 }

@@ -122,7 +122,7 @@ module.exports = {
 
     // ONE archive-head wire, always v1 (D4). The version byte no longer encodes
     // whether the attestation round met quorum: the degraded round emits the same v1
-    // with ATTEST_SIG_COUNT 0, exactly as the v0 bundle leg already does. A second
+    // with ATTEST_SIG_COUNT 0 (legal on v1 only; the v0 bundle leg defers instead). A second
     // tail-less shape would need its own parser branch on every consumer and buys
     // nothing the count field does not already say.
     archiveHeadPayload(cp, round, sigs, me, attestSigs){

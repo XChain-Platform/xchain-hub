@@ -226,8 +226,36 @@ function registerSplitSuitePart5() {
     expect(rt2.db.doQuery.called).to.be.false;
   });
   it('swallows an INSERT failure (idempotent retries)', async function () {
-    hub.db.doQuery.rejects(new Error('dup'));
+    hub.db.doQuery.onFirstCall().resolves([]);
+    hub.db.doQuery.onSecondCall().rejects(new Error('dup'));
     await rt.recordAnchorReward('anchor_LTC', 4, hexPk(3), 100); // must not throw
+    expect(hub.db.doQuery.callCount).to.equal(2);
+  });
+}
+async function expectRejects(promise) {
+  let err = null;
+  try { await promise; } catch (e) { err = e; }
+  expect(err, 'recordAnchorReward must reject').to.be.an('error');
+}
+function registerDedupFailClosedSuite() {
+  it('fails closed when the dedup read fails (no DELETE, no INSERT)', async function () {
+    hub.db.doQuery.onFirstCall().rejects(new Error('read down'));
+    await expectRejects(rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100));
+    expect(hub.db.doQuery.callCount).to.equal(1);
+  });
+  it('fails closed when the consolidating delete fails (no INSERT)', async function () {
+    hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(9), batch_seq: null }]);
+    hub.db.doQuery.onSecondCall().rejects(new Error('delete down'));
+    await expectRejects(rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100));
+    expect(hub.db.doQuery.callCount).to.equal(2);
+  });
+  it('a failed dedup read does not jam the per-anchor lock', async function () {
+    hub.db.doQuery.onFirstCall().rejects(new Error('read down'));
+    hub.db.doQuery.resolves([]);
+    await expectRejects(rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100));
+    await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
+    expect(hub.db.doQuery.getCall(2).args[0]).to.include('INSERT IGNORE INTO validator_rewards');
+    expect(rt._anchorLocks.size).to.equal(0);
   });
 }
 function registerSplitSuitePart6() {
@@ -277,6 +305,7 @@ function registerSplitSuitePart7() {
     registerSplitSuitePart3();
     registerSplitSuitePart4();
     registerSplitSuitePart5();
+    registerDedupFailClosedSuite();
   });
 }
 describe('RewardTracker', function () {

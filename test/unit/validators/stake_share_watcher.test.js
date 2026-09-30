@@ -40,15 +40,58 @@ describe('StakeShareWatcher', function () {
     registerStakeShareFailureTests();
     registerStakeShareLifecycleTests();
     registerStakeShareDefaultCapabilityTests();
+    registerWholeFederationTests();
 });
 
 function registerStakeShareDefaultCapabilityTests() {
-    it('watches by default every capability whose rounds lock a weighted snapshot', function () {
+    it('watches by default every capability gate and the whole-federation config-change gate', function () {
         // A capability added to the snapshot writers but not here would halt with no forecast.
         const { DERIVED_CAPABILITIES } = require('../../../src/oracle/price_aggregator/derived_capabilities.js');
         expect(DERIVED_CAPABILITIES.length).to.be.above(0);
+        expect(StakeShareWatcher.WHOLE_FEDERATION).to.equal('*');
         expect(StakeShareWatcher.DEFAULT_CAPABILITIES.slice().sort())
-            .to.deep.equal(DERIVED_CAPABILITIES.slice().sort());
+            .to.deep.equal(DERIVED_CAPABILITIES.concat(['*']).sort());
+    });
+
+    it('accepts the whole-federation key in the capability override', function () {
+        const { watcher } = makeWatcher(makeVenue(), { HUB_STAKE_SHARE_CAPABILITIES: 'price, *' }, null,
+            { capabilities: null });
+        expect(watcher.capabilities).to.deep.equal(['price', '*']);
+    });
+}
+
+function registerWholeFederationTests() {
+
+    describe('the whole-federation set config-change consensus tallies', function () {
+
+        it('halts on stakers outside every watched capability while the price gate still holds', async function () {
+            const venue = makeVenue({ allSources: OURS.concat(['c1', 'c2', 'c3']) });
+            const { watcher } = makeWatcher(venue, null, null, { capabilities: ['price', '*'] });
+            await watcher.pollOnce();
+            expect(watcher.monitor.entries.get('BTC:price').meetsGate).to.equal(true);
+            const whole = watcher.monitor.entries.get('BTC:*');
+            expect(whole.meetsGate).to.equal(false);
+            expect(whole.level).to.equal(LEVELS.HALTED);
+            expect(watcher.monitor.isAlerting()).to.equal(true);
+        });
+
+        it('reads the gate\'s own whole-federation RPC at the buried height, with no threshold', async function () {
+            const venue = makeVenue();
+            const { watcher } = makeWatcher(venue, null, null, { capabilities: ['*'] });
+            await watcher.pollOnce();
+            const read = venue.calls.find(c => c.method === 'getactivestakeweights');
+            expect(read.params).to.deep.equal({ block_index: 149994 });
+            expect(venue.calls.some(c => c.method === 'getstakeweightsbycapability')).to.equal(false);
+            expect(watcher.monitor.entries.get('BTC:*').unitStakeFrom).to.equal('largest_other_source');
+        });
+
+        it('records only the whole-federation entry unavailable when its read fails', async function () {
+            const venue = makeVenue({ throwOn: 'getactivestakeweights' });
+            const { watcher } = makeWatcher(venue, null, null, { capabilities: ['price', '*'] });
+            await watcher.pollOnce();
+            expect(watcher.monitor.entries.get('BTC:*').level).to.equal(LEVELS.UNAVAILABLE);
+            expect(watcher.monitor.entries.get('BTC:price').level).to.equal(LEVELS.WARNING);
+        });
     });
 }
 
@@ -329,7 +372,7 @@ function registerStakeShareLifecycleTests() {
             const venue = makeVenue();
             const { watcher } = makeWatcher(venue, null, null, { chains: null, capabilities: null });
             expect(watcher.chains).to.deep.equal(['BTC']);
-            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish', 'attestation', 'cross_chain']);
+            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish', 'attestation', 'cross_chain', '*']);
             expect(watcher.pollMs).to.equal(StakeShareWatcher.DEFAULT_POLL_MS);
         });
     });

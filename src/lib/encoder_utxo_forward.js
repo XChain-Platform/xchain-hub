@@ -47,7 +47,7 @@
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
-// xchain-encoder/src/validator.js MAX_UTXO_COUNT. Duplicated rather than
+// xchain-encoder/src/common/validator/constants.js MAX_UTXO_COUNT. Duplicated rather than
 // imported: the encoder is a separate service reached over JSON-RPC, not a
 // dependency of this package. A raise on the encoder side only makes this
 // bound conservative (we hand over fewer arrays than it would accept), never
