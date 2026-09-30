@@ -279,6 +279,12 @@ function mountBridgeSnapshots(app, ctx, helpers) {
         }
     });
 
+    mountListSnapshots(app, ctx, helpers);
+}
+
+function mountListSnapshots(app, ctx, helpers) {
+    const { hub, logger, bigIntReplacer } = ctx;
+    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
     // GET /hub-db/snapshot/list_snapshots: bootstrap the append-only shared-list
     // versions. A higher seq supersedes membership without retracting an older row.
     app.get('/hub-db/snapshot/list_snapshots', async (req, res) => {

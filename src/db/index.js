@@ -338,17 +338,11 @@ class Database {
     // paths already read through this.constructor. The lists themselves, and the
     // ordering contract stated with them, live in schema/mirror_columns.js; slice()
     // because each read has always handed the caller an array of its own.
-    static get BRIDGE_TRANSFER_COLUMNS(){
-        return mirrorColumns.BRIDGE_TRANSFER_COLUMNS.slice();
-    }
+    static get BRIDGE_TRANSFER_COLUMNS(){ return mirrorColumns.BRIDGE_TRANSFER_COLUMNS.slice(); }
 
-    static get POLICY_SNAPSHOT_COLUMNS(){
-        return mirrorColumns.POLICY_SNAPSHOT_COLUMNS.slice();
-    }
+    static get POLICY_SNAPSHOT_COLUMNS(){ return mirrorColumns.POLICY_SNAPSHOT_COLUMNS.slice(); }
 
-    static get LIST_SNAPSHOT_COLUMNS(){
-        return mirrorColumns.LIST_SNAPSHOT_COLUMNS.slice();
-    }
+    static get LIST_SNAPSHOT_COLUMNS(){ return mirrorColumns.LIST_SNAPSHOT_COLUMNS.slice(); }
 
     async close(){
         await this.pool.end();

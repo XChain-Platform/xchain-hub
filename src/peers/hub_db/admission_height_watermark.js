@@ -97,15 +97,7 @@ class AdmissionHeightWatermark {
         // for it would be a claim about rows that cannot exist.
         this.federationChains = ADMIT_COLUMN_CHAINS.slice();
 
-        // The round-abandon timeout per rail, in ms. Each one is its rail's own terminal
-        // bound read from its rail's own knob, so an operator who widened a rail's rounds
-        // widens its watermark trail by the same amount instead of the watermark claiming
-        // past rounds that are still open.
-        //
-        // xdex covers matches, calls, bridge transfers, policy snapshots and list snapshots.
-        // They run on CrossChainDexConsensus, whose terminal bound is the round MAX LIFETIME
-        // and not the single round timeout, because a view change re-arms the timeout on a
-        // round that is still open.
+        // CrossChainDexConsensus rails use max lifetime because view changes re-arm the timeout.
         let xdexTimeout = positiveIntConfig(
             hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS,
             DEFAULT_XDEX_ROUND_TIMEOUT_MS, 'XDEX_ROUND_TIMEOUT_MS');

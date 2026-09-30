@@ -39,7 +39,7 @@ function fakeResponse() {
     };
 }
 
-describe('list_snapshots hub table and mirror page', function () {
+describe('list_snapshots hub table', function () {
     afterEach(function () { sinon.restore(); });
 
     it('declares the complete append-only row and its two unique identities', function () {
@@ -91,6 +91,10 @@ describe('list_snapshots hub table and mirror page', function () {
         expect(sql).to.match(/ORDER BY seq ASC$/);
         expect(params).to.deep.equal(['regtest', 'DOGE', 41, 7]);
     });
+});
+
+describe('list_snapshots mirror page', function () {
+    afterEach(function () { sinon.restore(); });
 
     it('pages the REST route and stamps the current schema version', async function () {
         const routes = {};
