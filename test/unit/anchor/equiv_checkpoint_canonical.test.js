@@ -287,11 +287,11 @@ function registerEquivocationKeyTests() {
 // ONE fixture, projected into each service's own field naming, so a
 // transcription slip cannot make the three agree for the wrong reason.
 const ARCHIVE = { batch_seq: 3, count: 10, crc: 'cc', total_chunks: 2 };
-function hubCanonical(cp) {
+function hubCanonical(cp, crc = ARCHIVE.crc) {
     return SAP.prototype.archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
-        ARCHIVE.count, ARCHIVE.crc, ARCHIVE.total_chunks);
+        ARCHIVE.count, crc, ARCHIVE.total_chunks);
 }
-function indexerCanonical(cp, format) {
+function indexerCanonical(cp, format, crc = ARCHIVE.crc) {
     return Anchor.prototype.canonical.call(null, {
         FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
         BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
@@ -299,17 +299,17 @@ function indexerCanonical(cp, format) {
         CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
         SNAPSHOT_BLOCK: cp.snapshot_block,
         MATCH_BATCH_SEQ: ARCHIVE.batch_seq, MATCH_COUNT: ARCHIVE.count,
-        BATCH_CRC32: ARCHIVE.crc, TOTAL_CHUNKS: ARCHIVE.total_chunks
+        BATCH_CRC32: crc, TOTAL_CHUNKS: ARCHIVE.total_chunks
     });
 }
-function recoveryCanonical(cp) {
+function recoveryCanonical(cp, crc = ARCHIVE.crc) {
     return AnchorRecovery.prototype.wrapperCanonical.call(AnchorRecovery.prototype, {
         chain: cp.chain, network: cp.network, block_index: cp.block_index,
         block_hash: cp.block_hash, ledger_hash: cp.ledger_hash,
         actions_hash: cp.actions_hash, contract_hash: cp.contract_hash,
         checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block,
         match_batch_seq: ARCHIVE.batch_seq, match_count: ARCHIVE.count,
-        batch_crc32: ARCHIVE.crc, total_chunks: ARCHIVE.total_chunks
+        batch_crc32: crc, total_chunks: ARCHIVE.total_chunks
     });
 }
 function registerArchiveBasics() {
@@ -321,6 +321,12 @@ function registerArchiveBasics() {
             expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery.wrapperCanonical drifted from hub archiveCanonical');
             // Pinned literal so a THREE-sided edit (all copies changed together) still fails.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
+        });
+        it('all three embed an upper-case batch CRC as the lower-case bytes (v1)', function () {
+            const hub = hubCanonical(cpOn);
+            expect(hubCanonical(cpOn, 'CC')).to.equal(hub, 'hub archiveCanonical kept the CRC case');
+            expect(indexerCanonical(cpOn, 1, 'CC')).to.equal(hub, 'indexer Anchor.canonical kept the CRC case');
+            expect(recoveryCanonical(cpOn, 'CC')).to.equal(hub, 'recovery.wrapperCanonical kept the CRC case');
         });
         // The publisher tail is attested separately and is NOT part of the wrapper
         // canonical, so a v1 with an ATTEST_SIG_COUNT of 0 and one with a full quorum sign

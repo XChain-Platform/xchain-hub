@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
+const { canonicalBatchCrc } = require('../fold/wrapper_canonical.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const eq = require('../../../consensus/equivocation_header.js');
@@ -233,7 +234,7 @@ module.exports = {
     // Nests rawCanonicalCheckpoint (not canonicalCheckpoint) so the header lands outside.
     archiveCanonical(cp, batchSeq, count, crc, totalChunks){
         let raw = StateCheckpointEngine.rawCanonicalCheckpoint(cp) + '|' +
-                  String(batchSeq) + '|' + String(count) + '|' + crc + '|' + String(totalChunks);
+                  String(batchSeq) + '|' + String(count) + '|' + canonicalBatchCrc(crc) + '|' + String(totalChunks);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq + '|' + batchSeq, 0, raw);

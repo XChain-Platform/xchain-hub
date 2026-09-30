@@ -31,6 +31,7 @@ const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
+const { canonicalBatchCrc } = require('./fold/wrapper_canonical.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 
@@ -50,7 +51,7 @@ function isCheckpointAnchorRow(row){
 function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
     let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
               checkpointForms.checkpointRootSuffix(checkpoint) + '|' +
-              [String(batchSeq), String(count), String(crc).toLowerCase(), String(totalChunks)].join('|');
+              [String(batchSeq), String(count), canonicalBatchCrc(crc), String(totalChunks)].join('|');
     if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
             checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +

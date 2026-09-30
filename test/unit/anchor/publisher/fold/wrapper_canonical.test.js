@@ -32,6 +32,12 @@ describe('folded ANCHOR wrapper canonical', function () {
             .to.equal(base + '|43|18|abcdef01|3');
     });
 
+    it('embeds an upper-case batch CRC as lower-case', function () {
+        const upperCrc = { WRAPPER_SECTION_INDEX: 2, MATCH_BATCH_SEQ: 43, MATCH_COUNT: 18,
+            BATCH_CRC32: 'ABCDEF01', TOTAL_CHUNKS: 3 };
+        expect(extendWrapperCanonicalBase(base, 2, upperCrc)).to.equal(base + '|43|18|abcdef01|3');
+    });
+
     it('leaves a non-wrapper section unchanged', function () {
         expect(extendWrapperCanonicalBase(base, 1, archive)).to.equal(base);
     });

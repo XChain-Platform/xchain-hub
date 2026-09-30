@@ -114,7 +114,7 @@ function isZeroConfActive(requestBlock, network){
 }
 
 // The boot-time ordering assertion (spec §3.2 a), on the CapabilitySnapshot
-// _resolveReorgBuffer pattern: throw on a declared consensus network, warn on
+// resolveReorgBuffer pattern: throw on a declared consensus network, warn on
 // regtest and standalone, and a loud one-off bypass for a coordinated fleet-wide
 // change. Called once from the AttestationRound constructor.
 //
