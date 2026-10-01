@@ -19,10 +19,10 @@
  * when ANY table in the indexer's mirror set gains a DDL change a stale indexer
  * cannot interpret, and equally when the mirror SET itself gains a table (a table
  * a stale indexer does not know about is a row shape it cannot interpret either,
- * it just fails by omission instead of by column). As of now that set is ten
+ * it just fails by omission instead of by column). As of now that set is eleven
  * tables: oracle_prices, price_snapshots, cross_chain_matches, cross_chain_calls,
  * capability_snapshots, state_checkpoints, anchor_reward_attestations,
- * attestation_responses, bridge_transfers, policy_snapshots (see
+ * attestation_responses, bridge_transfers, policy_snapshots, list_snapshots (see
  * xchain-indexer/src/hub/hub_db_sync/mirror_tables.js RETRACTION_COLUMNS +
  * CROSS_CHAIN_TABLES + HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
  * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
@@ -107,6 +107,15 @@
 // v7 reader above the activation against a v6 hub would see no heights and
 // defer forever under the fail-closed rule, while below the activation the
 // same mismatched pair only parks the mirror for the roll window.
-const HUB_SCHEMA_VERSION = 7;
+//
+// v8: the mirror set gained list_snapshots. It carries the quorum-signed
+// shared-list versions every consuming indexer applies as injected LIST legs,
+// so a stale indexer that lacks the table never learns a version and its mirror
+// lists silently stop following the home list. A stale reader must reject this
+// stream until it has applied the list_snapshots migration.
+//
+// v8 ROLL: the v6 and v7 order stands. This hub rolls FIRST and stamps 8, then
+// every indexer and the explorer roll back to back behind it.
+const HUB_SCHEMA_VERSION = 8;
 
 module.exports = { HUB_SCHEMA_VERSION };
