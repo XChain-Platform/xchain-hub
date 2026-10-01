@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
+const { observedListIds, firstListOutside } = require('./list_observed.js');
 
 module.exports = {
 
@@ -78,7 +79,7 @@ module.exports = {
             entry = {
                 matches: new Set(), calls: new Set(), rewards: new Set(),
                 bridges: new Set(), policies: new Set(), checkpoints: new Set(),
-                prices: new Set(), tombstones: new Set()
+                prices: new Set(), tombstones: new Set(), lists: new Set()
             };
             byProposer.set(key, entry);
         }
@@ -92,6 +93,7 @@ module.exports = {
             if(b && b.transfer_id != null) entry.bridges.add(String(b.transfer_id));
         for(const p of (archive.policy_snapshots || []))
             if(p && p.snapshot_id != null) entry.policies.add(String(p.snapshot_id));
+        for(const id of observedListIds(archive)) entry.lists.add(id);
         for(const c of (archive.state_checkpoints || []))
             if(c && c.chain != null && c.network != null && c.checkpoint_seq != null)
                 entry.checkpoints.add([c.chain, c.network, c.checkpoint_seq].map(String).join('|'));
@@ -119,7 +121,7 @@ module.exports = {
     // would hand every p2p peer a per-message gzip and CPU amplifier for the sake of
     // local bookkeeping.
     finalizedOutsideObservedArchive(batchSeq, sender, matches, calls, rewards,
-                                    bridges, policies, checkpoints, prices, tombstones){
+                                    bridges, policies, checkpoints, prices, tombstones, lists){
         let byProposer = this._observedArchiveContents.get(Number(batchSeq));
         let entry = byProposer && byProposer.get(String(sender || '').toLowerCase());
         if(!entry) return null;
@@ -147,6 +149,8 @@ module.exports = {
         for(const t of (tombstones || []))
             if(t && !entry.tombstones.has([t.round_number, t.coin_pair].map(String).join('|')))
                 return 'tombstone ' + String(t.round_number) + '/' + String(t.coin_pair);
+        const missingList = firstListOutside(entry.lists, lists);
+        if(missingList) return missingList;
         return null;
     },
 
