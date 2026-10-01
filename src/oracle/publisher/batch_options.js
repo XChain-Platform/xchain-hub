@@ -29,6 +29,7 @@ const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants.js');
 const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
         LEGACY_BATCH_WINDOW_ROUNDS } = require('../price_batch_cadence.js');
+const { createHourlyWindowPlan } = require('./window_plan.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -170,6 +171,30 @@ module.exports = {
                 'Publishing one round per batch anyway; native-coin fees will still go ' +
                 'unpriceable between batches until the round interval or the grace comes down.');
         }
+
+        this.initHourlyWindowPlan();
+    },
+
+    initHourlyWindowPlan() {
+        let hourly;
+        try {
+            hourly = createHourlyWindowPlan({
+                network: this.network,
+                smallRounds: this.batchWindowRounds,
+                roundIntervalMs: this.roundIntervalMs,
+                graceMs: this.batchGraceMs,
+                landingReserveMs: this.batchLandingReserveMs
+            });
+        } catch (e) {
+            logger.error('OraclePublisher: CRITICAL - invalid hourly window plan: ' +
+                (e && e.message));
+            throw e;
+        }
+        this.windowPlan = hourly.plan;
+        this.hourlyWindowFirstRound = hourly.firstRound;
+        this.oracleHourlyWindowRounds = hourly.largeRounds;
+        this.oracleHourlyMaxPriceAgeMs = hourly.hourlyMaxPriceAgeMs;
+        this.oracleHourlyWindowRoundsCeiling = hourly.hourlyCeiling;
     },
 
     // The buffer, the window scheduler state and the batch counters.
