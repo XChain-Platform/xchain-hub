@@ -9,9 +9,8 @@ const { expect } = require('chai');
 const sinon = require('sinon');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const crossChainDb = require('../../../../../src/db/cross_chain.js');
-const {
-    LIST_SNAPSHOT_KEYS, ARCHIVE_MAX_LIST_ROWS
-} = require('../../../../../src/anchor/publisher/constants.js');
+const publisherConstants = require('../../../../../src/anchor/publisher/constants.js');
+const { LIST_SNAPSHOT_KEYS, ARCHIVE_MAX_LIST_ROWS } = publisherConstants;
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 function buildPub(db = {}){
@@ -26,6 +25,8 @@ function buildPub(db = {}){
 
 describe('archive list snapshot serialization', () => {
     it('uses the fixed key order and archive cap', () => {
+        expect(publisherConstants).to.have.own.property('LIST_SNAPSHOT_KEYS');
+        expect(publisherConstants).to.have.own.property('ARCHIVE_MAX_LIST_ROWS');
         expect(LIST_SNAPSHOT_KEYS).to.deep.equal([
             'id', 'snapshot_id', 'snapshot_block', 'network', 'home_chain',
             'home_list_index', 'list_type', 'seq', 'kind', 'origin_block',
