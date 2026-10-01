@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 
-const registry = require('../../../src/consensus/gate_registry.js');
-const eq = require('../../../src/consensus/equivocation_header.js');
+const registry = require('../../../../src/consensus/gate_registry.js');
+const eq = require('../../../../src/consensus/equivocation_header.js');
 
 const PRODUCER_KEY = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
 
