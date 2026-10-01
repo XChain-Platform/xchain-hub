@@ -33,10 +33,10 @@ module.exports = {
     // immediate-receipt path and the deferred drain, so an announcement that arrives at
     // 0 confirmations lands EXACTLY the same rows as one that arrives already buried.
     async applyFinalized(d, sender, calls, rewards, quorumRows){
-        const q = quorumRows || this.finalizedQuorumRows(d);
+        const q = quorumRows || this.finalizedQuorumRows(d), lists = Array.isArray(q.lists) ? q.lists : [];
         await this.backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
                                   calls, rewards, q.bridges, q.policies, q.checkpoints,
-                                  await this.finalizedPricesWithLocalProof(q.prices), q.tombstones);
+                                  await this.finalizedPricesWithLocalProof(q.prices), q.tombstones, lists);
         // Mirror the leader's archive-publish reward (sender is signature-verified),
         // on the BUNDLE_DONE rail. Only a COMPLETE publish earns it (the leader
         // skips its own reward on lost chunks and marks rows __partial__).
@@ -218,7 +218,8 @@ module.exports = {
                 return false;
             }
         }
-        const q = quorumRows || { bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [] };
+        const q = quorumRows || { bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [], lists: [] };
+        const lists = Array.isArray(q.lists) ? q.lists : [];
         for(const b of q.bridges){
             if(!b || b.transfer_id == null || b.status == null) return false;
             if(b.status === '__partial__') continue;
@@ -241,6 +242,7 @@ module.exports = {
         }
         for(const t of q.tombstones)
             if(!t || t.round_number == null || t.coin_pair == null) return false;
+        for(const l of lists) if(!l || l.snapshot_id == null) return false;
         return true;
     },
 

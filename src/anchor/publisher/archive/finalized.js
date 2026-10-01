@@ -92,7 +92,8 @@ module.exports = {
             policies: Array.isArray(d.policies) ? d.policies : [],
             checkpoints: Array.isArray(d.checkpoints) ? d.checkpoints : [],
             prices: Array.isArray(d.prices) ? d.prices : [],
-            tombstones: Array.isArray(d.tombstones) ? d.tombstones : []
+            tombstones: Array.isArray(d.tombstones) ? d.tombstones : [],
+            lists: Array.isArray(d.lists) ? d.lists : []
         };
     },
 
@@ -118,9 +119,10 @@ module.exports = {
     // True when the announcement names a row the archive this hub co-signed does not carry.
     finalizedCarriesStrayRows(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
+        const lists = Array.isArray(q.lists) ? q.lists : [];
         const stray = this.finalizedOutsideObservedArchive(
             Number(d.batch_seq), sender, d.matches, calls, rewards,
-            q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
+            q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones, lists);
         if(stray){
             logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces ' + stray +
                          ', which the archive we co-signed for this batch does not carry; ignoring the ' +
@@ -155,13 +157,14 @@ module.exports = {
     // True when the announcement pairs no txid with rows no honest failed publish produces.
     finalizedNullTxidForged(d, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
+        const lists = Array.isArray(q.lists) ? q.lists : [];
         const terminalAnnounced = (d.matches || []).some(m => m && m.status !== '__partial__') ||
                                 calls.some(c => c && c.status !== '__partial__') ||
                                 rewards.length > 0 ||
                                 q.bridges.some(b => b && b.status !== '__partial__') ||
                                 q.prices.some(p => p && p.status !== '__partial__') ||
                                 q.policies.length > 0 || q.checkpoints.length > 0 ||
-                                q.tombstones.length > 0;
+                                q.tombstones.length > 0 || lists.length > 0;
         if(!d.txid && terminalAnnounced){
             logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') carries NO txid but ' +
                          'announces non-__partial__ rows; an honest publish marks every row __partial__ when ' +
@@ -220,11 +223,12 @@ module.exports = {
     // none), so binding it needs an xchain-indexer change before this hub can.
     async stageFinalizedBackfill(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
+        const lists = Array.isArray(q.lists) ? q.lists : [];
         if(!d.txid){
             // Every announced row is '__partial__' here (finalizedNullTxidForged proves it), so
             // this is the honest failed-broadcast shape: seq bookkeeping, nothing to verify.
             await this.backfillBatch(Number(d.batch_seq), d.matches, null, calls, rewards,
-                                     q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
+                                     q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones, lists);
             return;
         }
         // Archive-head version SET {1}: publishArchive emits a v1 head at every height,
@@ -254,7 +258,7 @@ module.exports = {
                                   q.bridges.map(b => Object.assign({}, b, { status: '__partial__' })),
                                   [], [],
                                   q.prices.map(p => Object.assign({}, p, { status: '__partial__' })),
-                                  []);
+                                  [], []);
         this.deferFinalized(d, sender, calls, rewards, q, archiveOnChain);
     }
 

@@ -162,6 +162,7 @@ describe('archive quorum-table deferred FINALIZED staging', function () {
         expect(staged[0][7]).to.deep.equal([]);
         expect(staged[0][8][0].status).to.equal('__partial__');
         expect(staged[0][9]).to.deep.equal([]);
+        expect(staged[0][10]).to.deep.equal([]);
         expect(deferred).to.have.length(1);
     });
 
@@ -186,7 +187,7 @@ describe('archive quorum-table received FINALIZED handling', function () {
         await pub.handleFinalized({ data: d });
 
         expect(stamped).to.have.length(1);
-        expect(stamped[0].slice(5)).to.deep.equal([[], [], [], [], []]);
+        expect(stamped[0].slice(5)).to.deep.equal([[], [], [], [], [], []]);
     });
 
     it('rejects null-txid terminal or immutable quorum-table announcements', function () {

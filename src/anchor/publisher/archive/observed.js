@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
+const { observedListIds, firstListOutside } = require('./list_observed.js');
 
 module.exports = {
 
@@ -78,7 +79,7 @@ module.exports = {
             entry = {
                 matches: new Set(), calls: new Set(), rewards: new Set(),
                 bridges: new Set(), policies: new Set(), checkpoints: new Set(),
-                prices: new Set(), tombstones: new Set()
+                prices: new Set(), tombstones: new Set(), lists: new Set()
             };
             byProposer.set(key, entry);
         }
@@ -101,6 +102,7 @@ module.exports = {
         for(const t of (archive.price_tombstones || []))
             if(t && t.round_number != null && t.coin_pair != null)
                 entry.tombstones.add([t.round_number, t.coin_pair].map(String).join('|'));
+        for(const id of observedListIds(archive)) entry.lists.add(id);
         // Bounded on its own terms as well as through the leader map's lockstep evict,
         // so a body recorded for a seq whose leader entry is already gone cannot pin
         // memory.
@@ -119,7 +121,7 @@ module.exports = {
     // would hand every p2p peer a per-message gzip and CPU amplifier for the sake of
     // local bookkeeping.
     finalizedOutsideObservedArchive(batchSeq, sender, matches, calls, rewards,
-                                    bridges, policies, checkpoints, prices, tombstones){
+                                    bridges, policies, checkpoints, prices, tombstones, lists){
         let byProposer = this._observedArchiveContents.get(Number(batchSeq));
         let entry = byProposer && byProposer.get(String(sender || '').toLowerCase());
         if(!entry) return null;
@@ -147,6 +149,8 @@ module.exports = {
         for(const t of (tombstones || []))
             if(t && !entry.tombstones.has([t.round_number, t.coin_pair].map(String).join('|')))
                 return 'tombstone ' + String(t.round_number) + '/' + String(t.coin_pair);
+        const strayList = firstListOutside(entry.lists, lists);
+        if(strayList !== null) return strayList;
         return null;
     },
 
