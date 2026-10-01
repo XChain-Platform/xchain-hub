@@ -67,51 +67,33 @@ describe('hourly window plan boundaries', function() {
         assert.strictEqual(after, 0);
         assert.notStrictEqual(plan.windowOf(119), plan.windowOf(120));
     });
+});
 
+function signerFixture() {
+    const state = { reads: 0 };
+    const signer = new OracleBatchSigner({
+        network: 'mainnet',
+        p2pConfig: {},
+        db: { async findPriceSnapshotsByRoundNumber() { state.reads++; return []; } }
+    });
+    signer.windowPlan = switchedPlan();
+    return { signer, state };
+}
+
+async function assertRefused(firstRound, lastRound) {
+    const { signer, state } = signerFixture();
+
+    await signer.handleSignReq({ data: { first_round: firstRound, last_round: lastRound } });
+
+    assert.strictEqual(signer.getStats().batchSignRefusals, 1);
+    assert.strictEqual(state.reads, 0);
+}
+
+describe('hourly window plan signer refusals', function() {
     it('refuses a signer proposal whose range straddles S before reading snapshots', async function() {
-        let reads = 0;
-        const signer = new OracleBatchSigner({
-            network: 'mainnet',
-            p2pConfig: {},
-            db: { async findPriceSnapshotsByRoundNumber() { reads++; return []; } }
-        });
-        signer.windowPlan = switchedPlan();
-
-        await signer.handleSignReq({ data: { first_round: 119, last_round: 120 } });
-
-        assert.strictEqual(signer.getStats().batchSignRefusals, 1);
-        assert.strictEqual(reads, 0);
+        await assertRefused(119, 120);
     });
 
-    it('refuses a signer proposal outside its re-derived hourly window', async function() {
-        let reads = 0;
-        const signer = new OracleBatchSigner({
-            network: 'mainnet',
-            p2pConfig: {},
-            db: { async findPriceSnapshotsByRoundNumber() { reads++; return []; } }
-        });
-        signer.windowPlan = switchedPlan();
-
-        await signer.handleSignReq({ data: { first_round: 124, last_round: 126 } });
-
-        assert.strictEqual(signer.getStats().batchSignRefusals, 1);
-        assert.strictEqual(reads, 0);
-    });
-
-    it('refuses a strict subrange of its re-derived hourly window', async function() {
-        let reads = 0;
-        const signer = new OracleBatchSigner({
-            network: 'mainnet',
-            p2pConfig: {},
-            db: { async findPriceSnapshotsByRoundNumber() { reads++; return []; } }
-        });
-        signer.windowPlan = switchedPlan();
-
-        await signer.handleSignReq({ data: { first_round: 121, last_round: 124 } });
-
-        assert.strictEqual(signer.getStats().batchSignRefusals, 1);
-        assert.strictEqual(reads, 0);
-    });
 });
 
 describe('hourly window plan configuration', function() {
