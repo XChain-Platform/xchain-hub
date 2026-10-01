@@ -108,7 +108,7 @@ const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'D
 // the bare testnet fallback and every mainnet slot stay dark.
 const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DOGE:testnet': 67951140 };
 // The v0.21.1 cut arms the list share producer on the bare testnet key, a few blocks after the roll.
-const ARMED_LIST_SHARE_TESTNET = { testnet: 154750 };
+const ARMED_LIST_SHARE_TESTNET = { testnet: 154777 };
 const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET, listShare: ARMED_LIST_SHARE_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
