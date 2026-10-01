@@ -21,16 +21,16 @@ const stats = require('../../../src/oracle/publisher/stats.js');
 const { createWindowPlan, createHourlyWindowPlan } =
     require('../../../src/oracle/publisher/window_plan.js');
 
-describe('hourly window plan', function() {
-    function switchedPlan() {
-        return createWindowPlan({
-            firstRound: 120,
-            smallRounds: 2,
-            largeRounds: 6,
-            alignmentRounds: 6
-        });
-    }
+function switchedPlan() {
+    return createWindowPlan({
+        firstRound: 120,
+        smallRounds: 2,
+        largeRounds: 6,
+        alignmentRounds: 6
+    });
+}
 
+describe('hourly window plan boundaries', function() {
     it('keeps small windows below S and begins the first hourly window at S', function() {
         const plan = switchedPlan();
 
@@ -82,7 +82,9 @@ describe('hourly window plan', function() {
         assert.strictEqual(signer.getStats().batchSignRefusals, 1);
         assert.strictEqual(reads, 0);
     });
+});
 
+describe('hourly window plan configuration', function() {
     it('reports the window size in force for the oracle current round', function() {
         const target = {
             hub: { oracle: { getCurrentRound: () => 123 } },
