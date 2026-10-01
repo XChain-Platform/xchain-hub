@@ -28,8 +28,8 @@ const logger = getLogger();
 
 function finalizedBackfillArgs(d, calls, rewards, q, prices){
     const args = [Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                  calls, rewards, q.bridges, q.policies, q.checkpoints, prices, q.tombstones];
-    if(Array.isArray(d.lists) || (q.lists || []).length) args.push(q.lists || []);
+                  calls, rewards, q.bridges, q.policies, q.checkpoints, prices, q.tombstones,
+                  q.lists || []];
     return args;
 }
 

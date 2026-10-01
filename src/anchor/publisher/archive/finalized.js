@@ -225,8 +225,8 @@ module.exports = {
             // Every announced row is '__partial__' here (finalizedNullTxidForged proves it), so
             // this is the honest failed-broadcast shape: seq bookkeeping, nothing to verify.
             const args = [Number(d.batch_seq), d.matches, null, calls, rewards,
-                          q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones];
-            if(Array.isArray(d.lists) || (q.lists || []).length) args.push(q.lists || []);
+                          q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones,
+                          q.lists || []];
             await this.backfillBatch(...args);
             return;
         }
