@@ -63,7 +63,7 @@ require('./gate_registry/shared_rows_5.js');
 
 // HUB-ONLY GATES: the rows no other repo twins, queued after the block so the
 // block's order is untouched. Every module SHARED_GATES names is an indexer
-// twin or a shared carrier, so all 36 of the digest's value rows are in the
+// twin or a shared carrier, so all 37 of the digest's value rows are in the
 // block (its other 4 keys are admission FUNCTIONS, read from their carrier);
 // nothing in hub_rows.js is a digest input. The four hub-only activation files
 // keep their literals and are not rows (decision D34); the governance snapshot
