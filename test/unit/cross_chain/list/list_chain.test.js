@@ -65,7 +65,9 @@ describe('list chain', function () {
             }
         ]), null);
     });
+});
 
+describe('list chain', function () {
     it('rejects invalid row kinds', function () {
         assert.strictEqual(foldListChain([
             {
@@ -114,7 +116,9 @@ describe('list chain', function () {
             }
         ]), null);
     });
+});
 
+describe('list chain', function () {
     it('rejects a delta refused by the membership canonical', function () {
         assert.strictEqual(foldListChain([
             {
