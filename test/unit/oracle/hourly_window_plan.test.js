@@ -70,28 +70,61 @@ describe('hourly window plan boundaries', function() {
 });
 
 function signerFixture() {
-    const state = { reads: 0 };
+    const state = { broadcasts: 0, reasons: [] };
     const signer = new OracleBatchSigner({
         network: 'mainnet',
-        p2pConfig: {},
-        db: { async findPriceSnapshotsByRoundNumber() { state.reads++; return []; } }
+        p2pConfig: {}
     });
     signer.windowPlan = switchedPlan();
+    signer.canonical = (first, last, anchor, rounds) =>
+        JSON.stringify({ first, last, anchor, rounds });
+    signer.refuse = (first, last, reason) => {
+        signer.stats.batchSignRefusals++;
+        state.reasons.push(reason);
+    };
+    signer.identity = { sign: () => 'signature' };
+    signer.peerManager = { broadcast: () => state.broadcasts++ };
     return { signer, state };
 }
 
-async function assertRefused(firstRound, lastRound) {
-    const { signer, state } = signerFixture();
+function propose(signer, proposedRounds, mineRounds) {
+    signer.signIfReproduced({
+        first_round: 119,
+        last_round: 120,
+        btc_block_height: 5000,
+        rounds: proposedRounds
+    }, 119, 120, mineRounds, 5000, 'publisher');
+}
 
-    await signer.handleSignReq({ data: { first_round: firstRound, last_round: lastRound } });
+function assertRefused() {
+    const { signer, state } = signerFixture();
+    const rounds = [{ round: 119 }, { round: 120 }];
+
+    propose(signer, rounds, rounds);
 
     assert.strictEqual(signer.getStats().batchSignRefusals, 1);
-    assert.strictEqual(state.reads, 0);
+    assert.strictEqual(state.broadcasts, 0);
+    assert.deepStrictEqual(state.reasons, ['range straddles the hourly window activation']);
+}
+
+function assertExistingRefusalWins() {
+    const { signer, state } = signerFixture();
+    signer.describeMismatch = () => 'existing mismatch';
+
+    propose(signer, [{ round: 119 }], [{ round: 120 }]);
+
+    assert.deepStrictEqual(state.reasons, [
+        'proposal does not match this hub\'s own finalized rounds (existing mismatch)'
+    ]);
 }
 
 describe('hourly window plan signer refusals', function() {
-    it('refuses a signer proposal whose range straddles S before reading snapshots', async function() {
-        await assertRefused(119, 120);
+    it('refuses a reproduced signer proposal whose range straddles S', function() {
+        assertRefused();
+    });
+
+    it('keeps an established refusal reason ahead of the hourly boundary', function() {
+        assertExistingRefusalWins();
     });
 
 });

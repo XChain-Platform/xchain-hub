@@ -59,8 +59,10 @@ const logger = getLogger();
 const leaderPart   = require('./batch_signer/leader.js');
 const followerPart = require('./batch_signer/follower.js');
 const followerHandleSignReq = followerPart.handleSignReq;
+const followerSignIfReproduced = followerPart.signIfReproduced;
 const followerMethods = Object.assign({}, followerPart);
 delete followerMethods.handleSignReq;
+delete followerMethods.signIfReproduced;
 const PARTS = [leaderPart, followerMethods];
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
@@ -273,15 +275,25 @@ class OracleBatchSigner {
     }
 
     async handleSignReq(envelope){
-        let d = envelope && envelope.data;
-        let first = parseInt(d && d.first_round);
-        let last = parseInt(d && d.last_round);
-        if(Number.isFinite(first) && Number.isFinite(last) &&
+        return followerHandleSignReq.call(this, envelope);
+    }
+
+    proposalReproduces(d, first, last, mine, myAnchor){
+        try {
+            return this.canonical(first, last, myAnchor, mine) ===
+                this.canonical(d.first_round, d.last_round, d.btc_block_height, d.rounds);
+        } catch(e){
+            return false;
+        }
+    }
+
+    signIfReproduced(d, first, last, mine, myAnchor, me){
+        if(this.proposalReproduces(d, first, last, mine, myAnchor) &&
            this.windowPlan.straddles(first, last)){
             this.refuse(first, last, 'range straddles the hourly window activation');
             return;
         }
-        return followerHandleSignReq.call(this, envelope);
+        return followerSignIfReproduced.call(this, d, first, last, mine, myAnchor, me);
     }
 
     // ---------------------------------------------------------------- helpers
