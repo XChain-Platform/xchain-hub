@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
+const { sortedListRows, listCapabilityWants } = require('./list_rows_select.js');
 const { canonicalBatchCrc } = require('../fold/wrapper_canonical.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -173,12 +174,14 @@ module.exports = {
         rewards = rewards || [];
         let bridges  = this.sortedArchiveRows((quorumRows || {}).bridges, 'transfer_id');
         let policies = this.sortedArchiveRows((quorumRows || {}).policies, 'snapshot_id');
+        let lists = sortedListRows((quorumRows || {}).lists);
         const checkpoints = this.sortedStateCheckpoints((quorumRows || {}).checkpoints);
         const prices = this.sortedPriceSnapshots((quorumRows || {}).prices);
         const tombstones = this.sortedPriceTombstones((quorumRows || {}).tombstones);
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
             .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
             .concat(bridges.concat(policies).map(r => ({ block: Number(r.snapshot_block), capability: 'cross_chain' })))
+            .concat(listCapabilityWants(lists))
             .concat(checkpoints.map(r => ({ block: Number(r.snapshot_block), capability: 'oracle_publish' })))
             .concat(prices.filter(r => this.isSignatureProofedPrice(r))
                 .map(r => ({ block: Number(r.reference_block), capability: 'price' })))
@@ -222,6 +225,7 @@ module.exports = {
         if(checkpoints.length) obj.state_checkpoints = checkpoints.map(r => this.serializeStateCheckpoint(r));
         if(prices.length) obj.price_snapshots = prices.map(r => this.serializePriceSnapshot(r));
         if(tombstones.length) obj.price_tombstones = tombstones.map(r => this.serializePriceTombstone(r));
+        if(lists.length) obj.list_snapshots = lists.map(r => this.serializeListSnapshot(r));
         obj.capability_snapshots = snaps;
         return { json: JSON.stringify(obj), count: matches.length };
     },
