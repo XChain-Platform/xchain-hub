@@ -40,7 +40,7 @@ describe('advisory age at tip', function () {
 
     it('keeps the legacy bound on unarmed networks', function () {
         for (const coin of ['BTC', 'LTC', 'DOGE']) {
-            assert.strictEqual(ageAt('testnet', coin, 9999999998), LEGACY_SECONDS);
+            assert.strictEqual(ageAt('testnet', coin, 1), LEGACY_SECONDS);
         }
         assert.strictEqual(ageAt('mainnet', 'BTC', 9999999998), LEGACY_SECONDS);
     });

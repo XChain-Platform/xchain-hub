@@ -107,10 +107,12 @@ const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'D
 // The v0.21.0 cut arms both token rows per testnet chain at the heights its freeze plan sized;
 // the bare testnet fallback and every mainnet slot stay dark.
 const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DOGE:testnet': 67951140 };
-const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET };
+// The v0.21.1 cut arms the list share producer on the bare testnet key, a few blocks after the roll.
+const ARMED_LIST_SHARE_TESTNET = { testnet: 154777 };
+const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET, listShare: ARMED_LIST_SHARE_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
-    it('holds every mainnet slot of all four gates unarmed, the list share gate unarmed on testnet, and the cut\'s bridge and token testnet heights', function () {
+    it('holds every mainnet slot of all four gates unarmed, and the cut\'s bridge, token and list share testnet heights', function () {
         for (const [key, regKey] of GATES) {
             const row = registry.get(regKey);
             for (const slot of Object.keys(row)) {
@@ -128,7 +130,7 @@ function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
         // and an unlisted coin reads the dark bare fallback.
         for (const [key, sized] of Object.entries(ARMED_TESTNET)) {
             for (const [slot, height] of Object.entries(sized)) {
-                const coin = slot.split(':')[0];
+                const coin = slot.includes(':') ? slot.split(':')[0] : 'BTC';
                 expect(engine.activation[key](height - 1, 'testnet', coin), key + ' ' + slot + ' one below its height').to.equal(false);
                 expect(engine.activation[key](height, 'testnet', coin), key + ' ' + slot + ' at its height').to.equal(true);
             }

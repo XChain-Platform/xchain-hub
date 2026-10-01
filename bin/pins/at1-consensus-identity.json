@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "84fb63bf6e070596e4e1f533ab2a71455dd8186ff5c73381d1f14898cd80bc8b",
+  "consensus_rules_digest": "6ee594055e09850de9d2f04fc13a2c767237b79ec55e158de20ab86115dfe88a",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -21,12 +21,12 @@
     "attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2": "{\"headroom\":1,\"maxSlots\":2,\"startOffset\":0}",
     "rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":152208}",
     "xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION": "{\"BTC:mainnet\":9999999999,\"BTC:testnet\":152929,\"DOGE:mainnet\":9999999999,\"DOGE:testnet\":67902062,\"LTC:mainnet\":9999999999,\"LTC:testnet\":4887898,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":154567,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67951140,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":4903068}",
-    "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":154614,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67952082,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":4903291}",
+    "mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":154234,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67936053,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":4903068}",
+    "mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION": "{\"BTC:mainnet\":null,\"BTC:regtest\":null,\"BTC:testnet\":154291,\"DOGE:mainnet\":null,\"DOGE:regtest\":null,\"DOGE:testnet\":67936888,\"LTC:mainnet\":null,\"LTC:regtest\":null,\"LTC:testnet\":4903291}",
     "mirror_admission_activation.ADMIT_MARGIN_BLOCKS": "{\"anchor_reward_attestations\":144,\"attestation_responses\":1,\"default\":4,\"oracle_prices\":1}",
     "mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS": "1",
     "mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS": "{\"BTC\":6,\"DOGE\":60,\"LTC\":24,\"default\":6}",
-    "anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":154614}",
+    "anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION": "{\"mainnet\":null,\"regtest\":null,\"testnet\":154291}",
     "anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S": "64800",
     "mirror_admission_activation.CHAIN_CODE_RE": "{}",
     "mirror_admission_activation.CANONICAL_HEIGHT_RE": "{}",
@@ -36,12 +36,12 @@
     "mirror_admission_activation.admissionCanonicalField": "<function>",
     "token_bridge_activation.TOKEN_BRIDGE_ACTIVATION": "{\"BTC:testnet\":154567,\"DOGE:testnet\":67951140,\"LTC:testnet\":4903068,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION": "{\"BTC:testnet\":9999999999,\"DOGE:testnet\":9999999999,\"LTC:testnet\":9999999999,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION": "{\"BTC:testnet\":154778,\"DOGE:testnet\":67956923,\"LTC:testnet\":4905005,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":5082}",
     "price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH": "19",
     "price_scale_activation.PRICE_V1_FEE_MAX_LENGTH": "20",
-    "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
+    "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154777}"
   },
   "gate_key_count": 41,
   "absent_gates": [],
