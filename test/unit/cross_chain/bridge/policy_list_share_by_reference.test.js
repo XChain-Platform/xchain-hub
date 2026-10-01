@@ -10,7 +10,6 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const fs = require('fs');
 const path = require('path');
 
 const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
@@ -24,6 +23,9 @@ const SNAPSHOT_BLOCK = 150;
 const ORIGIN_BLOCK = 900;
 const REF = 'DOGE:2701';
 const BLOCK_LIST = ['blocked'];
+const SRC = path.resolve(__dirname, '../../../../src');
+const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
+const { bridgePolicyHash } = require(path.join(INDEXER_DIR, 'src', 'api', 'rpc', 'token_policy.js'));
 
 function expectedHash(ref = REF){
     return policyHash(null, BLOCK_LIST, false, { allow: ref, block: null });
@@ -31,7 +33,6 @@ function expectedHash(ref = REF){
 
 function byRefPolicy(ref = REF){
     return {
-        allow_list: ref,
         allow_list_ref: ref,
         block_list: BLOCK_LIST,
         sleeping: false,
@@ -114,9 +115,8 @@ function registerProducerTests(){
         const engine = new CrossChainBridgeEngine(hub);
 
         expect(CrossChainBridgeEngine.BRIDGE_GATE_KEYS.listShare).to.equal(key);
-        expect(engine.activation.listShare(SNAPSHOT_BLOCK, 'regtest', 'BTC')).to.equal(
-            registry.activeAt(key, 'regtest', 'BTC', SNAPSHOT_BLOCK, null)
-        );
+        expect(registry.activeAt(key, 'regtest', 'BTC', SNAPSHOT_BLOCK, null)).to.equal(true);
+        expect(engine.gateActive('listShare', SNAPSHOT_BLOCK, 'BTC')).to.equal(true);
     });
 
     it('signs and stores a reference using the sibling indexer hash', async function(){
@@ -128,19 +128,21 @@ function registerProducerTests(){
         expect(row.allow_list).to.equal(JSON.stringify(REF));
         expect(row.block_list).to.equal(JSON.stringify(BLOCK_LIST));
 
-        const src = path.resolve(__dirname, '../../../../src');
-        const indexerDir = process.env.XCHAIN_INDEXER_DIR || path.join(src, '..', '..', 'xchain-indexer');
-        const tokenPolicyPath = path.join(indexerDir, 'src', 'api', 'rpc', 'token_policy.js');
-        if(!fs.existsSync(tokenPolicyPath)){
-            if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                expect.fail('xchain-indexer sibling is absent at ' + tokenPolicyPath);
-            expect(row.policy_hash).to.equal(expectedHash());
-            return;
-        }
-        const { bridgePolicyHash } = require(tokenPolicyPath);
         expect(row.policy_hash).to.equal(
             bridgePolicyHash(null, BLOCK_LIST, false, { allow: REF, block: null })
         );
+    });
+
+    it('shapes an explicit block reference without a duplicated transport field', function(){
+        const { engine } = engineFor('regtest', true);
+        const shaped = engine.shapePolicy({
+            allow_list: ['allowed'],
+            block_list_ref: REF,
+            sleeping: false
+        }, SNAPSHOT_BLOCK);
+
+        expect(shaped.allow).to.deep.equal(['allowed']);
+        expect(shaped.block).to.deep.equal({ ref: REF });
     });
 
     it('does not propose after shared-list members change behind the same reference', async function(){

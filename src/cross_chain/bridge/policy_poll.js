@@ -248,7 +248,8 @@ module.exports = {
     // also verifies and never re-sorts (D13).
     shapePolicy(policy, snapshotBlock){
         let refsAllowed;
-        let one = (v) => {
+        let one = (members, ref) => {
+            let v = ref == null ? members : ref;
             let kind = sideKind(v);
             if(kind === 'none') return null;
             if(kind === 'members') return v.map(x => String(x));
@@ -259,8 +260,8 @@ module.exports = {
             }
             return undefined;
         };
-        let allow = one(policy.allow_list);
-        let block = one(policy.block_list);
+        let allow = one(policy.allow_list, policy.allow_list_ref);
+        let block = one(policy.block_list, policy.block_list_ref);
         if(allow === undefined || block === undefined) return null;
         if(Array.isArray(allow) && !this.isCanonicalOrder(allow)) return null;
         if(Array.isArray(block) && !this.isCanonicalOrder(block)) return null;
