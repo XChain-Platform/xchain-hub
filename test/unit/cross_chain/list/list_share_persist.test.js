@@ -51,7 +51,7 @@ function makeEngine(){
     return { engine, calls };
 }
 
-describe('shared-list finalized persistence', function () {
+describe('shared-list finalized persistence: capability gate', function () {
     it('defers without inserting when capability persistence writes zero rows', async function () {
         const { engine, calls } = makeEngine();
         engine.persistCapabilitySnapshot = async () => 0;
@@ -76,6 +76,9 @@ describe('shared-list finalized persistence', function () {
         assert.strictEqual(engine._inflight.has('throw-snapshot'), false);
     });
 
+});
+
+describe('shared-list finalized persistence: write and mirror', function () {
     it('inserts, re-reads, broadcasts and emits a good finalize', async function () {
         const { engine, calls } = makeEngine();
         const value = row('good-snapshot');
