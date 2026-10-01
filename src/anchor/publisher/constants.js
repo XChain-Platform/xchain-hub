@@ -130,11 +130,11 @@ const POLICY_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
     'finalizing_view', 'validator_signatures', 'status'];
 
-const LIST_SNAPSHOT_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
+const LIST_SNAPSHOT_KEYS = Object.freeze(['id', 'snapshot_id', 'snapshot_block', 'network',
     'home_chain', 'home_list_index', 'list_type', 'seq', 'kind', 'origin_block',
     'members_hash', 'added', 'removed',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
-    'finalizing_view', 'validator_signatures', 'status'];
+    'finalizing_view', 'validator_signatures', 'status']);
 
 const CHECKPOINT_KEYS = ['id', 'chain', 'network', 'block_index', 'block_hash',
     'ledger_hash', 'actions_hash', 'contract_hash', 'checkpoint_seq', 'snapshot_block',
@@ -180,11 +180,11 @@ module.exports = {
     CALL_KEYS,
     BRIDGE_KEYS,
     POLICY_KEYS,
-    LIST_SNAPSHOT_KEYS,
+    LIST_SNAPSHOT_KEYS: LIST_SNAPSHOT_KEYS,
     CHECKPOINT_KEYS,
     PRICE_KEYS,
     ARCHIVE_MAX_POLICY_ROWS,
-    ARCHIVE_MAX_LIST_ROWS,
+    ARCHIVE_MAX_LIST_ROWS: ARCHIVE_MAX_LIST_ROWS,
     ARCHIVE_MAX_PRICE_ROUNDS,
     ARCHIVE_MAX_JSON_BYTES,
     ARCHIVE_MAX_WIRE_B64_BYTES,

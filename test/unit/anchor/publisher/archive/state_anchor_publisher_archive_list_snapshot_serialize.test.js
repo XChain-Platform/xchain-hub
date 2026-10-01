@@ -33,6 +33,7 @@ describe('archive list snapshot serialization', () => {
             'admit_block_ltc', 'admit_block_doge', 'finalizing_view',
             'validator_signatures', 'status'
         ]);
+        expect(Object.isFrozen(LIST_SNAPSHOT_KEYS)).to.equal(true);
         expect(ARCHIVE_MAX_LIST_ROWS).to.equal(8);
     });
 
