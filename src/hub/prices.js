@@ -22,6 +22,7 @@
 
 const coins = require('../coins');
 const presence = require('../lib/oracle_round_presence.js');
+const { advisoryAgeSecondsAt } = require('./price_age_at.js');
 const { bcmul, bcdiv } = require('../bcmath.js');
 const mathjs = require('mathjs');
 const hubConfig = require('../config');
@@ -194,14 +195,31 @@ class Prices {
         return null;
     }
 
+    async advisoryMaxAgeSecondsAtTip(chain, network, bundle) {
+        let tip = null;
+        try {
+            let row = await this.db.getChainTip(chain, network);
+            let height = Number(row && row.blockHeight);
+            if (Number.isSafeInteger(height) && height >= 0) tip = height;
+        } catch (_) {}
+
+        return advisoryAgeSecondsAt({
+            network: network,
+            coin: chain,
+            tip: tip,
+            legacySeconds: Number(bundle && bundle.ORACLE_MAX_PRICE_AGE_SECONDS),
+            hourlySeconds: Number(bundle && bundle.ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS)
+        });
+    }
+
     // Latest finalized snapshot for a coin pair plus a staleness verdict:
     // { row, fresh, stale, missing, ageSeconds, maxAgeSeconds }. A snapshot whose
     // reference-block timestamp is older than the oracle max age is flagged stale so
     // callers can refuse it rather than serve it. A snapshot with no usable
     // block_timestamp is never aged out, since its age is unknown.
-    async getPriceStatus(coinPair) {
+    async getPriceStatus(coinPair, maxAgeSeconds) {
         let rows = await this.db.getFinalizedPriceSnapshotByCoinPair(coinPair);
-        let maxAge = this.oracleMaxAgeSeconds(coinPair);
+        let maxAge = maxAgeSeconds == null ? this.oracleMaxAgeSeconds(coinPair) : maxAgeSeconds;
         if (rows.length === 0)
             return { row: null, fresh: false, stale: false, missing: true, ageSeconds: null, maxAgeSeconds: maxAge };
         let row = rows[0];
@@ -215,8 +233,8 @@ class Prices {
     // Freshest finalized price for a coin pair, or null when missing OR stale, so
     // getFeeQuote fails closed: it treats an unavailable price as an error rather than
     // quoting an outdated round. Use getPriceStatus to tell stale from missing.
-    async getPrice(coinPair) {
-        let s = await this.getPriceStatus(coinPair);
+    async getPrice(coinPair, maxAgeSeconds) {
+        let s = await this.getPriceStatus(coinPair, maxAgeSeconds);
         return s.fresh ? s.row : null;
     }
 
@@ -247,8 +265,9 @@ class Prices {
         // those actions quoted as 'unknown action'.
         let gasSchedule = {};
         let gasPrice    = '0.00001';
+        let bundle      = null;
         try {
-            let bundle = coins.getCoinConfig(chain, network);
+            bundle = coins.getCoinConfig(chain, network);
             if (bundle && bundle.GAS_SCHEDULE) gasSchedule = Object.assign({}, bundle.GAS_SCHEDULE);
             if (bundle && bundle.GAS_PRICE)    gasPrice    = String(bundle.GAS_PRICE);
         } catch (_) { /* unknown chain (the public path is gated by validateChain); serve no schedule */ }
@@ -260,8 +279,10 @@ class Prices {
         // Use bignumber multiply (8 decimal places) to match indexer fee charging.
         let xchainAmount = bcmul(gasCost, gasPrice, 8);
 
-        let xchainPriceRow = await this.getPrice('XCHAIN/USD');
-        let coinPrice      = await this.getPrice(chain + '/USD');
+        let maxAge = await this.advisoryMaxAgeSecondsAtTip(chain, network, bundle);
+
+        let xchainPriceRow = await this.getPrice('XCHAIN/USD', maxAge);
+        let coinPrice      = await this.getPrice(chain + '/USD', maxAge);
 
         if (!xchainPriceRow || !xchainPriceRow.price) {
             throw new Error('XCHAIN/USD oracle price unavailable; cannot compute fee quote');
