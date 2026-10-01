@@ -193,6 +193,21 @@ describe('shared-list leader poll delta versions', function () {
 describe('shared-list leader poll fold caching', function () {
     afterEach(function () { sinon.restore(); });
 
+    it('reuses the helper cache for the same held sequence and hash', async function () {
+        const held = fullRow(['a']);
+        const { engine } = makeEngine({
+            read: listRead(['b']),
+            heldRows: [held]
+        });
+
+        await engine.pollSharedLists(SNAPSHOT_BLOCK);
+        held.added = JSON.stringify(['wrong']);
+        await engine.pollSharedLists(SNAPSHOT_BLOCK + 1);
+
+        assert.strictEqual(engine.listConsensus.propose.callCount, 2);
+        assert.strictEqual(Object.hasOwn(engine, '_listFoldCache'), false);
+    });
+
     it('does not share held-fold cache entries between engines', async function () {
         const members = ['a'];
         const first = makeEngine({
@@ -209,7 +224,8 @@ describe('shared-list leader poll fold caching', function () {
 
         assert.strictEqual(first.listConsensus.propose.callCount, 1);
         assert.strictEqual(second.listConsensus.propose.callCount, 0);
-        assert.notStrictEqual(first._listFoldCache, second._listFoldCache);
+        assert.strictEqual(Object.hasOwn(first, '_listFoldCache'), false);
+        assert.strictEqual(Object.hasOwn(second, '_listFoldCache'), false);
     });
 });
 
