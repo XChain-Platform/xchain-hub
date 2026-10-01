@@ -42,6 +42,7 @@ const { bigIntReplacer }      = require('../../../src/lib/bigint_replacer.js');
 const callFinalize  = require('../../../src/cross_chain/call/finalize.js');
 const dexFinalize   = require('../../../src/cross_chain/dex/finalize.js');
 const bridgePersist = require('../../../src/cross_chain/bridge/persist.js');
+const listPersist   = require('../../../src/cross_chain/list/persist.js');
 const rewardPart    = require('../../../src/anchor/publisher/reward.js');
 const attestBatch   = require('../../../src/attestation/response_mirror/batch.js');
 
@@ -181,6 +182,9 @@ const LIVE_PATHS = {
     },
     policy_snapshots: async (db, b, row) => {
         await bridgePersist.mirrorRow.call({ db: db, broadcaster: b }, 'policy_snapshots', 'snapshot_id', row.snapshot_id);
+    },
+    list_snapshots: async (db, b, row) => {
+        await listPersist.mirrorFinalizedList.call({ db: db, broadcaster: b }, row.snapshot_id);
     },
     price_snapshots: async (db, b, row) => {
         for (let r of await db.findPriceSnapshotsForRound(row.round_number))
