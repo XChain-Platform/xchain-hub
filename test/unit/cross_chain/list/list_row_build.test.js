@@ -37,6 +37,33 @@ const ROW_KEYS = [
     'origin_block'
 ].sort();
 
+function build(version) {
+    return buildListSnapshotRow({
+        version,
+        network: 'regtest',
+        homeChain: 'DOGE',
+        homeListIndex: '7',
+        snapshotBlock: '500'
+    });
+}
+
+function assertCommonRow(row, version) {
+    assert.deepStrictEqual(Object.keys(row).sort(), ROW_KEYS);
+    assert.strictEqual(row.snapshot_id,
+        deriveListSnapshotId('regtest', 'DOGE', '7', version.seq, '500'));
+    assert.strictEqual(row.snapshot_block, 500);
+    assert.strictEqual(row.network, 'regtest');
+    assert.strictEqual(row.home_chain, 'DOGE');
+    assert.strictEqual(row.home_list_index, 7);
+    assert.strictEqual(row.list_type, Number(version.list_type));
+    assert.strictEqual(row.seq, Number(version.seq));
+    assert.strictEqual(row.kind, version.kind);
+    assert.strictEqual(row.added, JSON.stringify(version.added));
+    assert.strictEqual(row.removed, JSON.stringify(version.removed));
+    assert.strictEqual(row.members_hash, version.members_hash);
+    assert.strictEqual(row.origin_block, Number(version.origin_block));
+}
+
 describe('shared-list row origin block', function () {
     it('subtracts the confirmation depth from either supported tip field', function () {
         assert.strictEqual(listOriginBlockFrom({ block_index: 120 }, 6), 114);
@@ -58,33 +85,6 @@ describe('shared-list row origin block', function () {
 });
 
 describe('shared-list snapshot row builder', function () {
-    function build(version) {
-        return buildListSnapshotRow({
-            version,
-            network: 'regtest',
-            homeChain: 'DOGE',
-            homeListIndex: '7',
-            snapshotBlock: '500'
-        });
-    }
-
-    function assertCommonRow(row, version) {
-        assert.deepStrictEqual(Object.keys(row).sort(), ROW_KEYS);
-        assert.strictEqual(row.snapshot_id,
-            deriveListSnapshotId('regtest', 'DOGE', '7', version.seq, '500'));
-        assert.strictEqual(row.snapshot_block, 500);
-        assert.strictEqual(row.network, 'regtest');
-        assert.strictEqual(row.home_chain, 'DOGE');
-        assert.strictEqual(row.home_list_index, 7);
-        assert.strictEqual(row.list_type, Number(version.list_type));
-        assert.strictEqual(row.seq, Number(version.seq));
-        assert.strictEqual(row.kind, version.kind);
-        assert.strictEqual(row.added, JSON.stringify(version.added));
-        assert.strictEqual(row.removed, JSON.stringify(version.removed));
-        assert.strictEqual(row.members_hash, version.members_hash);
-        assert.strictEqual(row.origin_block, Number(version.origin_block));
-    }
-
     it('builds the exact twelve-column row for a full version', function () {
         const version = {
             list_type: '1',
