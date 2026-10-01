@@ -276,10 +276,14 @@ class OracleBatchSigner {
         let d = envelope && envelope.data;
         let first = parseInt(d && d.first_round);
         let last = parseInt(d && d.last_round);
-        if(Number.isFinite(first) && Number.isFinite(last) &&
-           this.windowPlan.straddles(first, last)){
-            this.refuse(first, last, 'range straddles the hourly window activation');
-            return;
+        if(Number.isFinite(first) && Number.isFinite(last) && first >= 0 && last >= first){
+            let windowIndex = this.windowPlan.windowOf(first);
+            let planned = this.windowPlan.rangeOf(windowIndex);
+            if(first < planned.first || last > planned.last){
+                this.refuse(first, last, 'range is not contained in planned window [' +
+                    planned.first + ',' + planned.last + ']');
+                return;
+            }
         }
         return followerHandleSignReq.call(this, envelope);
     }

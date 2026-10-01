@@ -94,6 +94,10 @@ describe('hourly window plan signer refusals', function() {
         await assertRefused(119, 120);
     });
 
+    it('refuses a signer proposal crossing any re-derived planned range', async function() {
+        await assertRefused(117, 118);
+    });
+
 });
 
 describe('hourly window plan configuration', function() {
