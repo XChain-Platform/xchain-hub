@@ -29,16 +29,7 @@ const { listOriginBlockFrom, buildListSnapshotRow } = require('./row_build.js');
 const { planListVersion } = require('./version_plan.js');
 
 const logger = getLogger();
-const foldCaches = new WeakMap();
-
-function foldCacheFor(engine) {
-    let cache = foldCaches.get(engine);
-    if (!cache) {
-        cache = createFoldCache();
-        foldCaches.set(engine, cache);
-    }
-    return cache;
-}
+const foldCache = createFoldCache();
 
 function parseMembers(value) {
     if (Array.isArray(value)) return value;
@@ -94,7 +85,7 @@ async function heldListState(engine, network, chain, rootIndex, lastSeq) {
 
     return {
         latest,
-        fold: () => foldCacheFor(engine).get(
+        fold: () => foldCache.get(
             chain,
             rootIndex,
             lastSeq,
