@@ -89,14 +89,17 @@ async function validates(row, options){
     return validate.validateProposedMatch.call(context(options), row);
 }
 
-describe('shared-list follower validation', function () {
-    beforeEach(function () {
-        sinon.stub(ah, 'isAdmissionEra').returns(true);
-    });
+function enableAdmission(){
+    sinon.stub(ah, 'isAdmissionEra').returns(true);
+}
 
-    afterEach(function () {
-        sinon.restore();
-    });
+function restoreAdmission(){
+    sinon.restore();
+}
+
+describe('shared-list follower validation successes and abstentions', function () {
+    beforeEach(enableAdmission);
+    afterEach(restoreAdmission);
 
     it('co-signs a correct full version on regtest', async function () {
         assert.strictEqual(await validates(proposedRow()), true);
@@ -138,6 +141,11 @@ describe('shared-list follower validation', function () {
         });
         assert.strictEqual(await validates(delta, { readMembers: SECOND_MEMBERS }), false);
     });
+});
+
+describe('shared-list follower validation conflicts and reads', function () {
+    beforeEach(enableAdmission);
+    afterEach(restoreAdmission);
 
     it('refuses a second content at a held sequence', async function () {
         const row = proposedRow();
@@ -172,6 +180,11 @@ describe('shared-list follower validation', function () {
             members_hash: 'f'.repeat(64)
         })), false);
     });
+});
+
+describe('shared-list follower validation shape and activation', function () {
+    beforeEach(enableAdmission);
+    afterEach(restoreAdmission);
 
     it('refuses full kind at sequence two', async function () {
         assert.strictEqual(await validates(proposedRow({ seq: 2 })), false);
