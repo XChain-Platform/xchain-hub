@@ -150,6 +150,7 @@ const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block
 // many rows of either kind; the whole archive JSON stays under the byte ceiling, well
 // inside the 16 MiB decompress cap every verifier enforces.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
+// One version-1 list snapshot row can carry 10000 members, so use the same archive cap.
 const ARCHIVE_MAX_LIST_ROWS = 8;
 const ARCHIVE_MAX_PRICE_ROUNDS = 288;
 const ARCHIVE_MAX_JSON_BYTES = 8 * 1024 * 1024;
