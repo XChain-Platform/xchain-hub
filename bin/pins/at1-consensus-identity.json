@@ -63,6 +63,6 @@
   "coin_pin_skipped_networks": [
     "mainnet"
   ],
-  "hub_schema_version": 7,
+  "hub_schema_version": 8,
   "carrier_logic_digest": "96f7f2cbcd74d84ac22b00b0ee6f7fedbca028fce33e305d91c2f82610a83658"
 }
