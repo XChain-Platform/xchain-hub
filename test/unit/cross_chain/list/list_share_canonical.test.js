@@ -30,18 +30,11 @@ const docsDirs = process.env.XCHAIN_DOCS_DIR
 const vectorPath = docsDirs
     .map(dir => path.resolve(dir, 'protocol', 'test-vectors', 'list_share.json'))
     .find(candidate => fs.existsSync(candidate));
-const vectors = vectorPath ? require(vectorPath) : null;
-
-function requireVectors() {
-    if (!vectors) {
-        console.log('Skipping list share canonical vectors: list_share.json was not found in ' + docsDirs.join(' or '));
-        this.skip();
-    }
-}
+assert.ok(vectorPath, 'list_share.json was not found in ' + docsDirs.join(' or '));
+const vectors = require(vectorPath);
 
 describe('list share snapshot id vectors', function () {
-    before(requireVectors);
-    (vectors ? vectors.snapshotIds : []).forEach(function (entry) {
+    vectors.snapshotIds.forEach(function (entry) {
         it('derives snapshot id: ' + entry.name, function () {
             assert.strictEqual(
                 deriveListSnapshotId(
@@ -58,8 +51,7 @@ describe('list share snapshot id vectors', function () {
 });
 
 describe('list share signed canonical vectors', function () {
-    before(requireVectors);
-    (vectors ? vectors.canonicals : []).forEach(function (entry) {
+    vectors.canonicals.forEach(function (entry) {
         it('builds signed bytes: ' + entry.name, function () {
             const row = {
                 snapshot_id: entry.snapshot_id,
@@ -82,7 +74,6 @@ describe('list share signed canonical vectors', function () {
 });
 
 describe('list share signed canonical boundaries', function () {
-    before(requireVectors);
     it('requires admission bytes and excludes member arrays from signed bytes', function () {
         const entry = vectors.canonicals[1];
         const row = {
