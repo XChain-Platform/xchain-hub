@@ -112,7 +112,10 @@ describe('shared-list due filter', function () {
             { root_index: 2, share_block: 10 },
             { root_index: 3, share_block: 11 },
             { root_index: 4 },
-            { root_index: 5, share_block: 'not-a-block' }
+            { root_index: 5, share_block: 'not-a-block' },
+            0,
+            false,
+            ''
         ];
 
         assert.deepStrictEqual(listsDue(entries, '10'), entries.slice(0, 2));

@@ -77,7 +77,8 @@ function listsDue(entries, originBlock) {
     const origin = numericBlock(originBlock);
     if (origin === null) return [];
     return entries.filter(entry => {
-        const shareBlock = entry && numericBlock(entry.share_block);
+        const shareBlock = entry !== null && typeof entry === 'object' ?
+            numericBlock(entry.share_block) : null;
         return shareBlock !== null && shareBlock <= origin;
     });
 }
