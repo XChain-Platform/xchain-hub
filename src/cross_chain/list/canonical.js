@@ -15,6 +15,8 @@
  ********************************************************************/
 
 const crypto = require('crypto');
+const ah = require('../../lib/admission_height.js');
+const eq = require('../../consensus/equivocation_header.js');
 
 function compareMembers(a, b) {
     return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
@@ -61,4 +63,54 @@ function applyListDelta(prev, added, removed) {
     return [...result].sort(compareMembers);
 }
 
-module.exports = { isCanonicalOrder, listMembersHash, listDelta, applyListDelta };
+function deriveListSnapshotId(...args) {
+    return require('./chain.js').deriveListSnapshotId(...args);
+}
+
+function foldListChain(rows) {
+    return require('./chain.js').foldListChain(rows);
+}
+
+function listSnapshotCanonical(r, view) {
+    const admitBlocks = ah.rowAdmitBlocks(r);
+    if (admitBlocks === null) {
+        throw new Error('CrossChainListShare: a row must carry an admission map');
+    }
+
+    let raw = [
+        'XLISTSHARE',
+        r.snapshot_id,
+        String(r.snapshot_block),
+        r.home_chain,
+        String(r.home_list_index),
+        String(r.list_type),
+        String(r.seq),
+        r.kind,
+        String(r.origin_block),
+        String(r.members_hash),
+        r.network || ''
+    ].join('|');
+    raw += ah.admissionCanonicalField(
+        'CrossChainListShare', r.network, r.snapshot_block, admitBlocks
+    );
+
+    if (eq.isEquivHeaderActive(r.snapshot_block, r.network)) {
+        return eq.buildEquivCanonical(
+            eq.ENGINE_TAGS.LIST_SHARE,
+            r.snapshot_id,
+            view != null ? view : 0,
+            raw
+        );
+    }
+    return raw;
+}
+
+module.exports = {
+    isCanonicalOrder,
+    listMembersHash,
+    listDelta,
+    applyListDelta,
+    deriveListSnapshotId,
+    foldListChain,
+    listSnapshotCanonical
+};
