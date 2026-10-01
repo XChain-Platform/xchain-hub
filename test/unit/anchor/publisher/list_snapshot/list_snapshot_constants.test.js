@@ -15,7 +15,7 @@ const {
     LIST_SNAPSHOT_KEYS,
     POLICY_KEYS,
     ARCHIVE_MAX_LIST_ROWS
-} = require('../../../../src/anchor/publisher/constants.js');
+} = require('../../../../../src/anchor/publisher/constants.js');
 
 describe('list snapshot archive constants', () => {
     it('pins the list snapshot key order', () => {
