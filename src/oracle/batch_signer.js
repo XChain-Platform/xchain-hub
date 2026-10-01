@@ -279,6 +279,14 @@ class OracleBatchSigner {
             this.refuse(first, last, 'range straddles the hourly window activation');
             return;
         }
+        if(Number.isFinite(first) && Number.isFinite(last) && last >= first){
+            let planned = this.windowPlan.rangeOf(this.windowPlan.windowOf(first));
+            if(first < planned.first || last > planned.last){
+                this.refuse(first, last, 'range is outside planned window [' +
+                    planned.first + ',' + planned.last + ']');
+                return;
+            }
+        }
         return followerHandleSignReq.call(this, envelope);
     }
 
