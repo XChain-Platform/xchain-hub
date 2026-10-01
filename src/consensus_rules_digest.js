@@ -48,7 +48,7 @@
  * loadGateValue throw, never contribute an ABSENT sentinel, so a build that
  * LOSES a gate is a refusal rather than an invisible shortening of the list.
  *
- * BYTE-TWIN of xchain-hub/src/consensus_rules_digest.js. The two copies
+ * BYTE-TWIN of xchain-indexer/src/consensus_rules_digest.js. The two copies
  * must agree or every cross-process comparison reports a false mismatch and
  * the alarm trains its operators to ignore it, which is worse than no alarm.
  *
