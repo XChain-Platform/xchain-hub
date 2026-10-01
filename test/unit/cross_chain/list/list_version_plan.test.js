@@ -23,7 +23,7 @@ function read(members, type = 2) {
     return { type, members, hash: listMembersHash(members) };
 }
 
-describe('shared-list version plan', function () {
+describe('shared-list version plan first and unchanged', function () {
     it('plans the first version as a full copy', function () {
         const current = read(['a', 'b']);
         const result = planListVersion({
@@ -58,7 +58,9 @@ describe('shared-list version plan', function () {
 
         assert.deepStrictEqual(result, { unchanged: true });
     });
+});
 
+describe('shared-list version plan delta and input refusals', function () {
     it('plans a canonical delta with numeric origin-block comparison', function () {
         const previous = ['a', 'b', 'd', 'f'];
         const current = read(['b', 'c', 'e', 'f']);
@@ -110,7 +112,9 @@ describe('shared-list version plan', function () {
             held: { lastSeq: 0, latest: null, fold: () => null }
         }), { refuse: 'hash' });
     });
+});
 
+describe('shared-list version plan held-chain refusals', function () {
     it('refuses a changed held list type', function () {
         const current = read(['b']);
         assert.deepStrictEqual(planListVersion({
@@ -157,7 +161,9 @@ describe('shared-list version plan', function () {
             }
         }), { refuse: 'origin-block' });
     });
+});
 
+describe('shared-list version plan limits', function () {
     it('declines a list above the member limit', function () {
         const members = Array.from(
             { length: 10001 },
