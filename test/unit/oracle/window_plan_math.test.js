@@ -17,7 +17,7 @@
 const assert = require('assert');
 const { createWindowPlan } = require('../../../src/oracle/publisher/window_plan.js');
 
-describe('window plan math', function() {
+function defineBoundaryTests() {
     it('maps the last small window and first large window around the switch', function() {
         const plan = createWindowPlan({ firstRound: 120, smallRounds: 2, largeRounds: 6 });
 
@@ -48,7 +48,9 @@ describe('window plan math', function() {
             previous = windowIndex;
         }
     });
+}
 
+function defineSpecialSwitchTests() {
     it('supports a switch at round zero', function() {
         const plan = createWindowPlan({ firstRound: 0, smallRounds: 2, largeRounds: 6 });
 
@@ -73,7 +75,9 @@ describe('window plan math', function() {
             assert.strictEqual(plan.straddles(0, 20000001), false);
         });
     }
+}
 
+function defineRefusalTests() {
     it('refuses invalid window sizes with TypeError', function() {
         assert.throws(
             () => createWindowPlan({ firstRound: 12, smallRounds: 0, largeRounds: 6 }),
@@ -97,7 +101,9 @@ describe('window plan math', function() {
                     error.message.includes(String(firstRound)));
         }
     });
+}
 
+function defineStraddlesTest() {
     it('detects only intervals that cross the armed switch', function() {
         const plan = createWindowPlan({ firstRound: 120, smallRounds: 2, largeRounds: 6 });
 
@@ -106,4 +112,11 @@ describe('window plan math', function() {
         assert.strictEqual(plan.straddles(120, 125), false);
         assert.strictEqual(plan.straddles(118, 119), false);
     });
+}
+
+describe('window plan math', function() {
+    defineBoundaryTests();
+    defineSpecialSwitchTests();
+    defineRefusalTests();
+    defineStraddlesTest();
 });
