@@ -120,6 +120,7 @@ const archiveRoundMethods          = require('./publisher/archive/round.js');
 const archiveSelectionMethods      = require('./publisher/archive/selection.js');
 const archiveBuildMethods          = require('./publisher/archive/build.js');
 const archiveBridgePolicyMethods   = require('./publisher/archive/bridge_policy_rows.js');
+const archiveListSnapshotMethods   = require('./publisher/archive/list_snapshot_rows.js');
 const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy_verify.js');
 const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price_rows.js');
 const archiveCheckpointPriceVerifyMethods = require('./publisher/archive/checkpoint_price_verify.js');
@@ -276,6 +277,7 @@ const PART_METHODS = [
     archiveSelectionMethods,
     archiveBuildMethods,
     archiveBridgePolicyMethods,
+    archiveListSnapshotMethods,
     archiveBridgeVerifyMethods,
     archiveCheckpointPriceMethods,
     archiveCheckpointPriceVerifyMethods,
