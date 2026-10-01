@@ -58,7 +58,9 @@ describe('shared-list fold cache', function () {
         assert.strictEqual(calls, 3);
         assert.strictEqual(cache.size(), 1);
     });
+});
 
+describe('shared-list fold cache validation and eviction', function () {
     it('does not cache wrong-hash, null, or throwing folds', function () {
         const cache = createFoldCache();
         const expectedHash = listMembersHash(['expected']);
