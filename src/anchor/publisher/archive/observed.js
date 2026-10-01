@@ -93,7 +93,6 @@ module.exports = {
             if(b && b.transfer_id != null) entry.bridges.add(String(b.transfer_id));
         for(const p of (archive.policy_snapshots || []))
             if(p && p.snapshot_id != null) entry.policies.add(String(p.snapshot_id));
-        for(const id of observedListIds(archive)) entry.lists.add(id);
         for(const c of (archive.state_checkpoints || []))
             if(c && c.chain != null && c.network != null && c.checkpoint_seq != null)
                 entry.checkpoints.add([c.chain, c.network, c.checkpoint_seq].map(String).join('|'));
@@ -103,6 +102,7 @@ module.exports = {
         for(const t of (archive.price_tombstones || []))
             if(t && t.round_number != null && t.coin_pair != null)
                 entry.tombstones.add([t.round_number, t.coin_pair].map(String).join('|'));
+        for(const id of observedListIds(archive)) entry.lists.add(id);
         // Bounded on its own terms as well as through the leader map's lockstep evict,
         // so a body recorded for a seq whose leader entry is already gone cannot pin
         // memory.
