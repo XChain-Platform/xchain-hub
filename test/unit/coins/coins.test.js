@@ -64,16 +64,19 @@ const coins      = require('../../../src/coins');
 // LIST_SHARED_EDIT_BASE and LIST_SHARED_EDIT_PER_ITEM. GAS_SCHEDULE is hashed whole,
 // so all nine hashes move even though nothing charges the keys below
 // LIST_SHARE_ACTIVATION. The same one-wave rollout rule applies.
+// REGENERATED 2026-10-01: ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS joins the consensus
+// subset. All nine hashes move even though the 4500-second fee-gate bound is inert
+// below ORACLE_PRICE_AGE_HOURLY_ACTIVATION. The one-wave rollout rule applies.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '91fc64bc20c9615ad7a12d4dff70d43eb258daf0419dde16633eb7ed41b528b9',
-            testnet: '5d076adf982dc81c21c6e6855325265e0320f58f0dd61b938adaf42544895535',
-            regtest: '603b402538620934ad2b81fd3013b5c1651c32cf62cc56bea8dc53ddc247ec9a' },
-    LTC:  { mainnet: '90470750d9635d9f6e505105da027f9e20f73ef8377b2b3beabaa2e37d083fd1',
-            testnet: '2083cb4b90fa59172bc46a65eecff29a4f803e8d913a1c8d269ec7f17e4d4062',
-            regtest: '68a3751176e9a2b3857d5ea34cacfc1f0b2d88c17d46b8ccaf477c2a3baa7ffc' },
-    DOGE: { mainnet: 'cf0918fec0f99159b11e0cb3d2e58a9edb2e89388768089c3a71d9c9e45d5bab',
-            testnet: '3eebc68bca5024a757fae7170a98b9e2b8307ca0f2f037c4c6025dfd94e45128',
-            regtest: 'ab3c2ce46d3ac6eff3f12d6dca037b05dd27e456369124f48928598fcdb72173' },
+    BTC:  { mainnet: '1fd448eafb00c95f526f1d01422df98c1af8876a0adbefd859fca19c7d789a31',
+            testnet: '3e0083d555399e54eff2670a0ea5e8d76c8935d3e7423451c1221ae698386b5a',
+            regtest: 'ad800ecb8d28448f9d39743bd3a28e6aac121d0e9add30743ee1dcbbf694af86' },
+    LTC:  { mainnet: '3d3d4b3820199d4398b53eb239be552acd281dff678cda0d88acf3932af2076e',
+            testnet: 'd9c315b36adf5ab8bd6831ccc59a2a01124df70ba9fc8141662ec682285251e8',
+            regtest: '16dd43ca2299880704e076e5f7c262eae6b5e32823ad49c9748c33f014f44c36' },
+    DOGE: { mainnet: 'cc2a4db628dd3759bcf64dd35dc6b9ee2726be1a9d38eb5e5596bc3a9d0bf99e',
+            testnet: '82c6bc814e3de4a1e023d008457b7186c5a6ac142c85be9bf0a18f2d5989fd72',
+            regtest: 'd7bd53f527d961f1cf0cfc7de725d61e625975f7086532976c777a04c08988f6' },
 };
 
 function registerRegistryBasics() {

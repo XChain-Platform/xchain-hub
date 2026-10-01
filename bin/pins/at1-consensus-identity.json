@@ -47,17 +47,17 @@
   "gates_field": "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION,anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S,anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION,anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION,attest_relay_activation.ATTEST_RELAY_ACTIVATION,attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2,attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION,checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION,cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION,equivocation_header.EQUIV_HEADER_ACTIVATION,mirror_admission_activation.ADMIT_MARGIN_BLOCKS,mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS,mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS,mirror_admission_activation.CANONICAL_HEIGHT_RE,mirror_admission_activation.CHAIN_CODE_RE,mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION,mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION,mirror_admission_activation.admissionCanonicalField,mirror_admission_activation.decodeAdmitBlocks,mirror_admission_activation.encodeAdmitBlocks,mirror_admission_activation.isAdmissionEra,oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND,oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION,price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION,price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION,price_scale_activation.PRICE_V1_FEE_MAX_LENGTH,price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH,price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION,retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION,rollcall_activation.ROLLCALL_ACTIVATION,rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION,snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION,stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION,token_bridge_activation.TOKEN_BRIDGE_ACTIVATION,xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION",
   "gates_field_hash": "9c2d78a40cbedeb5846a153f687979b4bf7d9a844728cb0f5dd72223b146b05c",
   "coin_consensus_pins": {
-    "BTC:mainnet": "91fc64bc20c9615ad7a12d4dff70d43eb258daf0419dde16633eb7ed41b528b9",
-    "LTC:mainnet": "90470750d9635d9f6e505105da027f9e20f73ef8377b2b3beabaa2e37d083fd1",
-    "DOGE:mainnet": "cf0918fec0f99159b11e0cb3d2e58a9edb2e89388768089c3a71d9c9e45d5bab",
-    "BTC:testnet": "5d076adf982dc81c21c6e6855325265e0320f58f0dd61b938adaf42544895535",
-    "LTC:testnet": "2083cb4b90fa59172bc46a65eecff29a4f803e8d913a1c8d269ec7f17e4d4062",
-    "DOGE:testnet": "3eebc68bca5024a757fae7170a98b9e2b8307ca0f2f037c4c6025dfd94e45128",
-    "BTC:regtest": "603b402538620934ad2b81fd3013b5c1651c32cf62cc56bea8dc53ddc247ec9a",
-    "LTC:regtest": "68a3751176e9a2b3857d5ea34cacfc1f0b2d88c17d46b8ccaf477c2a3baa7ffc",
-    "DOGE:regtest": "ab3c2ce46d3ac6eff3f12d6dca037b05dd27e456369124f48928598fcdb72173"
+    "BTC:mainnet": "1fd448eafb00c95f526f1d01422df98c1af8876a0adbefd859fca19c7d789a31",
+    "LTC:mainnet": "3d3d4b3820199d4398b53eb239be552acd281dff678cda0d88acf3932af2076e",
+    "DOGE:mainnet": "cc2a4db628dd3759bcf64dd35dc6b9ee2726be1a9d38eb5e5596bc3a9d0bf99e",
+    "BTC:testnet": "3e0083d555399e54eff2670a0ea5e8d76c8935d3e7423451c1221ae698386b5a",
+    "LTC:testnet": "d9c315b36adf5ab8bd6831ccc59a2a01124df70ba9fc8141662ec682285251e8",
+    "DOGE:testnet": "82c6bc814e3de4a1e023d008457b7186c5a6ac142c85be9bf0a18f2d5989fd72",
+    "BTC:regtest": "ad800ecb8d28448f9d39743bd3a28e6aac121d0e9add30743ee1dcbbf694af86",
+    "LTC:regtest": "16dd43ca2299880704e076e5f7c262eae6b5e32823ad49c9748c33f014f44c36",
+    "DOGE:regtest": "d7bd53f527d961f1cf0cfc7de725d61e625975f7086532976c777a04c08988f6"
   },
-  "coin_consensus_pin_hash": "584e671eb649f19f9822beb68cf008372dddc91dc581ef47427bb52f4b729d29",
+  "coin_consensus_pin_hash": "1c044b4d9c8e0c728e39afa775de53efda8d3562820ca6193c72007cff4aa794",
   "coin_pin_armed_networks": [
     "testnet",
     "regtest"
