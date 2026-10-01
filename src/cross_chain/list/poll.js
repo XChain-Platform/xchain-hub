@@ -29,7 +29,6 @@ const { listOriginBlockFrom, buildListSnapshotRow } = require('./row_build.js');
 const { planListVersion } = require('./version_plan.js');
 
 const logger = getLogger();
-const foldCache = createFoldCache();
 
 function parseMembers(value) {
     if (Array.isArray(value)) return value;
@@ -85,7 +84,7 @@ async function heldListState(engine, network, chain, rootIndex, lastSeq) {
 
     return {
         latest,
-        fold: () => foldCache.get(
+        fold: () => engine._listFoldCache.get(
             chain,
             rootIndex,
             lastSeq,
@@ -172,6 +171,8 @@ module.exports = {
     },
 
     async maybeSnapshotList(chain, rootIndex, originBlock, snapshotBlock) {
+        if (!this._listFoldCache) this._listFoldCache = createFoldCache();
+
         const read = await readListAt(this, chain, rootIndex, originBlock);
         if (!read) return;
 

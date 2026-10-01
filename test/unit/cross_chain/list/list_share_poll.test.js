@@ -190,6 +190,29 @@ describe('shared-list leader poll delta versions', function () {
     });
 });
 
+describe('shared-list leader poll fold caching', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('does not share held-fold cache entries between engines', async function () {
+        const members = ['a'];
+        const first = makeEngine({
+            read: listRead(['b']),
+            heldRows: [fullRow(members)]
+        }).engine;
+        const second = makeEngine({
+            read: listRead(['b']),
+            heldRows: [fullRow(members, { added: JSON.stringify(['wrong']) })]
+        }).engine;
+
+        await first.pollSharedLists(SNAPSHOT_BLOCK);
+        await second.pollSharedLists(SNAPSHOT_BLOCK);
+
+        assert.strictEqual(first.listConsensus.propose.callCount, 1);
+        assert.strictEqual(second.listConsensus.propose.callCount, 0);
+        assert.notStrictEqual(first._listFoldCache, second._listFoldCache);
+    });
+});
+
 describe('shared-list leader poll read refusals', function () {
     afterEach(function () { sinon.restore(); });
 
