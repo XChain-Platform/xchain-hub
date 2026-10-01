@@ -59,7 +59,7 @@ module.exports = {
         let ids = this.archiveBackfillIds(round, lostChunks, onChainValid, noTxid);
         await this.backfillBatch(round.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
                                  ids.bridgeIds, ids.policyIds, ids.checkpointIds,
-                                 ids.priceIds, ids.tombstoneIds);
+                                 ids.priceIds, ids.tombstoneIds, ids.listIds);
         // Bookkeeping is done, so the crash window this marker covers is closed: settle it
         // and let the next round start immediately. Settling is gated on a real txid
         // because a null one is a false/incomplete broadcast success, NOT proof that
@@ -266,6 +266,7 @@ module.exports = {
     archiveBackfillIds(round, lostChunks, onChainValid, noTxid){
         let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
         let bridgeIds = round.bridgeIds || [], policyIds = round.policyIds || [];
+        let listIds = round.listIds || [];
         let checkpointIds = round.checkpointIds || [], priceIds = round.priceIds || [];
         let tombstoneIds = round.tombstoneIds || [];
         if(lostChunks > 0 || !onChainValid || noTxid){
@@ -275,6 +276,7 @@ module.exports = {
             priceIds  = priceIds.map(p => Object.assign({}, p, { status: '__partial__' }));
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
             policyIds = [];
+            listIds = [];
             checkpointIds = [];
             tombstoneIds = [];
             if(lostChunks > 0)
@@ -289,7 +291,7 @@ module.exports = {
                 logger.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive v1 broadcast returned no ' +
                               'txid; rows stay pending and re-archive under a new batch seq');
         }
-        return { matchIds, callIds, rewardIds, bridgeIds, policyIds,
+        return { matchIds, callIds, rewardIds, bridgeIds, policyIds, listIds,
                  checkpointIds, priceIds, tombstoneIds };
     },
 
@@ -303,6 +305,7 @@ module.exports = {
                 rewards: rewardIds,
                 bridges: ids.bridgeIds || [],
                 policies: ids.policyIds || [],
+                lists: ids.listIds || [],
                 checkpoints: ids.checkpointIds || [],
                 prices: ids.priceIds || [],
                 tombstones: ids.tombstoneIds || [],
