@@ -32,6 +32,7 @@ const CrossChainEngine   = require('./cross_chain/engine.js');
 const CrossChainDexEngine  = require('./cross_chain/dex_engine.js');
 const CrossChainCallEngine = require('./cross_chain/call_engine.js');
 const CrossChainBridgeEngine = require('./cross_chain/bridge_engine.js');
+const ListShareEngine = require('./cross_chain/list_share_engine.js');
 const StateCheckpointEngine = require('./anchor/checkpoint_engine.js');
 const StateAnchorPublisher  = require('./anchor/publisher.js');
 const RetractionConsensus   = require('./consensus/retraction.js');
@@ -83,7 +84,7 @@ const MODULES = Object.freeze({
     Database, PeerManager, Consensus, ValidatorIdentity, PriceAggregator, HubDbBroadcaster,
     OracleRound, OracleConsensus, OracleBatchSigner, OraclePublisher, RewardTracker,
     SlashDetector, CrossChainEngine, CrossChainDexEngine, CrossChainCallEngine,
-    CrossChainBridgeEngine, StateCheckpointEngine, StateAnchorPublisher, RetractionConsensus,
+    CrossChainBridgeEngine, ListShareEngine, StateCheckpointEngine, StateAnchorPublisher, RetractionConsensus,
     SwapTracker, ReorgHandler, Governance, SlashGovernance, CapabilityRegistry,
     StakeShareWatcher, ProviderRegistry, AttestationRound, AttestationConsensus,
     AttestationPublisher, AttestationSpotChecker, AttestationResponseMirror,
@@ -143,6 +144,7 @@ class XChainHub {
         this.rewardTracker    = null;
         this.slashDetector    = null;
         this.crossChain       = null;
+        this.listShare        = null;
         this.reorgHandler     = null;
         this.swapTracker      = null;
         this.governance       = null;

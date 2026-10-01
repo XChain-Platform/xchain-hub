@@ -257,6 +257,7 @@ class Lifecycle {
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
+        if(this.listShare)        await this.listShare.stop();
         if(this.crossChainBridge) await this.crossChainBridge.stop();
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();
