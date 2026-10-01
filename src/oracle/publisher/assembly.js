@@ -47,8 +47,7 @@ module.exports = {
         let takeover = !!(opts && opts.takeover);
         if (!takeover && this._assembledWindows.has(windowIndex)) return;
 
-        let first  = windowIndex * this.batchWindowRounds;
-        let last   = first + this.batchWindowRounds - 1;
+        let { first, last } = this.windowPlan.rangeOf(windowIndex);
         // Before anything is read off the buffer, make it agree with price_snapshots.
         // Every co-signer re-derives this window from ITS price_snapshots,
         // so a buffered round that has drifted from this hub's own rows is a proposal

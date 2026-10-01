@@ -43,6 +43,12 @@ const swq               = require('../consensus/stake_weighted_quorum.js');
 const gateRegistry      = require('../consensus/gate_registry');
 const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
 const { positiveIntConfig } = require('../lib/config_int.js');
+const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
+const hubConfig         = require('../config');
+const { maxBatchWindowRounds, pinnedMaxPriceAgeMs,
+        DEFAULT_BATCH_LANDING_RESERVE_MS,
+        LEGACY_BATCH_WINDOW_ROUNDS } = require('./price_batch_cadence.js');
+const { createHourlyWindowPlan } = require('./publisher/window_plan.js');
 const ah                = require('../lib/admission_height.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -52,7 +58,12 @@ const logger = getLogger();
 // with a proposal.
 const leaderPart   = require('./batch_signer/leader.js');
 const followerPart = require('./batch_signer/follower.js');
-const PARTS = [leaderPart, followerPart];
+const followerHandleSignReq = followerPart.handleSignReq;
+const followerSignIfReproduced = followerPart.signIfReproduced;
+const followerMethods = Object.assign({}, followerPart);
+delete followerMethods.handleSignReq;
+delete followerMethods.signIfReproduced;
+const PARTS = [leaderPart, followerMethods];
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
@@ -62,6 +73,45 @@ const XPRICEB_SIGN     = 'XPRICEB_SIGN';
 // needed before broadcasting, and how long ago"; anything older than a couple of
 // failover windows can no longer change that answer.
 const CO_SIGNED_WINDOW_MEMO_MAX = 256;
+
+function nonNegativeInt(raw, dflt) {
+    if (raw === undefined || raw === null || raw === '') return dflt;
+    let n = parseInt(raw, 10);
+    return Number.isInteger(n) && n >= 0 ? n : dflt;
+}
+
+function signerWindowPlan(network, cfg, enabled) {
+    let roundIntervalMs = positiveIntConfig(
+        hubConfig.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
+        DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
+    let graceMs = positiveIntConfig(
+        hubConfig.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
+        300000, 'ORACLE_BATCH_GRACE_MS');
+    let landingReserveMs = nonNegativeInt(
+        hubConfig.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
+        DEFAULT_BATCH_LANDING_RESERVE_MS);
+    let cadence = maxBatchWindowRounds({
+        maxPriceAgeMs: pinnedMaxPriceAgeMs(network),
+        roundIntervalMs,
+        graceMs,
+        landingReserveMs
+    });
+    let smallRounds = positiveIntConfig(
+        hubConfig.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
+        cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
+        'ORACLE_BATCH_WINDOW_ROUNDS');
+    if (cadence.ceiling !== null && smallRounds > cadence.ceiling) {
+        smallRounds = cadence.ceiling;
+    }
+    return createHourlyWindowPlan({
+        network,
+        enabled,
+        smallRounds,
+        roundIntervalMs,
+        graceMs,
+        landingReserveMs
+    });
+}
 
 class OracleBatchSigner {
 
@@ -74,6 +124,14 @@ class OracleBatchSigner {
         this.network     = (hub && hub.network) ? hub.network : '';
 
         let cfg = (hub && hub.p2pConfig) ? hub.p2pConfig : {};
+        try {
+            this.windowPlan = signerWindowPlan(
+                this.network, cfg, Boolean(hub && hub.oracleConsensus)).plan;
+        } catch (e) {
+            logger.error('OracleBatchSigner: CRITICAL - invalid hourly window plan: ' +
+                (e && e.message));
+            throw e;
+        }
         // Sized against the WINDOW, not against a PBFT round: the leader has already
         // waited out ORACLE_BATCH_GRACE_MS before it proposes, so a peer that is
         // briefly behind on its own mirror still has a full minute to catch up and
@@ -214,6 +272,28 @@ class OracleBatchSigner {
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
         this.checkSignQuorum();
+    }
+
+    async handleSignReq(envelope){
+        return followerHandleSignReq.call(this, envelope);
+    }
+
+    proposalReproduces(d, first, last, mine, myAnchor){
+        try {
+            return this.canonical(first, last, myAnchor, mine) ===
+                this.canonical(d.first_round, d.last_round, d.btc_block_height, d.rounds);
+        } catch(e){
+            return false;
+        }
+    }
+
+    signIfReproduced(d, first, last, mine, myAnchor, me){
+        if(this.proposalReproduces(d, first, last, mine, myAnchor) &&
+           this.windowPlan.straddles(first, last)){
+            this.refuse(first, last, 'range straddles the hourly window activation');
+            return;
+        }
+        return followerSignIfReproduced.call(this, d, first, last, mine, myAnchor, me);
     }
 
     // ---------------------------------------------------------------- helpers

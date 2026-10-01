@@ -44,7 +44,7 @@ module.exports = {
     // ----- The window scheduler -----
 
     windowIndexOf(round) {
-        return Math.floor(parseInt(round) / this.batchWindowRounds);
+        return this.windowPlan.windowOf(parseInt(round));
     },
 
     // Called for every round this hub buffers. Two things close a window: its LAST
@@ -58,7 +58,7 @@ module.exports = {
             if (lower < w) this.armWindowTimer(lower);
         }
         if (!this._windows.has(w)) this._windows.set(w, { timer: null });
-        if (parseInt(round) % this.batchWindowRounds === this.batchWindowRounds - 1) {
+        if (parseInt(round) === this.windowPlan.rangeOf(w).last) {
             this.armWindowTimer(w);
         }
     },
@@ -114,7 +114,7 @@ module.exports = {
     // closes the window live, so holding it is proof the window is closed even when no
     // higher round exists yet and no timer survived to say so.
     windowLastSlotBuffered(windowIndex) {
-        return this._buffer.has(windowIndex * this.batchWindowRounds + this.batchWindowRounds - 1);
+        return this._buffer.has(this.windowPlan.rangeOf(windowIndex).last);
     },
 
     // Every closed window this hub still holds buffered rounds for, has not already
@@ -233,8 +233,7 @@ module.exports = {
         if (!seen || seen.count < this.catchupMaxAttempts) return false;
         if ((Date.now() - seen.firstAt) < this.catchupRetireAfterMs) return false;
 
-        let first = windowIndex * this.batchWindowRounds;
-        let last  = first + this.batchWindowRounds - 1;
+        let { first, last } = this.windowPlan.rangeOf(windowIndex);
         this.batchCatchupRetiredWindows++;
         this.noteAssembled(windowIndex);   // also clears the attempt record
         logger.warn('OraclePublisher: window [' + first + ',' + last + '] has failed ' + seen.count +
