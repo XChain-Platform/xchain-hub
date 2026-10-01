@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The bridge engine resolves its three flag-day gates at construction: the table as a
+// The bridge engine resolves its four flag-day gates at construction: the table as a
 // registry row read by its literal key, the predicate as the registry's own activeAt
 // over that row (W5: the predicate-only twin modules retired). A miss that returned
 // null idled the engine with no error, no failing round and no wire field naming it.
@@ -48,8 +48,8 @@ const PROBE_COINS  = ['BTC', 'LTC', 'DOGE', undefined];
 let engine;
 
 function itNamesAllGatesByRegistryKey() {
-    it('names all three gates by their registry keys, and each has a row', function () {
-        expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy']);
+    it('names all four gates by their registry keys, and each has a row', function () {
+        expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy', 'listShare']);
         for (const [, regKey] of GATES) expect(registry.has(regKey), regKey + ' has no registry row').to.equal(true);
     });
 }
@@ -95,7 +95,7 @@ function itHandsTheCoinToTheRegistryAheadOfTheBareKey() {
     });
 }
 
-// The three rows must stay dark on mainnet for every chain, and each testnet slot stays dark
+// The four rows must stay dark on mainnet for every chain, and each testnet slot stays dark
 // until a cut sizes it: the hub signs transfer records, so an armed slot here is a federation that
 // starts signing on a network the fleet has not deployed the flag day to. The one
 // exception is what the v0.19.0 train wrote: the bridge row's three testnet coin slots,
@@ -110,7 +110,7 @@ const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DO
 const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
-    it('holds every mainnet slot of all three gates unarmed, the token gates unarmed on testnet, and the cut\'s bridge testnet heights', function () {
+    it('holds every mainnet slot of all four gates unarmed, the list share gate unarmed on testnet, and the cut\'s bridge and token testnet heights', function () {
         for (const [key, regKey] of GATES) {
             const row = registry.get(regKey);
             for (const slot of Object.keys(row)) {

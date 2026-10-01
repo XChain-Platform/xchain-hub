@@ -72,7 +72,7 @@ const { relayMarginFloorS } = require('../lib/relay_margin.js');
 // Activation gates. The tables are rows of the activation registry (the SHARED block in
 // src/consensus/gate_registry.js, a byte twin of the indexer's), read by their literal
 // keys; the predicate is the registry's own activeAt over the row (W5: the predicate-only
-// twin modules that once carried these three retired), so a second hand-written copy of
+// twin modules that once carried these four retired), so a second hand-written copy of
 // a flag day cannot fork the fleet.
 //
 // A miss is a build defect, not a network state, and THROWS here at construction naming
@@ -84,11 +84,12 @@ const { relayMarginFloorS } = require('../lib/relay_margin.js');
 const BRIDGE_GATE_KEYS = {
     bridge: 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION',
     token:  'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
-    policy: 'token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION'
+    policy: 'token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION',
+    listShare: 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION'
 };
 
 // The predicate shape every bridge part calls through gateActive: (block, network, coin).
-// All three maps are keyed '<COIN>:<network>' with a bare network fallback; the registry
+// All four maps are keyed '<COIN>:<network>' with a bare network fallback; the registry
 // resolves the coin-keyed entry first, then the bare network, so the coin a caller passes
 // must be the chain whose height `block` is (BTC for the BTC-anchored snapshot block).
 function loadActivation(key){
@@ -141,7 +142,8 @@ class CrossChainBridgeEngine extends EventEmitter {
         this.activation = {
             bridge: loadActivation(BRIDGE_GATE_KEYS.bridge),
             token:  loadActivation(BRIDGE_GATE_KEYS.token),
-            policy: loadActivation(BRIDGE_GATE_KEYS.policy)
+            policy: loadActivation(BRIDGE_GATE_KEYS.policy),
+            listShare: loadActivation(BRIDGE_GATE_KEYS.listShare)
         };
         this._idleLogged = {};
 
