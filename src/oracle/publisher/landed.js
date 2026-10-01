@@ -66,7 +66,8 @@ module.exports = {
             if (r >= f && r <= l && this._buffer.delete(r)) pruned++;
         }
         for (let w = this.windowIndexOf(f); w <= this.windowIndexOf(l); w++) {
-            if (this.bufferedRange(w * this.batchWindowRounds, w * this.batchWindowRounds + this.batchWindowRounds - 1).length > 0) continue;
+            let range = this.windowPlan.rangeOf(w);
+            if (this.bufferedRange(range.first, range.last).length > 0) continue;
             this.noteAssembled(w);
             let state = this._windows.get(w);
             if (state && state.timer) clearTimeout(state.timer);
@@ -101,8 +102,8 @@ module.exports = {
     async reconcileBacklogAgainstChain() {
         let pending = this.pendingCatchupWindows();
         if (pending.length === 0) return 0;
-        let first = pending[0] * this.batchWindowRounds;
-        let last  = pending[pending.length - 1] * this.batchWindowRounds + this.batchWindowRounds - 1;
+        let first = this.windowPlan.rangeOf(pending[0]).first;
+        let last  = this.windowPlan.rangeOf(pending[pending.length - 1]).last;
         let answer = await this.fetchLandedBatches(first, last);
         if (!answer) return 0;
         this.chainReconcileRuns++;

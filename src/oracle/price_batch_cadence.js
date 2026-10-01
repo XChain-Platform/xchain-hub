@@ -151,13 +151,13 @@ function maxBatchWindowRounds(opts) {
  * @param {string} network 'mainnet' | 'testnet' | 'regtest'
  * @returns {number|null} milliseconds, or null when the registry is unreadable
  */
-function pinnedMaxPriceAgeMs(network) {
+function pinnedPriceAgeMs(network, field) {
     let net = network || 'mainnet';
     let tightest = null;
     for (let tick of (coins.ALLOWED_COINS || [])) {
         try {
             let cfg = coins.getCoinConfig(tick, net);
-            let age = Number(cfg && cfg.ORACLE_MAX_PRICE_AGE_SECONDS);
+            let age = Number(cfg && cfg[field]);
             if (!Number.isFinite(age) || age <= 0) continue;
             if (tightest === null || age < tightest) tightest = age;
         } catch (e) { /* this tick is not configured on this network; the others still count */ }
@@ -169,12 +169,21 @@ function pinnedMaxPriceAgeMs(network) {
     for (let [tick, n] of candidates) {
         try {
             let cfg = coins.getCoinConfig(tick, n);
-            let age = Number(cfg && cfg.ORACLE_MAX_PRICE_AGE_SECONDS);
+            let age = Number(cfg && cfg[field]);
             if (Number.isFinite(age) && age > 0) return age * 1000;
         } catch (e) { /* non-registry tick or unknown network; try the next candidate */ }
     }
     return null;
 }
 
+function pinnedMaxPriceAgeMs(network) {
+    return pinnedPriceAgeMs(network, 'ORACLE_MAX_PRICE_AGE_SECONDS');
+}
+
+function pinnedMaxPriceAgeHourlyMs(network) {
+    return pinnedPriceAgeMs(network, 'ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS');
+}
+
 module.exports = { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
+                   pinnedMaxPriceAgeHourlyMs,
                    DEFAULT_BATCH_LANDING_RESERVE_MS, LEGACY_BATCH_WINDOW_ROUNDS };
