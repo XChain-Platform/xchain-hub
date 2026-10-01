@@ -269,9 +269,11 @@ const foldPublisherMethods = {
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
                                                            broadcaster, archiveSection.cp);
         let ids = this.archiveBackfillIds(archiveSection, lostChunks, true, false);
-        await this.backfillBatch(archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
-                                 ids.bridgeIds, ids.policyIds, ids.checkpointIds,
-                                 ids.priceIds, ids.tombstoneIds, ids.listIds);
+        let backfillArgs = [archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
+                            ids.bridgeIds, ids.policyIds, ids.checkpointIds,
+                            ids.priceIds, ids.tombstoneIds];
+        if(ids.listIds && ids.listIds.length) backfillArgs.push(ids.listIds);
+        await this.backfillBatch(...backfillArgs);
         await this.settleArchiveIntent(String(archiveSection.cp.network), archiveSection.batchSeq);
         this.announceArchiveFinalized(archiveSection, txid, ids);
     }
