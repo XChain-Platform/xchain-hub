@@ -40,7 +40,7 @@ function mountSnapshotRoutes(app, ctx) {
 function snapshotHelpers({ hub, HUB_NETWORK }) {
     // The per-table per-chain admission height watermark, for the REST carriers.
     //
-    // It rides all TEN snapshot pages as well as the heartbeat and the ready frame:
+    // It rides all ELEVEN snapshot pages as well as the heartbeat and the ready frame:
     // a poll-mode consumer never receives a heartbeat at all, so without it a poll-mode
     // bootstrap never establishes a baseline and every height-keyed barrier defers forever
     // rather than for one interval.
@@ -273,6 +273,28 @@ function mountBridgeSnapshots(app, ctx, helpers) {
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findPolicySnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+        } catch (err) {
+            logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
+    mountListSnapshots(app, ctx, helpers);
+}
+
+function mountListSnapshots(app, ctx, helpers) {
+    const { hub, logger, bigIntReplacer } = ctx;
+    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
+    // GET /hub-db/snapshot/list_snapshots: bootstrap the append-only shared-list
+    // versions. A higher seq supersedes membership without retracting an older row.
+    app.get('/hub-db/snapshot/list_snapshots', async (req, res) => {
+        try {
+            if (req.query.limit) { const limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            const limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { const sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            const since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const rows = await hub.db.findListSnapshots(since, limit);
+            res.type('json').send(JSON.stringify({ table: 'list_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });

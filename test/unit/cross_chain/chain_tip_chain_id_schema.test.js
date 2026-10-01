@@ -7,7 +7,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
 const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
-const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots'];
+const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots', 'list_snapshots'];
 
 function makeDb(fsOverrides) {
     const mockConn = { query: sinon.stub().resolves([]), release: sinon.stub().resolves(), end: sinon.stub().resolves() };

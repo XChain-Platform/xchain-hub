@@ -158,6 +158,7 @@ const BOOTSTRAP_READS = {
     cross_chain_matches:        (db) => db.findCrossChainMatchesById(0, 10),
     bridge_transfers:           (db) => db.findBridgeTransfers(0, 10),
     policy_snapshots:           (db) => db.findPolicySnapshots(0, 10),
+    list_snapshots:             (db) => db.findListSnapshots(0, 10),
     price_snapshots:            (db) => db.findPriceSnapshotsById(0, 10),
     oracle_prices:              (db) => db.findOraclePricesAfterId(0, 10),
     attestation_responses:      (db) => db.findAttestationResponsesById(0, 10),
@@ -199,8 +200,8 @@ describe('hub-DB mirror: admission columns on the bootstrap page and the live st
 
     it('covers every hub table whose DDL defines an admission column', function () {
         let tables = tablesWithAdmissionColumns();
-        // Non-vacuity: the seven signed rails plus the unsigned oracle rail.
-        expect(tables).to.have.lengthOf(8);
+        // Non-vacuity: the eight signed rails plus the unsigned oracle rail.
+        expect(tables).to.have.lengthOf(9);
         expect(Object.keys(BOOTSTRAP_READS).sort()).to.deep.equal(tables);
     });
 
