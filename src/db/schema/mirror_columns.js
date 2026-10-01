@@ -12,24 +12,22 @@
  *
  **********************************************************************
  *
- * XChain Hub - the COLUMN LISTS the hub-DB mirror carries, for the two rails whose
+ * XChain Hub - the COLUMN LISTS the hub-DB mirror carries, for the rails whose
  * writer builds its statement from a list rather than naming columns inline.
  *
- * One place owns what an indexer receives for a finalized bridge transfer and a
- * finalized policy snapshot, which is why these are a list at all: the order is
- * contract (see btc_chain_id below), and a column added in one of the two writers
- * and not the other is the defect the shared list removes.
+ * One place owns what an indexer receives for finalized signed mirror rows. The
+ * order is contract (see btc_chain_id below), and every writer reads its list here.
  *
  * src/db/index.js exposes each as the static it always was, so the write paths in
- * db/bridge_transfers.js and db/policy_snapshots.js keep reading
+ * db table-family modules keep reading
  * this.constructor.<NAME> and still get a fresh array per read.
  *
  ********************************************************************/
 
 // ---------------------------------------------------------------------------
 // Bridge tables (the base bridge spec section 6, token spec section 5,
-// policy spec section 5). CrossChainBridgeEngine runs the rounds; the writes and
-// the invariant read live in db/bridge_transfers.js and db/policy_snapshots.js,
+// policy spec section 5). Consensus engines run the rounds; writes and invariant
+// reads live in the matching db table-family modules,
 // and the column lists stay in ONE place so one file owns what the hub-DB mirror
 // carries to every indexer. src/db/index.js serves them as the statics the write
 // paths read.
@@ -59,4 +57,11 @@ const POLICY_SNAPSHOT_COLUMNS = ['snapshot_id', 'snapshot_block', 'origin_chain'
             'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
             'btc_chain_id'];
 
-module.exports = { BRIDGE_TRANSFER_COLUMNS, POLICY_SNAPSHOT_COLUMNS };
+// Columns written for a finalized shared-list snapshot.
+const LIST_SNAPSHOT_COLUMNS = ['snapshot_id', 'snapshot_block', 'network', 'home_chain',
+            'home_list_index', 'list_type', 'seq', 'kind', 'added', 'removed',
+            'members_hash', 'origin_block', 'finalizing_view', 'validator_signatures',
+            'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+            'btc_chain_id'];
+
+module.exports = { BRIDGE_TRANSFER_COLUMNS, POLICY_SNAPSHOT_COLUMNS, LIST_SNAPSHOT_COLUMNS };

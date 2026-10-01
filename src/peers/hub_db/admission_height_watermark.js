@@ -78,6 +78,7 @@ const ADMISSION_WATERMARK_TABLES = Object.freeze({
     cross_chain_calls:          Object.freeze({ chains: null,                      round: 'xdex'   }),
     bridge_transfers:           Object.freeze({ chains: null,                      round: 'xdex'   }),
     policy_snapshots:           Object.freeze({ chains: null,                      round: 'xdex'   }),
+    list_snapshots:             Object.freeze({ chains: null,                      round: 'xdex'   }),
     price_snapshots:            Object.freeze({ chains: null,                      round: 'price'  }),
     // The unsigned rail: its admission height is a SCALAR on the publishing chain, so its
     // entries are keyed by publishing chain rather than by reading chain. Same frame shape,
@@ -96,16 +97,7 @@ class AdmissionHeightWatermark {
         // for it would be a claim about rows that cannot exist.
         this.federationChains = ADMIT_COLUMN_CHAINS.slice();
 
-        // The round-abandon timeout per rail, in ms. Each one is its rail's own terminal
-        // bound read from its rail's own knob, so an operator who widened a rail's rounds
-        // widens its watermark trail by the same amount instead of the watermark claiming
-        // past rounds that are still open.
-        //
-        // xdex covers matches, calls, bridge transfers and policy snapshots: all four run
-        // on CrossChainDexConsensus (CrossChainCallEngine.js:193, CrossChainBridgeEngine.js
-        // :211, :231), whose terminal bound is the round MAX LIFETIME and not the single
-        // round timeout, because a view change re-arms the timeout on a round that is still
-        // open (CrossChainDexConsensus.js:134, :140).
+        // CrossChainDexConsensus rails use max lifetime because view changes re-arm the timeout.
         let xdexTimeout = positiveIntConfig(
             hubConfig.XDEX_ROUND_TIMEOUT_MS || this.config.XDEX_ROUND_TIMEOUT_MS,
             DEFAULT_XDEX_ROUND_TIMEOUT_MS, 'XDEX_ROUND_TIMEOUT_MS');
