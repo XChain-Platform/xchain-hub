@@ -25,11 +25,9 @@
 
 /*
  * `every: true` marks a rail whose consumers carry NO chain clause at all, so
- * every chain the federation serves reads every row. Policy snapshots are the
- * sharp case: its consuming query, SELECT * FROM policy_snapshots WHERE
- * status='finalized' AND network=? AND effective_time<=?, has no chain column
- * in it, so a map covering only the pair's own chains would leave the row
- * unadmitted everywhere else.
+ * every chain the federation serves reads every row. Policy and list snapshots
+ * are the sharp cases: their consuming queries have no chain column, so a map
+ * covering only the pair's own chains would leave the row unadmitted elsewhere.
  *
  * Per mirrored table: the row fields naming its readers, or EVERY_CHAIN, or a
  * fixed chain list. Sourced from the consuming query in each case, at the
@@ -40,6 +38,7 @@
  *   cross_chain_calls        db/index.js                               target_chain OR source_chain
  *   bridge_transfers         consensus/bridge_settle.js                dest_chain
  *   policy_snapshots         consensus/bridge_settle.js                no chain clause at all
+ *   list_snapshots           consensus/list_share_settle.js            no chain clause at all
  *   attestation_responses    XChainIndexer.js:1517 call-site guard     BTC only
  *   anchor_reward_attestations  XChainIndexer.js:1495 same guard       BTC only
  *   oracle_prices            XChainIndexer.js:1336                     every chain
@@ -54,6 +53,7 @@ const ADMISSION_READ_SETS = Object.freeze({
     cross_chain_calls:          Object.freeze({ fields: Object.freeze(['target_chain', 'source_chain']) }),
     bridge_transfers:           Object.freeze({ fields: Object.freeze(['dest_chain']) }),
     policy_snapshots:           Object.freeze({ every: true }),
+    list_snapshots:             Object.freeze({ every: true }),
     attestation_responses:      Object.freeze({ chains: Object.freeze(['BTC']) }),
     anchor_reward_attestations: Object.freeze({ chains: Object.freeze(['BTC']) }),
     // The one UNSIGNED rail, and the one that takes a scalar rather than a map. It carries no
