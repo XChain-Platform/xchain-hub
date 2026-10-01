@@ -22,6 +22,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { listIdsOf } = require('./list_rows_select.js');
 const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
@@ -260,6 +261,7 @@ module.exports = {
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase(), round_qualifier: Number(row.round_qualifier || 0) })),
             bridgeIds:  rows.bridges.map(r => ({ transfer_id: String(r.transfer_id), status: String(r.status) })),
             policyIds:  rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
+            listIds:    listIdsOf(rows.lists),
             checkpointIds: rows.checkpoints.map(r => ({ chain: String(r.chain), network: String(r.network), checkpoint_seq: Number(r.checkpoint_seq) })),
             priceIds: rows.prices.map(r => ({ round_number: Number(r.round_number), coin_pair: String(r.coin_pair), status: String(r.status), batch_block_time: Number(r.batch_block_time), proof_sha: crypto.createHash('sha256').update(String(r.consensus_proof)).digest('hex') })),
             tombstoneIds: rows.tombstones.map(r => ({ round_number: Number(r.round_number), coin_pair: String(r.coin_pair) })),

@@ -131,7 +131,7 @@ module.exports = {
     },
 
     async backfillBatch(batchSeq, matchIds, txid, callIds, rewardIds,
-                        bridgeIds, policyIds, checkpointIds, priceIds, tombstoneIds){
+                        bridgeIds, policyIds, checkpointIds, priceIds, tombstoneIds, listIds){
         // Every stamp is guarded by the archive-eligibility predicate the
         // pending selectors use (batch_seq IS NULL OR archived_status <> status):
         // a row that is already fully archived can never be re-stamped onto a
@@ -178,6 +178,7 @@ module.exports = {
         }
         await this.backfillBridgePolicyRows(batchSeq, txid, bridgeIds, policyIds);
         await this.backfillCheckpointPriceRows(batchSeq, checkpointIds, priceIds, tombstoneIds);
+        await this.backfillListRows(batchSeq, txid, listIds);
     },
 
     async getNextBatchSeq(){

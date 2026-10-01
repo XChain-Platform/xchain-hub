@@ -24,9 +24,10 @@
 
 const zlib = require('zlib');
 const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
-        ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES,
+        ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_LIST_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES,
         ARCHIVE_MAX_WIRE_B64_BYTES, ARCHIVE_MAX_CHAIN_TXS,
         ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
+const { capListRows, sortedListRows } = require('./list_rows_select.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -91,23 +92,29 @@ module.exports = {
             ]);
             return this.archiveRows(matches, calls, this.dropChainDerivedRewards(rewards));
         }
-        let [matches, calls, rewards, bridges, policies, checkpoints, priceRounds, tombstones] = await Promise.all([
+        let [matches, calls, rewards, bridges, policies, lists, checkpoints, priceRounds, tombstones] = await Promise.all([
             this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
             this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
             this.pendingArchiveRewards(),
             this.db.findBridgeTransfersByBatchSeq(this.maxBatch),
             this.db.findPolicySnapshotsByBatchSeq(ARCHIVE_MAX_POLICY_ROWS + 1),
+            this.db.findListSnapshotsByBatchSeq
+                ? this.db.findListSnapshotsByBatchSeq(ARCHIVE_MAX_LIST_ROWS + 1)
+                : Promise.resolve([]),
             this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
             this.db.findPriceSnapshotRoundsByBatchSeq(ARCHIVE_MAX_PRICE_ROUNDS + 1),
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);
         rewards = this.dropChainDerivedRewards(rewards);
-        let capped = policies.length > ARCHIVE_MAX_POLICY_ROWS || priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
+        let cappedLists = capListRows(lists, ARCHIVE_MAX_LIST_ROWS);
+        let capped = policies.length > ARCHIVE_MAX_POLICY_ROWS || cappedLists.capped ||
+            priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
         policies = policies.slice(0, ARCHIVE_MAX_POLICY_ROWS);
         priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
         let prices = await this.db.findPriceSnapshotsForArchiveRounds(priceRounds);
         return this.archiveRows(matches, calls, rewards, {
-            bridges, policies, checkpoints, prices, tombstones, cappedOrTrimmed: capped
+            bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
+            cappedOrTrimmed: capped
         });
     },
 
@@ -118,6 +125,7 @@ module.exports = {
             matches: matches || [], calls: calls || [], rewards: rewards || [],
             bridges: this.sortedArchiveRows(quorumRows.bridges, 'transfer_id'),
             policies: this.sortedArchiveRows(quorumRows.policies, 'snapshot_id'),
+            lists: sortedListRows(quorumRows.lists),
             checkpoints: this.sortedStateCheckpoints(quorumRows.checkpoints),
             prices: this.sortedPriceSnapshots(quorumRows.prices),
             tombstones: this.sortedPriceTombstones(quorumRows.tombstones),
@@ -128,7 +136,7 @@ module.exports = {
     },
 
     archiveRowCount(rows){
-        return ['matches', 'calls', 'rewards', 'bridges', 'policies', 'checkpoints', 'prices', 'tombstones']
+        return ['matches', 'calls', 'rewards', 'bridges', 'policies', 'lists', 'checkpoints', 'prices', 'tombstones']
             .reduce((count, key) => count + ((rows[key] || []).length), 0);
     },
 
@@ -179,7 +187,7 @@ module.exports = {
             this.trimTrailingPriceRounds(rows, removeCount);
             return true;
         }
-        for(const key of ['policies', 'checkpoints', 'bridges', 'tombstones']){
+        for(const key of ['policies', 'lists', 'checkpoints', 'bridges', 'tombstones']){
             if(rows[key].length){
                 const removeCount = Math.max(1, Math.ceil(rows[key].length * (1 - 1 / ratio)));
                 rows[key].splice(rows[key].length - removeCount, removeCount);

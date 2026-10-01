@@ -92,6 +92,20 @@ function registerFoldHooks(){
     });
 }
 
+async function foldedBackfillArgs(ids){
+    let pub = Object.create(StateAnchorPublisher.prototype);
+    let forwarded;
+    pub.markArchiveSent = async () => {};
+    pub.broadcastArchiveChunks = async () => 0;
+    pub.archiveBackfillIds = () => ids;
+    pub.backfillBatch = async (...args) => { forwarded = args; };
+    pub.settleArchiveIntent = async () => {};
+    pub.announceArchiveFinalized = () => {};
+    await pub.completeFoldArchive(
+        { cp: { network: 'regtest' }, batchSeq: 4 }, { broadcastFn: async () => {} }, 'txid4');
+    return forwarded;
+}
+
 describe('ANCHOR v3 one-round archive fold wire', function () {
     registerFoldHooks();
 
@@ -120,24 +134,29 @@ describe('ANCHOR v3 one-round archive fold wire', function () {
     });
 
     it('backfills every row family carried by the folded archive', async function () {
-        let pub = Object.create(StateAnchorPublisher.prototype);
-        let forwarded;
         let ids = {
             matchIds: ['matches'], callIds: ['calls'], rewardIds: ['rewards'],
             bridgeIds: ['bridges'], policyIds: ['policies'], checkpointIds: ['checkpoints'],
             priceIds: ['prices'], tombstoneIds: ['tombstones']
         };
-        pub.markArchiveSent = async () => {};
-        pub.broadcastArchiveChunks = async () => 0;
-        pub.archiveBackfillIds = () => ids;
-        pub.backfillBatch = async (...args) => { forwarded = args; };
-        pub.settleArchiveIntent = async () => {};
-        pub.announceArchiveFinalized = () => {};
-        await pub.completeFoldArchive(
-            { cp: { network: 'regtest' }, batchSeq: 4 }, { broadcastFn: async () => {} }, 'txid4');
+        let forwarded = await foldedBackfillArgs(ids);
         expect(forwarded).to.deep.equal([
             4, ids.matchIds, 'txid4', ids.callIds, ids.rewardIds,
             ids.bridgeIds, ids.policyIds, ids.checkpointIds, ids.priceIds, ids.tombstoneIds
+        ]);
+    });
+
+    it('backfills list rows carried by the folded archive', async function () {
+        let ids = {
+            matchIds: ['matches'], callIds: ['calls'], rewardIds: ['rewards'],
+            bridgeIds: ['bridges'], policyIds: ['policies'], checkpointIds: ['checkpoints'],
+            priceIds: ['prices'], tombstoneIds: ['tombstones'], listIds: ['lists']
+        };
+        let forwarded = await foldedBackfillArgs(ids);
+        expect(forwarded).to.deep.equal([
+            4, ids.matchIds, 'txid4', ids.callIds, ids.rewardIds,
+            ids.bridgeIds, ids.policyIds, ids.checkpointIds, ids.priceIds, ids.tombstoneIds,
+            ids.listIds
         ]);
     });
 });
