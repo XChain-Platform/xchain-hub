@@ -24,6 +24,7 @@ const crypto = require('crypto');
 const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
 const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { ALLOWED_CHAINS, PENDING_PAGE, TRANSFER_CANONICAL_INT_FIELDS, POLICY_CANONICAL_INT_FIELDS, SNAPSHOT_BLOCK_TOLERANCE } = require('./constants.js');
+const { parsePolicyColumn } = require('./policy_column.js');
 
 module.exports = {
     // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
@@ -208,27 +209,36 @@ module.exports = {
         // FAILURE abstains (no co-signature, the round retries next cycle); it never
         // refuses, because an unreachable indexer is our problem, not the leader's.
         let policy;
-        try { policy = await this.indexerCall(row.origin_chain, 'gettokenpolicy',
-                                               { tick: row.tick, origin_block: Number(row.origin_block) }); }
+        try { policy = await this.indexerCall(row.origin_chain, 'gettokenpolicy', {
+            tick: row.tick,
+            origin_block: Number(row.origin_block),
+            snapshot_block: Number(row.snapshot_block)
+        }); }
         catch(e){ return false; }
         if(!policy || policy.error) return false;
 
-        let shaped = this.shapePolicy(policy);
+        let shaped = this.shapePolicy(policy, row.snapshot_block);
         if(!shaped || shaped.oversized) return false;
         let hash = this.policyHash(shaped.allow, shaped.block, shaped.sleeping);
         if(hash !== String(row.policy_hash).toLowerCase()) return false;
 
-        // The transport arrays must hash to the hash we just agreed on, or every destination
+        // The transport sides must hash to the hash we just agreed on, or every destination
         // would refuse the row after we had already signed it.
-        let asArray = (v) => {
-            if(v === null || v === undefined) return null;
-            try { let p = JSON.parse(v); return Array.isArray(p) ? p.map(String) : undefined; }
-            catch(e){ return undefined; }
+        let allow = parsePolicyColumn(row.allow_list, false);
+        let block = parsePolicyColumn(row.block_list, false);
+        let referenceColumn = (raw) => {
+            try { return typeof JSON.parse(raw) === 'string'; }
+            catch(e){ return false; }
         };
-        let allow = asArray(row.allow_list);
-        let block = asArray(row.block_list);
+        if((allow === undefined || block === undefined) &&
+           (referenceColumn(row.allow_list) || referenceColumn(row.block_list))){
+            let refsAllowed = this.gateActive('listShare', Number(row.snapshot_block), 'BTC');
+            allow = parsePolicyColumn(row.allow_list, refsAllowed);
+            block = parsePolicyColumn(row.block_list, refsAllowed);
+        }
         if(allow === undefined || block === undefined) return false;
-        if(!this.isCanonicalOrder(allow) || !this.isCanonicalOrder(block)) return false;
+        if(Array.isArray(allow) && !this.isCanonicalOrder(allow)) return false;
+        if(Array.isArray(block) && !this.isCanonicalOrder(block)) return false;
         if(this.policyHash(allow, block, Number(row.sleeping) === 1) !== hash) return false;
 
         let derived = this.deriveSnapshotId(row.network, row.origin_chain, row.tick,

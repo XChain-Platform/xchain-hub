@@ -237,12 +237,14 @@ module.exports = {
         // hub that already holds the row must be able to answer with the id it holds
         // (the gossip receiver needs exactly that), and res.insertId is 0 on an
         // ignored insert, so the id can only come from the table.
-        let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
-        let stored = (rows && rows.length) ? rows[0] : null;
+        let { stored, readError } = await this.readBackMirrorRow(db, row, inserted);
         if(!stored){
             this.stats.errors++;
             logger.error('AttestationResponseMirror: wrote ' + String(row.request_id).substring(0, 16) +
-                          '... but could not read it back; not broadcasting a row with no id');
+                          '... but could not read it back' + (readError ? ' (' + readError + ')' : '') +
+                          '; not broadcasting a row with no id');
+            // Repair only a fresh insert: the duplicate path put nothing new into the stream.
+            if(inserted) this.resyncMirrorSubscribers(readError || 'the committed row read back empty');
             return inserted;
         }
 
@@ -259,6 +261,30 @@ module.exports = {
                 b.broadcastRow({ table: 'attestation_responses', row: stored });
         }
         return inserted;
+    },
+
+    // Select the row back for its id. A fresh insert's failed read returns its reason rather
+    // than throwing past the commit; a duplicate committed nothing, so its throw stays the caller's.
+    async readBackMirrorRow(db, row, inserted){
+        try {
+            let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
+            return { stored: (rows && rows.length) ? rows[0] : null, readError: null };
+        } catch(err){
+            if(!inserted) throw err;
+            return { stored: null, readError: (err && err.message) ? err.message : String(err) };
+        }
+    },
+
+    // Force every mirror subscriber to re-drain after a committed row could not be streamed,
+    // since the height watermark never learns of the drop (see HubDbBroadcaster.dropAllForResync).
+    resyncMirrorSubscribers(failure){
+        let b = this.broadcaster();
+        if(!b) return;
+        if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
+        logger.error('AttestationResponseMirror: could not stream a committed attestation_responses row (' +
+                      failure + '); forcing subscriber resync');
+        try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('attestation_responses mirror gap'); }
+        catch(_e){ /* the repair must never fail a committed row */ }
     }
 
 };

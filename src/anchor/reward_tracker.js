@@ -167,8 +167,9 @@ class RewardTracker {
 
         // Cross-pubkey dedup guard: inspect any rows already holding this logical
         // anchor (round_number, reward_type, qualifier) regardless of pubkey.
+        // Fail closed on a read or delete error: a late credit recovers, a duplicate row can ride the archive.
         let existing = await this.db.findValidatorRewardsByRoundNumber(roundNumber, rewardType, qualifier)
-            .catch(e => { logger.error(nodeUtil.format('Error reading anchor reward for ' + lcPubkey + ':', e)); return null; });
+            .catch(e => { logger.error(nodeUtil.format('Error reading anchor reward for ' + lcPubkey + ':', e)); throw e; });
         existing = existing || [];
 
         if (existing.some(r => String(r.validator_pubkey).toLowerCase() === lcPubkey)) return;   // already ours (idempotent)
@@ -183,7 +184,7 @@ class RewardTracker {
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
             // supersedes the local-only incumbent(s); every hub makes the same call.
             await this.db.deleteValidatorReward(roundNumber, rewardType, qualifier)
-                .catch(e => logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)));
+                .catch(e => { logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)); throw e; });
         }
 
         await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)

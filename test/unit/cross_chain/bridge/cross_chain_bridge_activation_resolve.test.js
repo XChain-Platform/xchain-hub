@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The bridge engine resolves its three flag-day gates at construction: the table as a
+// The bridge engine resolves its four flag-day gates at construction: the table as a
 // registry row read by its literal key, the predicate as the registry's own activeAt
 // over that row (W5: the predicate-only twin modules retired). A miss that returned
 // null idled the engine with no error, no failing round and no wire field naming it.
@@ -48,8 +48,8 @@ const PROBE_COINS  = ['BTC', 'LTC', 'DOGE', undefined];
 let engine;
 
 function itNamesAllGatesByRegistryKey() {
-    it('names all three gates by their registry keys, and each has a row', function () {
-        expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy']);
+    it('names all four gates by their registry keys, and each has a row', function () {
+        expect(GATES.map(([k]) => k)).to.deep.equal(['bridge', 'token', 'policy', 'listShare']);
         for (const [, regKey] of GATES) expect(registry.has(regKey), regKey + ' has no registry row').to.equal(true);
     });
 }
@@ -95,7 +95,7 @@ function itHandsTheCoinToTheRegistryAheadOfTheBareKey() {
     });
 }
 
-// The three rows must stay dark on mainnet for every chain, and each testnet slot stays dark
+// The four rows must stay dark on mainnet for every chain, and each testnet slot stays dark
 // until a cut sizes it: the hub signs transfer records, so an armed slot here is a federation that
 // starts signing on a network the fleet has not deployed the flag day to. The one
 // exception is what the v0.19.0 train wrote: the bridge row's three testnet coin slots,
@@ -107,10 +107,12 @@ const ARMED_XCHAIN_TESTNET = { 'BTC:testnet': 152929, 'LTC:testnet': 4887898, 'D
 // The v0.21.0 cut arms both token rows per testnet chain at the heights its freeze plan sized;
 // the bare testnet fallback and every mainnet slot stay dark.
 const ARMED_TOKEN_TESTNET = { 'BTC:testnet': 154567, 'LTC:testnet': 4903068, 'DOGE:testnet': 67951140 };
-const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET };
+// The v0.21.1 cut arms the list share producer on the bare testnet key, a few blocks after the roll.
+const ARMED_LIST_SHARE_TESTNET = { testnet: 154777 };
+const ARMED_TESTNET = { bridge: ARMED_XCHAIN_TESTNET, token: ARMED_TOKEN_TESTNET, policy: ARMED_TOKEN_TESTNET, listShare: ARMED_LIST_SHARE_TESTNET };
 
 function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
-    it('holds every mainnet slot of all three gates unarmed, the token gates unarmed on testnet, and the cut\'s bridge testnet heights', function () {
+    it('holds every mainnet slot of all four gates unarmed, and the cut\'s bridge, token and list share testnet heights', function () {
         for (const [key, regKey] of GATES) {
             const row = registry.get(regKey);
             for (const slot of Object.keys(row)) {
@@ -128,7 +130,7 @@ function itHoldsEveryMainnetAndTestnetSlotUnarmed() {
         // and an unlisted coin reads the dark bare fallback.
         for (const [key, sized] of Object.entries(ARMED_TESTNET)) {
             for (const [slot, height] of Object.entries(sized)) {
-                const coin = slot.split(':')[0];
+                const coin = slot.includes(':') ? slot.split(':')[0] : 'BTC';
                 expect(engine.activation[key](height - 1, 'testnet', coin), key + ' ' + slot + ' one below its height').to.equal(false);
                 expect(engine.activation[key](height, 'testnet', coin), key + ' ' + slot + ' at its height').to.equal(true);
             }

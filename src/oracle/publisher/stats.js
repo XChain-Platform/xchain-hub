@@ -154,6 +154,7 @@ module.exports = {
     // The PRICE batch rail: what published, what is still waiting, and whether the
     // backlog is draining.
     batchRailStats() {
+        let windowRounds = this.windowRoundsInForce();
         return {
             // PRICE batch rail (spec section 7). batchUnpublishableCount is the
             // machine-checkable half of the loud ceiling: a non-zero value means a
@@ -168,7 +169,9 @@ module.exports = {
             batchSignTimeouts:       this.batchSignTimeouts(),
             batchBufferDepth:        this._buffer.size,
             batchBufferPath:         this.bufferPath,
-            batchWindowRounds:       this.batchWindowRounds,
+            batchWindowRounds:       windowRounds,
+            hourlyWindowFirstRound:  this.hourlyWindowFirstRound,
+            oracleHourlyWindowRounds: this.oracleHourlyWindowRounds,
             // The stuck-backlog reading. A closed window still buffered and
             // not yet assembled in this process is a window that attempted and produced
             // no wire; a count that does not fall across sweeps is a federation that
@@ -198,15 +201,16 @@ module.exports = {
 
     // The cadence contract with the fee gate, in one place, plus the spend guard.
     cadenceStats() {
+        let windowRounds = this.windowRoundsInForce();
         return {
             // The cadence contract with the fee gate, in one place.
             // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
             // native-coin fees go unpriceable between batches, which is invisible in
             // every other field here: the rail reports perfect health while it happens.
             batchWindowRoundsCeiling:         this.batchWindowRoundsCeiling,
-            batchCadenceSeconds:              Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000),
+            batchCadenceSeconds:              Math.round((windowRounds * this.roundIntervalMs) / 1000),
             batchWorstCaseSnapshotAgeSeconds: (() => {
-                let ms = worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+                let ms = worstCaseSnapshotAgeMs(windowRounds, {
                     roundIntervalMs:  this.roundIntervalMs,
                     graceMs:          this.batchGraceMs,
                     landingReserveMs: this.batchLandingReserveMs });
@@ -214,8 +218,27 @@ module.exports = {
             })(),
             oracleMaxPriceAgeSeconds: this.oracleMaxPriceAgeMs === null
                 ? null : Math.round(this.oracleMaxPriceAgeMs / 1000),
+            oracleHourlyMaxPriceAgeSeconds: this.oracleHourlyMaxPriceAgeMs === null
+                ? null : Math.round(this.oracleHourlyMaxPriceAgeMs / 1000),
             spendGuard:          this.spendGuard.stats()
         };
+    },
+
+    windowRoundsInForce() {
+        let round = null;
+        try {
+            let oracle = this.hub && typeof this.hub.getOracle === 'function'
+                ? this.hub.getOracle() : (this.hub && this.hub.oracle);
+            if (oracle && typeof oracle.getCurrentRound === 'function') {
+                round = Number(oracle.getCurrentRound());
+            } else if (oracle) {
+                round = Number(oracle.currentRound);
+            }
+        } catch (e) { round = null; }
+        if (!Number.isFinite(round) && this._lastRankState) {
+            round = Number(this._lastRankState.round);
+        }
+        return Number.isFinite(round) ? this.windowPlan.sizeAt(round) : this.batchWindowRounds;
     },
 
     // The signer's own timeout counter, read without constructing a signer: getStats is

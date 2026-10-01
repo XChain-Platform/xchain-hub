@@ -277,7 +277,7 @@ exports.fetch = async (payload, options) => {
 // NOTE: agree() returns a winner body when the simple-majority quorum is met,
 // but finalization of a byte_equality round also requires max(quorum, redundancy)
 // winner-matching signatures (see AttestationConsensus.checkCommitQuorum). A
-// follower only re-signs on byte-identical body match (AttestationConsensus ~582).
+// follower only re-signs on byte-identical body match (AttestationConsensus.coSignByteEqualWinner).
 // So when redundancy=3, effective finalization requires 3-of-3 byte-identical
 // signatures, not the 2-of-3 majority this function's quorum check alone suggests.
 // Rounds that cannot collect enough matching signatures expire rather than
@@ -294,7 +294,7 @@ exports.agree = (proposals, options) => {
         // used a single unframed delimiter, so distinct pairs collided
         // whenever bytes moved across it: body="A|",meta="B" hashed identically
         // to body="A",meta="|B". Since PROPOSE `meta` is an attacker-chosen
-        // wire string (AttestationConsensus ~392, sender-sig-verified only), a
+        // wire string (AttestationConsensus.handlePropose, sender-sig-verified only), a
         // Byzantine proposer could craft a collision that inflated an honest
         // group's count, manufacturing a quorum winner where agree() should
         // return null and driving honest divergent proposals into the

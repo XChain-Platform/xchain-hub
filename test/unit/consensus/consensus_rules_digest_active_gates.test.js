@@ -36,9 +36,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 38 entries, and contains the gates the last trains append', function () {
+    it('is sorted, has 41 entries, and contains the gates the last trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(38, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(41, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -66,9 +66,12 @@ function registerGateInventoryTest() {
             // The token leg gate this hub loads per bridge leg.
             'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
             'anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION',
+            'oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION',
+            'oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND',
             'price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION',
             'price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH',
-            'price_scale_activation.PRICE_V1_FEE_MAX_LENGTH'
+            'price_scale_activation.PRICE_V1_FEE_MAX_LENGTH',
+            'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION'
         ]);
     });
 }
@@ -102,7 +105,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('8e59a7814bb923f615685f7b8a4dad48858cc85286c0a77a49c7b377eeff0f33',
+                .to.equal('6ee594055e09850de9d2f04fc13a2c767237b79ec55e158de20ab86115dfe88a',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -136,9 +139,10 @@ function registerGateOrderingTest() {
             'a SHARED_GATES entry was inserted mid-list; that reorders the preimage of every gate after it')
             .to.deep.equal(PRE_EXISTING);
         expect(mods.slice(PRE_EXISTING.length),
-            'the family must follow the bridge gate, then the token and anchor bundle gates must remain appended')
+            'the family must follow the bridge gate, then the later shared gates must remain appended')
             .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation',
-                'token_bridge_activation', 'anchor_bundle_order_activation', 'price_scale_activation']);
+                'token_bridge_activation', 'anchor_bundle_order_activation', 'oracle_price_age_hourly_activation',
+                'oracle_hourly_window_activation', 'price_scale_activation', 'list_share_producer_activation']);
     });
 }
 

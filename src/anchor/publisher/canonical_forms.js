@@ -31,6 +31,8 @@ const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
+const { canonicalBatchCrc } = require('./fold/wrapper_canonical.js');
+const { listIdsOf } = require('./archive/list_rows_select.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 
@@ -50,7 +52,7 @@ function isCheckpointAnchorRow(row){
 function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
     let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
               checkpointForms.checkpointRootSuffix(checkpoint) + '|' +
-              [String(batchSeq), String(count), String(crc).toLowerCase(), String(totalChunks)].join('|');
+              [String(batchSeq), String(count), canonicalBatchCrc(crc), String(totalChunks)].join('|');
     if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
             checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +
@@ -97,6 +99,7 @@ const foldPublisherMethods = {
             })),
             bridgeIds: rows.bridges.map(r => ({ transfer_id: String(r.transfer_id), status: String(r.status) })),
             policyIds: rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
+            listIds: listIdsOf(rows.lists),
             checkpointIds: rows.checkpoints.map(r => ({
                 chain: String(r.chain), network: String(r.network), checkpoint_seq: Number(r.checkpoint_seq)
             })),
@@ -266,9 +269,11 @@ const foldPublisherMethods = {
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
                                                            broadcaster, archiveSection.cp);
         let ids = this.archiveBackfillIds(archiveSection, lostChunks, true, false);
-        await this.backfillBatch(archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
-                                 ids.bridgeIds, ids.policyIds, ids.checkpointIds,
-                                 ids.priceIds, ids.tombstoneIds);
+        let backfillArgs = [archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
+                            ids.bridgeIds, ids.policyIds, ids.checkpointIds,
+                            ids.priceIds, ids.tombstoneIds];
+        if(ids.listIds && ids.listIds.length) backfillArgs.push(ids.listIds);
+        await this.backfillBatch(...backfillArgs);
         await this.settleArchiveIntent(String(archiveSection.cp.network), archiveSection.batchSeq);
         this.announceArchiveFinalized(archiveSection, txid, ids);
     }

@@ -22,9 +22,15 @@ function archiveField(archive, name){
     return archive[name] !== undefined ? archive[name] : archive[name.toLowerCase()];
 }
 
+// Embed the batch CRC32 lower-case; every ANCHOR archive canonical builder calls this.
+function canonicalBatchCrc(crc){
+    return String(crc).toLowerCase();
+}
+
 function foldArchiveSuffix(archive){
-    return ['MATCH_BATCH_SEQ', 'MATCH_COUNT', 'BATCH_CRC32', 'TOTAL_CHUNKS']
-        .map(name => '|' + String(archiveField(archive, name))).join('');
+    const field = name => String(archiveField(archive, name));
+    return '|' + [field('MATCH_BATCH_SEQ'), field('MATCH_COUNT'),
+        canonicalBatchCrc(archiveField(archive, 'BATCH_CRC32')), field('TOTAL_CHUNKS')].join('|');
 }
 
 function extendWrapperCanonicalBase(base, sectionIndex, archive){
@@ -33,4 +39,4 @@ function extendWrapperCanonicalBase(base, sectionIndex, archive){
     return Number(wrapperIndex) === Number(sectionIndex) ? base + foldArchiveSuffix(archive) : base;
 }
 
-module.exports = { foldArchiveSuffix, extendWrapperCanonicalBase };
+module.exports = { canonicalBatchCrc, foldArchiveSuffix, extendWrapperCanonicalBase };

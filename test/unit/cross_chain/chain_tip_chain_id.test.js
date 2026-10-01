@@ -22,7 +22,7 @@
 // chainparams constant that is byte-identical across every re-genesis, while block 1
 // commits to the moment the new chain started. The Bitcoin indexer reports it on the tip
 // push it already makes; the hub stores it, stamps it on the rows it writes, and
-// advertises it on the three snapshot envelopes so a DOGE/LTC mirror (which cannot derive
+// advertises it on the six snapshot envelopes so a DOGE/LTC mirror (which cannot derive
 // it locally) learns what to expect.
 //
 // The column is TRANSPORT, never consensus: the last describe here drives the signed match
@@ -34,6 +34,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const proxyquireNoCache = require('proxyquire').noPreserveCache();
+const { registerSnapshotTableTests } = require('../../helpers/snapshotEnvelopeCases.js');
 const { waitUntil } = require('../../helpers/waitUntil');
 
 const snapWrite            = require('../../../src/lib/capability_snapshot_write.js');
@@ -46,7 +47,7 @@ const LOCAL_ID   = '00000000c937983704a73af28acdec37b049d214adbda81d7e2a3dd146f6
 const FOREIGN_ID = '000000005c8ba8e1e0a4a2e6f2d3c4b5a6978869fedcba0987654321abcdef01';
 
 const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
-const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots'];
+const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots', 'list_snapshots'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // api.js harness: boot with everything heavy stubbed and capture both the
@@ -242,6 +243,12 @@ it('stores a valid chain_id with the tip', async function () {
 function registerSnapshotEnvelopeSuite() {
 describe('snapshot envelopes advertise the hub chain identity', function () {
         let routes, db;
+        // Pin the list to the routes that stamp the identity, so a new envelope cannot go untested.
+        it('covers every snapshot route that stamps btc_chain_id', function () {
+            const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'src', 'api', 'rest', 'hub_db_snapshot.js'), 'utf8');
+            const stamped = [...src.matchAll(/table: '([a-z_]+)'[^\n]*btc_chain_id: await/g)].map(m => m[1]);
+            expect(stamped.sort()).to.deep.equal([...CROSS_CHAIN_TABLES].sort());
+        });
         before(async function () {
             db = snapshotDb();
             ({ routes } = await bootApi(db, 'regtest'));
@@ -252,34 +259,7 @@ describe('snapshot envelopes advertise the hub chain identity', function () {
             db.chainTipThrows = false;
             db.seenSql.length = 0;
         });
-        for (const table of CROSS_CHAIN_TABLES) {
-            it(table + ': the envelope carries btc_chain_id', async function () {
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                const env = res.parsed();
-                expect(env.table).to.equal(table);
-                expect(env.btc_chain_id).to.equal(LOCAL_ID);
-                // The identity is read for BITCOIN on the hub's own network: a DOGE mirror
-                // must be told the BTC chain the rows are anchored to, not its own.
-                expect(db.lastTipArgs).to.deep.equal(['bitcoin', 'regtest']);
-            });
-
-            it(table + ': btc_chain_id is null when no indexer has reported one', async function () {
-                db.chainTip = null;
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                expect(res.parsed().btc_chain_id).to.equal(null);
-            });
-
-            it(table + ': an unreadable identity serves null, never a 500', async function () {
-                db.chainTipThrows = true;
-                const res = fakeRes();
-                await routes['/hub-db/snapshot/' + table]({ query: {} }, res);
-                expect(res.statusCode).to.equal(200);
-                expect(res.parsed().btc_chain_id).to.equal(null);
-                expect(res.parsed().rows).to.have.lengthOf(1);
-            });
-        }
+        registerSnapshotTableTests(() => ({ routes, db }), { fakeRes, tables: CROSS_CHAIN_TABLES, localId: LOCAL_ID });
 
         // cross_chain_calls is the one route with an explicit column list; a column left
         // out there is silently dropped for every bootstrapped row while the streamed

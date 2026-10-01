@@ -293,9 +293,16 @@ module.exports = {
     async rebroadcastRow(row){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
-        let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
+        let rows, failure = null;
+        try { rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time); }
+        catch(err){ failure = (err && err.message) ? err.message : String(err); }
         let stored = (rows && rows.length) ? rows[0] : null;
-        if(!stored) return;
+        if(!stored){
+            // Resync rather than throw: the update is committed and a retry finds nothing left to stream.
+            this.stats.errors++;
+            this.resyncMirrorSubscribers(failure || 'the updated row read back empty');
+            return;
+        }
         let b = this.broadcaster();
         if(b && typeof b.broadcastRow === 'function')
             b.broadcastRow({ table: 'attestation_responses', row: stored });

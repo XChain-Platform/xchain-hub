@@ -90,6 +90,7 @@ module.exports = {
         return {
             bridges: Array.isArray(d.bridges) ? d.bridges : [],
             policies: Array.isArray(d.policies) ? d.policies : [],
+            lists: Array.isArray(d.lists) ? d.lists : [],
             checkpoints: Array.isArray(d.checkpoints) ? d.checkpoints : [],
             prices: Array.isArray(d.prices) ? d.prices : [],
             tombstones: Array.isArray(d.tombstones) ? d.tombstones : []
@@ -120,7 +121,7 @@ module.exports = {
         const q = quorumRows || this.finalizedQuorumRows(d);
         const stray = this.finalizedOutsideObservedArchive(
             Number(d.batch_seq), sender, d.matches, calls, rewards,
-            q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
+            q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones, q.lists);
         if(stray){
             logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces ' + stray +
                          ', which the archive we co-signed for this batch does not carry; ignoring the ' +
@@ -161,7 +162,7 @@ module.exports = {
                                 q.bridges.some(b => b && b.status !== '__partial__') ||
                                 q.prices.some(p => p && p.status !== '__partial__') ||
                                 q.policies.length > 0 || q.checkpoints.length > 0 ||
-                                q.tombstones.length > 0;
+                                q.tombstones.length > 0 || (q.lists || []).length > 0;
         if(!d.txid && terminalAnnounced){
             logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') carries NO txid but ' +
                          'announces non-__partial__ rows; an honest publish marks every row __partial__ when ' +
@@ -223,8 +224,10 @@ module.exports = {
         if(!d.txid){
             // Every announced row is '__partial__' here (finalizedNullTxidForged proves it), so
             // this is the honest failed-broadcast shape: seq bookkeeping, nothing to verify.
-            await this.backfillBatch(Number(d.batch_seq), d.matches, null, calls, rewards,
-                                     q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones);
+            const args = [Number(d.batch_seq), d.matches, null, calls, rewards,
+                          q.bridges, q.policies, q.checkpoints, q.prices, q.tombstones,
+                          q.lists || []];
+            await this.backfillBatch(...args);
             return;
         }
         // Archive-head version SET {1}: publishArchive emits a v1 head at every height,
@@ -254,7 +257,7 @@ module.exports = {
                                   q.bridges.map(b => Object.assign({}, b, { status: '__partial__' })),
                                   [], [],
                                   q.prices.map(p => Object.assign({}, p, { status: '__partial__' })),
-                                  []);
+                                  [], []);
         this.deferFinalized(d, sender, calls, rewards, q, archiveOnChain);
     }
 

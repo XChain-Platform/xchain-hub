@@ -59,7 +59,7 @@ function archiveHead(version, chunk0Len, wrapperSigs, attestSigs){
 }
 
 // The compiled push costs 3 bytes more than the raw text
-// (xchain-encoder/src/validator.js), so the raw budget is 8192 - 3.
+// (xchain-encoder/src/common/validator/constants.js), so the raw budget is 8192 - 3.
 const BUNDLE_BUDGET = MAX_ACTION_DATA_LENGTH - 3;
 
 // A worst-case mainnet-height section: 7-digit block_index, 6-digit seq and

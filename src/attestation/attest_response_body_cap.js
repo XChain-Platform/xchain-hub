@@ -39,7 +39,8 @@
  * exist and already sit below 8189 in practice (http_get 32768 bytes / llm
  * 16384 bytes of `max_response_bytes` in ProviderRegistry.js:33-51 bound the
  * fetch itself, and the PBFT proposal-size gate derived from them,
- * AttestationConsensus.js:644-665, is `ceil(maxBytes * 1.4)` base64 of that),
+ * AttestationConsensus.maxBodyB64Length in attestation/consensus/wire.js, is
+ * `ceil(maxBytes * 1.4)` base64 of that),
  * so a per-provider body cap is already a governance-syncable provider field
  * and needs no new constant here (inventory D41). This module's constant is
  * the protocol-wide RELAY ceiling, a separate and lower concern than any one

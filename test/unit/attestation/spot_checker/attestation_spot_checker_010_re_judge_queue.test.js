@@ -190,6 +190,21 @@ describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookA
         expect(sc.failuresFor('aa'.repeat(32))).to.have.length(0);
     }); });
 
+// A spent agree() wall-clock budget means no judge answered in time, so it is held too.
+describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('holds and requeues a judge_timeout spot-check, scoring it once the judge answers', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('judge_timeout', 2, false));
+        sc.register('rt1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('rt1', 702, ['cc'.repeat(32)]));
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        expect(await sc.sweepReJudge()).to.equal(0);             // timed out again: requeued
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        expect(await sc.sweepReJudge()).to.equal(1);
+        expect(db.rows).to.have.length(1);
+        expect(sc.failuresFor('cc'.repeat(32))).to.have.length(1);
+    }); });
+
 describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('scores the held spot-check once the provider resumes (the coverage that used to be lost)', async function () {
         const db  = makeFakeDb();
         const hub = makeHub({ db });

@@ -56,7 +56,7 @@ const RELAYABLE_STATUSES = ['ok', 'expired'];
 // to a request that really was materialized on the home chain.
 const REFUSED_REQUEST_STATUS = 'rejected';
 
-// Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js, as in
+// Must equal MAX_DATA_BYTES in xchain-encoder/src/common/validator.js, as in
 // AttestationPublisher: an oversized payload is rejected by createTx, and finding
 // that out after the round has finalized wastes the whole round.
 const ATTEST_WIRE_MAX_BYTES = 8189;

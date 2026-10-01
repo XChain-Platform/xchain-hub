@@ -34,7 +34,11 @@ const DOWNGRADE_TO_COUNT = Symbol('downgrade to a count quorum');
 
 // The skip reason for a round whose raw submission set cannot carry it, or null to go on.
 function submissionCountSkip(round, submissions) {
-    if (!submissions || submissions.size === 0) return 'no submissions';
+    // Warn on a total loss too: storeSkippedRound only logs at info, and alerting keys on level.
+    if (!submissions || submissions.size === 0) {
+        logger.warn('Oracle: Round ' + round + ' has no submissions at all, not even this hub\'s own; skipping');
+        return 'no submissions';
+    }
 
     if (submissions.size < this.minSubmissions) {
         logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
@@ -157,7 +161,10 @@ function snapshotSkip(round, btcBlockHeight, snapshot) {
 
 // The same floor over the snapshot-member submissions the round will actually aggregate.
 function memberSubmissionSkip(round, submissions) {
-    if (!submissions || submissions.size === 0) return 'no submissions from snapshot members';
+    if (!submissions || submissions.size === 0) {
+        logger.warn('Oracle: Round ' + round + ' has no submissions from price-snapshot members; skipping');
+        return 'no submissions from snapshot members';
+    }
     if (submissions.size < this.minSubmissions) {
         logger.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
             ' snapshot-member submission(s); minimum is ' + this.minSubmissions + ', skipping');
@@ -177,6 +184,8 @@ async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submission
     // stall gauges and round:finalized still emits an empty-pair PRICE v0
     // on-chain. Store a durable skipped-round row and stop instead.
     if (aggregated.length === 0) {
+        logger.warn('Oracle: Round ' + round + ' aggregation yielded no prices from ' + submissions.size +
+            ' submission(s); every pair was dropped or none was submitted; skipping');
         await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices');
         return;
     }
@@ -332,9 +341,8 @@ module.exports = {
         // Lock the validator-set snapshot at the round's block boundary so
         // every hub computes the same quorum for this round, even when stake
         // state drifts mid-round. Spec: capability-staking-model.md §6.
-        // Falls back to the live validator-set count when the indexer is
-        // unreachable (graceful degradation; same behavior as before the
-        // snapshot wiring landed).
+        // With no deterministic snapshot, snapshotSkip (via finalizeOnSnapshot) skips
+        // the round on a federated hub; only a single-node hub uses the live count.
         // STAKE_WEIGHTED_QUORUM: at/above the activation snapshot_block, finalize on
         // summed signer STAKE (>2/3 of S, source-deduped) rather than signer COUNT.
         // Gated on the round's BTC block boundary + the hub's network so the hub and

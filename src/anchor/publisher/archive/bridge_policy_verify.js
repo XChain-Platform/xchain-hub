@@ -18,7 +18,9 @@
 
 'use strict';
 
-const CrossChainBridgeEngine = require('../../../cross_chain/bridge_engine.js');
+const gateRegistry = require('../../../consensus/gate_registry.js');
+const { parsePolicyColumn } = require('../../../cross_chain/bridge/policy_column.js');
+const { policyHash } = require('../../../cross_chain/bridge/policy_hash.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../observability');
@@ -31,14 +33,10 @@ function comparable(row){
     return out;
 }
 
-function policyList(raw){
-    if(raw == null) return null;
-    try {
-        const parsed = JSON.parse(String(raw));
-        return Array.isArray(parsed) ? parsed.map(String) : undefined;
-    } catch(e){
-        return undefined;
-    }
+const LIST_SHARE_PRODUCER_GATE = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
+
+function policyList(raw, refsAllowed){
+    return parsePolicyColumn(raw, refsAllowed);
 }
 
 module.exports = {
@@ -60,12 +58,18 @@ module.exports = {
     },
 
     async verifyArchivedPolicySnapshot(row){
-        const allow = policyList(row.allow_list);
-        const block = policyList(row.block_list);
+        const refsAllowed = gateRegistry.activeAt(LIST_SHARE_PRODUCER_GATE,
+            row.network, 'BTC', Number(row.snapshot_block), null);
+        const allow = policyList(row.allow_list, refsAllowed);
+        const block = policyList(row.block_list, refsAllowed);
+        const members = side => Array.isArray(side) ? side : null;
+        const refs = {
+            allow: allow && !Array.isArray(allow) ? allow.ref : null,
+            block: block && !Array.isArray(block) ? block.ref : null
+        };
         if(allow === undefined || block === undefined ||
-           CrossChainBridgeEngine.prototype.policyHash.call(
-               null, allow, block, Number(row.sleeping) === 1
-           ) !== String(row.policy_hash || '').toLowerCase()){
+           policyHash(members(allow), members(block), Number(row.sleeping) === 1, refs) !==
+               String(row.policy_hash || '').toLowerCase()){
             logger.warn('StateAnchorPublisher: archive policy snapshot ' +
                         String(row.snapshot_id).substring(0, 16) +
                         '... membership does not match policy_hash; NOT signing');

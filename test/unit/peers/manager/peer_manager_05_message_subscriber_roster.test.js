@@ -107,17 +107,17 @@ const feature19messageSubscriberRosterBranches = [['regtest with nothing armed',
 function registerFeature19messageSubscriberRosterPart1() {
   it('a regtest venue with no activation height credits no roll-call listener', function () {
     this.timeout(10000);
-    // 18 is what lane L6e counted attaching at a real regtest boot: the 14
-    // singleton subscribers plus the four CrossChainDexConsensus channels.
+    // 19 is what lane L6e counted attaching at a real regtest boot: the 14
+    // singleton subscribers plus the five CrossChainDexConsensus channels.
     expect(feature19messageSubscriberRosterRegtestRosterWith(null)).to.deep.equal({
-      n: 18,
+      n: 19,
       rollcall: false
     });
   });
   it('arming the regtest venue adds exactly one, and it is the roll-call listener', function () {
     this.timeout(10000);
     expect(feature19messageSubscriberRosterRegtestRosterWith('armed')).to.deep.equal({
-      n: 19,
+      n: 20,
       rollcall: true
     });
   });

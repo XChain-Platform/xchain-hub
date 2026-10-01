@@ -33,7 +33,7 @@ function wrapperCheckpoint(){
     };
 }
 
-function indexerSection(sectionIndex){
+function indexerSection(sectionIndex, crc = '8665563e'){
     const cp = wrapperCheckpoint();
     return {
         FORMAT: 0, SECTION_INDEX: sectionIndex, NETWORK: cp.network, CHAIN: cp.chain,
@@ -43,7 +43,7 @@ function indexerSection(sectionIndex){
         STATE_ROOT: cp.state_root, STATE_ROOT_VERSION: '1',
         BLOCK_MERKLE_ROOT: cp.block_merkle_root, BLOCK_MERKLE_VERSION: '1',
         FOLD_ARCHIVE: { WRAPPER_SECTION_INDEX: '0', MATCH_BATCH_SEQ: '5', MATCH_COUNT: '1',
-            BATCH_CRC32: '8665563e', TOTAL_CHUNKS: '1' }
+            BATCH_CRC32: crc, TOTAL_CHUNKS: '1' }
     };
 }
 
@@ -71,6 +71,10 @@ describe('folded ANCHOR wrapper signing canonical vector', function () {
         it('the indexer rebuilds the hub signer bytes for the wrapper section', function () {
             const hub = foldArchiveCanonical(wrapperCheckpoint(), 5, 1, '8665563e', 1);
             expect(Anchor.prototype.canonical.call({}, indexerSection(0))).to.equal(hub);
+        });
+
+        it('the indexer rebuilds the hub signer bytes for an upper-case batch CRC', function () {
+            expect(Anchor.prototype.canonical.call({}, indexerSection(0, '8665563E'))).to.equal(EXPECTED);
         });
 
         it('a non-wrapper section keeps the batch sequence out of its round id', function () {

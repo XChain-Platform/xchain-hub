@@ -119,7 +119,7 @@ const PARTS = [optionsPart, batchOptionsPart, broadcastPart, landingPart, lifecy
                rotationPart, queuePart, bufferPart, takeoverPart, schedulerPart, landedPart,
                assemblyPart, wirePart, publishPassPart, publishEntryPart, statsPart];
 
-// PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
+// PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/common/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
 // rejected by createTx with a RangeError, so we drop it before it lands on the durable
 // queue rather than letting the queue retry sweep replay it forever. (Named for

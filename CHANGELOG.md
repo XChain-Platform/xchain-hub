@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-01
+
+### Added
+- Added folded ANCHOR v3 payloads with archived checkpoints, prices, bridge transfers, and policy snapshots.
+- Added shared-list policy references and the list share producer gate.
+- Added hourly PRICE batches with six rounds per wire.
+
+### Changed
+- Keyed token bridge and policy testnet gates separately for each supported chain.
+- Armed the testnet release train at BTC 154566.
+- Armed testnet mirror admission producers at BTC 154234, LTC 4903068 and DOGE 67936053.
+- Armed testnet mirror admission consumers at BTC 154291, LTC 4903291 and DOGE 67936888.
+- Armed the testnet anchor attestation barrier at BTC 154291.
+- Armed testnet token bridges at BTC 154567, LTC 4903068 and DOGE 67951140.
+- Armed testnet token policy inheritance at BTC 154567, LTC 4903068 and DOGE 67951140.
+
+### Fixed
+- Required an explicit network when deriving oracle snapshots.
+
 ## [0.21.0] - 2026-09-29
 
 ### Added

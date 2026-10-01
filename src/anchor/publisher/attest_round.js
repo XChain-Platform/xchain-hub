@@ -66,22 +66,16 @@ module.exports = {
     },
 
     async attestationSigningSet(b){
-        // resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
-        // deterministic snapshot is unavailable), which is right for the callers that
-        // must not build on a divergent set. Here it would abort the whole anchor: this
-        // round is awaited inside publishBundle, whose catch only logs the failure and
-        // drops the bundle, so a transient snapshot outage would withhold the ANCHOR
-        // itself rather than just its reward. Degrade instead, byte-identically to the
-        // snapCount === 0 abstain below: no attestation, a v0 with ATTEST_SIG_COUNT 0
-        // lands, no reward is recorded. Scoped to the resolve call only, so an unrelated
-        // throw inside the round still surfaces.
+        // Catch the fail-closed resolve and return null, so the round abstains (met:false) and the
+        // caller counts, logs and defers the bundle with nothing published, as for snapCount 0 below.
+        // Scoped to the resolve call only, so an unrelated throw inside the round still surfaces.
         let signingSet;
         try {
             signingSet = await this.resolveCapabilitySet('oracle_publish', Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));
         } catch(e){
             logger.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
                          Number(b.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
-                         'publisher-attestation round (unattested bundle, no reward) rather than blocking the anchor');
+                         'publisher-attestation round (bundle deferred, nothing published, checkpoints stay pending)');
             return null;
         }
         return signingSet;
@@ -89,7 +83,7 @@ module.exports = {
 
     // Open the round on the wire and settle it: the leader's own signature is already in,
     // the followers verify the body against their own rows, and the timer resolves the
-    // round unattested if the quorum does not arrive.
+    // round met:false (the caller defers the bundle) if the quorum does not arrive.
     openAttestRound(b, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig){
         return new Promise((resolve) => {
             // Full {pubkey, source, weight} set so the stake-weighted tally can sum
@@ -113,7 +107,7 @@ module.exports = {
                     this._attestRound = null;
                     logger.warn('StateAnchorPublisher: publisher-attestation round (bundle ' + b.network + ' @ ' +
                                  b.snapshot_block + ') timed out at ' + round.signatures.size + '/' + quorum +
-                                 ' sigs; unattested fallback');
+                                 ' sigs; bundle deferred');
                     resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })) });
                 }
             }, this.roundTimeoutMs);
@@ -142,7 +136,7 @@ module.exports = {
     // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
     // against, so the hub never collects a quorum the chain then rejects.
     // The oracle_publish set this round tallies against, or null when the snapshot is
-    // unavailable and the round must abstain rather than block the anchor.
+    // unavailable and the round abstains (met:false, the caller defers the bundle).
     async runPublisherAttestationRound(b, publisher){
         if(!this.identity) return { met: false, sigs: [] };
         let signingSet = await this.attestationSigningSet(b);
@@ -164,17 +158,17 @@ module.exports = {
         // and still resolve snapCount 0 here. Self-attesting on that would emit a v0
         // carrying one signature that every indexer rejects (it resolves a non-empty set),
         // while THIS hub banks and archives an anchor reward no live indexer credits: the
-        // live-vs-recovered ledger fork the reward gates exist to prevent. An unattested
-        // bundle is degraded, not divergent.
+        // live-vs-recovered ledger fork the reward gates exist to prevent. Abstaining
+        // defers the bundle to a later cycle, which recovers; self-attesting diverges.
         if(snapCount === 0){
             logger.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
                          Number(b.snapshot_block) + '; abstaining from the publisher-attestation round ' +
-                         '(unattested bundle, no reward) rather than self-attesting');
+                         '(bundle deferred, nothing published) rather than self-attesting');
             return { met: false, sigs: [] };
         }
         // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
-        // drops the reward (PUBLISHER must be in the verified set). Fall back to an
-        // unattested bundle rather than emit one whose reward can never be credited.
+        // drops the reward (PUBLISHER must be in the verified set). Return met:false (the
+        // caller defers the bundle) rather than emit one whose reward can never be credited.
         if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
 
         let signatures = new Map();

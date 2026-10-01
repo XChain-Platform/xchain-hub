@@ -17,6 +17,7 @@
 const proxyquire = require('proxyquire');
 
 const StakeShareWatcher = require('../../src/validators/stake_share_watcher.js');
+const ChainTips = require('../../src/hub/chain_tips.js');
 
 const OURS = ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'];
 
@@ -30,11 +31,13 @@ function makeVenue(opts) {
     opts = opts || {};
     const venue = {
         tip:        150000,
+        lag:        null,          // getlatestblock's `lag`, which the gate's tip resolver bounds
         sources:    OURS.concat(['community1']),
+        allSources: null,          // the whole-federation set; null reuses `sources`
         weight:     25000,
         truncated:  false,
         error:      null,
-        throwOn:    null,          // 'getlatestblock' | 'getstakeweightsbycapability'
+        throwOn:    null,          // an RPC method name to fail
         httpStatus: null,
         // Echo overrides: answer for a height or capability other than the one
         // asked for ('omit' strips the capability field), and weightless rows.
@@ -51,27 +54,44 @@ function makeVenue(opts) {
                 if (venue.httpStatus) err.response = { status: venue.httpStatus };
                 throw err;
             }
-            if (body.method === 'getlatestblock') return { data: { result: { block_index: venue.tip } } };
-            if (body.method === 'getstakeweightsbycapability') {
-                if (venue.error) return { data: { result: { error: venue.error } } };
-                let rows = stakeRows(venue.sources, venue.weight);
-                if (venue.dropWeight) delete rows[0].weight;
-                let result = {
-                    capability:   venue.echoCapability === null ? body.params.capability : venue.echoCapability,
-                    block_index:  venue.echoBlock === null ? body.params.block_index : venue.echoBlock,
-                    count:        venue.sources.length,
-                    source_count: venue.sources.length,
-                    truncated:    venue.truncated,
-                    validators:   rows
-                };
-                if (venue.echoCapability === 'omit') delete result.capability;
-                return { data: { result: result } };
+            if (body.method === 'getlatestblock') {
+                return { data: { result: venue.lag === null ? { block_index: venue.tip }
+                    : { block_index: venue.tip, lag: venue.lag } } };
             }
+            if (body.method === 'getstakeweightsbycapability') return stakeAnswer(venue, body, venue.sources);
+            if (body.method === 'getactivestakeweights') return stakeAnswer(venue, body, venue.allSources || venue.sources);
             return { data: { result: {} } };
         }
     };
     Object.assign(venue, opts);
     return venue;
+}
+
+// One stake-weight answer over `sources`, echoing what was asked unless the venue overrides it.
+function stakeAnswer(venue, body, sources) {
+    if (venue.error) return { data: { result: { error: venue.error } } };
+    let rows = stakeRows(sources, venue.weight);
+    if (venue.dropWeight) delete rows[0].weight;
+    let result = {
+        capability:   venue.echoCapability === null ? body.params.capability : venue.echoCapability,
+        block_index:  venue.echoBlock === null ? body.params.block_index : venue.echoBlock,
+        count:        sources.length,
+        source_count: sources.length,
+        truncated:    venue.truncated,
+        validators:   rows
+    };
+    if (venue.echoCapability === 'omit' || result.capability === undefined) delete result.capability;
+    return { data: { result: result } };
+}
+
+// The gate's real tip resolver, reading the venue's indexer and an optional pushed tip.
+function bindTipResolver(hub, venue, opts) {
+    if (opts.noTipResolver) return hub;
+    hub.db = { getChainTip: async () => opts.pushedTip || null };
+    hub.resolveBtcNetwork = async () => 'regtest';
+    for (const m of ['resolveBtcLatestBlock', 'btcPushedTipFresh', 'btcDirectTipAcceptable'])
+        hub[m] = ChainTips.prototype[m];
+    return hub;
 }
 
 // The hub's own snapshot carries a counting monitor, so a test can prove the
@@ -82,7 +102,9 @@ function makeHub(venue, opts) {
     gateMonitor.recordFailure = () => { gateMonitor.calls++; };
     gateMonitor.recordSuccess = () => { gateMonitor.calls++; };
     const urlFor = (coin) => (opts.urls === undefined ? 'http://indexer/' + coin : opts.urls[coin] || null);
-    return {
+    // The resolver posts through axiosFor(hub), which reads the hub class's modules.
+    class HubStub { static get modules() { return { axios: venue.axios }; } }
+    return bindTipResolver(Object.assign(new HubStub(), {
         network: 'regtest',
         capabilitySnapshot: {
             reorgBufferBlocks: opts.reorgBuffer === undefined ? 6 : opts.reorgBuffer,
@@ -97,7 +119,7 @@ function makeHub(venue, opts) {
         // A coin mismatch is the one case where the raw lookup has a URL and the
         // coin-verified lookup the gate uses does not.
         resolveBtcIndexerUrl: async () => (opts.coinMismatch ? null : urlFor('BTC'))
-    };
+    }), venue, opts);
 }
 
 // The watcher reads through the gate's real CapabilitySnapshot, with this
@@ -111,7 +133,6 @@ function makeWatcher(venue, env, hubOpts, opts) {
     const hub = makeHub(venue, hubOpts);
     const watcher = new StakeShareWatcher(hub, Object.assign({
         env:    Object.assign({ HUB_OPERATOR_STAKE_SOURCES: OURS.join(',') }, env || {}),
-        axios:  venue.axios,
         CapabilitySnapshot: snapshotClassFor(venue),
         log:    (m) => lines.push(m),
         chains: ['BTC'],

@@ -42,6 +42,7 @@ const { bigIntReplacer }      = require('../../../src/lib/bigint_replacer.js');
 const callFinalize  = require('../../../src/cross_chain/call/finalize.js');
 const dexFinalize   = require('../../../src/cross_chain/dex/finalize.js');
 const bridgePersist = require('../../../src/cross_chain/bridge/persist.js');
+const listPersist   = require('../../../src/cross_chain/list/persist.js');
 const rewardPart    = require('../../../src/anchor/publisher/reward.js');
 const attestBatch   = require('../../../src/attestation/response_mirror/batch.js');
 
@@ -158,6 +159,7 @@ const BOOTSTRAP_READS = {
     cross_chain_matches:        (db) => db.findCrossChainMatchesById(0, 10),
     bridge_transfers:           (db) => db.findBridgeTransfers(0, 10),
     policy_snapshots:           (db) => db.findPolicySnapshots(0, 10),
+    list_snapshots:             (db) => db.findListSnapshots(0, 10),
     price_snapshots:            (db) => db.findPriceSnapshotsById(0, 10),
     oracle_prices:              (db) => db.findOraclePricesAfterId(0, 10),
     attestation_responses:      (db) => db.findAttestationResponsesById(0, 10),
@@ -181,6 +183,9 @@ const LIVE_PATHS = {
     policy_snapshots: async (db, b, row) => {
         await bridgePersist.mirrorRow.call({ db: db, broadcaster: b }, 'policy_snapshots', 'snapshot_id', row.snapshot_id);
     },
+    list_snapshots: async (db, b, row) => {
+        await listPersist.mirrorFinalizedList.call({ db: db, broadcaster: b }, row.snapshot_id);
+    },
     price_snapshots: async (db, b, row) => {
         for (let r of await db.findPriceSnapshotsForRound(row.round_number))
             b.broadcastRow({ table: 'price_snapshots', row: r });
@@ -199,9 +204,11 @@ describe('hub-DB mirror: admission columns on the bootstrap page and the live st
 
     it('covers every hub table whose DDL defines an admission column', function () {
         let tables = tablesWithAdmissionColumns();
-        // Non-vacuity: the seven signed rails plus the unsigned oracle rail.
-        expect(tables).to.have.lengthOf(8);
+        // Non-vacuity: the eight signed rails plus the unsigned oracle rail.
+        expect(tables).to.have.lengthOf(9);
         expect(Object.keys(BOOTSTRAP_READS).sort()).to.deep.equal(tables);
+        expect(Object.keys(LIVE_PATHS).sort()).to.deep.equal(
+            tables.filter(table => table !== 'oracle_prices'));
     });
 
     registerPerQueryCases();

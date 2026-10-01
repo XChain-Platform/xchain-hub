@@ -7,7 +7,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
 const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
-const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots'];
+const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots', 'list_snapshots'];
 
 function makeDb(fsOverrides) {
     const mockConn = { query: sinon.stub().resolves([]), release: sinon.stub().resolves(), end: sinon.stub().resolves() };
@@ -24,6 +24,14 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
     afterEach(function () { sinon.restore(); });
 
 describe('schema: the column ships as DDL drift', function () {
+        // Pin the list to the DDLs that carry the column, so a new carrier cannot go untested.
+        it('covers every DDL that declares btc_chain_id', function () {
+            const carriers = fs.readdirSync(SQL_DIR).filter(f => f.endsWith('.sql'))
+                .filter(f => /^\s*btc_chain_id\s+CHAR\(64\)\s+NULL,/m.test(fs.readFileSync(path.join(SQL_DIR, f), 'utf8')))
+                .map(f => f.slice(0, -4));
+            expect(carriers.sort()).to.deep.equal([...CROSS_CHAIN_TABLES].sort());
+        });
+
         for (const table of CROSS_CHAIN_TABLES) {
             it(table + ' declares btc_chain_id CHAR(64) NULL', function () {
                 const src = fs.readFileSync(path.join(SQL_DIR, table + '.sql'), 'utf8');

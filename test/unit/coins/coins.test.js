@@ -60,16 +60,23 @@ const coins      = require('../../../src/coins');
 // even though XCHAIN_BRIDGE_ACTIVATION is unarmed on mainnet and testnet. Same
 // one-wave rollout rule as every regeneration above: every vendoring service ships
 // the new pins together and a straggler fail-closes on verifyConsensusPin().
+// REGENERATED 2026-09-30: GAS_SCHEDULE gains LIST_SHARE,
+// LIST_SHARED_EDIT_BASE and LIST_SHARED_EDIT_PER_ITEM. GAS_SCHEDULE is hashed whole,
+// so all nine hashes move even though nothing charges the keys below
+// LIST_SHARE_ACTIVATION. The same one-wave rollout rule applies.
+// REGENERATED 2026-10-01: ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS joins the consensus
+// subset. All nine hashes move even though the 4500-second fee-gate bound is inert
+// below ORACLE_PRICE_AGE_HOURLY_ACTIVATION. The one-wave rollout rule applies.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '242cf3cfcb4ff494d43b3d39775938f822f03a45326beff3b125ca102648e6ad',
-            testnet: 'fcff7c1f46a8f7a75ddb7e1e4fb30f9e0c72d72f307a75a9d9357ffad29452c0',
-            regtest: '63ee757834f6f815045321090fd89b446e784f442e3e7abf84b8c0fb3b479324' },
-    LTC:  { mainnet: '5fd9f1dda65b55faf6a5e507a4a81bd2a5ba6813d8a3ed1f04cd27b99fec03c3',
-            testnet: '57373962a5c562f8ceb98fceb482c586741ecf8dd6335965c76f9b8e61a4eb87',
-            regtest: 'ab30c1d1fd444ca3dca1a9ec855bd587422e87d5e5e5e6b6f9ddadd1d2fb587d' },
-    DOGE: { mainnet: '78c298463e586fed8daa1979d9dfe58f4d6de32efd01ae45024b9490e871b1cc',
-            testnet: '5276c0a0fb161bbfd4e8b0acaabf38751dded4370ecce86455c57eb5de0e9bb2',
-            regtest: '34f8dafeff36f7c8ca3b327c3c915251e78e64448742860620522a92a69368a0' },
+    BTC:  { mainnet: '1fd448eafb00c95f526f1d01422df98c1af8876a0adbefd859fca19c7d789a31',
+            testnet: '3e0083d555399e54eff2670a0ea5e8d76c8935d3e7423451c1221ae698386b5a',
+            regtest: 'ad800ecb8d28448f9d39743bd3a28e6aac121d0e9add30743ee1dcbbf694af86' },
+    LTC:  { mainnet: '3d3d4b3820199d4398b53eb239be552acd281dff678cda0d88acf3932af2076e',
+            testnet: 'd9c315b36adf5ab8bd6831ccc59a2a01124df70ba9fc8141662ec682285251e8',
+            regtest: '16dd43ca2299880704e076e5f7c262eae6b5e32823ad49c9748c33f014f44c36' },
+    DOGE: { mainnet: 'cc2a4db628dd3759bcf64dd35dc6b9ee2726be1a9d38eb5e5596bc3a9d0bf99e',
+            testnet: '82c6bc814e3de4a1e023d008457b7186c5a6ac142c85be9bf0a18f2d5989fd72',
+            regtest: 'd7bd53f527d961f1cf0cfc7de725d61e625975f7086532976c777a04c08988f6' },
 };
 
 function registerRegistryBasics() {

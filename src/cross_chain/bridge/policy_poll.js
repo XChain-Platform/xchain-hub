@@ -20,9 +20,11 @@
  *
  ********************************************************************/
 
-const crypto = require('crypto');
 const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const { XPOLICY_MAX_MEMBERS } = require('./constants.js');
+const { sideKind } = require('./list_ref.js');
+const { policyColumnText } = require('./policy_column.js');
+const { policyHash: bridgePolicyHash } = require('./policy_hash.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -130,7 +132,7 @@ module.exports = {
 
     async maybeSnapshotPolicy(pair, network, snapshotBlock){
         let originChain = pair.origin_chain;
-        let signable = await this.readSignablePolicy(pair, originChain);
+        let signable = await this.readSignablePolicy(pair, originChain, snapshotBlock);
         if(!signable) return;
         let { originBlock, shaped, hash } = signable;
 
@@ -152,8 +154,8 @@ module.exports = {
             policy_seq:      policySeq,
             origin_block:    Number(originBlock),
             policy_hash:     hash,
-            allow_list:      shaped.allow === null ? null : JSON.stringify(shaped.allow),
-            block_list:      shaped.block === null ? null : JSON.stringify(shaped.block),
+            allow_list:      policyColumnText(shaped.allow),
+            block_list:      policyColumnText(shaped.block),
             sleeping:        shaped.sleeping ? 1 : 0,
             // Sized to the SLOWEST chain that holds a copy per this hub's own transfer rows,
             // never over the issuer's BRIDGE_CHAINS (which an issuer can empty while copies
@@ -182,17 +184,21 @@ module.exports = {
 
     // The origin's policy for `pair` at its confirmed height, shaped and checked against its
     // own hash, or undefined when this cycle signs nothing for the pair.
-    async readSignablePolicy(pair, originChain){
+    async readSignablePolicy(pair, originChain, snapshotBlock){
         if(!this.indexers[originChain] || !this.indexers[originChain].url) return;
         let originBlock = await this.policyOriginBlock(originChain);
         if(originBlock == null) return;
 
         let policy;
-        try { policy = await this.indexerCall(originChain, 'gettokenpolicy', { tick: pair.tick, origin_block: originBlock }); }
+        try { policy = await this.indexerCall(originChain, 'gettokenpolicy', {
+            tick: pair.tick,
+            origin_block: originBlock,
+            snapshot_block: Number(snapshotBlock)
+        }); }
         catch(e){ return; }                       // read failure abstains; never refuses (D16)
         if(!policy || policy.error) return;       // the tick has no native row here
 
-        let shaped = this.shapePolicy(policy);
+        let shaped = this.shapePolicy(policy, snapshotBlock);
         if(!shaped) return;
         // The membership ceiling (R2). Declining is the whole action: the previous snapshot
         // stays in force and the watch raises WARN, so an oversized list can never be
@@ -203,7 +209,7 @@ module.exports = {
                          '); the previous snapshot stays in force');
             return;
         }
-        // Membership arrays are TRANSPORT and are verified against the hash on apply, so a
+        // Policy sides are TRANSPORT and are verified against the hash on apply, so a
         // snapshot whose own indexer answer does not hash to its own policy_hash would be
         // refused by every destination. Recompute rather than trust the read.
         let hash = this.policyHash(shaped.allow, shaped.block, shaped.sleeping);
@@ -237,22 +243,30 @@ module.exports = {
     },
 
     // Normalize a gettokenpolicy answer into the three signed inputs, or null when the
-    // answer is not usable. A list is either null (the origin row has no such list) or an
-    // array of members; the arrays must already be in canonical order, which the apply side
-    // also verifies and never re-sorts (D13), so an out-of-order answer is refused here too
-    // rather than silently re-sorted into a hash the origin never held.
-    shapePolicy(policy){
-        let one = (v) => {
-            if(v === null || v === undefined) return null;
-            if(!Array.isArray(v)) return undefined;
-            return v.map(x => String(x));
+    // answer is not usable. A side is null, an array of members, or a gated shared-list
+    // reference. Member arrays must already be in canonical order, which the apply side
+    // also verifies and never re-sorts (D13).
+    shapePolicy(policy, snapshotBlock){
+        let refsAllowed;
+        let one = (members, ref) => {
+            let v = ref == null ? members : ref;
+            let kind = sideKind(v);
+            if(kind === 'none') return null;
+            if(kind === 'members') return v.map(x => String(x));
+            if(kind === 'ref'){
+                if(refsAllowed === undefined)
+                    refsAllowed = this.gateActive('listShare', Number(snapshotBlock), 'BTC');
+                if(refsAllowed) return { ref: v };
+            }
+            return undefined;
         };
-        let allow = one(policy.allow_list);
-        let block = one(policy.block_list);
+        let allow = one(policy.allow_list, policy.allow_list_ref);
+        let block = one(policy.block_list, policy.block_list_ref);
         if(allow === undefined || block === undefined) return null;
-        if(!this.isCanonicalOrder(allow) || !this.isCanonicalOrder(block)) return null;
-        let oversized = (allow && allow.length > XPOLICY_MAX_MEMBERS) ||
-                        (block && block.length > XPOLICY_MAX_MEMBERS);
+        if(Array.isArray(allow) && !this.isCanonicalOrder(allow)) return null;
+        if(Array.isArray(block) && !this.isCanonicalOrder(block)) return null;
+        let oversized = (Array.isArray(allow) && allow.length > XPOLICY_MAX_MEMBERS) ||
+                        (Array.isArray(block) && block.length > XPOLICY_MAX_MEMBERS);
         return { allow: allow, block: block, sleeping: !!policy.sleeping, oversized: !!oversized };
     },
 
@@ -267,20 +281,18 @@ module.exports = {
         return true;
     },
 
-    // sha256 over the canonical membership text (policy spec section 5):
+    // sha256 over the canonical membership text (policy spec section 5). A reference side
+    // is spelled <LABEL>|REF|<CHAIN:index>; a member side keeps the legacy spelling:
     //   ALLOW|<n or ->|<addr>|... |BLOCK|<m or ->|<addr>|... |SLEEP|<0 or 1>
     // `-` means the origin row has no such list, `0` means it has an EMPTY one. The two are
     // not the same thing: isActionAllowed denies everyone on an empty allow list, so a copy
     // must be able to tell "no policy" from "allow nobody".
     policyHash(allow, block, sleeping){
-        let part = (label, list) => {
-            if(list === null) return [label, '-'];
-            return [label, String(list.length)].concat(list.map(a => String(a)));
+        let members = (side) => Array.isArray(side) ? side : null;
+        let refs = {
+            allow: allow && !Array.isArray(allow) ? allow.ref : null,
+            block: block && !Array.isArray(block) ? block.ref : null
         };
-        let text = part('ALLOW', allow)
-            .concat(part('BLOCK', block))
-            .concat(['SLEEP', sleeping ? '1' : '0'])
-            .join('|');
-        return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+        return bridgePolicyHash(members(allow), members(block), sleeping, refs);
     },
 };

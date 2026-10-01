@@ -24,8 +24,12 @@ const {
   createMockHub
 } = require('../../../helpers/mockHub');
 const {
-  pubkeyForTestSender
+  pubkeyForTestSender,
+  VALIDATORS_3,
+  buildSubmissions
 } = require('../../../helpers/fixtures');
+const { getLogger } = require('../../../../src/observability');
+const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
 let oracleConsensusLocallySkippedRoundsStayRepSuite1Hub, oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, oracleConsensusLocallySkippedRoundsStayRepSuite1OracleRound;
 const oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND = 7;
 function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part1() {
@@ -158,4 +162,86 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
   registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part1.call(this);
   registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part2.call(this);
   registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part3.call(this);
+});
+
+// A skip that lost the whole round must warn like a partial shortfall does: the
+// stored skip's own summary line is info, and log alerting keys on level.
+let warnHub, warnOc, warnRound;
+const BTC_USD = [{ coinPair: 'BTC/USD', price: '100000' }];
+
+// The warn lines one round produced; the info summary never lands here.
+function spyRoundWarns() {
+  const spy = sinon.spy(getLogger(), 'warn');
+  return round => spy.getCalls().map(c => String(c.args[0])).filter(m => m.includes('Round ' + round + ' '));
+}
+function snapshotOf(capability, blockIndex) {
+  const vals = Array.isArray(warnOc.validatorSet) ? warnOc.validatorSet : [];
+  return { capability, blockIndex: Number(blockIndex), count: vals.length,
+    validators: vals.map(v => ({ pubkey: v.pubkey, amount: '50000' })) };
+}
+function registerTotalLossWarnHarness() {
+  beforeEach(function () {
+    warnHub = createMockHub();
+    warnRound = { getSubmissions: sinon.stub().returns(new Map()) };
+    warnOc = new OracleConsensus(warnHub, warnRound);
+    warnHub.capabilitySnapshot = {
+      getSnapshot: async (c, b) => snapshotOf(c, b),
+      getWeightSnapshot: async (c, b) => snapshotOf(c, b),
+      getQuorum: s => bftQuorumOrSingle(s && Array.isArray(s.validators) ? s.validators.length : 0, 0)
+    };
+    warnOc.minSubmissions = 1;
+  });
+  afterEach(function () {
+    sinon.restore();
+  });
+}
+function registerTotalLossWarnSubmissionTests() {
+  it('warns when a round has no submissions at all', async function () {
+    const warns = spyRoundWarns();
+    await warnOc.finalizeRound(5);
+    expect(warns(5)).to.have.length(1);
+    expect(warns(5)[0]).to.include('no submissions');
+  });
+  it('warns when no submission comes from a snapshot member', async function () {
+    const warns = spyRoundWarns();
+    warnOc.setValidatorSet(VALIDATORS_3);
+    warnRound.getSubmissions.returns(buildSubmissions([{ sender: 'ws://outsider:1', prices: BTC_USD }]));
+    await warnOc.finalizeRound(6, 900000, 1700000000);
+    expect(warns(6)).to.have.length(1);
+    expect(warns(6)[0]).to.include('snapshot members');
+  });
+  it('still warns exactly once on a partial shortfall', async function () {
+    const warns = spyRoundWarns();
+    warnOc.minSubmissions = 3;
+    warnRound.getSubmissions.returns(buildSubmissions([{ sender: 'v1', prices: BTC_USD }]));
+    await warnOc.finalizeRound(9);
+    expect(warns(9)).to.have.length(1);
+    expect(warns(9)[0]).to.include('minimum is 3');
+  });
+}
+function registerTotalLossWarnAggregateTests() {
+  it('warns when the solo path aggregates no prices', async function () {
+    const warns = spyRoundWarns();
+    warnOc.setValidatorSet([]);
+    warnHub._peerManager.getPeerStatus.returns([]);
+    sinon.stub(warnOc, 'aggregateAll').returns([]);
+    warnRound.getSubmissions.returns(buildSubmissions([{ sender: warnHub._peerManager.validatorAddr, prices: BTC_USD }]));
+    await warnOc.finalizeRound(7, 900000, 1700000000);
+    expect(warns(7)).to.have.length(1);
+    expect(warns(7)[0]).to.include('aggregation yielded no prices');
+  });
+  it('warns when the proposer aggregates no prices, keeping the skip reason', async function () {
+    const warns = spyRoundWarns();
+    sinon.stub(warnOc, 'aggregateAll').returns([]);
+    const store = sinon.stub(warnOc, 'storeSkippedRound').resolves();
+    const subs = buildSubmissions([{ sender: 'v1', prices: BTC_USD }]);
+    await warnOc.proposeRound(8, subs, false, 900000, 1700000000, null, 1, false, null);
+    expect(warns(8)).to.have.length(1);
+    expect(store.getCall(0).args[3]).to.equal('aggregation yielded no prices');
+  });
+}
+describe('OracleConsensus: a round that lost everything warns like a partial shortfall', function () {
+  registerTotalLossWarnHarness();
+  registerTotalLossWarnSubmissionTests();
+  registerTotalLossWarnAggregateTests();
 });

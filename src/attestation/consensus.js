@@ -169,7 +169,8 @@ class AttestationConsensus extends EventEmitter {
         // was verified in handlePropose over the sender's own wire status. A proposer
         // can match the winner body+meta yet have signed over status='fail', so its sig
         // does NOT verify over the winner canonical. Re-verify here before counting it,
-        // mirroring handlePrepare (614) and handleCommit; an unverifiable sig inflates
+        // mirroring the PREPARE path (verifyEstablishingPrepare, countLatePrepare) and
+        // handleCommit; an unverifiable sig inflates
         // signatures.size and the indexer would deterministically reject the response.
         let winnerCanonical = this.buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){

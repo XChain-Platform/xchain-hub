@@ -188,8 +188,9 @@ describe('bin/check-frozen-set.js', function () {
             assert.deepStrictEqual(frozen.sharedGateModules(), Array.from(new Set(live.map(([mod]) => mod))));
         });
 
-        it('reads all three bridge keys out of the engine', () => {
+        it('reads all four bridge keys out of the engine', () => {
             assert.deepStrictEqual(frozen.bridgeGateKeys().slice().sort(), [
+                'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION',
                 'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
                 'token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION',
                 'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION',
