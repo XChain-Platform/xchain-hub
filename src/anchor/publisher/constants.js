@@ -146,9 +146,9 @@ const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block
     'consensus_proof', 'status', 'source_chain', 'source_action_index', 'batch_block_time',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
 
-// One policy or list snapshot can reach 10000 members, so a round carries at most this
-// many rows of either kind; the whole archive JSON stays under the byte ceiling, well
-// inside the 16 MiB decompress cap every verifier enforces.
+// One policy list can reach 10000 members, so a round carries at most this many policy
+// rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
+// decompress cap every verifier enforces.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
 // One version-1 list snapshot row can carry 10000 members, so use the same archive cap.
 const ARCHIVE_MAX_LIST_ROWS = 8;
@@ -180,11 +180,11 @@ module.exports = {
     CALL_KEYS,
     BRIDGE_KEYS,
     POLICY_KEYS,
-    LIST_SNAPSHOT_KEYS: LIST_SNAPSHOT_KEYS,
+    LIST_SNAPSHOT_KEYS,
     CHECKPOINT_KEYS,
     PRICE_KEYS,
     ARCHIVE_MAX_POLICY_ROWS,
-    ARCHIVE_MAX_LIST_ROWS: ARCHIVE_MAX_LIST_ROWS,
+    ARCHIVE_MAX_LIST_ROWS,
     ARCHIVE_MAX_PRICE_ROUNDS,
     ARCHIVE_MAX_JSON_BYTES,
     ARCHIVE_MAX_WIRE_B64_BYTES,
