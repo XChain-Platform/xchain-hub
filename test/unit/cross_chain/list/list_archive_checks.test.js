@@ -39,7 +39,7 @@ describe('archived list row self checks accepted rows', function () {
     });
 });
 
-describe('archived list row self checks refused rows', function () {
+describe('archived list row sequence and kind refusals', function () {
     it('refuses non-canonical sequence values', function () {
         for (const seq of [0, -1, 1.5, '0', '02', '2.0', '', Number.MAX_SAFE_INTEGER + 1,
             String(Number.MAX_SAFE_INTEGER + 1)]) {
@@ -60,7 +60,9 @@ describe('archived list row self checks refused rows', function () {
             'kind disagrees with seq'
         );
     });
+});
 
+describe('archived list row array and hash refusals', function () {
     it('refuses invalid or non-canonical added arrays', function () {
         for (const added of ['nope', '{}', JSON.stringify(['b', 'a']), ['a', 'a'], [1]]) {
             assert.strictEqual(
