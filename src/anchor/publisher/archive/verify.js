@@ -60,6 +60,9 @@ module.exports = {
         for(const policy of (archive.policy_snapshots || [])){
             if(!(await this.verifyArchivedPolicySnapshot(policy))) return false;
         }
+        for(const list of (archive.list_snapshots || [])){
+            if(!(await this.verifyArchivedListSnapshot(list))) return false;
+        }
         for(const checkpoint of (archive.state_checkpoints || [])){
             if(!(await this.verifyArchivedStateCheckpoint(checkpoint))) return false;
         }
@@ -323,6 +326,7 @@ module.exports = {
         .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.bridge_transfers || []).map(b => ({ block: b.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.policy_snapshots || []).map(p => ({ block: p.snapshot_block, capability: 'cross_chain' })))
+        .concat((archive.list_snapshots || []).map(l => ({ block: l.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.state_checkpoints || []).map(c => ({ block: c.snapshot_block, capability: 'oracle_publish' })))
         .concat((archive.price_snapshots || []).filter(p => this.isSignatureProofedPrice(p))
             .map(p => ({ block: p.reference_block, capability: 'price' })))

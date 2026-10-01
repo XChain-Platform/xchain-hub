@@ -27,7 +27,7 @@ class CrossChain {
     async startCrossChain(){
         if(!this.peerManager) return;
         const { CrossChainEngine, SwapTracker, CrossChainDexEngine, CrossChainCallEngine,
-                CrossChainBridgeEngine, StateCheckpointEngine, RetractionConsensus,
+                CrossChainBridgeEngine, ListShareEngine, StateCheckpointEngine, RetractionConsensus,
                 StateAnchorPublisher } = this.constructor.modules;
         this.crossChain = new CrossChainEngine(this);
         let validators = await this.loadValidatorSet();
@@ -58,6 +58,9 @@ class CrossChain {
         // activation gate and without indexer URLs.
         this.crossChainBridge = new CrossChainBridgeEngine(this);
         await this.crossChainBridge.start();
+
+        this.listShare = new ListShareEngine(this);
+        await this.listShare.start();
 
         // Quorum-signed per-chain ledger/actions/contract hash commitments, written
         // off-chain to state_checkpoints and streamed over the hub-DB mirror so explorers
