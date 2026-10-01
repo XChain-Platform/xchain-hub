@@ -130,6 +130,12 @@ const POLICY_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
     'finalizing_view', 'validator_signatures', 'status'];
 
+const LIST_SNAPSHOT_KEYS = ['id', 'snapshot_id', 'snapshot_block', 'network',
+    'home_chain', 'home_list_index', 'list_type', 'seq', 'kind', 'origin_block',
+    'members_hash', 'added', 'removed',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+    'finalizing_view', 'validator_signatures', 'status'];
+
 const CHECKPOINT_KEYS = ['id', 'chain', 'network', 'block_index', 'block_hash',
     'ledger_hash', 'actions_hash', 'contract_hash', 'checkpoint_seq', 'snapshot_block',
     'state_root', 'state_root_version', 'block_merkle_root', 'block_merkle_version',
@@ -140,10 +146,11 @@ const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block
     'consensus_proof', 'status', 'source_chain', 'source_action_index', 'batch_block_time',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
 
-// One policy list can reach 10000 members, so a round carries at most this many policy
-// rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
-// decompress cap every verifier enforces.
+// One policy or list snapshot can reach 10000 members, so a round carries at most this
+// many rows of either kind; the whole archive JSON stays under the byte ceiling, well
+// inside the 16 MiB decompress cap every verifier enforces.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
+const ARCHIVE_MAX_LIST_ROWS = 8;
 const ARCHIVE_MAX_PRICE_ROUNDS = 288;
 const ARCHIVE_MAX_JSON_BYTES = 8 * 1024 * 1024;
 const ARCHIVE_MAX_WIRE_B64_BYTES = 768 * 1024;
@@ -172,9 +179,11 @@ module.exports = {
     CALL_KEYS,
     BRIDGE_KEYS,
     POLICY_KEYS,
+    LIST_SNAPSHOT_KEYS,
     CHECKPOINT_KEYS,
     PRICE_KEYS,
     ARCHIVE_MAX_POLICY_ROWS,
+    ARCHIVE_MAX_LIST_ROWS,
     ARCHIVE_MAX_PRICE_ROUNDS,
     ARCHIVE_MAX_JSON_BYTES,
     ARCHIVE_MAX_WIRE_B64_BYTES,
