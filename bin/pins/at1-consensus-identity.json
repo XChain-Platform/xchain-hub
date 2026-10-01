@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "8e3c499518831c1cdff4ee55f4f0cba9d09d85aa9e4d0ea1a8a4ae35f03a2ee6",
+  "consensus_rules_digest": "4da5fb8292eaf5721b57b4d27faad2cbdf820c493c48eced2880026e99efe32c",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -37,11 +37,11 @@
     "token_bridge_activation.TOKEN_BRIDGE_ACTIVATION": "{\"BTC:testnet\":154567,\"DOGE:testnet\":67951140,\"LTC:testnet\":4903068,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION": "{\"BTC:testnet\":154751,\"DOGE:testnet\":67956461,\"LTC:testnet\":4904963,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":5052}",
+    "oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":5064}",
     "price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH": "19",
     "price_scale_activation.PRICE_V1_FEE_MAX_LENGTH": "20",
-    "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
+    "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154750}"
   },
   "gate_key_count": 41,
   "absent_gates": [],

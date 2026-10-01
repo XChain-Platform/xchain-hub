@@ -25,11 +25,12 @@ describe('list-share registry twin', function () {
     it('registers the producer activation as a network-only height map', function () {
         assert.deepStrictEqual(registry.get(PRODUCER_KEY), {
             mainnet: 9999999999,
-            testnet: 9999999999,
+            testnet: 154750,
             regtest: 0,
         });
         assert.strictEqual(registry.activeAt(PRODUCER_KEY, 'mainnet', 'BTC', 9999999998), false);
-        assert.strictEqual(registry.activeAt(PRODUCER_KEY, 'testnet', 'BTC', 9999999998), false);
+        assert.strictEqual(registry.activeAt(PRODUCER_KEY, 'testnet', 'BTC', 154749), false);
+        assert.strictEqual(registry.activeAt(PRODUCER_KEY, 'testnet', 'BTC', 154750), true);
         assert.strictEqual(registry.activeAt(PRODUCER_KEY, 'regtest', 'BTC', 0), true);
     });
 
