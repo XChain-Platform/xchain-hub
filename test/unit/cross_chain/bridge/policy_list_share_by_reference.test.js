@@ -13,6 +13,8 @@ const sinon = require('sinon');
 const fs = require('fs');
 const path = require('path');
 
+const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
+const registry = require('../../../../src/consensus/gate_registry.js');
 const policyPoll = require('../../../../src/cross_chain/bridge/policy_poll.js');
 const validate = require('../../../../src/cross_chain/bridge/validate.js');
 const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy_verify.js');
@@ -100,6 +102,23 @@ function rowFor(engine, network, allowRef = REF){
 }
 
 function registerProducerTests(){
+    it('resolves the list-share producer gate through the real bridge engine', function(){
+        const key = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
+        const hub = {
+            db: {},
+            network: 'regtest',
+            p2pConfig: {},
+            getPeerManager: () => null,
+            getIdentity: () => null
+        };
+        const engine = new CrossChainBridgeEngine(hub);
+
+        expect(CrossChainBridgeEngine.BRIDGE_GATE_KEYS.listShare).to.equal(key);
+        expect(engine.activation.listShare(SNAPSHOT_BLOCK, 'regtest', 'BTC')).to.equal(
+            registry.activeAt(key, 'regtest', 'BTC', SNAPSHOT_BLOCK, null)
+        );
+    });
+
     it('signs and stores a reference using the sibling indexer hash', async function(){
         const { engine } = engineFor('regtest', true);
         await engine.maybeSnapshotPolicy(pair(), 'regtest', SNAPSHOT_BLOCK);
