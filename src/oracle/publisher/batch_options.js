@@ -180,6 +180,7 @@ module.exports = {
         try {
             hourly = createHourlyWindowPlan({
                 network: this.network,
+                enabled: Boolean(this.hub && this.hub.oracleConsensus),
                 smallRounds: this.batchWindowRounds,
                 roundIntervalMs: this.roundIntervalMs,
                 graceMs: this.batchGraceMs,

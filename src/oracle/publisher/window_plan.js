@@ -72,7 +72,9 @@ function createWindowPlan({ firstRound, smallRounds, largeRounds, alignmentRound
 function createHourlyWindowPlan(opts) {
     opts = opts || {};
     const byNetwork = gateRegistry.copy(HOURLY_WINDOW_GATE);
-    const firstRound = byNetwork ? byNetwork[opts.network] : undefined;
+    const firstRound = opts.enabled === false
+        ? undefined
+        : (byNetwork ? byNetwork[opts.network] : undefined);
     const hourlyMaxPriceAgeMs = pinnedMaxPriceAgeHourlyMs(opts.network);
     const cadence = maxBatchWindowRounds({
         maxPriceAgeMs: hourlyMaxPriceAgeMs,

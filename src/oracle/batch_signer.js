@@ -78,7 +78,7 @@ function nonNegativeInt(raw, dflt) {
     return Number.isInteger(n) && n >= 0 ? n : dflt;
 }
 
-function signerWindowPlan(network, cfg) {
+function signerWindowPlan(network, cfg, enabled) {
     let roundIntervalMs = positiveIntConfig(
         hubConfig.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
         DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
@@ -103,6 +103,7 @@ function signerWindowPlan(network, cfg) {
     }
     return createHourlyWindowPlan({
         network,
+        enabled,
         smallRounds,
         roundIntervalMs,
         graceMs,
@@ -122,7 +123,8 @@ class OracleBatchSigner {
 
         let cfg = (hub && hub.p2pConfig) ? hub.p2pConfig : {};
         try {
-            this.windowPlan = signerWindowPlan(this.network, cfg).plan;
+            this.windowPlan = signerWindowPlan(
+                this.network, cfg, Boolean(hub && hub.oracleConsensus)).plan;
         } catch (e) {
             logger.error('OracleBatchSigner: CRITICAL - invalid hourly window plan: ' +
                 (e && e.message));

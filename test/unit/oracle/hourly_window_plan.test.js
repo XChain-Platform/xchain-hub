@@ -125,6 +125,20 @@ describe('hourly window plan configuration', function() {
         assert.strictEqual(hourly.hourlyMaxPriceAgeMs, 4500000);
     });
 
+    it('keeps legacy windows when the publisher has no oracle round source', function() {
+        const hourly = createHourlyWindowPlan({
+            network: 'regtest',
+            enabled: false,
+            smallRounds: 2,
+            roundIntervalMs: 600000,
+            graceMs: 300000,
+            landingReserveMs: 300000
+        });
+
+        assert.strictEqual(hourly.firstRound, undefined);
+        assert.deepStrictEqual(hourly.plan.rangeOf(0), { first: 0, last: 1 });
+    });
+
     it('requires S to align to six even when the hourly age bound is tighter', function() {
         assert.throws(() => createWindowPlan({
             firstRound: 10,
