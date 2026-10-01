@@ -22,7 +22,7 @@
 // chainparams constant that is byte-identical across every re-genesis, while block 1
 // commits to the moment the new chain started. The Bitcoin indexer reports it on the tip
 // push it already makes; the hub stores it, stamps it on the rows it writes, and
-// advertises it on the five snapshot envelopes so a DOGE/LTC mirror (which cannot derive
+// advertises it on the six snapshot envelopes so a DOGE/LTC mirror (which cannot derive
 // it locally) learns what to expect.
 //
 // The column is TRANSPORT, never consensus: the last describe here drives the signed match
@@ -47,7 +47,7 @@ const LOCAL_ID   = '00000000c937983704a73af28acdec37b049d214adbda81d7e2a3dd146f6
 const FOREIGN_ID = '000000005c8ba8e1e0a4a2e6f2d3c4b5a6978869fedcba0987654321abcdef01';
 
 const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
-const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots'];
+const CROSS_CHAIN_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'capability_snapshots', 'bridge_transfers', 'policy_snapshots', 'list_snapshots'];
 
 // ────────────────────────────────────────────────────────────────────────────
 // api.js harness: boot with everything heavy stubbed and capture both the
