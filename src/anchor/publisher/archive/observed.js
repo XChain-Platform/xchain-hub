@@ -149,8 +149,8 @@ module.exports = {
         for(const t of (tombstones || []))
             if(t && !entry.tombstones.has([t.round_number, t.coin_pair].map(String).join('|')))
                 return 'tombstone ' + String(t.round_number) + '/' + String(t.coin_pair);
-        const strayList = firstListOutside(entry.lists, lists);
-        if(strayList !== null) return strayList;
+        const missingList = firstListOutside(entry.lists, lists);
+        if(missingList) return missingList;
         return null;
     },
 

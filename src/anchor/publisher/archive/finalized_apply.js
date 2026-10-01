@@ -26,6 +26,13 @@ const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
+function finalizedBackfillArgs(d, calls, rewards, q, prices){
+    const args = [Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
+                  calls, rewards, q.bridges, q.policies, q.checkpoints, prices, q.tombstones];
+    if(Array.isArray(d.lists) || (q.lists || []).length) args.push(q.lists || []);
+    return args;
+}
+
 module.exports = {
 
     // Apply a FINALIZED whose archive head is confirmed on DOGE at depth: stamp the
@@ -33,10 +40,9 @@ module.exports = {
     // immediate-receipt path and the deferred drain, so an announcement that arrives at
     // 0 confirmations lands EXACTLY the same rows as one that arrives already buried.
     async applyFinalized(d, sender, calls, rewards, quorumRows){
-        const q = quorumRows || this.finalizedQuorumRows(d), lists = Array.isArray(q.lists) ? q.lists : [];
-        await this.backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                                  calls, rewards, q.bridges, q.policies, q.checkpoints,
-                                  await this.finalizedPricesWithLocalProof(q.prices), q.tombstones, lists);
+        const q = quorumRows || this.finalizedQuorumRows(d);
+        const prices = await this.finalizedPricesWithLocalProof(q.prices);
+        await this.backfillBatch(...finalizedBackfillArgs(d, calls, rewards, q, prices));
         // Mirror the leader's archive-publish reward (sender is signature-verified),
         // on the BUNDLE_DONE rail. Only a COMPLETE publish earns it (the leader
         // skips its own reward on lost chunks and marks rows __partial__).
@@ -218,8 +224,9 @@ module.exports = {
                 return false;
             }
         }
-        const q = quorumRows || { bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [], lists: [] };
-        const lists = Array.isArray(q.lists) ? q.lists : [];
+        const q = quorumRows || {
+            bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [], lists: []
+        };
         for(const b of q.bridges){
             if(!b || b.transfer_id == null || b.status == null) return false;
             if(b.status === '__partial__') continue;
@@ -227,6 +234,7 @@ module.exports = {
             if(rows && rows.length > 0 && String(rows[0].status) !== String(b.status)) return false;
         }
         for(const p of q.policies) if(!p || p.snapshot_id == null) return false;
+        for(const l of (q.lists || [])) if(!l || l.snapshot_id == null) return false;
         for(const c of q.checkpoints)
             if(!c || c.chain == null || c.network == null || c.checkpoint_seq == null) return false;
         for(const p of q.prices){
@@ -242,7 +250,6 @@ module.exports = {
         }
         for(const t of q.tombstones)
             if(!t || t.round_number == null || t.coin_pair == null) return false;
-        for(const l of lists) if(!l || l.snapshot_id == null) return false;
         return true;
     },
 
