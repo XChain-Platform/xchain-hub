@@ -97,6 +97,21 @@ describe('hourly window plan boundaries', function() {
         assert.strictEqual(signer.getStats().batchSignRefusals, 1);
         assert.strictEqual(reads, 0);
     });
+
+    it('refuses a strict subrange of its re-derived hourly window', async function() {
+        let reads = 0;
+        const signer = new OracleBatchSigner({
+            network: 'mainnet',
+            p2pConfig: {},
+            db: { async findPriceSnapshotsByRoundNumber() { reads++; return []; } }
+        });
+        signer.windowPlan = switchedPlan();
+
+        await signer.handleSignReq({ data: { first_round: 121, last_round: 124 } });
+
+        assert.strictEqual(signer.getStats().batchSignRefusals, 1);
+        assert.strictEqual(reads, 0);
+    });
 });
 
 describe('hourly window plan configuration', function() {

@@ -281,8 +281,8 @@ class OracleBatchSigner {
         }
         if(Number.isFinite(first) && Number.isFinite(last) && last >= first){
             let planned = this.windowPlan.rangeOf(this.windowPlan.windowOf(first));
-            if(first < planned.first || last > planned.last){
-                this.refuse(first, last, 'range is outside planned window [' +
+            if(first !== planned.first || last !== planned.last){
+                this.refuse(first, last, 'range does not match planned window [' +
                     planned.first + ',' + planned.last + ']');
                 return;
             }
