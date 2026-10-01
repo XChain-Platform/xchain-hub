@@ -16,31 +16,10 @@
 'use strict';
 
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
 
 const consensusRules = require('../../../src/consensus_rules_digest.js');
 
 const KEY = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
-const MODULE = 'list_share_producer_activation';
-const INDEXER_COPY = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus_rules_digest.js');
-
-let stagedIndexerEntry = null;
-
-before(function () {
-    if (!fs.existsSync(INDEXER_COPY)) return;
-    const indexerRules = require(INDEXER_COPY);
-    if (indexerRules.SHARED_GATES.some(([moduleName]) => moduleName === MODULE)) return;
-    const [, names] = consensusRules.SHARED_GATES.find(([moduleName]) => moduleName === MODULE);
-    stagedIndexerEntry = [MODULE, [...names]];
-    indexerRules.SHARED_GATES.push(stagedIndexerEntry);
-});
-
-after(function () {
-    if (!stagedIndexerEntry) return;
-    const sharedGates = require(INDEXER_COPY).SHARED_GATES;
-    sharedGates.splice(sharedGates.indexOf(stagedIndexerEntry), 1);
-});
 
 describe('list-share producer rules digest gate', function () {
     it('publishes and resolves the producer gate', function () {
