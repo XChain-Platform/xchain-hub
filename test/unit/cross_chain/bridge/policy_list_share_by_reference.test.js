@@ -99,11 +99,7 @@ function rowFor(engine, network, allowRef = REF){
     return row;
 }
 
-describe('bridge policy list sharing by reference', function(){
-    afterEach(function(){
-        sinon.restore();
-    });
-
+function registerProducerTests(){
     it('signs and stores a reference using the sibling indexer hash', async function(){
         const { engine } = engineFor('regtest', true);
         await engine.maybeSnapshotPolicy(pair(), 'regtest', SNAPSHOT_BLOCK);
@@ -137,7 +133,9 @@ describe('bridge policy list sharing by reference', function(){
 
         expect(engine.policyConsensus.propose.called).to.equal(false);
     });
+}
 
+function registerFollowerTests(){
     it('co-signs the matching reference and refuses a changed transport reference', async function(){
         const { engine } = engineFor('regtest', true);
         expect(await engine.validateProposedMatch(rowFor(engine, 'regtest'))).to.equal(true);
@@ -152,7 +150,9 @@ describe('bridge policy list sharing by reference', function(){
         expect(engine.policyConsensus.propose.called).to.equal(false);
         expect(await engine.validateProposedMatch(rowFor(engine, 'testnet'))).to.equal(false);
     });
+}
 
+function registerArchiveTests(){
     it('verifies an armed archived reference and refuses it when unarmed', async function(){
         const row = rowFor(validate, 'regtest');
         const ctx = {
@@ -166,4 +166,13 @@ describe('bridge policy list sharing by reference', function(){
         )).to.equal(false);
         expect(ctx.verifyArchivedBridgePolicyQuorum.calledOnce).to.equal(true);
     });
+}
+
+describe('bridge policy list sharing by reference', function(){
+    afterEach(function(){
+        sinon.restore();
+    });
+    registerProducerTests();
+    registerFollowerTests();
+    registerArchiveTests();
 });
