@@ -28,23 +28,7 @@ module.exports = {
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;
 
-        let persisted = 0;
-        try {
-            persisted = await this.persistCapabilitySnapshot(
-                'cross_chain', Number(row.snapshot_block), row.network);
-        } catch(e){
-            logger.error('ListShare: snapshot persist on finalize FAILED (fail-closed; deferring ' +
-                         String(snapshotId).substring(0, 16) + '... to a later round): ' +
-                         (e && e.message));
-            this.deferFinalizedList(snapshotId);
-            return;
-        }
-        if(!persisted){
-            logger.error('ListShare: snapshot persist wrote ZERO capability rows (fail-closed; deferring ' +
-                         String(snapshotId).substring(0, 16) + '... to a later round)');
-            this.deferFinalizedList(snapshotId);
-            return;
-        }
+        if(!await this.persistListSnapshotOrDefer(row)) return;
 
         let inserted;
         try {
@@ -62,6 +46,29 @@ module.exports = {
         if(!inserted) return;
         await this.mirrorFinalizedList(snapshotId);
         this.emit('list:finalized', { snapshotId });
+    },
+
+    async persistListSnapshotOrDefer(row){
+        const snapshotId = row.snapshot_id;
+        let persisted = 0;
+        try {
+            persisted = await this.persistCapabilitySnapshot(
+                'cross_chain', Number(row.snapshot_block), row.network);
+        } catch(e){
+            logger.error('ListShare: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+                         String(snapshotId).substring(0, 16) + '... to a later round): ' +
+                         (e && e.message));
+            this.deferFinalizedList(snapshotId);
+            return false;
+        }
+        if(!persisted){
+            logger.error('ListShare: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+                         row.snapshot_block + ' (fail-closed; deferring ' +
+                         String(snapshotId).substring(0, 16) + '... to a later round)');
+            this.deferFinalizedList(snapshotId);
+            return false;
+        }
+        return true;
     },
 
     deferFinalizedList(snapshotId){

@@ -207,6 +207,8 @@ describe('hub-DB mirror: admission columns on the bootstrap page and the live st
         // Non-vacuity: the eight signed rails plus the unsigned oracle rail.
         expect(tables).to.have.lengthOf(9);
         expect(Object.keys(BOOTSTRAP_READS).sort()).to.deep.equal(tables);
+        expect(Object.keys(LIVE_PATHS).sort()).to.deep.equal(
+            tables.filter(table => table !== 'oracle_prices'));
     });
 
     registerPerQueryCases();
