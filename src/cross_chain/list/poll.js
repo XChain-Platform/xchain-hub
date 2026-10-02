@@ -70,11 +70,19 @@ function listLabel(chain, rootIndex) {
 
 async function readListAt(engine, chain, rootIndex, originBlock) {
     try {
-        const read = await engine.indexerCall(chain, 'getlistat', {
+        const answer = await engine.indexerCall(chain, 'getlistat', {
             list_index: rootIndex,
             block: originBlock
         });
-        return read && !read.error ? read : null;
+        if (!answer || answer.error) return null;
+        return {
+            type: answer.type,
+            members: answer.members,
+            hash: answer.hash,
+            name: answer.name,
+            description: answer.description,
+            meta_hash: answer.meta_hash
+        };
     } catch (_) {
         return null;
     }
