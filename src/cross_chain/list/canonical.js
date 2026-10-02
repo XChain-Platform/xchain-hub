@@ -81,7 +81,7 @@ function foldListChain(rows) {
     return require('./chain.js').foldListChain(rows);
 }
 
-function listSnapshotCanonical(r, view) {
+function listSnapshotCanonical(r, view, isListMetaActive) {
     const admitBlocks = ah.rowAdmitBlocks(r);
     if (admitBlocks === null) {
         throw new Error('CrossChainListShare: a row must carry an admission map');
@@ -103,7 +103,10 @@ function listSnapshotCanonical(r, view) {
     raw += ah.admissionCanonicalField(
         'CrossChainListShare', r.network, r.snapshot_block, admitBlocks
     );
-    if (registry.activeAt(LIST_META_GATE_KEY, r.network, 'BTC', r.snapshot_block, null)) {
+    const metaActive = typeof isListMetaActive === 'function'
+        ? isListMetaActive(r.snapshot_block, r.network)
+        : registry.activeAt(LIST_META_GATE_KEY, r.network, 'BTC', r.snapshot_block, null);
+    if (metaActive) {
         raw += '|' + (r.meta_hash || '');
     }
 
