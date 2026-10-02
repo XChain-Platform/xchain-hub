@@ -255,12 +255,16 @@ it('fails CLOSED in getWeightSnapshot too when a live registry has no threshold'
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(null) };
             let snap = new CapabilitySnapshot(makeHub(registry));
-            logStub.error;
+            let errStub = logStub.error;
+            // Pins the weighted path to the one shared guard, so an inline copy cannot drift.
+            let guard = sinon.spy(snap, 'snapshotThreshold');
 
             let result = await snap.getWeightSnapshot('attestation', 106);
 
             expect(result).to.equal(null);
             expect(axiosStub.post.called).to.equal(false);
+            expect(errStub.calledWithMatch(/NO configured MIN_STAKE/)).to.equal(true);
+            expect(guard.calledOnceWith('attestation')).to.equal(true);
         });
 });
 });
