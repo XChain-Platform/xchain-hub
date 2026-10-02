@@ -17,6 +17,9 @@
 const crypto = require('crypto');
 const ah = require('../../lib/admission_height.js');
 const eq = require('../../consensus/equivocation_header.js');
+const registry = require('../../consensus/gate_registry.js');
+
+const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
 
 function compareMembers(a, b) {
     return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
@@ -29,6 +32,15 @@ function isCanonicalOrder(list) {
         if (compareMembers(list[i - 1], list[i]) >= 0) return false;
     }
     return true;
+}
+
+function listMetaHash(name, description) {
+    const noName = name === null || name === undefined;
+    const noDescription = description === null || description === undefined;
+    if (noName && noDescription) return '';
+
+    const text = ['LISTMETA', name ?? '', description ?? ''].join('|');
+    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 function listMembersHash(members) {
@@ -93,6 +105,9 @@ function listSnapshotCanonical(r, view) {
     raw += ah.admissionCanonicalField(
         'CrossChainListShare', r.network, r.snapshot_block, admitBlocks
     );
+    if (registry.activeAt(LIST_META_GATE_KEY, r.network, 'BTC', r.snapshot_block, null)) {
+        raw += '|' + (r.meta_hash || '');
+    }
 
     if (eq.isEquivHeaderActive(r.snapshot_block, r.network)) {
         return eq.buildEquivCanonical(
@@ -107,6 +122,7 @@ function listSnapshotCanonical(r, view) {
 
 module.exports = {
     isCanonicalOrder,
+    listMetaHash,
     listMembersHash,
     listDelta,
     applyListDelta,
