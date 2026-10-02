@@ -43,10 +43,11 @@ const DOCS_DIR  = process.env.XCHAIN_DOCS_DIR || path.join(__dirname, '..', '..'
 const CANON_DIR = path.join(DOCS_DIR, 'protocol', 'reference-impl');
 const VEC_DIR   = path.join(DOCS_DIR, 'protocol', 'test-vectors');
 
-let quorumVec = null, equivVec = null;
+let quorumVec = null, equivVec = null, activationVec = null;
 try {
-    quorumVec = require(path.join(VEC_DIR, 'stake_weighted_quorum.json'));
-    equivVec  = require(path.join(VEC_DIR, 'equivocation_header.json'));
+    quorumVec     = require(path.join(VEC_DIR, 'stake_weighted_quorum.json'));
+    equivVec      = require(path.join(VEC_DIR, 'equivocation_header.json'));
+    activationVec = require(path.join(VEC_DIR, 'activation_predicates.json'));
 } catch(e){ /* sibling xchain-documentation absent */ }
 
 const CANON_PRESENT = fs.existsSync(CANON_DIR);
@@ -99,6 +100,44 @@ describe('consensus-primitive conformance: canonical vectors @regression', funct
             it('buildEquivCanonical: ' + c.name, function(){
                 assert.strictEqual(equiv.buildEquivCanonical(c.engineTag, c.roundId, c.view, c.content), c.expected);
             });
+        });
+    });
+});
+
+// JSON cannot carry NaN or undefined, so the corpus spells them {special:'nan'|'undefined'}.
+function decodeSnapshotBlock(v){
+    if(v === null || typeof v !== 'object') return v;
+    if(v.special === 'nan') return NaN;
+    if(v.special === 'undefined') return undefined;
+    throw new Error('unknown special snapshotBlock: ' + JSON.stringify(v));
+}
+
+// The activation boundaries run through THIS repo's carriers
+// and so through its own gate registry, which byte identity alone never reaches.
+describe('consensus-primitive conformance: activation predicate vectors @regression', function(){
+    const srb = require('../../../src/consensus/snapshot_reorg_buffer.js');
+    before(function(){ if(!activationVec){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but activation_predicates.json not found (sibling xchain-documentation missing)'); this.skip(); } });
+    const groups = activationVec || {};
+
+    it('every group this repo runs is a non-empty list', function(){
+        for(const g of ['isStakeWeightedQuorumActive', 'isEquivHeaderActive', 'snapshotBurial'])
+            assert.ok(Array.isArray(groups[g]) && groups[g].length > 0, g + ' is missing or empty');
+    });
+    (groups.isStakeWeightedQuorumActive || []).forEach(function(c){
+        it('isStakeWeightedQuorumActive: ' + c.name, function(){
+            assert.strictEqual(swq.isStakeWeightedQuorumActive(decodeSnapshotBlock(c.snapshotBlock), c.network), c.expected);
+        });
+    });
+    (groups.isEquivHeaderActive || []).forEach(function(c){
+        it('isEquivHeaderActive: ' + c.name, function(){
+            assert.strictEqual(equiv.isEquivHeaderActive(decodeSnapshotBlock(c.snapshotBlock), c.network), c.expected);
+        });
+    });
+    (groups.snapshotBurial || []).forEach(function(c){
+        it('snapshotBurial: ' + c.name, function(){
+            const sb = decodeSnapshotBlock(c.snapshotBlock);
+            assert.strictEqual(srb.isSnapshotBurialActive(sb, c.network), c.active);
+            assert.deepStrictEqual(srb.buriedSnapshotBlock(sb, c.network), decodeSnapshotBlock(c.buriedSnapshotBlock));
         });
     });
 });
