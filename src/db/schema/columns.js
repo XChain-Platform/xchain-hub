@@ -157,6 +157,12 @@ module.exports = {
         // it against heights[oracle_prices][source_chain] rather than against the reading
         // chain's own B, and every chain reads the row without needing an entry of its own.
         await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
+
+        await this.migrateAddNullableColumn('list_snapshots', 'name',
+            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL');
+        await this.migrateAddNullableColumn('list_snapshots', 'description',
+            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL');
+        await this.migrateAddNullableColumn('list_snapshots', 'meta_hash', 'CHAR(64) NULL');
     },
 
 

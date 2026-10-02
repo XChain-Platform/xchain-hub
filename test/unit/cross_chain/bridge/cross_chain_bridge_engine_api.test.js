@@ -245,7 +245,7 @@ function registerSnapshotRouteTests() {
             const body = JSON.parse(res.payload);
             expect(body.table).to.equal('bridge_transfers');
             expect(body.count).to.equal(1);
-            expect(body.schema_version).to.equal(8); // HUB_SCHEMA_VERSION rolled to v8 for list_snapshots
+            expect(body.schema_version).to.equal(9); // HUB_SCHEMA_VERSION rolled to v9 for list metadata
             const [sql, params] = doQuery.lastCall.args;
             expect(sql).to.contain("status <> 'retracted'");
             expect(sql).to.contain('ORDER BY id ASC');
