@@ -48,6 +48,10 @@ function ownReadVerdict({
     if (!isCanonicalOrder(read.members) ||
         read.members.length > LIST_SHARE_MAX_MEMBERS ||
         listMembersHash(read.members) !== row.members_hash) return 'refuse';
+    if (!metaActive &&
+        (nullableMetaValue(row.name) !== null ||
+            nullableMetaValue(row.description) !== null ||
+            nullableMetaValue(row.meta_hash) !== null)) return 'refuse';
     const compareMeta = metaActive ||
         (typeof row.meta_hash === 'string' && row.meta_hash.length > 0);
     if (metaActive && typeof row.meta_hash !== 'string') return 'refuse';
