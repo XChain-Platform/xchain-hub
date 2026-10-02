@@ -53,6 +53,35 @@ function plan(current, currentHeld, metaActive = true) {
     });
 }
 
+function firstPlan(current, metaActive = true) {
+    return plan(current, {
+        lastSeq: 0,
+        latest: null,
+        fold: () => null
+    }, metaActive);
+}
+
+function metadataRead(name, description, metaHash) {
+    return read(['a'], {
+        name,
+        description,
+        meta_hash: metaHash
+    });
+}
+
+function firstVersion(current, metadata = {}) {
+    return {
+        list_type: 2,
+        seq: 1,
+        kind: 'full',
+        added: ['a'],
+        removed: [],
+        members_hash: current.hash,
+        origin_block: 100,
+        ...metadata
+    };
+}
+
 describe('shared-list version plan metadata compatibility', function () {
     it('keeps the legacy result shape when metadata is inactive', function () {
         const current = read(['a'], {
@@ -182,4 +211,73 @@ describe('shared-list version plan metadata validation', function () {
             });
         }
     });
+});
+
+function plansCanonicalMetadataHash() {
+    const name = 'Named list';
+    const description = 'A description';
+    const current = metadataRead(name, description, listMetaHash(name, description));
+
+    assert.deepStrictEqual(firstPlan(current), {
+        version: firstVersion(current, {
+            name,
+            description,
+            meta_hash: listMetaHash(name, description)
+        })
+    });
+}
+
+function refusesNoncanonicalMetadataHashes() {
+    const name = 'Named list';
+    const description = 'A description';
+    const canonical = listMetaHash(name, description);
+    const cases = [
+        listMetaHash(description, name),
+        canonical.toUpperCase(),
+        listMetaHash('Another name', description),
+        ''
+    ];
+
+    for (const metaHash of cases) {
+        assert.deepStrictEqual(firstPlan(metadataRead(name, description, metaHash)), {
+            refuse: 'meta'
+        });
+    }
+}
+
+function plansAbsentMetadataHash() {
+    const current = read(['a'], { meta_hash: '' });
+    assert.deepStrictEqual(firstPlan(current), {
+        version: firstVersion(current, {
+            name: null,
+            description: null,
+            meta_hash: ''
+        })
+    });
+}
+
+function ignoresMetadataHashBeforeActivation() {
+    const name = 'Named list';
+    const description = 'A description';
+    const canonical = listMetaHash(name, description);
+    const cases = [
+        listMetaHash(description, name),
+        canonical.toUpperCase(),
+        listMetaHash('Another name', description),
+        ''
+    ];
+
+    for (const metaHash of cases) {
+        const current = metadataRead(name, description, metaHash);
+        assert.deepStrictEqual(firstPlan(current, false), {
+            version: firstVersion(current)
+        });
+    }
+}
+
+describe('shared-list version plan metadata hash', function () {
+    it('plans metadata carrying its canonical hash', plansCanonicalMetadataHash);
+    it('refuses metadata hashes that do not match their fields', refusesNoncanonicalMetadataHashes);
+    it('plans absent metadata with an empty hash', plansAbsentMetadataHash);
+    it('keeps mismatched hashes inert before activation', ignoresMetadataHashBeforeActivation);
 });
