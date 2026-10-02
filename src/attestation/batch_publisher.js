@@ -275,7 +275,7 @@ class AttestationBatchPublisher {
             let pending = await this.pendingWindows(now);
             for(let w of pending){
                 attempted++;
-                let done = await this.publishWindow(w.windowStart, w.age);
+                let done = await this.publishWindow(w.windowStart, w.age, w.reopenedSkipped);
                 if(done) published++;
             }
         } finally {

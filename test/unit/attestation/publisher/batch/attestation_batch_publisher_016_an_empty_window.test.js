@@ -231,7 +231,9 @@ describe('AttestationBatchPublisher reopened windows', function () {
         try { pending = await publisher.pendingWindows(now); }
         finally { console.error = realError; }
 
-        expect(pending).to.deep.equal([{ windowStart: start, age: 1 }]);
+        expect(pending).to.deep.equal([
+            { windowStart: start, age: 1, reopenedSkipped: true }
+        ]);
         expect(errors.filter(line => /has no batch marker/.test(line))).to.deep.equal([]);
         expect(publisher.stats.coverageGapsDetected).to.equal(0);
         expect(publisher._coverageGaps.size).to.equal(0);
@@ -253,6 +255,86 @@ describe('AttestationBatchPublisher reopened windows', function () {
         expect(publisher.stats.windowsPublished).to.equal(1);
         expect(publisher.stats.windowsEmpty).to.equal(0);
         expect(db.marker(start).status).to.equal('sent');
+    });
+});
+
+describe('AttestationBatchPublisher reopened election deferral', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-empty-window-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('keeps the skipped marker until a later sweep is elected', async function () {
+        let db = makeDb();
+        let publisher = makePublisher(dir, db);
+        let now = 200 * WINDOW_S;
+        let start = now - 2 * WINDOW_S;
+        db.markers.push(
+            { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                row_count: 0, status: 'skipped' },
+            { network: 'regtest', window_start: start + WINDOW_S, window_end: now,
+                row_count: 1, status: 'sent' }
+        );
+        db.responses.push(makeRow(start + 1));
+        publisher._floorWindow = start;
+        publisher._newestMarkerWindow = start + WINDOW_S;
+        publisher.electionRank = async () => ({ rank: 2 });
+
+        let deferred = await publisher.sweep(now);
+
+        expect(deferred).to.deep.equal({ attempted: 1, published: 0 });
+        expect(db.marker(start).status).to.equal('skipped');
+        expect(publisher.stats.coverageGapsDetected).to.equal(0);
+        expect(publisher._coverageGaps.size).to.equal(0);
+        expect(publisher._quarantined.size).to.equal(0);
+
+        publisher.electionRank = async () => ({ rank: 0 });
+        let published = await publisher.sweep(now);
+
+        expect(published).to.deep.equal({ attempted: 1, published: 1 });
+        expect(db.marker(start).status).to.equal('sent');
+        expect(publisher.stats.coverageGapsDetected).to.equal(0);
+        expect(publisher._coverageGaps.size).to.equal(0);
+        expect(publisher._quarantined.size).to.equal(0);
+    });
+});
+
+describe('AttestationBatchPublisher reopened claim', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-empty-window-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('publishes nothing when the skipped marker cannot be removed', async function () {
+        let db = makeDb();
+        let publisher = makePublisher(dir, db);
+        let now = 200 * WINDOW_S;
+        let start = now - WINDOW_S;
+        db.markers.push({ network: 'regtest', window_start: start,
+            window_end: now, row_count: 0, status: 'skipped' });
+        db.responses.push(makeRow(start + 1));
+        publisher._floorWindow = start;
+        let realDelete = db.deleteAttestPublishedBatch;
+        db.deleteAttestPublishedBatch = async (network, windowStart, status) => {
+            if(status === 'skipped') return { affectedRows: 0 };
+            return await realDelete(network, windowStart, status);
+        };
+
+        let result = await publisher.sweep(now);
+
+        expect(result).to.deep.equal({ attempted: 1, published: 0 });
+        expect(db.marker(start).status).to.equal('skipped');
+        expect(publisher.wires).to.deep.equal([]);
     });
 });
 

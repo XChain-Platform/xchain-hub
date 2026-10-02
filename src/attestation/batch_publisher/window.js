@@ -62,9 +62,9 @@ module.exports = {
         return this.windowStartFor(this.nowSeconds());
     },
 
-    // Closed windows to offer, oldest first. A late row reopens a skipped marker after
-    // its guarded delete. `age` is the required publisher rank, which staggers fallback
-    // when the elected leader is dark.
+    // Closed windows to offer, oldest first. A late row makes a skipped marker eligible
+    // again, but the marker stays durable until the pre-send claim. `age` is the required
+    // publisher rank, which staggers fallback when the elected leader is dark.
     async pendingWindows(nowSec){
         let current = this.windowStartFor(nowSec);
         let out = [];
@@ -75,19 +75,7 @@ module.exports = {
             let marker = await this.getMarker(start);
             let reopenedSkipped = false;
             if(marker && String(marker.status) === 'skipped'){
-                let rows;
-                try {
-                    rows = await this.selectWindowRows(start, this.windowEndFor(start));
-                } catch(e){
-                    logger.warn('AttestationBatchPublisher: cannot re-read skipped window ' + start +
-                                ' from attestation_responses (' + (e && e.message) + '); deferring');
-                    this.stats.windowsDeferred++;
-                    continue;
-                }
-                if(rows.length === 0) continue;
-                let db = this.hubDb();
-                let removed = await db.deleteAttestPublishedBatch(this.network, start, 'skipped');
-                if(!removed || Number(removed.affectedRows) !== 1) continue;
+                if(!(await this.skippedWindowHasRows(start))) continue;
                 marker = null;
                 reopenedSkipped = true;
             }
@@ -118,9 +106,23 @@ module.exports = {
                     'being retried now, but a window that falls out of the ' + MAX_CATCHUP_WINDOWS +
                     '-window catch-up horizon needs a manual replay.');
             }
-            out.push({ windowStart: start, age: i - 1 });
+            let candidate = { windowStart: start, age: i - 1 };
+            if(reopenedSkipped) candidate.reopenedSkipped = true;
+            out.push(candidate);
         }
         return out;
+    },
+
+    async skippedWindowHasRows(windowStart){
+        try {
+            let rows = await this.selectWindowRows(windowStart, this.windowEndFor(windowStart));
+            return rows.length > 0;
+        } catch(e){
+            logger.warn('AttestationBatchPublisher: cannot re-read skipped window ' + windowStart +
+                        ' from attestation_responses (' + (e && e.message) + '); deferring');
+            this.stats.windowsDeferred++;
+            return false;
+        }
     },
 
     async readWindowRows(windowStart, windowEnd){
@@ -136,7 +138,7 @@ module.exports = {
 
     // Publish one window, or leave it for a later attempt. Returns true only when a
     // batch for this window actually went out.
-    async publishWindow(windowStart, age){
+    async publishWindow(windowStart, age, reopenedSkipped){
         let windowEnd = this.windowEndFor(windowStart);
         let rows = await this.readWindowRows(windowStart, windowEnd);
         if(rows === null) return false;
@@ -191,7 +193,7 @@ module.exports = {
             return false;
         }
 
-        return await this.signAndBroadcastWindow(window, batchKey);
+        return await this.signAndBroadcastWindow(window, batchKey, reopenedSkipped);
     },
 
     // OVER-ROWS IS A DEAD LETTER, NOT A TRUNCATION. The row cap is consensus: a
@@ -210,7 +212,7 @@ module.exports = {
     // The second half of publishWindow, from the signing round on: a window this hub
     // has decided it is this one's turn to publish either reaches a quorum and goes out
     // as encoded wires, or leaves the table untouched for a later attempt.
-    async signAndBroadcastWindow(window, batchKey){
+    async signAndBroadcastWindow(window, batchKey, reopenedSkipped){
         let windowStart = window.window_start;
         let windowEnd   = window.window_end;
         let rows        = window.rows;
@@ -249,7 +251,7 @@ module.exports = {
         // complete that read before either one sends.
         let claimed = Object.create(this);
         claimed.recordIntent = async (candidate, key) => {
-            if(!(await this.claimWindowForBroadcast(candidate, key))){
+            if(!(await this.claimWindowForBroadcast(candidate, key, reopenedSkipped))){
                 let error = new Error('window already has a durable publication claim');
                 error.code = 'ATTEST_BATCH_WINDOW_CLAIMED';
                 throw error;
@@ -263,14 +265,18 @@ module.exports = {
     // marker row from every other attempt on it. This runs inside broadcastWindow after
     // its pipeline, balance and spend reservations have passed, preserving the rule
     // that a window unable to attempt a send leaves no intent marker.
-    async claimWindowForBroadcast(window, batchKey){
+    async claimWindowForBroadcast(window, batchKey, reopenedSkipped){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function')
             throw new Error('no hub DB for durable batch-window claim');
 
-        // A tracking row is a coverage floor, not a publication claim. The guarded
-        // delete cannot remove an intent or outcome installed by a competing path.
-        await db.deleteAttestPublishedBatch(this.network, window.window_start, 'tracking');
+        // A tracking row is a coverage floor, not a publication claim. A reopened
+        // skipped row stays in place through every deferral and must be the exact row
+        // removed at this pre-send claim. Either guarded delete leaves outcomes alone.
+        let status = reopenedSkipped ? 'skipped' : 'tracking';
+        let removed = await db.deleteAttestPublishedBatch(
+            this.network, window.window_start, status);
+        if(reopenedSkipped && (!removed || Number(removed.affectedRows) !== 1)) return false;
         let result = await db.setAttestPublishedBatchByNetwork(
             this.network, window.window_start, window.window_end,
             batchKey, window.row_count, 'intent');
