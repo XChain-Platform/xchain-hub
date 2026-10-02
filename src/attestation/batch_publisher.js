@@ -97,6 +97,7 @@ const anchor    = require('./batch_publisher/anchor.js');
 const signing   = require('./batch_publisher/signing.js');
 const broadcast = require('./batch_publisher/broadcast.js');
 const markers   = require('./batch_publisher/markers.js');
+const chainReconcile = require('./batch_publisher/chain_reconcile.js');
 const { XATTESTB_SIGN_REQ, XATTESTB_SIGN, MAX_CATCHUP_WINDOWS,
         ANCHOR_MAX_LAG_BLOCKS } = require('./batch_publisher/constants.js');
 const hubConfig = require('../config');
@@ -271,6 +272,8 @@ class AttestationBatchPublisher {
         try {
             let now     = Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds();
             let pending = await this.pendingWindows(now);
+            if(pending.length > 0)
+                pending = await this.reconcilePendingAgainstChain(pending);
             for(let w of pending){
                 attempted++;
                 let done = await this.publishWindow(w.windowStart, w.age);
@@ -333,7 +336,8 @@ function installParts(target, parts){
     }
 }
 
-installParts(AttestationBatchPublisher.prototype, [windows, anchor, signing, broadcast, markers]);
+installParts(AttestationBatchPublisher.prototype,
+    [windows, anchor, signing, broadcast, markers, chainReconcile]);
 
 module.exports = Object.assign(AttestationBatchPublisher, {
     XATTESTB_SIGN_REQ,
