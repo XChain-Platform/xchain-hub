@@ -16,7 +16,10 @@
 
 const assert = require('assert');
 
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
+const {
+    listMembersHash,
+    listMetaHash
+} = require('../../../../src/cross_chain/list/canonical.js');
 const { planListVersion } = require('../../../../src/cross_chain/list/version_plan.js');
 
 function read(members, meta = {}) {
@@ -55,7 +58,7 @@ describe('shared-list version plan metadata compatibility', function () {
         const current = read(['a'], {
             name: 'Named list',
             description: 'A description',
-            meta_hash: 'meta-1'
+            meta_hash: listMetaHash('Named list', 'A description')
         });
 
         assert.deepStrictEqual(plan(current, {
@@ -85,7 +88,7 @@ describe('shared-list version plan metadata compatibility', function () {
         const current = read(['a'], {
             name: 'Named list',
             description: null,
-            meta_hash: 'meta-1'
+            meta_hash: listMetaHash('Named list', null)
         });
         const result = plan(current, held(['a']));
 
@@ -99,10 +102,10 @@ describe('shared-list version plan metadata compatibility', function () {
             origin_block: 100,
             name: 'Named list',
             description: null,
-            meta_hash: 'meta-1'
+            meta_hash: listMetaHash('Named list', null)
         });
         assert.deepStrictEqual(plan(current, {
-            ...held(['a'], 'meta-1'),
+            ...held(['a'], listMetaHash('Named list', null)),
             lastSeq: 2
         }), { unchanged: true });
     });
@@ -113,10 +116,13 @@ describe('shared-list version plan metadata versions', function () {
         const current = read(['a', 'b'], {
             name: 'New name',
             description: 'New description',
-            meta_hash: 'meta-2'
+            meta_hash: listMetaHash('New name', 'New description')
         });
 
-        assert.deepStrictEqual(plan(current, held(['a', 'b'], 'meta-1')).version, {
+        assert.deepStrictEqual(plan(current, held(
+            ['a', 'b'],
+            listMetaHash('Old name', 'Old description')
+        )).version, {
             list_type: 2,
             seq: 2,
             kind: 'delta',
@@ -126,14 +132,14 @@ describe('shared-list version plan metadata versions', function () {
             origin_block: 100,
             name: 'New name',
             description: 'New description',
-            meta_hash: 'meta-2'
+            meta_hash: listMetaHash('New name', 'New description')
         });
     });
 
     it('carries metadata on a first full version', function () {
         const current = read(['a'], {
             name: 'Named list',
-            meta_hash: 'meta-1'
+            meta_hash: listMetaHash('Named list', null)
         });
 
         assert.deepStrictEqual(plan(current, {
@@ -150,18 +156,23 @@ describe('shared-list version plan metadata versions', function () {
             origin_block: 100,
             name: 'Named list',
             description: null,
-            meta_hash: 'meta-1'
+            meta_hash: listMetaHash('Named list', null)
         });
     });
 });
 
 describe('shared-list version plan metadata validation', function () {
     it('refuses invalid metadata', function () {
+        const longName = 'n'.repeat(65);
+        const bidiDescription = `bad\u202Edescription`;
         const cases = [
-            { name: 'n'.repeat(65), meta_hash: 'meta' },
-            { name: '-', meta_hash: 'meta' },
-            { name: 'bad;name', meta_hash: 'meta' },
-            { description: `bad\u202Edescription`, meta_hash: 'meta' },
+            { name: longName, meta_hash: listMetaHash(longName, null) },
+            { name: '-', meta_hash: listMetaHash('-', null) },
+            { name: 'bad;name', meta_hash: listMetaHash('bad;name', null) },
+            {
+                description: bidiDescription,
+                meta_hash: listMetaHash(null, bidiDescription)
+            },
             { name: 'Named list', meta_hash: 123 }
         ];
 
