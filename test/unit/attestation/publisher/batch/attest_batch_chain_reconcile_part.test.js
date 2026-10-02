@@ -146,6 +146,19 @@ function registerLandedBatchTests(){
 }
 
 function registerFailureTests(){
+    it('warns once per distinct reason when failures alternate', function(){
+        let ctx = context();
+
+        expect(ctx.chainReconcileFailed('first failure')).to.equal(null);
+        expect(ctx.chainReconcileFailed('second failure')).to.equal(null);
+        expect(ctx.chainReconcileFailed('first failure')).to.equal(null);
+
+        expect(ctx.stats.chainReconcileFailures).to.equal(3);
+        expect(warnings).to.have.length(2);
+        expect(warnings[0]).to.include('first failure');
+        expect(warnings[1]).to.include('second failure');
+    });
+
     it('fails open without an indexer URL and warns once for repeats', async function(){
         let ctx = context();
         ctx.hub.resolveIndexerUrl.resolves(null);

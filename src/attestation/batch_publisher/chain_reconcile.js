@@ -94,14 +94,14 @@ module.exports = {
             if(start === null || end === null) continue;
             batches.push(Object.assign({}, batch, { window_start: start, window_end: end }));
         }
-        this._chainReconcileWarned = null;
         return { batches: batches, truncated: !!result.truncated };
     },
 
     chainReconcileFailed(reason){
         this.stats.chainReconcileFailures++;
-        if(this._chainReconcileWarned !== reason){
-            this._chainReconcileWarned = reason;
+        if(!this._chainReconcileWarned) this._chainReconcileWarned = new Set();
+        if(!this._chainReconcileWarned.has(reason)){
+            this._chainReconcileWarned.add(reason);
             logger.warn('AttestationBatchPublisher: cannot check pending windows against the chain (' +
                 reason + '); the sweep may re-publish windows the chain already carries');
         }
