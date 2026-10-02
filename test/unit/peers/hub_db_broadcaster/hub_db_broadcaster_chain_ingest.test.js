@@ -82,124 +82,155 @@ async function closeServer(server) {
     await new Promise(resolve => server.close(resolve));
 }
 
+function requireIndexer(context) {
+    if (HubDbSync) return;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_SYNC_PATH);
+    context.skip();
+}
+
+function recoveryFixture() {
+    const hubRows = [];
+    const db = {
+        getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
+            max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
+        }])
+    };
+    const broadcaster = new HubDbBroadcaster({}, db);
+    broadcaster.admissionWatermark = lateWatermark();
+    return {
+        hubRows,
+        db,
+        broadcaster,
+        mirroredRows: [],
+        snapshotRequests: [],
+        connectionCount: 0
+    };
+}
+
+function chainIngestedRow() {
+    return {
+        id: 41,
+        round_number: 41,
+        coin_pair: 'BTC/USD',
+        price: '50000.00000000',
+        reference_block: 1003,
+        block_timestamp: 1700000000,
+        status: 'finalized',
+        admit_block_btc: 1003
+    };
+}
+
+function serveSnapshots(fixture, req, res) {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname !== '/hub-db/snapshot/price_snapshots') {
+        res.writeHead(404).end();
+        return;
+    }
+    const sinceId = Number(url.searchParams.get('since_id') || 0);
+    fixture.snapshotRequests.push(sinceId);
+    const rows = fixture.hubRows.filter(row => Number(row.id) > sinceId);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {} }));
+}
+
+function trackConnection(fixture, conn, req) {
+    fixture.connectionCount++;
+    if (fixture.connectionCount === 1) {
+        fixture.firstClose = new Promise(resolve => conn.once('close', (code, reason) => {
+            resolve({ code: code, reason: reason.toString() });
+        }));
+    }
+    fixture.broadcaster.addSubscriber(conn, req);
+}
+
+async function openRecoveryServers(fixture) {
+    fixture.httpServer = http.createServer((req, res) => serveSnapshots(fixture, req, res));
+    fixture.wsServer = new WebSocketServer({ server: fixture.httpServer, path: '/hub-db/subscribe' });
+    fixture.wsServer.on('connection', (conn, req) => trackConnection(fixture, conn, req));
+    return listen(fixture.httpServer);
+}
+
+function configureRecoverySync(fixture, port) {
+    fixture.sync = new HubDbSync({ doQuery: sinon.stub().resolves([]) }, {
+        hubUrl: 'http://127.0.0.1:' + port,
+        network: 'testnet'
+    });
+    sinon.stub(fixture.sync, 'localColumns').resolves(new Set([
+        'id', 'round_number', 'coin_pair', 'price', 'reference_block',
+        'block_timestamp', 'status', 'admit_block_btc'
+    ]));
+    sinon.stub(fixture.sync, 'applyRow').callsFake(async (table, row) => {
+        expect(table).to.equal('price_snapshots');
+        if (!fixture.mirroredRows.some(existing => Number(existing.id) === Number(row.id)))
+            fixture.mirroredRows.push(Object.assign({}, row));
+    });
+    sinon.stub(fixture.sync, 'reconcileForeignPriceRounds').resolves();
+    sinon.stub(fixture.sync, 'replayDrainedPriceEvents').resolves(true);
+    sinon.stub(fixture.sync, 'refreshPriceSyncHeight').resolves();
+    sinon.stub(fixture.sync, 'refreshAllSyncHeights').resolves();
+    const productionBootstrapTable = fixture.sync.bootstrapTable.bind(fixture.sync);
+    fixture.bootstrapTable = sinon.stub(fixture.sync, 'bootstrapTable').callsFake(async table => {
+        if (table === 'price_snapshots') return productionBootstrapTable(table);
+        return 1700000000;
+    });
+}
+
+function assertRecovery(fixture, closed, lateRow) {
+    expect(closed).to.deep.equal({
+        code: 1012,
+        reason: 'chain-ingested price_snapshots below admission watermark'
+    });
+    expect(fixture.broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
+    expect(fixture.connectionCount).to.equal(2);
+    expect(fixture.db.getPriceSnapshotsMaxId.callCount).to.equal(2);
+    expect(fixture.bootstrapTable.withArgs('price_snapshots').callCount).to.equal(2);
+    expect(fixture.snapshotRequests).to.deep.equal([0, 0]);
+    expect(fixture.mirroredRows).to.deep.equal([lateRow]);
+    expect(fixture.broadcaster.getSubscriberCount()).to.equal(1);
+}
+
+async function closeRecoveryFixture(fixture) {
+    if (fixture.sync) fixture.sync.stop();
+    fixture.broadcaster.stop();
+    if (fixture.wsServer) fixture.wsServer.close();
+    await closeServer(fixture.httpServer);
+}
+
+async function recoverChainIngestedRound() {
+    this.timeout(15000);
+    requireIndexer(this);
+    const fixture = recoveryFixture();
+
+    try {
+        const port = await openRecoveryServers(fixture);
+        configureRecoverySync(fixture, port);
+        await fixture.sync.start();
+        expect(fixture.mirroredRows).to.deep.equal([]);
+        const lateRow = chainIngestedRow();
+        fixture.hubRows.push(lateRow);
+
+        fixture.broadcaster.broadcastRow({
+            table: 'price_snapshots',
+            origin: 'chain-ingest',
+            row: lateRow
+        });
+
+        const closed = await fixture.firstClose;
+        await waitUntil(() => fixture.mirroredRows.length === 1 && fixture.connectionCount === 2, 10000);
+        assertRecovery(fixture, closed, lateRow);
+    } finally {
+        await closeRecoveryFixture(fixture);
+    }
+}
+
 describe('HubDbBroadcaster chain-ingest rows', function () {
     afterEach(function () {
         sinon.restore();
     });
 
-    it('makes the production indexer re-download a chain-ingested round below this hub watermark', async function () {
-        this.timeout(15000);
-        if (!HubDbSync) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_SYNC_PATH);
-            this.skip();
-        }
-
-        const hubRows = [];
-        const mirroredRows = [];
-        const snapshotRequests = [];
-        const db = {
-            getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
-                max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
-            }])
-        };
-        const broadcaster = new HubDbBroadcaster({}, db);
-        broadcaster.admissionWatermark = lateWatermark();
-        let httpServer;
-        let wsServer;
-        let sync;
-        let connectionCount = 0;
-        let firstClose;
-
-        try {
-            httpServer = http.createServer((req, res) => {
-                const url = new URL(req.url, 'http://127.0.0.1');
-                if (url.pathname !== '/hub-db/snapshot/price_snapshots') {
-                    res.writeHead(404).end();
-                    return;
-                }
-                const sinceId = Number(url.searchParams.get('since_id') || 0);
-                snapshotRequests.push(sinceId);
-                const rows = hubRows.filter(row => Number(row.id) > sinceId);
-                res.writeHead(200, { 'content-type': 'application/json' });
-                res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {} }));
-            });
-            wsServer = new WebSocketServer({ server: httpServer, path: '/hub-db/subscribe' });
-            wsServer.on('connection', (conn, req) => {
-                connectionCount++;
-                if (connectionCount === 1) {
-                    firstClose = new Promise(resolve => conn.once('close', (code, reason) => {
-                        resolve({ code: code, reason: reason.toString() });
-                    }));
-                }
-                broadcaster.addSubscriber(conn, req);
-            });
-
-            const port = await listen(httpServer);
-            sync = new HubDbSync({ doQuery: sinon.stub().resolves([]) }, {
-                hubUrl: 'http://127.0.0.1:' + port,
-                network: 'testnet'
-            });
-            sinon.stub(sync, 'localColumns').resolves(new Set([
-                'id', 'round_number', 'coin_pair', 'price', 'reference_block',
-                'block_timestamp', 'status', 'admit_block_btc'
-            ]));
-            sinon.stub(sync, 'applyRow').callsFake(async (table, row) => {
-                expect(table).to.equal('price_snapshots');
-                if (!mirroredRows.some(existing => Number(existing.id) === Number(row.id)))
-                    mirroredRows.push(Object.assign({}, row));
-            });
-            sinon.stub(sync, 'reconcileForeignPriceRounds').resolves();
-            sinon.stub(sync, 'replayDrainedPriceEvents').resolves(true);
-            sinon.stub(sync, 'refreshPriceSyncHeight').resolves();
-            sinon.stub(sync, 'refreshAllSyncHeights').resolves();
-            const productionBootstrapTable = sync.bootstrapTable.bind(sync);
-            const bootstrapTable = sinon.stub(sync, 'bootstrapTable').callsFake(async table => {
-                if (table === 'price_snapshots') return productionBootstrapTable(table);
-                return 1700000000;
-            });
-
-            await sync.start();
-            expect(mirroredRows).to.deep.equal([]);
-            const lateRow = {
-                id: 41,
-                round_number: 41,
-                coin_pair: 'BTC/USD',
-                price: '50000.00000000',
-                reference_block: 1003,
-                block_timestamp: 1700000000,
-                status: 'finalized',
-                admit_block_btc: 1003
-            };
-            hubRows.push(lateRow);
-
-            broadcaster.broadcastRow({
-                table: 'price_snapshots',
-                origin: 'chain-ingest',
-                row: lateRow
-            });
-
-            const closed = await firstClose;
-            await waitUntil(() => mirroredRows.length === 1 && connectionCount === 2, 10000);
-
-            expect(closed).to.deep.equal({
-                code: 1012,
-                reason: 'chain-ingested price_snapshots below admission watermark'
-            });
-            expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
-            expect(connectionCount).to.equal(2);
-            expect(db.getPriceSnapshotsMaxId.callCount).to.equal(2);
-            expect(bootstrapTable.withArgs('price_snapshots').callCount).to.equal(2);
-            expect(snapshotRequests).to.deep.equal([0, 0]);
-            expect(mirroredRows).to.deep.equal([lateRow]);
-            expect(broadcaster.getSubscriberCount()).to.equal(1);
-        } finally {
-            if (sync) sync.stop();
-            broadcaster.stop();
-            if (wsServer) wsServer.close();
-            await closeServer(httpServer);
-        }
-    });
+    it('makes the production indexer re-download a chain-ingested round below this hub watermark',
+        recoverChainIngestedRound);
 
     it('still refuses a self-finalized late round', async function () {
         const { broadcaster, ws } = await subscribedBroadcaster();
