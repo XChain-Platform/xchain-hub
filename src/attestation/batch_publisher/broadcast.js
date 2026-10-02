@@ -135,7 +135,6 @@ module.exports = {
         this._refusalAttempts.delete(window.window_start);   // the window is paid for; its attempt history is spent
         this.stats.windowsPublished++;
         this.stats.rowsPublished += window.row_count;
-        if(window.row_count === 0) this.stats.windowsEmpty++;
         this.stats.lastPublishedWindow = window.window_start;
         this.stats.lastPublishedTxid   = headTxid;
         logger.info('AttestationBatchPublisher: published window ' + window.window_start + '-' +

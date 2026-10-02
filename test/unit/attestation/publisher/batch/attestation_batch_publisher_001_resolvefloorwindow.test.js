@@ -16,11 +16,13 @@
  * design, §6.2).
  *
  * The cases here are the ones a reading of the diff cannot settle: that the window
- * is on the unix hour and not on the process's own start, that an EMPTY window still
- * publishes a coverage head, that an over-cap window dead-letters loudly rather than
- * truncating itself, that a restart cannot pay for a window twice, and that a window
- * whose quorum was unavailable is retried with the SAME bytes rather than a new
- * proposal. The DB is a small in-memory pair of tables rather than call-counting
+ * is on the unix hour and not on process start; that by the operator ruling of
+ * 2026-10-02 an empty window records a local skipped marker and publishes nothing,
+ * giving up chain-only proof that a quiet hour was quiet; that an over-cap
+ * window dead-letters loudly rather than truncating itself; that a restart cannot pay
+ * for a window twice; and that a window whose quorum was unavailable is retried with
+ * the SAME bytes rather than a new proposal. The DB is a small in-memory pair of
+ * tables rather than call-counting
  * stubs, because "the second publisher saw the first one's marker" is exactly the
  * assertion a canned stub cannot fail.
  *
@@ -288,7 +290,10 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             expect(pending.map(w => w.windowStart),
                 'the skipped window is inside the catch-up horizon and must come back')
                 .to.deep.equal([now - 2 * WINDOW_S]);
-            // And the gap is no longer silent.
+            // A marker gap is actionable only when the window contains coverage.
+            hub.db.responses.push(makeRow({ effective_time: now - 2 * WINDOW_S + 1 }));
+            p.resolveAnchor = async () => null;
+            await p.publishWindow(pending[0].windowStart, pending[0].age);
             expect(p.stats.coverageGapsDetected).to.equal(1);
             expect(p.getStats().coverageGapWindows).to.equal(1);
         }); }); });

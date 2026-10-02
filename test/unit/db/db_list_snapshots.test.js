@@ -100,15 +100,17 @@ describe('list_snapshots hub table', function () {
         expect(await db.getLatestListSeq('regtest', 'DOGE', 41)).to.equal(0);
     });
 
-    it('reads a version chain in sequence order with only fold inputs', async function () {
+    it('reads a version chain in sequence order with fold and metadata inputs', async function () {
         const db = stubDb();
-        db.doQuery.resolves([]);
-        await db.findListSnapshotChain('regtest', 'DOGE', 41, 7);
+        const metaHash = 'a'.repeat(64);
+        db.doQuery.resolves([{ name: 'Custodians', description: null, meta_hash: metaHash }]);
+        const rows = await db.findListSnapshotChain('regtest', 'DOGE', 41, 7);
         const [sql, params] = db.doQuery.firstCall.args;
-        expect(sql).to.match(/^SELECT seq, kind, list_type, added, removed, members_hash, origin_block FROM list_snapshots/);
+        expect(sql).to.match(/^SELECT seq, kind, list_type, added, removed, members_hash, name, description, meta_hash, origin_block FROM list_snapshots/);
         expect(sql).to.match(/seq <= \?/);
         expect(sql).to.match(/ORDER BY seq ASC$/);
         expect(params).to.deep.equal(['regtest', 'DOGE', 41, 7]);
+        expect(rows[0].meta_hash).to.equal(metaHash);
     });
 });
 

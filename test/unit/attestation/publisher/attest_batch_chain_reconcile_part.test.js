@@ -23,7 +23,7 @@ let part;
 
 function setup(){
     warnings = [];
-    part = proxyquire('../../../../../src/attestation/batch_publisher/chain_reconcile.js', {
+    part = proxyquire('../../../../src/attestation/batch_publisher/chain_reconcile.js', {
         axios: { post: sinon.stub() },
         '../../config': { DOGE_INDEXER_API_KEY: 'config-key' },
         '../../observability': { getLogger: () => ({ warn: line => warnings.push(line) }) }

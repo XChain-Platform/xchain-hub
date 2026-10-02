@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/attestation/publisher/batch/attest_batch_wire_era.test.js
+ * test/unit/attestation/attest_batch_wire_era.test.js
  *
  * The hub half of the ATTEST batch admission-era rule: this hub SIGNS the batch, so
  * below the BTC mirror-admission producer activation it must sign the legacy bytes
@@ -26,12 +26,12 @@
 
 const { expect } = require('chai');
 
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const adm = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
-const signing = require('../../../../../src/attestation/batch_publisher/signing.js');
-const windows = require('../../../../../src/attestation/batch_publisher/window.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const HISTORY = require('../../../../fixtures/attest_batch_v0190_replay.json');
+const abw = require('../../../src/lib/attest_batch_wire.js');
+const adm = require('../../../src/consensus/gates/mirror_admission_gate.js');
+const signing = require('../../../src/attestation/batch_publisher/signing.js');
+const windows = require('../../../src/attestation/batch_publisher/window.js');
+const ValidatorIdentity = require('../../../src/validators/identity.js');
+const HISTORY = require('../../fixtures/attest_batch_v0190_replay.json');
 
 const { isAdmissionEra } = adm;
 const NETWORK  = 'testnet';
