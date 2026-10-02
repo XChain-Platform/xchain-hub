@@ -50,7 +50,7 @@ function plan(current, currentHeld, metaActive = true) {
     });
 }
 
-describe('shared-list version plan metadata', function () {
+describe('shared-list version plan metadata compatibility', function () {
     it('keeps the legacy result shape when metadata is inactive', function () {
         const current = read(['a'], {
             name: 'Named list',
@@ -106,7 +106,9 @@ describe('shared-list version plan metadata', function () {
             lastSeq: 2
         }), { unchanged: true });
     });
+});
 
+describe('shared-list version plan metadata versions', function () {
     it('plans a rename-only delta carrying the new metadata', function () {
         const current = read(['a', 'b'], {
             name: 'New name',
@@ -151,7 +153,9 @@ describe('shared-list version plan metadata', function () {
             meta_hash: 'meta-1'
         });
     });
+});
 
+describe('shared-list version plan metadata validation', function () {
     it('refuses invalid metadata', function () {
         const cases = [
             { name: 'n'.repeat(65), meta_hash: 'meta' },
