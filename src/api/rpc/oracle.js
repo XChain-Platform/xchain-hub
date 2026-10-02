@@ -49,8 +49,10 @@ function oracleStatusRpc(ctx) {
             // that getprice already rejects as stale. Reuse oracleMaxAgeSeconds
             // rather than a literal, so the exposed number can never diverge
             // from what getprice enforces; called without a pair it resolves to
-            // the registry default, the correct representative scalar while all
-            // registry coins share one bound. Additive: callers that ignore the
+            // the TIGHTEST registry bound, so a consumer clamping every pair to
+            // this one scalar never calls a pair fresh past its own getprice
+            // bound (the publisher-status field of the same name follows the
+            // same rule). Additive: callers that ignore the
             // field are unaffected, and it is null when the registry read fails.
             return {active: true, ...info, oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds()};
         },
@@ -94,7 +96,8 @@ function priceReadsRpc(ctx) {
                 // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
                 // bound the consumer clamps freshness to travelled only on
                 // getoraclesubmissions, so it was lost exactly when that rail was
-                // down; same oracleMaxAgeSeconds source as there, never a literal.
+                // down; same oracleMaxAgeSeconds() tightest-bound scalar as there,
+                // never a literal.
                 if (with_watermark) {
                     return {
                         watermark: Math.floor(Date.now() / 1000),

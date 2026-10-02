@@ -125,12 +125,12 @@ module.exports = {
             if (btcTip) {
                 applyPushedChainTip.call(this, btcTip);
             } else {
-                let directHeight = null;
+                let directHeight = null, directCause = null;
                 try { directHeight = await this.hub.resolveBtcLatestBlock(); }
-                catch (_) { /* resolver failed; fall through to round-number anchor */ }
+                catch (resolveErr) { directCause = resolveErr; /* logged by the round-number anchor */ }
 
                 if (directHeight) applyDirectHeight.call(this, directHeight);
-                else applyRoundNumberAnchor.call(this);
+                else applyRoundNumberAnchor.call(this, directCause);
             }
         } catch (err) {
             noteChainTipFailure.call(this, err);
@@ -221,14 +221,16 @@ function applyDirectHeight(directHeight) {
     this.anchorTipBlockTime = null;
 }
 
-// No BTC tip available at all; fall back to round number.
-function applyRoundNumberAnchor() {
+// No BTC tip available at all; fall back to round number. `cause` is the direct
+// resolver's error when it threw, and is appended so the fallback line says why.
+function applyRoundNumberAnchor(cause) {
     this.chainTipFetchFailures++;
     if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
+    const withCause = (line) => (cause ? nodeUtil.format(line + ':', cause) : line);
     if (this.chainTipFetchFailures > 1) {
-        logger.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor');
+        logger.error(withCause('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor'));
     } else {
-        logger.warn('Oracle: BTC chain tip unavailable; using round number as fallback anchor');
+        logger.warn(withCause('Oracle: BTC chain tip unavailable; using round number as fallback anchor'));
     }
     this.currentBtcBlockHeight = this.currentRound;
     this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);

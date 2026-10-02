@@ -23,6 +23,7 @@
 const coins = require('../coins');
 const presence = require('../lib/oracle_round_presence.js');
 const { advisoryAgeSecondsAt } = require('./price_age_at.js');
+const { pinnedMaxPriceAgeMs } = require('../oracle/price_batch_cadence.js');
 const { bcmul, bcdiv } = require('../bcmath.js');
 const mathjs = require('mathjs');
 const hubConfig = require('../config');
@@ -156,14 +157,15 @@ class Prices {
     // as the platform's other consensus-adjacent seams (coins/index.js resolveFeeDestination,
     // OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS); standalone mode, where network is '',
     // fails closed to the pinned value for the same reason those do.
+    // Called with no pair it answers the hub-wide scalar, the tightest registry bound.
     oracleMaxAgeSeconds(coinPair) {
         let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
             ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
             : hubConfig.ORACLE_MAX_PRICE_AGE_SECONDS;
         let v = parseInt(raw, 10);
-        if (!Number.isFinite(v)) return this.registryOracleMaxAge(coinPair);
+        let pinned = coinPair ? this.registryOracleMaxAge(coinPair) : this.registryTightestOracleMaxAge();
+        if (!Number.isFinite(v)) return pinned;
         if (this.network === 'regtest') return v;
-        let pinned = this.registryOracleMaxAge(coinPair);
         // Warned once per hub, not per call: this resolves on every getprice, every fee
         // quote and every health poll, so a per-call line would bury the log.
         if (v !== pinned && !this._warnedOracleMaxAgeOverride) {
@@ -193,6 +195,14 @@ class Prices {
         // makes the caller's `maxAge > 0` guard fail open on staleness rather than
         // reintroduce a hardcoded copy of the consensus-pinned constant.
         return null;
+    }
+
+    // The tightest pinned bound across registry coins, for the one scalar a health
+    // consumer clamps every pair to: no pair then reads fresh past its own getprice
+    // bound, and a coin with a looser bound only errs toward warning early.
+    registryTightestOracleMaxAge() {
+        let ms = pinnedMaxPriceAgeMs(this.network || 'mainnet');
+        return ms === null ? this.registryOracleMaxAge() : ms / 1000;
     }
 
     async advisoryMaxAgeSecondsAtTip(chain, network, bundle) {

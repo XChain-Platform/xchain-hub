@@ -185,6 +185,36 @@ function registerExecuteroundBtcChainTipFallback5Tests9() {
 
 }
 
+// The direct resolver's error rides on the fallback line, at warn first and error after.
+function registerExecuteroundDirectResolverCauseTests() {
+        it('names the direct resolver error on the fallback anchor line', async function () {
+            const logger = require('../../../../src/observability').getLogger();
+            const warn = sinon.stub(logger, 'warn');
+            const error = sinon.stub(logger, 'error');
+            hub.db.getChainTip = sinon.stub().resolves(null);
+            hub.resolveBtcLatestBlock = sinon.stub().rejects(new Error('indexer url boom'));
+            await or.executeRound();
+            const first = warn.getCalls().map(c => String(c.args[0])).filter(l => l.includes('fallback anchor'));
+            expect(first).to.have.length(1);
+            expect(first[0]).to.include('indexer url boom');
+            or.lastExecutedRound = -1;
+            await or.executeRound();
+            const second = error.getCalls().map(c => String(c.args[0])).filter(l => l.includes('fallback anchor'));
+            expect(second).to.have.length(1);
+            expect(second[0]).to.include('(failure 2)').and.to.include('indexer url boom');
+            expect(or.chainTipFetchFailures).to.equal(2);
+        });
+
+        it('keeps the fallback line unchanged when the resolver returns no height', async function () {
+            const warn = sinon.stub(require('../../../../src/observability').getLogger(), 'warn');
+            hub.db.getChainTip = sinon.stub().resolves(null);
+            await or.executeRound();
+            const lines = warn.getCalls().map(c => String(c.args[0])).filter(l => l.includes('fallback anchor'));
+            expect(lines).to.deep.equal(['Oracle: BTC chain tip unavailable; using round number as fallback anchor']);
+        });
+
+}
+
 function registerGetsubmissionsinfoAnchorTipBlockAge6Tests14() {
         it('flags a frozen-but-present pushed tip as block-stale while fetch counters stay clean', async function () {
             let staleBlockTime = Math.floor(Date.now() / 1000) - 100000; // ~28h old
@@ -249,6 +279,7 @@ describe('OracleRound (extra coverage)', function () {
     // ── executeRound: chain-tip branch coverage ─────────────────────────────
     describe('executeRound(): BTC chain tip fallback', function () {
         registerExecuteroundBtcChainTipFallback5Tests9();
+        registerExecuteroundDirectResolverCauseTests();
     });
 
 

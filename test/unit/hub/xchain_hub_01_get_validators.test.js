@@ -209,13 +209,39 @@ function registerFeature9oraclePriceStalenessL5Part4() {
   // Item #4479: getoraclesubmissions publishes this bound as the scalar
   // oracleMaxPriceAgeSeconds, so a cadence-derived health consumer cannot
   // call a row fresh that getprice already rejects. The RPC calls it with
-  // NO pair, so that arity must resolve to the registry default rather
+  // NO pair, so that arity must resolve to the tightest registry bound rather
   // than null, or the consumer's clamp silently no-ops.
-  it('resolves the representative scalar when called with no coin pair (#4479)', function () {
+  it('resolves the tightest registry bound when called with no coin pair (#4479)', function () {
     const coins = require('../../../src/coins');
-    const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
-    expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds()).to.equal(pinned);
+    const tightest = Math.min(...coins.ALLOWED_COINS.map(t => Number(coins.getCoinConfig(t, 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS)));
+    expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds()).to.equal(tightest);
     expect(feature9oraclePriceStalenessL5Hub.oracleMaxAgeSeconds()).to.be.greaterThan(0);
+  });
+}
+function registerFeature9oraclePriceStalenessL5Part5() {
+  // A health consumer clamps every pair to the no-pair scalar, so it must be the
+  // TIGHTEST coin's bound; a per-pair read keeps its own coin's bound.
+  it('reports the tightest coin bound with no pair while each pair keeps its own', function () {
+    const coins = require('../../../src/coins');
+    const real = coins.getCoinConfig;
+    const btc = Number(real.call(coins, 'BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
+    coins.getCoinConfig = function (tick, network) {
+      let cfg = real.call(coins, tick, network);
+      return tick === 'LTC' ? { ...cfg, ORACLE_MAX_PRICE_AGE_SECONDS: 900 } : cfg;
+    };
+    try {
+      let h = feature9oraclePriceStalenessL5Hub;
+      expect(h.oracleMaxAgeSeconds()).to.equal(900);
+      expect(h.oracleMaxAgeSeconds('LTC/USD')).to.equal(900);
+      expect(h.oracleMaxAgeSeconds('BTC/USD')).to.equal(btc);
+      expect(h.oracleMaxAgeSeconds('XCHAIN/USD')).to.equal(btc);
+    } finally {
+      coins.getCoinConfig = real;
+    }
+  });
+  it('keeps the regtest override ahead of the no-pair scalar', function () {
+    let h = new rootSuiteXChainHub('host', 3306, 'db', 'user', 'pass', { HUB_NETWORK: 'regtest', ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
+    expect(h.oracleMaxAgeSeconds()).to.equal(0);
   });
 }
 function registerFeature9oraclePriceStalenessL5() {
@@ -228,6 +254,7 @@ function registerFeature9oraclePriceStalenessL5() {
     registerFeature9oraclePriceStalenessL5Part2();
     registerFeature9oraclePriceStalenessL5Part3();
     registerFeature9oraclePriceStalenessL5Part4();
+    registerFeature9oraclePriceStalenessL5Part5();
   });
 }
 const feature10capabilityGovernanceHotReloadCapabilityRegistry = require('../../../src/validators/capability_registry');

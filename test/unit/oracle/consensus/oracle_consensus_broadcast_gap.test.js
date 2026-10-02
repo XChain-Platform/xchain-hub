@@ -88,3 +88,50 @@ function registerOracleConsensusPostCommitPriceBroadcastGapSuite1Part1() {
 describe('OracleConsensus: post-commit price broadcast gap (#4459)', function () {
   registerOracleConsensusPostCommitPriceBroadcastGapSuite1Part1.call(this);
 });
+
+// The skipped-round writer feeds the same mirrored price_snapshots table, so its
+// post-commit re-read takes the same resync repair as the finalized path.
+describe('OracleConsensus: post-commit skipped-round broadcast gap', function () {
+  const ROUND = 42;
+  let hub, oc, b;
+  function failRoundSelect() {
+    oc.db.doQuery.callsFake(async sql => {
+      if (oracleConsensusPostCommitPriceBroadcastGapSuite1IsRoundSelect(sql)) throw new Error('connection reset');
+      return [];
+    });
+  }
+  beforeEach(function () {
+    hub = createMockHub();
+    b = { broadcastRow: sinon.stub(), dropAllForResync: sinon.stub().returns(1) };
+    hub.hubDbBroadcaster = b;
+    oc = new OracleConsensus(hub, { getSubmissions: sinon.stub().returns(new Map()) });
+    sinon.stub(console, 'error');
+    sinon.stub(console, 'warn');
+  });
+  afterEach(function () {
+    sinon.restore();
+  });
+  it('broadcasts each skipped row and does not resync when the re-read succeeds', async function () {
+    oc.db.doQuery.callsFake(async sql => oracleConsensusPostCommitPriceBroadcastGapSuite1IsRoundSelect(sql)
+      ? [{ id: 7, round_number: ROUND, coin_pair: 'BTC/USD', status: 'skipped' }] : []);
+    await oc.storeSkippedRound(ROUND, 900001, 1700000000, 'no submissions');
+    expect(b.broadcastRow.calledOnce).to.be.true;
+    expect(b.broadcastRow.firstCall.args[0].table).to.equal('price_snapshots');
+    expect(b.dropAllForResync.called).to.be.false;
+  });
+  it('forces a subscriber resync and logs when the skipped-round re-read fails', async function () {
+    failRoundSelect();
+    await oc.storeSkippedRound(ROUND, 900001, 1700000000, 'no submissions');
+    expect(b.broadcastRow.called, 'no row reached a subscriber').to.be.false;
+    expect(b.dropAllForResync.calledOnce, 'subscribers dropped for resync').to.be.true;
+    expect(b.dropAllForResync.firstCall.args[0]).to.equal('price-round broadcast gap');
+    expect(console.error.called, 'the drop is logged, not swallowed').to.be.true;
+  });
+  it('still marks the round locally skipped when the resync repair itself throws', async function () {
+    failRoundSelect();
+    b.dropAllForResync.throws(new Error('broadcaster gone'));
+    await oc.storeSkippedRound(ROUND, 900001, 1700000000, 'no submissions');
+    expect(b.dropAllForResync.calledOnce).to.be.true;
+    expect(oc._locallySkippedOrder).to.include(ROUND);
+  });
+});
