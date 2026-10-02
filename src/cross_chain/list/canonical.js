@@ -17,6 +17,9 @@
 const crypto = require('crypto');
 const ah = require('../../lib/admission_height.js');
 const eq = require('../../consensus/equivocation_header.js');
+const registry = require('../../consensus/gate_registry.js');
+
+const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
 
 function compareMembers(a, b) {
     return Buffer.compare(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
@@ -38,9 +41,15 @@ function listMembersHash(members) {
 }
 
 function listMetaHash(name, description) {
-    if (name == null && description == null) return '';
-    const text = ['LISTMETA', name == null ? '' : name, description == null ? '' : description]
-        .join('|');
+    const hasName = name !== null && name !== undefined;
+    const hasDescription = description !== null && description !== undefined;
+    if (!hasName && !hasDescription) return '';
+
+    const text = [
+        'LISTMETA',
+        hasName ? name : '',
+        hasDescription ? description : ''
+    ].join('|');
     return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
@@ -100,8 +109,10 @@ function listSnapshotCanonical(r, view, isListMetaActive) {
     raw += ah.admissionCanonicalField(
         'CrossChainListShare', r.network, r.snapshot_block, admitBlocks
     );
-    if (typeof isListMetaActive === 'function' &&
-        isListMetaActive(r.snapshot_block, r.network)) {
+    const metaActive = typeof isListMetaActive === 'function'
+        ? isListMetaActive(r.snapshot_block, r.network)
+        : registry.activeAt(LIST_META_GATE_KEY, r.network, 'BTC', r.snapshot_block, null);
+    if (metaActive) {
         raw += '|' + (r.meta_hash || '');
     }
 
