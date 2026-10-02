@@ -21,7 +21,9 @@ function listRowShapeOk(row, network) {
         seq >= 1 &&
         row.kind === (seq === 1 ? 'full' : 'delta') &&
         typeof row.members_hash === 'string' &&
-        /^[0-9a-f]{64}$/.test(row.members_hash);
+        /^[0-9a-f]{64}$/.test(row.members_hash) &&
+        (row.meta_hash == null || row.meta_hash === '' ||
+            (typeof row.meta_hash === 'string' && /^[0-9a-f]{64}$/.test(row.meta_hash)));
 }
 
 function listTransportOk(row, readMembers, prevMembers) {

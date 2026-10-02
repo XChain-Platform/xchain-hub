@@ -17,6 +17,10 @@
 const { isCanonicalOrder, listMembersHash } = require('./canonical.js');
 const { LIST_SHARE_MAX_MEMBERS } = require('./constants.js');
 
+function nullableMetaValue(value) {
+    return value === undefined || value === null ? null : value;
+}
+
 function ownReadVerdict({
     row,
     sharedLists,
@@ -43,6 +47,12 @@ function ownReadVerdict({
     if (!isCanonicalOrder(read.members) ||
         read.members.length > LIST_SHARE_MAX_MEMBERS ||
         listMembersHash(read.members) !== row.members_hash) return 'refuse';
+    if (typeof row.meta_hash === 'string' && row.meta_hash.length > 0 &&
+        (read.meta_hash !== row.meta_hash ||
+            nullableMetaValue(read.name) !== nullableMetaValue(row.name) ||
+            nullableMetaValue(read.description) !== nullableMetaValue(row.description))) {
+        return 'refuse';
+    }
 
     return 'pass';
 }

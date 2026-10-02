@@ -88,8 +88,8 @@ class PriceFetcher {
         // any successful CMC fetch. A persistent 400 most likely means the
         // operator's CMC plan does not support multi-currency convert; once
         // CMC_400_ALERT_THRESHOLD consecutive failures accumulate the hub logs
-        // a high-visibility warning so the operator knows they have one source,
-        // not two, and can upgrade their plan or remove the key.
+        // a high-visibility error so the operator knows CMC is not contributing,
+        // and can upgrade their plan or remove the key.
         this._cmc400Count          = 0;
         this._cmc400AlertThreshold = parseInt(config.CMC_400_ALERT_THRESHOLD) || 5;
 
@@ -262,8 +262,8 @@ class PriceFetcher {
     // Perform an HTTP GET with up to 3 attempts, retrying only on HTTP 429/503
     // with exponential backoff + jitter (attempt 1 → 1-3s, attempt 2 → 2-6s).
     // Non-retryable errors fail immediately. Resolves with the axios response;
-    // rejects with the last error once every attempt is exhausted. Shared by both
-    // price-source fetchers so each gets identical rate-limit resilience.
+    // rejects with the last error once every attempt is exhausted. Shared by every
+    // price-source fetcher so each gets identical rate-limit resilience.
     async fetchWithRetry(url, options) {
         let maxAttempts = 3;
         let lastErr     = null;
@@ -273,14 +273,9 @@ class PriceFetcher {
             } catch (err) {
                 lastErr = err;
                 let status = err.response && err.response.status;
-                if (status === 400) {
-                    // 400 is non-retryable and typically indicates a plan-tier
-                    // incompatibility (e.g. multi-currency /convert requires a paid
-                    // CMC plan). Log a distinct warning so operators can distinguish
-                    // this from a transient network error and upgrade their plan.
-                    logger.warn('CoinMarketCap returned 400 (possible plan-tier limit: multi-currency convert may require a paid plan). Skipping CMC this round.');
-                    break;
-                }
+                // A 400 is a client error, never retried; the calling fetcher reports it
+                // under its own source name (CMC adds its plan-tier hint there).
+                if (status === 400) break;
                 let retryable = status === 429 || status === 503;
                 if (retryable && attempt < maxAttempts) {
                     // Backoff with jitter: attempt 1 → 1-3s, attempt 2 → 2-6s
