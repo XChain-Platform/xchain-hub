@@ -62,9 +62,10 @@ module.exports = {
         return this.windowStartFor(this.nowSeconds());
     },
 
-    // The closed windows with no durable marker, oldest first, bounded. `age` is how
-    // many windows have closed since: it is the rank a hub must be at or below to
-    // publish, which is what staggers the fallback when the elected leader is dark.
+    // The closed windows to offer, oldest first, bounded. A skipped marker is offered
+    // only after a late row arrives and the guarded delete removes it. `age` is how many
+    // windows have closed since: it is the rank a hub must be at or below to publish,
+    // which is what staggers the fallback when the elected leader is dark.
     async pendingWindows(nowSec){
         let current = this.windowStartFor(nowSec);
         let out = [];
@@ -73,6 +74,24 @@ module.exports = {
             if(start < 0) continue;
             if(this._floorWindow !== null && start < this._floorWindow) continue;
             let marker = await this.getMarker(start);
+            let reopenedSkipped = false;
+            if(marker && String(marker.status) === 'skipped'){
+                let rows;
+                try {
+                    rows = await this.selectWindowRows(start, this.windowEndFor(start));
+                } catch(e){
+                    logger.warn('AttestationBatchPublisher: cannot re-read skipped window ' + start +
+                                ' from attestation_responses (' + (e && e.message) + '); deferring');
+                    this.stats.windowsDeferred++;
+                    continue;
+                }
+                if(rows.length === 0) continue;
+                let db = this.hubDb();
+                let removed = await db.deleteAttestPublishedBatch(this.network, start, 'skipped');
+                if(!removed || Number(removed.affectedRows) !== 1) continue;
+                marker = null;
+                reopenedSkipped = true;
+            }
             if(marker && String(marker.status) !== 'intent') continue;   // sent, landed or dead-lettered
             if(marker){
                 // Intent with no outcome: a crash between the send and the sent marker.
@@ -91,7 +110,7 @@ module.exports = {
             // A pending window older than a marker this hub already holds is a window an
             // earlier sweep gave up on and walked past. Say so once per window: nothing
             // else reports it, and only the oldest-marker floor keeps it retryable.
-            if(this._newestMarkerWindow !== null && start < this._newestMarkerWindow &&
+            if(!reopenedSkipped && this._newestMarkerWindow !== null && start < this._newestMarkerWindow &&
                !this._coverageGaps.has(start)){
                 this._coverageGaps.add(start);
                 this.stats.coverageGapsDetected++;
@@ -120,6 +139,11 @@ module.exports = {
             return false;
         }
 
+        if(rows.length === 0){
+            await this.recordSkipped(windowStart, windowEnd);
+            return false;
+        }
+
         if(rows.length > abw.ATTEST_BATCH_MAX_ROWS){
             this.deadLetterOverCap(windowStart, windowEnd, rows.length);
             await this.recordDeadLetter(windowStart, windowEnd, rows.length);
@@ -133,14 +157,7 @@ module.exports = {
             return false;
         }
 
-        let window = {
-            network:          this.network,
-            window_start:     windowStart,
-            window_end:       windowEnd,
-            row_count:        rows.length,
-            btc_block_height: anchor,
-            rows:             rows
-        };
+        let window = this.buildWindow(windowStart, windowEnd, rows, anchor);
         let batchKey = abw.computeBatchKey(window);
 
         // Publisher election, before any signing round: five hubs holding the same rows
@@ -166,6 +183,13 @@ module.exports = {
         }
 
         return await this.signAndBroadcastWindow(window, batchKey);
+    },
+
+    buildWindow(windowStart, windowEnd, rows, anchor){
+        return {
+            network: this.network, window_start: windowStart, window_end: windowEnd,
+            row_count: rows.length, btc_block_height: anchor, rows: rows
+        };
     },
 
     // OVER-ROWS IS A DEAD LETTER, NOT A TRUNCATION. The row cap is consensus: a
