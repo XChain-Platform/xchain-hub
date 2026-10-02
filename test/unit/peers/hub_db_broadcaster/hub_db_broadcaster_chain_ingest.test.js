@@ -32,6 +32,7 @@ function socket() {
 
 function lateWatermark() {
     return {
+        heights: sinon.stub().returns({}),
         isLateFinalization: sinon.stub().returns({
             chain: 'BTC',
             reason: 'round abandoned',
@@ -55,20 +56,59 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
         sinon.restore();
     });
 
-    it('forces a mirror re-download for a chain-ingested round below this hub watermark', async function () {
-        let { broadcaster, ws } = await subscribedBroadcaster();
+    it('re-downloads a chain-ingested round below this hub watermark after reconnect', async function () {
+        let hubRows = [];
+        let mirroredRows = [];
+        let db = {
+            getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
+                max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
+            }])
+        };
+        let downloadPriceSnapshots = sinon.stub().callsFake((sinceId, throughId) =>
+            hubRows.filter(row => row.id > sinceId && row.id <= throughId));
+        let broadcaster = new HubDbBroadcaster({}, db);
+        broadcaster.admissionWatermark = lateWatermark();
+        let reconnectPromise = null;
+        let connections = [];
+
+        async function connectMirror() {
+            let ws = socket();
+            connections.push(ws);
+            ws.send.callsFake(payload => {
+                let frame = JSON.parse(payload);
+                if (frame.type !== 'ready') return;
+                let localMax = mirroredRows.reduce((max, row) => Math.max(max, row.id), 0);
+                let hubMax = Number(frame.max_ids.price_snapshots || 0);
+                if (hubMax > localMax)
+                    mirroredRows.push(...downloadPriceSnapshots(localMax, hubMax));
+            });
+            ws.close.callsFake(code => {
+                if (code === 1012) reconnectPromise = connectMirror();
+            });
+            await broadcaster.addSubscriber(ws);
+            return ws;
+        }
+
+        let firstWs = await connectMirror();
+        expect(mirroredRows).to.deep.equal([]);
+        let lateRow = { id: 41, round_number: 41, admit_block_btc: 1003 };
+        hubRows.push(lateRow);
 
         broadcaster.broadcastRow({
             table: 'price_snapshots',
             origin: 'chain-ingest',
-            row: { round_number: 41, admit_block_btc: 1003 }
+            row: lateRow
         });
+        await reconnectPromise;
 
         expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
-        expect(ws.send.called).to.equal(false);
-        expect(ws.close.calledOnceWithExactly(1012,
+        expect(firstWs.close.calledOnceWithExactly(1012,
             'chain-ingested price_snapshots below admission watermark')).to.equal(true);
-        expect(broadcaster.getSubscriberCount()).to.equal(0);
+        expect(connections).to.have.length(2);
+        expect(db.getPriceSnapshotsMaxId.callCount).to.equal(2);
+        expect(downloadPriceSnapshots.calledOnceWithExactly(0, 41)).to.equal(true);
+        expect(mirroredRows).to.deep.equal([lateRow]);
+        expect(broadcaster.getSubscriberCount()).to.equal(1);
         broadcaster.stop();
     });
 

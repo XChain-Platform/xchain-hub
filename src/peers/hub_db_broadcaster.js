@@ -215,9 +215,10 @@ class HubDbBroadcaster {
             let late = this.admissionWatermark.isLateFinalization(event.table, event.row);
             if (late) {
                 // PRICE consumers do not apply isRowReadableAt when selecting snapshots,
-                // so a chain-ingested row cannot safely bypass this refusal. Reconnect
-                // subscribers instead: their ready-frame max IDs drive the REST bootstrap
-                // that downloads rows this hub holds and their mirrors lack.
+                // so a chain-ingested row cannot safely bypass this refusal. A retryable
+                // close drives the consumer through reconnect and bootstrapAll; the new
+                // ready-frame max ID then makes it re-page rows this hub holds past its
+                // local ceiling.
                 if (event.origin === 'chain-ingest') {
                     this.dropAllForResync('chain-ingested ' + event.table + ' below admission watermark');
                     return;
