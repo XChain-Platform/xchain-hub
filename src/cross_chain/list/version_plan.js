@@ -17,6 +17,7 @@
 const {
     isCanonicalOrder,
     listMembersHash,
+    listMetaHash,
     listDelta
 } = require('./canonical.js');
 const { LIST_SHARE_MAX_MEMBERS } = require('./constants.js');
@@ -61,6 +62,9 @@ function planListVersion({ read, originBlock, held, metaActive = false }) {
     if (!isCanonicalOrder(read.members)) return { refuse: 'order' };
     if (listMembersHash(read.members) !== read.hash) return { refuse: 'hash' };
     if (metaActive && !hasValidListMeta(read)) return { refuse: 'meta' };
+    if (metaActive && read.meta_hash !== listMetaHash(read.name, read.description)) {
+        return { refuse: 'meta' };
+    }
     if (read.members.length > LIST_SHARE_MAX_MEMBERS) return { decline: 'max-members' };
 
     if (held.lastSeq === 0) {
