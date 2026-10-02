@@ -261,11 +261,13 @@ module.exports = {
         let status = err && err.response && err.response.status;
         if (status === 400) {
             this._cmc400Count++;
+            logger.warn('CoinMarketCap returned HTTP 400 (possible plan-tier limit: multi-currency convert ' +
+                'may require a paid plan); skipping CMC this round (' + this._cmc400Count + ' consecutive).');
             if (this._cmc400Count >= this._cmc400AlertThreshold) {
                 logger.error(
                     'CoinMarketCap has returned HTTP 400 for ' + this._cmc400Count + ' consecutive rounds. ' +
                     'The configured COINMARKETCAP_API_KEY likely does not support multi-currency convert ' +
-                    '(a paid plan feature). Price oracle is running on CoinGecko only. ' +
+                    '(a paid plan feature). Price oracle is running without CMC, on the keyless sources. ' +
                     'Upgrade your CMC plan or remove COINMARKETCAP_API_KEY to silence this alert.'
                 );
             }
