@@ -94,18 +94,6 @@ module.exports = {
                 }
                 continue;
             }
-            // A pending window older than a marker this hub already holds is a window an
-            // earlier sweep gave up on and walked past. Say so once per window: nothing
-            // else reports it, and only the oldest-marker floor keeps it retryable.
-            if(!reopenedSkipped && this._newestMarkerWindow !== null && start < this._newestMarkerWindow &&
-               !this._coverageGaps.has(start)){
-                this._coverageGaps.add(start);
-                this.stats.coverageGapsDetected++;
-                logger.error('AttestationBatchPublisher: window ' + start + ' has no batch marker while ' +
-                    'window ' + this._newestMarkerWindow + ' does; an earlier sweep left it behind. It is ' +
-                    'being retried now, but a window that falls out of the ' + MAX_CATCHUP_WINDOWS +
-                    '-window catch-up horizon needs a manual replay.');
-            }
             let candidate = { windowStart: start, age: i - 1 };
             if(reopenedSkipped) candidate.reopenedSkipped = true;
             out.push(candidate);
@@ -147,6 +135,8 @@ module.exports = {
             await this.recordSkipped(windowStart, windowEnd);
             return false;
         }
+
+        if(!reopenedSkipped) this.reportCoverageGap(windowStart);
 
         if(rows.length > abw.ATTEST_BATCH_MAX_ROWS){
             this.deadLetterOverCap(windowStart, windowEnd, rows.length);
@@ -194,6 +184,20 @@ module.exports = {
         }
 
         return await this.signAndBroadcastWindow(window, batchKey, reopenedSkipped);
+    },
+
+    // A row-bearing window below a newer marker is one an earlier sweep walked past.
+    // Empty windows are normal quiet periods, so publishWindow calls this only after
+    // its mirror read proves the missing marker represents response coverage.
+    reportCoverageGap(windowStart){
+        if(this._newestMarkerWindow === null || windowStart >= this._newestMarkerWindow ||
+           this._coverageGaps.has(windowStart)) return;
+        this._coverageGaps.add(windowStart);
+        this.stats.coverageGapsDetected++;
+        logger.error('AttestationBatchPublisher: window ' + windowStart + ' has no batch marker while ' +
+            'window ' + this._newestMarkerWindow + ' does; an earlier sweep left it behind. It is ' +
+            'being retried now, but a window that falls out of the ' + MAX_CATCHUP_WINDOWS +
+            '-window catch-up horizon needs a manual replay.');
     },
 
     // OVER-ROWS IS A DEAD LETTER, NOT A TRUNCATION. The row cap is consensus: a

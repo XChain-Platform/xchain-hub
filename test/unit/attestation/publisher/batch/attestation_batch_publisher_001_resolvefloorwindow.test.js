@@ -290,7 +290,10 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             expect(pending.map(w => w.windowStart),
                 'the skipped window is inside the catch-up horizon and must come back')
                 .to.deep.equal([now - 2 * WINDOW_S]);
-            // And the gap is no longer silent.
+            // A marker gap is actionable only when the window contains coverage.
+            hub.db.responses.push(makeRow({ effective_time: now - 2 * WINDOW_S + 1 }));
+            p.resolveAnchor = async () => null;
+            await p.publishWindow(pending[0].windowStart, pending[0].age);
             expect(p.stats.coverageGapsDetected).to.equal(1);
             expect(p.getStats().coverageGapWindows).to.equal(1);
         }); }); });

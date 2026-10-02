@@ -256,6 +256,38 @@ describe('AttestationBatchPublisher reopened windows', function () {
         expect(publisher.stats.windowsEmpty).to.equal(0);
         expect(db.marker(start).status).to.equal('sent');
     });
+
+});
+
+describe('AttestationBatchPublisher newly discovered empty windows', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-empty-window-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('records an empty window below a sent marker without a gap', async function () {
+        let db = makeDb();
+        let publisher = makePublisher(dir, db);
+        let now = 200 * WINDOW_S;
+        let start = now - 2 * WINDOW_S;
+        db.markers.push({ network: 'regtest', window_start: start + WINDOW_S,
+            window_end: now, row_count: 1, status: 'sent' });
+        publisher._floorWindow = start;
+        publisher._newestMarkerWindow = start + WINDOW_S;
+
+        let result = await publisher.sweep(now);
+
+        expect(result).to.deep.equal({ attempted: 1, published: 0 });
+        expect(db.marker(start)).to.include({ status: 'skipped', row_count: 0 });
+        expect(publisher.stats.coverageGapsDetected).to.equal(0);
+        expect(publisher._coverageGaps.size).to.equal(0);
+        expect(publisher._quarantined.size).to.equal(0);
+    });
 });
 
 describe('AttestationBatchPublisher reopened election deferral', function () {
