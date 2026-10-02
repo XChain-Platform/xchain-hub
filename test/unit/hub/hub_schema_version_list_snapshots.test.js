@@ -14,7 +14,7 @@ function fakeResponse() {
 }
 
 describe('list_snapshots schema-version fence', function () {
-    it('stamps schema_version 8 on the list_snapshots snapshot route', async function () {
+    it('stamps schema_version 9 on the list_snapshots snapshot route', async function () {
         const routes = {};
         const app = {
             use() {},
@@ -39,6 +39,6 @@ describe('list_snapshots schema-version fence', function () {
 
         const snapshot = JSON.parse(res.body);
         assert.strictEqual(snapshot.table, 'list_snapshots');
-        assert.strictEqual(snapshot.schema_version, 8);
+        assert.strictEqual(snapshot.schema_version, 9);
     });
 });
