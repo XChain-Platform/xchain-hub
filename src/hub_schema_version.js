@@ -116,6 +116,14 @@
 //
 // v8 ROLL: the v6 and v7 order stands. This hub rolls FIRST and stamps 8, then
 // every indexer and the explorer roll back to back behind it.
-const HUB_SCHEMA_VERSION = 8;
+//
+// v9: list_snapshots gained name, description and meta_hash so every shared-list
+// version can carry metadata bound to the signed record. A stale reader cannot
+// interpret the expanded row and must reject the stream until it has migrated.
+//
+// v9 ROLL: the v8 order stands. This hub rolls FIRST and stamps 9, then every
+// indexer and the explorer roll back to back behind it. The whole roll completes
+// BELOW every network's LIST_META_ACTIVATION height.
+const HUB_SCHEMA_VERSION = 9;
 
 module.exports = { HUB_SCHEMA_VERSION };

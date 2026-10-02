@@ -60,7 +60,8 @@ const POLICY_SNAPSHOT_COLUMNS = ['snapshot_id', 'snapshot_block', 'origin_chain'
 // Columns written for a finalized shared-list snapshot.
 const LIST_SNAPSHOT_COLUMNS = ['snapshot_id', 'snapshot_block', 'network', 'home_chain',
             'home_list_index', 'list_type', 'seq', 'kind', 'added', 'removed',
-            'members_hash', 'origin_block', 'finalizing_view', 'validator_signatures',
+            'members_hash', 'name', 'description', 'meta_hash', 'origin_block',
+            'finalizing_view', 'validator_signatures',
             'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
             'btc_chain_id'];
 
