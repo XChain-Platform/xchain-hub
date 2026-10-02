@@ -21,6 +21,7 @@
 'use strict';
 
 const ah = require('../../lib/admission_height.js');
+const registry = require('../../consensus/gate_registry.js');
 const { getLogger } = require('../../observability');
 const { ALLOWED_CHAINS } = require('../bridge/constants.js');
 const { foldListChain } = require('./chain.js');
@@ -30,6 +31,14 @@ const { planListVersion } = require('./version_plan.js');
 
 const logger = getLogger();
 const foldCacheKey = Symbol('listFoldCache');
+const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
+
+function installListMetaActivation(engine) {
+    if (typeof engine.activation.listMeta === 'function') return;
+    registry.get(LIST_META_GATE_KEY);
+    engine.activation.listMeta = (block, network, coin) =>
+        registry.activeAt(LIST_META_GATE_KEY, network, coin, block, null);
+}
 
 function foldCacheFor(engine) {
     if (!engine[foldCacheKey]) engine[foldCacheKey] = createFoldCache();
@@ -144,6 +153,7 @@ module.exports = {
     },
 
     async pollSharedLists(snapshotBlock) {
+        if (this['_polling'] === true) installListMetaActivation(this);
         const network = this.network;
         for (const chain of ALLOWED_CHAINS) {
             if (!this.indexers[chain] || !this.indexers[chain].url) continue;

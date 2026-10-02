@@ -20,11 +20,29 @@
 
 const axios = require('axios');
 const ah = require('../../lib/admission_height.js');
+const registry = require('../../consensus/gate_registry.js');
 const { SNAPSHOT_BLOCK_TOLERANCE } = require('../bridge/constants.js');
 const { deriveListSnapshotId, foldListChain } = require('./canonical.js');
 const { heldRowVerdict } = require('./held_checks.js');
 const { ownReadVerdict } = require('./read_checks.js');
 const { listRowShapeOk, listTransportOk } = require('./row_checks.js');
+
+const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
+
+function listMetaActive(engine, snapshotBlock) {
+    const reader = engine.activation && engine.activation.listMeta;
+    if (typeof reader === 'function') {
+        return reader(Number(snapshotBlock), engine.network, 'BTC') === true;
+    }
+    if (!engine.listConsensus) return false;
+    return registry.activeAt(
+        LIST_META_GATE_KEY,
+        engine.network,
+        'BTC',
+        Number(snapshotBlock),
+        null
+    ) === true;
+}
 
 function parseHeldChain(rows){
     if(!Array.isArray(rows)) return null;
@@ -91,7 +109,7 @@ async function readHeldState(engine, row){
     return { previousMembers, heldListType };
 }
 
-async function ownReadsPass(engine, row, heldState){
+async function ownReadsPass(engine, row, heldState, metaActive){
     const [sharedLists, latest, read] = await Promise.all([
         engine.indexerCall(row.home_chain, 'getsharedlists', { network: row.network }),
         engine.indexerCall(row.home_chain, 'getlatestblock', {}),
@@ -106,7 +124,8 @@ async function ownReadsPass(engine, row, heldState){
         homeTip: homeTipFrom(latest),
         confirmations: Number(engine.confirmations[row.home_chain]),
         read,
-        heldListType: heldState.heldListType
+        heldListType: heldState.heldListType,
+        metaActive
     }) !== 'pass') return false;
     return listTransportOk(row, read.members, heldState.previousMembers);
 }
@@ -140,7 +159,9 @@ module.exports = {
             );
             if(row.snapshot_id !== expectedId) return false;
             const heldState = await readHeldState(this, row);
-            return heldState !== null && await ownReadsPass(this, row, heldState);
+            const metaActive = listMetaActive(this, row.snapshot_block);
+            return heldState !== null &&
+                await ownReadsPass(this, row, heldState, metaActive);
         } catch(_e){
             return false;
         }

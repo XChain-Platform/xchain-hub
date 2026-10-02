@@ -27,7 +27,8 @@ function ownReadVerdict({
     homeTip,
     confirmations,
     read,
-    heldListType = null
+    heldListType = null,
+    metaActive = false
 }) {
     if (!Array.isArray(sharedLists) ||
         !Number.isSafeInteger(homeTip) || homeTip < 0 ||
@@ -47,7 +48,10 @@ function ownReadVerdict({
     if (!isCanonicalOrder(read.members) ||
         read.members.length > LIST_SHARE_MAX_MEMBERS ||
         listMembersHash(read.members) !== row.members_hash) return 'refuse';
-    if (typeof row.meta_hash === 'string' && row.meta_hash.length > 0 &&
+    const compareMeta = metaActive ||
+        (typeof row.meta_hash === 'string' && row.meta_hash.length > 0);
+    if (metaActive && typeof row.meta_hash !== 'string') return 'refuse';
+    if (compareMeta &&
         (read.meta_hash !== row.meta_hash ||
             nullableMetaValue(read.name) !== nullableMetaValue(row.name) ||
             nullableMetaValue(read.description) !== nullableMetaValue(row.description))) {
