@@ -18,56 +18,57 @@ const { expect } = require('chai');
 const sinon = require('sinon');
 const proxyquire = require('proxyquire').noCallThru();
 
-describe('AttestationBatchPublisher chain reconcile part', function(){
-    let warnings;
-    let part;
+let warnings;
+let part;
 
-    beforeEach(function(){
-        warnings = [];
-        part = proxyquire('../../../../../src/attestation/batch_publisher/chain_reconcile.js', {
-            axios: { post: sinon.stub() },
-            '../../config': { DOGE_INDEXER_API_KEY: 'config-key' },
-            '../../observability': { getLogger: () => ({ warn: line => warnings.push(line) }) }
-        });
+function setup(){
+    warnings = [];
+    part = proxyquire('../../../../../src/attestation/batch_publisher/chain_reconcile.js', {
+        axios: { post: sinon.stub() },
+        '../../config': { DOGE_INDEXER_API_KEY: 'config-key' },
+        '../../observability': { getLogger: () => ({ warn: line => warnings.push(line) }) }
     });
+}
 
-    function context(answer){
-        let ctx = {
-            hub: {
-                resolveIndexerUrl: sinon.stub().resolves('indexer-url'),
-                p2pConfig: { DOGE_INDEXER_API_KEY: 'p2p-key' }
-            },
-            windowS: 3600,
-            stats: {
-                chainReconcileRuns: 0,
-                chainReconcileLandedWindows: 0,
-                chainReconcileFailures: 0
-            },
-            recordLandedWindow: sinon.stub().resolves()
-        };
-        Object.assign(ctx, part);
-        ctx.indexerRpc = sinon.stub().resolves(answer === undefined
-            ? { batches: [], truncated: false } : answer);
-        return ctx;
-    }
+function context(answer){
+    let ctx = {
+        hub: {
+            resolveIndexerUrl: sinon.stub().resolves('indexer-url'),
+            p2pConfig: { DOGE_INDEXER_API_KEY: 'p2p-key' }
+        },
+        windowS: 3600,
+        stats: {
+            chainReconcileRuns: 0,
+            chainReconcileLandedWindows: 0,
+            chainReconcileFailures: 0
+        },
+        recordLandedWindow: sinon.stub().resolves()
+    };
+    Object.assign(ctx, part);
+    ctx.indexerRpc = sinon.stub().resolves(answer === undefined
+        ? { batches: [], truncated: false } : answer);
+    return ctx;
+}
 
-    function pending(){
-        return [
-            { windowStart: 7200, age: 0 },
-            { windowStart: 0, age: 2 },
-            { windowStart: 3600, age: 1 }
-        ];
-    }
+function pending(){
+    return [
+        { windowStart: 7200, age: 0 },
+        { windowStart: 0, age: 2 },
+        { windowStart: 3600, age: 1 }
+    ];
+}
 
-    function expectRpc(rpc, count){
-        expect(rpc.callCount).to.equal(count);
-        for(let call of rpc.getCalls()){
-            expect(call.args).to.deep.equal([
-                'indexer-url', 'config-key', 'getattestbatches',
-                { window_start_from: 0, window_start_to: 7200, limit: 500 }
-            ]);
-        }
+function expectRpc(rpc, count){
+    expect(rpc.callCount).to.equal(count);
+    for(let call of rpc.getCalls()){
+        expect(call.args).to.deep.equal([
+            'indexer-url', 'config-key', 'getattestbatches',
+            { window_start_from: 0, window_start_to: 7200, limit: 500 }
+        ]);
     }
+}
+
+function registerInterfaceTests(){
 
     it('exports exactly the four methods installed by the publisher', function(){
         expect(Object.keys(part)).to.deep.equal([
@@ -85,7 +86,9 @@ describe('AttestationBatchPublisher chain reconcile part', function(){
         expect(ctx.indexerRpc.called).to.equal(false);
         expect(ctx.hub.resolveIndexerUrl.called).to.equal(false);
     });
+}
 
+function registerLandedBatchTests(){
     it('records and drops a landed pending window while keeping an omitted one', async function(){
         let ctx = context({
             batches: [
@@ -140,7 +143,9 @@ describe('AttestationBatchPublisher chain reconcile part', function(){
         expect(ctx.stats.chainReconcileLandedWindows).to.equal(1);
         expectRpc(ctx.indexerRpc, 1);
     });
+}
 
+function registerFailureTests(){
     it('fails open without an indexer URL and warns once for repeats', async function(){
         let ctx = context();
         ctx.hub.resolveIndexerUrl.resolves(null);
@@ -183,4 +188,11 @@ describe('AttestationBatchPublisher chain reconcile part', function(){
             expect(warnings).to.have.length(1);
         });
     }
+}
+
+describe('AttestationBatchPublisher chain reconcile part', function(){
+    beforeEach(setup);
+    registerInterfaceTests();
+    registerLandedBatchTests();
+    registerFailureTests();
 });
