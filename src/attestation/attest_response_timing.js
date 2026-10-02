@@ -38,13 +38,14 @@
  * already recorded for the price-barrier grace, and it gets the same answer:
  * a network-gated seam, not a lowered constant.
  *
- * THE BATCH WINDOW RIDES HERE FOR THE SAME REASON. The periodic on-chain batch
- * that keeps the response history reconstructible from chain parse closes on the
- * wall-clock hour, and a regtest venue cannot wait an hour per acceptance test, so
- * it gets the identical network-gated seam. The window is deliberately NOT coupled
- * to the PRICE batch window, which counts ROUNDS rather than seconds and is resized
- * against the fee-staleness bound: coupling attestation coverage to a number that
- * moves for unrelated reasons would move a chain-only node's coverage proof with it.
+ * THE BATCH WINDOW RIDES HERE FOR THE SAME REASON. By the operator ruling of
+ * 2026-10-02, a window with responses publishes their periodic on-chain batch and an
+ * empty window writes only a local skipped marker. This gives up chain-only proof
+ * that a quiet hour was quiet. A regtest venue cannot wait an hour per acceptance
+ * test, so it gets the identical network-gated seam. The window is deliberately NOT
+ * coupled to the PRICE batch window, which counts ROUNDS rather than seconds and is
+ * resized against the fee-staleness bound: coupling attestation coverage to a number
+ * that moves for unrelated reasons would move a chain-only node's coverage proof with it.
  *
  * WHY THE SEAM IS REGTEST-ONLY AND FAILS LOUD THERE. The resolved value goes
  * straight into bytes the responsible set signs, and every honest hub bounds an
