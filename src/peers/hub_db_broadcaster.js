@@ -72,6 +72,12 @@ function initWatermarkCadence(broadcaster) {
     if (broadcaster._watermarkTimer.unref) broadcaster._watermarkTimer.unref();
 }
 
+function recoverLateChainIngest(broadcaster, event, late) {
+    if (!late || event.origin !== 'chain-ingest') return false;
+    broadcaster.dropAllForResync('chain-ingested ' + event.table + ' below admission watermark');
+    return true;
+}
+
 class HubDbBroadcaster {
 
     constructor(config, db) {
@@ -213,16 +219,13 @@ class HubDbBroadcaster {
         // byte-identical to today.
         if (this.admissionWatermark && event) {
             const late = this.admissionWatermark.isLateFinalization(event.table, event.row);
+            // PRICE consumers do not apply isRowReadableAt when selecting snapshots,
+            // so a chain-ingested row cannot safely bypass this refusal. The consumer's
+            // reconnect path runs bootstrapAll, and price_snapshots is a full-repage
+            // table, so a retryable close repairs the missing row without binding it
+            // retroactively through the live stream.
+            if (recoverLateChainIngest(this, event, late)) return;
             if (late) {
-                // PRICE consumers do not apply isRowReadableAt when selecting snapshots,
-                // so a chain-ingested row cannot safely bypass this refusal. The consumer's
-                // reconnect path runs bootstrapAll, and price_snapshots is a full-repage
-                // table, so a retryable close repairs the missing row without binding it
-                // retroactively through the live stream.
-                if (event.origin === 'chain-ingest') {
-                    this.dropAllForResync('chain-ingested ' + event.table + ' below admission watermark');
-                    return;
-                }
                 logger.error('HubDbBroadcaster: REFUSING to broadcast a ' + event.table + ' row admissible at '
                     + late.admitBlock + ' on ' + late.chain + '; the height watermark already claims '
                     + late.watermark + ' there (' + late.reason + '), so the mirror has been told that round '
