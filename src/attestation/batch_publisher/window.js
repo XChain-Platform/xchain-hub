@@ -157,7 +157,14 @@ module.exports = {
             return false;
         }
 
-        let window = this.buildWindow(windowStart, windowEnd, rows, anchor);
+        let window = {
+            network:          this.network,
+            window_start:     windowStart,
+            window_end:       windowEnd,
+            row_count:        rows.length,
+            btc_block_height: anchor,
+            rows:             rows
+        };
         let batchKey = abw.computeBatchKey(window);
 
         // Publisher election, before any signing round: five hubs holding the same rows
@@ -183,13 +190,6 @@ module.exports = {
         }
 
         return await this.signAndBroadcastWindow(window, batchKey);
-    },
-
-    buildWindow(windowStart, windowEnd, rows, anchor){
-        return {
-            network: this.network, window_start: windowStart, window_end: windowEnd,
-            row_count: rows.length, btc_block_height: anchor, rows: rows
-        };
     },
 
     // OVER-ROWS IS A DEAD LETTER, NOT A TRUNCATION. The row cap is consensus: a
