@@ -40,6 +40,27 @@ function makeRes() {
     return { statusCode: 200, status(code) { this.statusCode = code; return this; } };
 }
 
+function installTestEnvironment() {
+    const saved = {};
+    for (const key of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH',
+                       'HUB_ALLOW_UNAUTHENTICATED', 'HUB_DB_HOST', 'HUB_DB_PORT',
+                       'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
+                       'P2P_VALIDATOR_ADDR']) {
+        saved[key] = process.env[key];
+        delete process.env[key];
+    }
+    Object.assign(process.env, {
+        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9995', HUB_API_KEY: 'k'
+    });
+    return () => {
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    };
+}
+
 async function bootApi(batchPublisher, options) {
     const captured = { methods: null };
     const { mockExpress, mockServer } = makeBatchHealthServer();
@@ -63,18 +84,7 @@ async function bootApi(batchPublisher, options) {
         on: () => {}
     };
 
-    const saved = {};
-    for (const key of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH',
-                       'HUB_ALLOW_UNAUTHENTICATED', 'HUB_DB_HOST', 'HUB_DB_PORT',
-                       'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
-                       'P2P_VALIDATOR_ADDR']) {
-        saved[key] = process.env[key];
-        delete process.env[key];
-    }
-    Object.assign(process.env, {
-        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9995', HUB_API_KEY: 'k'
-    });
+    const restoreEnvironment = installTestEnvironment();
 
     try {
         proxyquire('../../../src/api', {
@@ -93,10 +103,7 @@ async function bootApi(batchPublisher, options) {
             './XChainHub': function () { return mockHub; }
         });
     } finally {
-        for (const [key, value] of Object.entries(saved)) {
-            if (value === undefined) delete process.env[key];
-            else process.env[key] = value;
-        }
+        restoreEnvironment();
     }
     await waitUntil(() => captured.methods,
         { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
