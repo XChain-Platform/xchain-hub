@@ -1,12 +1,18 @@
 'use strict';
 
+function heldMetaHash(value) {
+    return value === undefined || value === null || value === '' ? '' : value;
+}
+
 function heldRowVerdict({ row, heldAtSeq, latestHeldSeq, prevOriginBlock }) {
     const seq = row && row.seq;
     if (!Number.isInteger(seq) || seq < 1) return 'refuse';
 
     if (heldAtSeq && typeof heldAtSeq === 'object') {
         return heldAtSeq.snapshot_id === row.snapshot_id &&
-            heldAtSeq.members_hash === row.members_hash ? 'pass' : 'refuse';
+            heldAtSeq.members_hash === row.members_hash &&
+            heldMetaHash(heldAtSeq.meta_hash) === heldMetaHash(row.meta_hash) ?
+            'pass' : 'refuse';
     }
 
     const latest = Number(latestHeldSeq) || 0;

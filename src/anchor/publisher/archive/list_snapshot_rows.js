@@ -35,8 +35,13 @@ function archivedValue(key, value){
 module.exports = {
 
     serializeListSnapshot(row){
-        let out = {};
+        const out = {};
         for(const key of LIST_SNAPSHOT_KEYS) out[key] = archivedValue(key, row[key]);
+        if(row.meta_hash != null){
+            out.name = row.name == null ? null : String(row.name);
+            out.description = row.description == null ? null : String(row.description);
+            out.meta_hash = String(row.meta_hash);
+        }
         return out;
     },
 
