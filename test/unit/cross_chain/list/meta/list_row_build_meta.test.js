@@ -18,7 +18,7 @@ const assert = require('assert');
 
 const {
     buildListSnapshotRow
-} = require('../../../../src/cross_chain/list/row_build.js');
+} = require('../../../../../src/cross_chain/list/row_build.js');
 
 const ROW_KEYS = [
     'snapshot_id',
