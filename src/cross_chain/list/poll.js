@@ -189,10 +189,13 @@ module.exports = {
             return;
         }
 
+        const metaActive = typeof this.activation.listMeta === 'function'
+            && this.activation.listMeta(Number(snapshotBlock), network, 'BTC') === true;
         const plan = planListVersion({
             read,
             originBlock,
-            held: { lastSeq, ...held }
+            held: { lastSeq, ...held },
+            metaActive
         });
         if (plan.unchanged) return;
         if (plan.decline) {
