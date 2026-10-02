@@ -62,10 +62,9 @@ module.exports = {
         return this.windowStartFor(this.nowSeconds());
     },
 
-    // The closed windows to offer, oldest first, bounded. A skipped marker is offered
-    // only after a late row arrives and the guarded delete removes it. `age` is how many
-    // windows have closed since: it is the rank a hub must be at or below to publish,
-    // which is what staggers the fallback when the elected leader is dark.
+    // Closed windows to offer, oldest first. A late row reopens a skipped marker after
+    // its guarded delete. `age` is the required publisher rank, which staggers fallback
+    // when the elected leader is dark.
     async pendingWindows(nowSec){
         let current = this.windowStartFor(nowSec);
         let out = [];
@@ -124,20 +123,23 @@ module.exports = {
         return out;
     },
 
-    // Publish one window, or leave it for a later attempt. Returns true only when a
-    // batch for this window actually went out.
-    async publishWindow(windowStart, age){
-        let windowEnd = this.windowEndFor(windowStart);
-
-        let rows;
+    async readWindowRows(windowStart, windowEnd){
         try {
-            rows = await this.selectWindowRows(windowStart, windowEnd);
+            return await this.selectWindowRows(windowStart, windowEnd);
         } catch(e){
             logger.warn('AttestationBatchPublisher: cannot read window ' + windowStart +
                          ' from attestation_responses (' + (e && e.message) + '); deferring');
             this.stats.windowsDeferred++;
-            return false;
+            return null;
         }
+    },
+
+    // Publish one window, or leave it for a later attempt. Returns true only when a
+    // batch for this window actually went out.
+    async publishWindow(windowStart, age){
+        let windowEnd = this.windowEndFor(windowStart);
+        let rows = await this.readWindowRows(windowStart, windowEnd);
+        if(rows === null) return false;
 
         if(rows.length === 0){
             await this.recordSkipped(windowStart, windowEnd);

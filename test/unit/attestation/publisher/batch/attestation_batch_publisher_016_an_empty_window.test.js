@@ -54,14 +54,12 @@ function makeRow(effectiveTime){
 }
 
 function makeDb(){
-    let responses = [];
-    let markers = [];
+    let responses = [], markers = [];
     let findMarker = (start) => markers.find(m => Number(m.window_start) === Number(start));
     let upsert = (row) => {
         let current = findMarker(row.window_start);
         if(current) Object.assign(current, row);
         else markers.push(row);
-        return current;
     };
     return {
         responses,
@@ -198,6 +196,18 @@ describe('AttestationBatchPublisher empty windows', function () {
         expect(publisher.wires).to.have.length(1);
         expect(db.marker(start).status).to.equal('sent');
     });
+});
+
+describe('AttestationBatchPublisher reopened windows', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-empty-window-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
 
     it('does not report a skipped window below a newer sent marker as a gap', async function () {
         let db = makeDb();
@@ -243,6 +253,18 @@ describe('AttestationBatchPublisher empty windows', function () {
         expect(publisher.stats.windowsPublished).to.equal(1);
         expect(publisher.stats.windowsEmpty).to.equal(0);
         expect(db.marker(start).status).to.equal('sent');
+    });
+});
+
+describe('AttestationBatchPublisher skipped marker landing', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-empty-window-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
     it('lets a landed marker replace a skipped marker', async function () {
