@@ -127,7 +127,7 @@
     },
     {
       "name": "getoraclesubmissions",
-      "summary": "Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.",
+      "summary": "Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the tightest per-coin price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -137,7 +137,7 @@
     },
     {
       "name": "getpricesnapshots",
-      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the price-age bound getprice enforces.",
+      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the tightest per-coin price-age bound getprice enforces.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -226,7 +226,7 @@
             },
             {
               "type": "object",
-              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds, the price-age bound getprice enforces (oracleMaxPriceAgeSeconds, null when the registry read fails), plus the rows.",
+              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds, the tightest per-coin price-age bound getprice enforces (oracleMaxPriceAgeSeconds, null when the registry read fails), plus the rows.",
               "properties": {
                 "watermark": {
                   "type": "number"
