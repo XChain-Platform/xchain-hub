@@ -41,9 +41,15 @@ function listMembersHash(members) {
 }
 
 function listMetaHash(name, description) {
-    if (name == null && description == null) return '';
-    const text = ['LISTMETA', name == null ? '' : name, description == null ? '' : description]
-        .join('|');
+    const hasName = name !== null && name !== undefined;
+    const hasDescription = description !== null && description !== undefined;
+    if (!hasName && !hasDescription) return '';
+
+    const text = [
+        'LISTMETA',
+        hasName ? name : '',
+        hasDescription ? description : ''
+    ].join('|');
     return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
