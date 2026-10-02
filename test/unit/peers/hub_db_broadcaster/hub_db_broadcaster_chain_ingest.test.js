@@ -55,7 +55,7 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
         sinon.restore();
     });
 
-    it('broadcasts a chain-ingested round below this hub watermark', async function () {
+    it('forces a mirror re-download for a chain-ingested round below this hub watermark', async function () {
         let { broadcaster, ws } = await subscribedBroadcaster();
 
         broadcaster.broadcastRow({
@@ -64,9 +64,11 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
             row: { round_number: 41, admit_block_btc: 1003 }
         });
 
-        expect(ws.send.calledOnce).to.equal(true);
-        expect(JSON.parse(ws.send.firstCall.args[0]).row.round_number).to.equal(41);
-        expect(broadcaster.admissionWatermark.isLateFinalization.called).to.equal(false);
+        expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
+        expect(ws.send.called).to.equal(false);
+        expect(ws.close.calledOnceWithExactly(1012,
+            'chain-ingested price_snapshots below admission watermark')).to.equal(true);
+        expect(broadcaster.getSubscriberCount()).to.equal(0);
         broadcaster.stop();
     });
 
@@ -87,6 +89,7 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
 
     it('carries batch_block_time through a landing re-emit', async function () {
         let { broadcaster, ws } = await subscribedBroadcaster();
+        broadcaster.admissionWatermark.isLateFinalization.returns(null);
         let row = {
             round_number: 43,
             coin_pair: 'BTC/USD',
@@ -106,6 +109,7 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
 
         expect(await aggregator.stampBatchLanding(43, 1700009000)).to.equal(1);
         expect(emitted.origin).to.equal('chain-ingest');
+        expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
         expect(ws.send.calledOnce).to.equal(true);
         expect(JSON.parse(ws.send.firstCall.args[0]).row.batch_block_time).to.equal(1700009000);
         broadcaster.stop();
