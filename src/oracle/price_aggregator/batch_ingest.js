@@ -142,7 +142,7 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence) {
         // Re-emit on the WS mirror stream exactly as v0-stored rows do, or a
         // replaying node's mirror never fills and its price barrier never opens.
         for (let row of insertedRows) {
-            this.emit('row:inserted', { table: 'price_snapshots', row: row });
+            this.emit('row:inserted', { table: 'price_snapshots', row: row, origin: 'chain-ingest' });
         }
         stored++;
 
@@ -201,7 +201,7 @@ module.exports = {
             // without asking the driver for a count it does not uniformly report.
             let rows = await this.db.findPriceSnapshotsByRoundNumberAndBatchBlockTime(round, landed);
             for (let row of (rows || [])) {
-                this.emit('row:inserted', { table: 'price_snapshots', row: row });
+                this.emit('row:inserted', { table: 'price_snapshots', row: row, origin: 'chain-ingest' });
             }
             return (rows || []).length;
         } catch (err) {
