@@ -13,7 +13,17 @@
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const proxyquire       = require('proxyquire');
+const fs                = require('node:fs');
+const http              = require('node:http');
+const path              = require('node:path');
+const ws                = require('ws');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+
+const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
+    path.resolve(__dirname, '../../../../../xchain-indexer');
+const INDEXER_SYNC_PATH = path.join(INDEXER_ROOT, 'src', 'hub', 'hub_db_sync.js');
+const HubDbSync = fs.existsSync(INDEXER_SYNC_PATH) ? require(INDEXER_SYNC_PATH) : null;
+const WebSocketServer = ws.WebSocketServer || ws.Server;
 
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', {
     ws: { OPEN: 1 }
@@ -43,12 +53,33 @@ function lateWatermark() {
 }
 
 async function subscribedBroadcaster() {
-    let broadcaster = new HubDbBroadcaster({});
-    let ws = socket();
+    const broadcaster = new HubDbBroadcaster({});
+    const ws = socket();
     await broadcaster.addSubscriber(ws);
     ws.send.resetHistory();
     broadcaster.admissionWatermark = lateWatermark();
     return { broadcaster, ws };
+}
+
+async function listen(server) {
+    await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+    });
+    return server.address().port;
+}
+
+async function waitUntil(predicate, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error('timed out waiting for production mirror reconnect');
+        await new Promise(resolve => setTimeout(resolve, 20));
+    }
+}
+
+async function closeServer(server) {
+    if (!server) return;
+    await new Promise(resolve => server.close(resolve));
 }
 
 describe('HubDbBroadcaster chain-ingest rows', function () {
@@ -56,64 +87,122 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
         sinon.restore();
     });
 
-    it('re-downloads a chain-ingested round below this hub watermark after reconnect', async function () {
-        let hubRows = [];
-        let mirroredRows = [];
-        let db = {
+    it('makes the production indexer re-download a chain-ingested round below this hub watermark', async function () {
+        this.timeout(15000);
+        if (!HubDbSync) {
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_SYNC_PATH);
+            this.skip();
+        }
+
+        const hubRows = [];
+        const mirroredRows = [];
+        const snapshotRequests = [];
+        const db = {
             getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
                 max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
             }])
         };
-        let downloadPriceSnapshots = sinon.stub().callsFake((sinceId, throughId) =>
-            hubRows.filter(row => row.id > sinceId && row.id <= throughId));
-        let broadcaster = new HubDbBroadcaster({}, db);
+        const broadcaster = new HubDbBroadcaster({}, db);
         broadcaster.admissionWatermark = lateWatermark();
-        let reconnectPromise = null;
-        let connections = [];
+        let httpServer;
+        let wsServer;
+        let sync;
+        let connectionCount = 0;
+        let firstClose;
 
-        async function connectMirror() {
-            let ws = socket();
-            connections.push(ws);
-            ws.send.callsFake(payload => {
-                let frame = JSON.parse(payload);
-                if (frame.type !== 'ready') return;
-                let localMax = mirroredRows.reduce((max, row) => Math.max(max, row.id), 0);
-                let hubMax = Number(frame.max_ids.price_snapshots || 0);
-                if (hubMax > localMax)
-                    mirroredRows.push(...downloadPriceSnapshots(localMax, hubMax));
+        try {
+            httpServer = http.createServer((req, res) => {
+                const url = new URL(req.url, 'http://127.0.0.1');
+                if (url.pathname !== '/hub-db/snapshot/price_snapshots') {
+                    res.writeHead(404).end();
+                    return;
+                }
+                const sinceId = Number(url.searchParams.get('since_id') || 0);
+                snapshotRequests.push(sinceId);
+                const rows = hubRows.filter(row => Number(row.id) > sinceId);
+                res.writeHead(200, { 'content-type': 'application/json' });
+                res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {} }));
             });
-            ws.close.callsFake(code => {
-                if (code === 1012) reconnectPromise = connectMirror();
+            wsServer = new WebSocketServer({ server: httpServer, path: '/hub-db/subscribe' });
+            wsServer.on('connection', (conn, req) => {
+                connectionCount++;
+                if (connectionCount === 1) {
+                    firstClose = new Promise(resolve => conn.once('close', (code, reason) => {
+                        resolve({ code: code, reason: reason.toString() });
+                    }));
+                }
+                broadcaster.addSubscriber(conn, req);
             });
-            await broadcaster.addSubscriber(ws);
-            return ws;
+
+            const port = await listen(httpServer);
+            sync = new HubDbSync({ doQuery: sinon.stub().resolves([]) }, {
+                hubUrl: 'http://127.0.0.1:' + port,
+                network: 'testnet'
+            });
+            sinon.stub(sync, 'localColumns').resolves(new Set([
+                'id', 'round_number', 'coin_pair', 'price', 'reference_block',
+                'block_timestamp', 'status', 'admit_block_btc'
+            ]));
+            sinon.stub(sync, 'applyRow').callsFake(async (table, row) => {
+                expect(table).to.equal('price_snapshots');
+                if (!mirroredRows.some(existing => Number(existing.id) === Number(row.id)))
+                    mirroredRows.push(Object.assign({}, row));
+            });
+            sinon.stub(sync, 'reconcileForeignPriceRounds').resolves();
+            sinon.stub(sync, 'replayDrainedPriceEvents').resolves(true);
+            sinon.stub(sync, 'refreshPriceSyncHeight').resolves();
+            sinon.stub(sync, 'refreshAllSyncHeights').resolves();
+            const productionBootstrapTable = sync.bootstrapTable.bind(sync);
+            const bootstrapTable = sinon.stub(sync, 'bootstrapTable').callsFake(async table => {
+                if (table === 'price_snapshots') return productionBootstrapTable(table);
+                return 1700000000;
+            });
+
+            await sync.start();
+            expect(mirroredRows).to.deep.equal([]);
+            const lateRow = {
+                id: 41,
+                round_number: 41,
+                coin_pair: 'BTC/USD',
+                price: '50000.00000000',
+                reference_block: 1003,
+                block_timestamp: 1700000000,
+                status: 'finalized',
+                admit_block_btc: 1003
+            };
+            hubRows.push(lateRow);
+
+            broadcaster.broadcastRow({
+                table: 'price_snapshots',
+                origin: 'chain-ingest',
+                row: lateRow
+            });
+
+            const closed = await firstClose;
+            await waitUntil(() => mirroredRows.length === 1 && connectionCount === 2, 10000);
+
+            expect(closed).to.deep.equal({
+                code: 1012,
+                reason: 'chain-ingested price_snapshots below admission watermark'
+            });
+            expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
+            expect(connectionCount).to.equal(2);
+            expect(db.getPriceSnapshotsMaxId.callCount).to.equal(2);
+            expect(bootstrapTable.withArgs('price_snapshots').callCount).to.equal(2);
+            expect(snapshotRequests).to.deep.equal([0, 0]);
+            expect(mirroredRows).to.deep.equal([lateRow]);
+            expect(broadcaster.getSubscriberCount()).to.equal(1);
+        } finally {
+            if (sync) sync.stop();
+            broadcaster.stop();
+            if (wsServer) wsServer.close();
+            await closeServer(httpServer);
         }
-
-        let firstWs = await connectMirror();
-        expect(mirroredRows).to.deep.equal([]);
-        let lateRow = { id: 41, round_number: 41, admit_block_btc: 1003 };
-        hubRows.push(lateRow);
-
-        broadcaster.broadcastRow({
-            table: 'price_snapshots',
-            origin: 'chain-ingest',
-            row: lateRow
-        });
-        await reconnectPromise;
-
-        expect(broadcaster.admissionWatermark.isLateFinalization.calledOnce).to.equal(true);
-        expect(firstWs.close.calledOnceWithExactly(1012,
-            'chain-ingested price_snapshots below admission watermark')).to.equal(true);
-        expect(connections).to.have.length(2);
-        expect(db.getPriceSnapshotsMaxId.callCount).to.equal(2);
-        expect(downloadPriceSnapshots.calledOnceWithExactly(0, 41)).to.equal(true);
-        expect(mirroredRows).to.deep.equal([lateRow]);
-        expect(broadcaster.getSubscriberCount()).to.equal(1);
-        broadcaster.stop();
     });
 
     it('still refuses a self-finalized late round', async function () {
-        let { broadcaster, ws } = await subscribedBroadcaster();
+        const { broadcaster, ws } = await subscribedBroadcaster();
         sinon.stub(console, 'error');
 
         broadcaster.broadcastRow({
@@ -128,19 +217,19 @@ describe('HubDbBroadcaster chain-ingest rows', function () {
     });
 
     it('carries batch_block_time through a landing re-emit', async function () {
-        let { broadcaster, ws } = await subscribedBroadcaster();
+        const { broadcaster, ws } = await subscribedBroadcaster();
         broadcaster.admissionWatermark.isLateFinalization.returns(null);
-        let row = {
+        const row = {
             round_number: 43,
             coin_pair: 'BTC/USD',
             batch_block_time: 1700009000,
             admit_block_btc: 1003
         };
-        let db = {
+        const db = {
             updatePriceSnapshotByRoundNumber: sinon.stub().resolves(),
             findPriceSnapshotsByRoundNumberAndBatchBlockTime: sinon.stub().resolves([row])
         };
-        let aggregator = new PriceAggregator({ db });
+        const aggregator = new PriceAggregator({ db });
         let emitted;
         aggregator.on('row:inserted', event => {
             emitted = event;

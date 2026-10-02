@@ -212,13 +212,13 @@ class HubDbBroadcaster {
         // no admission height and is never refused, so a hub below the activation is
         // byte-identical to today.
         if (this.admissionWatermark && event) {
-            let late = this.admissionWatermark.isLateFinalization(event.table, event.row);
+            const late = this.admissionWatermark.isLateFinalization(event.table, event.row);
             if (late) {
                 // PRICE consumers do not apply isRowReadableAt when selecting snapshots,
-                // so a chain-ingested row cannot safely bypass this refusal. A retryable
-                // close drives the consumer through reconnect and bootstrapAll; the new
-                // ready-frame max ID then makes it re-page rows this hub holds past its
-                // local ceiling.
+                // so a chain-ingested row cannot safely bypass this refusal. The consumer's
+                // reconnect path runs bootstrapAll, and price_snapshots is a full-repage
+                // table, so a retryable close repairs the missing row without binding it
+                // retroactively through the live stream.
                 if (event.origin === 'chain-ingest') {
                     this.dropAllForResync('chain-ingested ' + event.table + ' below admission watermark');
                     return;
