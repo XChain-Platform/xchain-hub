@@ -238,3 +238,65 @@ describe('bin/consensus-identity.js', function () {
         });
     });
 });
+
+// --compare refuses what it cannot judge: a venue that arms the digest from its
+// environment, and a pin shaped for the indexer's readout. Neither may read as drift.
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    const fs = require('fs');
+    const os = require('os');
+    const { spawnSync } = require('child_process');
+    const { REGTEST_ARMING } = require('../../src/consensus/gate_registry/shared_rows.js');
+    const BIN = path.resolve(__dirname, '../consensus-identity.js');
+    const PIN = path.resolve(__dirname, '../pins/at1-consensus-identity.json');
+    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort();
+    const BARE = Object.fromEntries(NAMES.map((name) => [name, null]));
+
+    // The child env is built explicitly, so the runner's own arming never decides a case.
+    function run(args, armed = {}) {
+        const env = Object.assign({}, process.env, armed);
+        for (const name of NAMES) if (!(name in armed)) delete env[name];
+        return spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env });
+    }
+
+    function tmpPin(body) {
+        const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'consensus-identity-pin-')), 'pin.json');
+        fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body));
+        return file;
+    }
+
+    describe('the arming env and --compare refusals', () => {
+        it('records every variable REGTEST_ARMING names, null when unset and raw when set', () => {
+            assert.deepStrictEqual(identity.armingEnv({}), BARE);
+            assert.strictEqual(identity.armingEnv({ XC_ROLLCALL_REGTEST_ACTIVATION: 'armed' }).XC_ROLLCALL_REGTEST_ACTIVATION, 'armed');
+        });
+
+        it('judges a pin by shape and arming before any value', () => {
+            const pin = JSON.parse(fs.readFileSync(PIN, 'utf8'));
+            for (const bad of [[], 'x', null]) assert.throws(() => identity.checkPin(bad, 'p', BARE), /must be a JSON object/);
+            assert.throws(() => identity.checkPin({ bare_checkout: {} }, 'p', BARE), /indexer's bin\/consensus-identity\.js/);
+            assert.throws(() => identity.checkPin({ consensus_rules_digest: 'x' }, 'p', BARE), /not a hub consensus identity/);
+            identity.checkPin(pin, 'p', BARE);
+            const armed = Object.assign({}, BARE, { XC_ROLLCALL_REGTEST_ACTIVATION: 'armed' });
+            assert.throws(() => identity.checkPin(pin, 'p', armed), /XC_ROLLCALL_REGTEST_ACTIVATION: pin unset, now "armed"/);
+            identity.checkPin(Object.assign({}, pin, { env: armed }), 'p', armed);
+        });
+
+        it('exits 2 naming the variable when the venue arms what the pin did not', () => {
+            assert.strictEqual(run(['--compare', PIN]).status, 0);
+            const r = run(['--compare', PIN], { XC_ROLLCALL_REGTEST_ACTIVATION: 'armed' });
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.match(r.stderr, /XC_ROLLCALL_REGTEST_ACTIVATION/);
+            assert.strictEqual(r.stdout, '');
+        });
+
+        it('exits 2 naming the indexer tool for an indexer pin, and for a non-object pin', () => {
+            const r = run(['--compare', tmpPin({ bare_checkout: { network: 'regtest' }, armed_regtest_venue: { env: {} } })]);
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.match(r.stderr, /indexer's bin\/consensus-identity\.js/);
+            assert.strictEqual(r.stdout, '');
+            assert.strictEqual(run(['--compare', tmpPin('[]')]).status, 2);
+        });
+    });
+});
