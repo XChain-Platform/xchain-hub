@@ -91,7 +91,7 @@ function registerLandedTests(){
         publisher.indexerRpc.resolves(answer([]));
 
         expect(await publisher.sweep(120)).to.deep.equal({ attempted: 1, published: 1 });
-        expect(publisher.publishWindow.calledOnceWithExactly(90, 2)).to.equal(true);
+        expect(publisher.publishWindow.calledOnceWithExactly(90, 2, undefined)).to.equal(true);
     });
 
     it('ignores a landed batch whose window end does not match', async function(){
@@ -101,7 +101,7 @@ function registerLandedTests(){
         ]));
 
         expect(await publisher.sweep(120)).to.deep.equal({ attempted: 1, published: 1 });
-        expect(publisher.publishWindow.calledOnceWithExactly(100, 0)).to.equal(true);
+        expect(publisher.publishWindow.calledOnceWithExactly(100, 0, undefined)).to.equal(true);
         expect(markers.size).to.equal(0);
     });
 }
@@ -138,7 +138,10 @@ function registerFailureTests(){
         ], true));
 
         expect(await publisher.sweep(120)).to.deep.equal({ attempted: 2, published: 2 });
-        expect(publisher.publishWindow.args).to.deep.equal([[80, 2], [100, 0]]);
+        expect(publisher.publishWindow.args).to.deep.equal([
+            [80, 2, true],
+            [100, 0, undefined]
+        ]);
         expect(markers.get(90)).to.deep.include({ status: 'landed', row_count: 7, txid: null });
     });
 }
