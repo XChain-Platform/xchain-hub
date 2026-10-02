@@ -354,6 +354,38 @@ function registerObservabilityLogShipperSuite1Part7() {
     }
   });
 }
+// A BigInt amount or a throwing toJSON must never escape log() as a synchronous throw.
+const BIG = 10n ** 30n;
+const BOOM = { toJSON() { throw new Error('boom'); } };
+function registerObservabilityLogShipperSuite1Part8() {
+  it('keeps a BigInt field exact in json and text mode without throwing', function () {
+    const json = fakeConsole();
+    createLogShipper({ service: 'svc', env: { LOG_FORMAT: 'json' }, console: json }).info('m', { amount: BIG });
+    expect(JSON.parse(json.lines.log[0]).amount).to.equal(BIG.toString());
+    const text = fakeConsole();
+    createLogShipper({ service: 'svc', env: {}, console: text }).info('m', { amount: BIG });
+    expect(text.lines.log[0]).to.include('amount=' + BIG.toString());
+    expect(redactFields(5n)).to.equal('5');
+  });
+  it('degrades an unserializable record to its envelope instead of throwing', function () {
+    const sink = fakeConsole();
+    createLogShipper({ service: 'svc', env: { LOG_FORMAT: 'json' }, console: sink }).warn('keep me', { bad: BOOM });
+    expect(JSON.parse(sink.lines.warn[0])).to.include({ msg: 'keep me', serialize_error: '[unserializable]' });
+  });
+  it('ships a batch holding a BigInt and an unserializable record, one line each', async function () {
+    const bodies = [];
+    const env = { LOG_SHIP_ENABLED: '1', LOG_SHIP_URL: 'https://collector.invalid/logs', LOG_SHIP_BATCH_SIZE: '2' };
+    const log = createLogShipper({ service: 'svc', env, console: fakeConsole(), transport: async body => { bodies.push(body); } });
+    log.info('one', { amount: BIG });
+    log.info('two', { bad: BOOM });
+    await new Promise(r => setImmediate(r));
+    await log.stop();
+    const lines = bodies[0].trim().split('\n').map(l => JSON.parse(l));
+    expect(lines.map(l => l.msg)).to.deep.equal(['one', 'two']);
+    expect(lines[0].amount).to.equal(BIG.toString());
+    expect(log.stats.shipped).to.equal(2);
+  });
+}
 describe('observability/logShipper', function () {
   registerObservabilityLogShipperSuite1Part1.call(this);
   registerObservabilityLogShipperSuite1Part2.call(this);
@@ -362,4 +394,5 @@ describe('observability/logShipper', function () {
   registerObservabilityLogShipperSuite1Part5.call(this);
   registerObservabilityLogShipperSuite1Part6.call(this);
   registerObservabilityLogShipperSuite1Part7.call(this);
+  registerObservabilityLogShipperSuite1Part8.call(this);
 });
