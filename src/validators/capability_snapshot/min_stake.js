@@ -29,7 +29,8 @@ module.exports = {
 
     // Resolve the MIN_STAKE a capability snapshot read folds into its RPC and its
     // cache key as { ok: true, minStake }, or { ok: false } when the read must be
-    // refused. getSnapshot reads its threshold here.
+    // refused. getSnapshot and getWeightSnapshot both read their threshold here, so
+    // a new threshold source or refusal condition belongs here, never in a caller.
     //
     // The hub is the authoritative source of the MIN_STAKE threshold for its
     // own federation queries: passing it here makes the validator set depend
