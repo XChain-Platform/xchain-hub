@@ -37,6 +37,13 @@ function listMembersHash(members) {
     return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+function listMetaHash(name, description) {
+    if (name == null && description == null) return '';
+    const text = ['LISTMETA', name == null ? '' : name, description == null ? '' : description]
+        .join('|');
+    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
 function listDelta(prev, next) {
     if (!Array.isArray(prev) || !Array.isArray(next)) {
         throw new TypeError('prev and next must be arrays');
@@ -112,6 +119,7 @@ function listSnapshotCanonical(r, view, isListMetaActive) {
 module.exports = {
     isCanonicalOrder,
     listMembersHash,
+    listMetaHash,
     listDelta,
     applyListDelta,
     deriveListSnapshotId,
