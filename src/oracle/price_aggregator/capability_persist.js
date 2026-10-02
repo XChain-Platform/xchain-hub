@@ -29,19 +29,26 @@ const logger = getLogger();
 // capability, pubkey, SOURCE) exactly as the consensus path re-reads them: a
 // pubkey delegated by two sources has two rows, and a pubkey-only LIMIT 1 re-read
 // would stream only one. Without this the indexer never receives them live.
-// Delivery is not allowed to un-commit the write, so a broadcast failure is
-// reported and the block still counts as covered.
+// A thrown or empty re-read leaves subscribers holding a partial set that reads as
+// COMPLETE downstream, so it drops them for a resync (the StateCheckpointEngine
+// broadcastRowOrResync repair); the committed write still counts as covered.
 async function mirrorSnapshotRows(capability, block, rows) {
-    try {
-        if (this.hub && this.hub.hubDbBroadcaster) {
-            for (let row of rows) {
-                let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
-                if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
-            }
+    let b = this.hub && this.hub.hubDbBroadcaster;
+    if (!b || (b.subscribers && b.subscribers.size === 0)) return;
+    for (let row of rows) {
+        let failure = null;
+        try {
+            let r = await this.db.getCapabilitySnapshot(block, capability, row.signing_pubkey, row.source);
+            if (r && r.length) { b.broadcastRow({ table: 'capability_snapshots', row: r[0] }); continue; }
+            failure = 'the committed row read back empty';
+        } catch (e) {
+            failure = (e && e.message) ? e.message : String(e);
         }
-    } catch (e) {
-        logger.error('PriceAggregator: mirroring the derived ' + capability + ' capability snapshot at '
-            + 'block ' + block + ' to subscribers failed: ' + (e && e.message));
+        logger.error('PriceAggregator: mirroring the derived ' + capability + ' capability snapshot at block '
+            + block + ' to subscribers failed (' + failure + '); forcing subscriber resync');
+        try { if (typeof b.dropAllForResync === 'function') b.dropAllForResync('capability-snapshot broadcast gap'); }
+        catch (err) { /* the repair itself must not fail the committed write */ }
+        return;
     }
 }
 

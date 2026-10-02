@@ -282,9 +282,30 @@ function registerFeature1dispatchDiscoveryGatingMaybeDispatch() {
     registerFeature1dispatchDiscoveryGatingMaybeDispatchPart1();
   });
 }
+function registerGetStatsReadFailure() {
+  describe('getStats backlog read', function () {
+    it('sums the per-chain backlog and passes the failure counter through', async function () {
+      const { engine, db } = makeEngine();
+      db.findCrossChainCallsByPhase = async () => [
+        { target_chain: 'BTC', pending_relay_count: '2' }, { target_chain: 'LTC', pending_relay_count: '3' }];
+      engine._resultAttemptFailures = 4;
+      expect(await engine.getStats()).to.deep.equal(
+        { pending_relay_count: 5, pending_by_chain: { BTC: 2, LTC: 3 }, result_attempt_failures: 4 });
+    });
+    it('throws on a failed DB read instead of reporting an empty backlog', async function () {
+      const { engine, db } = makeEngine();
+      db.findCrossChainCallsByPhase = async () => { throw new Error('db down'); };
+      let stats = null, err = null;
+      try { stats = await engine.getStats(); } catch (e) { err = e; }
+      expect(stats, 'a zero backlog that was never read reads as a drained queue').to.equal(null);
+      expect(err && err.message).to.equal('db down');
+    });
+  });
+}
 describe('CrossChainCallEngine', function () {
   afterEach(function () {
     sinon.restore();
   });
   registerFeature1dispatchDiscoveryGatingMaybeDispatch();
+  registerGetStatsReadFailure();
 });

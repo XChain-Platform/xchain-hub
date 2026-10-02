@@ -32,14 +32,17 @@ module.exports = {
     // rows per target chain that do not yet have a result row; result_attempt_failures
     // is a process-lifetime count of per-call errors in pollTargetResults.
     async getStats(){
-        let rows = [];
+        let rows;
         try {
             // Mirror pollTargetResults' retracted-result filter so the backlog
             // count matches what the engine will actually re-relay: a
             // dispatch whose only result row is 'retracted' is pending again.
             rows = await this.db.findCrossChainCallsByPhase();
         } catch(e){
+            // Rethrow so the RPC answers an error: a zero backlog that was never
+            // read looks exactly like a drained relay queue to monitoring.
             logger.warn('CrossChainCall: getStats query failed: ' + (e && e.message));
+            throw e;
         }
         let pending_by_chain = {};
         for(let r of rows) pending_by_chain[r.target_chain] = Number(r.pending_relay_count);
