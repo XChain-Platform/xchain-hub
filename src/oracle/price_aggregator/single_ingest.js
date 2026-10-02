@@ -192,6 +192,7 @@ function announceOraclePrice(priceData, sourceChain, stamps) {
     // Emit row event so the hub DB sync channel can broadcast to subscribers
     this.emit('row:inserted', {
         table: 'oracle_prices',
+        origin: 'chain-ingest',
         row: {
             source_address: priceData.source_address,
             source_chain:   sourceChain || '',

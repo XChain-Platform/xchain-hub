@@ -202,7 +202,7 @@ class HubDbBroadcaster {
         this._admissionTimer = null;
     }
 
-    // event: { table, row }
+    // event: { table, row, origin? }
     broadcastRow(event) {
         if (this.subscribers.size === 0) return;
         // The round-abandon timeout's other half: a late finalization of a round this hub's
@@ -211,7 +211,13 @@ class HubDbBroadcaster {
         // row that binds at or below it is a fork, not a late delivery. A legacy row carries
         // no admission height and is never refused, so a hub below the activation is
         // byte-identical to today.
-        if (this.admissionWatermark && event) {
+        // Chain-ingested rows were finalized by the signed on-chain batch, not by this
+        // hub after its own watermark abandoned the round. The consumer activation is
+        // armed on testnet and its isRowReadableAt rule compares the row's admit block
+        // with the block currently being processed. Since completed blocks are not
+        // rebound, delivering this row late cannot alter a height already processed;
+        // the stamp can only become readable during current or later processing.
+        if (this.admissionWatermark && event && event.origin !== 'chain-ingest') {
             let late = this.admissionWatermark.isLateFinalization(event.table, event.row);
             if (late) {
                 logger.error('HubDbBroadcaster: REFUSING to broadcast a ' + event.table + ' row admissible at '
