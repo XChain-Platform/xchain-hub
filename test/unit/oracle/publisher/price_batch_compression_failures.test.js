@@ -37,6 +37,7 @@ const path   = require('path');
 const zlib   = require('zlib');
 
 const c = require('../../../../src/price_batch_compression.js');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -304,12 +305,9 @@ describe('price_batch_compression: vendored-twin byte identity @regression', fun
 
     it('this copy is byte-identical to the xchain-indexer canonical', function(){
         const twin = path.join(INDEXER_DIR, 'src', 'actions', 'price', 'price_batch_compression.js');
-        if(!fs.existsSync(twin)){
-            if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical is missing: ' + twin);
-            this.skip();
-            return;
-        }
+        // Refuses an absent twin and a lane symlink into a live main checkout alike.
+        const twinCheckout = siblingCheckout(__dirname, twin);
+        if(!twinCheckout.usable) return skipOrFail(this, twinCheckout, 'the price_batch_compression.js indexer twin byte identity');
         const local = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'src', 'price_batch_compression.js'), 'utf8');
         assert.strictEqual(local, fs.readFileSync(twin, 'utf8'),
             'price_batch_compression.js has drifted from the xchain-indexer canonical; the two would ' +
