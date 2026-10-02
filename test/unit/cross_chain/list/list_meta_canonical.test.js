@@ -2,6 +2,8 @@
 
 /*********************************************************************
  *
+ * GENERATED vector cases are loaded from protocol/test-vectors/list_share.json.
+ *
  * Copyright © 2025–2026 Dankest, LLC
  * Based on XChain Platform by Dankest, LLC – https://dankest.llc
  *

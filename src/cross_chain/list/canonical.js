@@ -34,15 +34,6 @@ function isCanonicalOrder(list) {
     return true;
 }
 
-function listMetaHash(name, description) {
-    const noName = name === null || name === undefined;
-    const noDescription = description === null || description === undefined;
-    if (noName && noDescription) return '';
-
-    const text = ['LISTMETA', name ?? '', description ?? ''].join('|');
-    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
-}
-
 function listMembersHash(members) {
     if (!Array.isArray(members)) throw new TypeError('members must be an array');
     const text = ['MEMBERS', String(members.length)].concat(members).join('|');
@@ -129,7 +120,6 @@ function listSnapshotCanonical(r, view) {
 
 module.exports = {
     isCanonicalOrder,
-    listMetaHash,
     listMembersHash,
     listMetaHash,
     listDelta,
