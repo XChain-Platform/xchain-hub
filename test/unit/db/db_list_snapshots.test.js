@@ -48,9 +48,10 @@ describe('list_snapshots hub table', function () {
         expect(ddlColumns(sql)).to.deep.equal([
             'id', 'snapshot_id', 'snapshot_block', 'network', 'home_chain',
             'home_list_index', 'list_type', 'seq', 'kind', 'added', 'removed',
-            'members_hash', 'origin_block', 'admit_block_btc', 'admit_block_ltc',
-            'admit_block_doge', 'finalizing_view', 'validator_signatures', 'status',
-            'anchor_txid', 'batch_seq', 'btc_chain_id', 'created_at'
+            'members_hash', 'name', 'description', 'meta_hash', 'origin_block',
+            'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+            'finalizing_view', 'validator_signatures', 'status', 'anchor_txid',
+            'batch_seq', 'btc_chain_id', 'created_at'
         ]);
         expect(sql).to.match(/CREATE UNIQUE INDEX\s+\w+\s+ON list_snapshots\s*\(network, home_chain, home_list_index, seq\)/);
         expect(sql).to.match(/CREATE UNIQUE INDEX\s+snapshot_id\s+ON list_snapshots\s*\(snapshot_id\)/);
@@ -71,9 +72,26 @@ describe('list_snapshots hub table', function () {
             'INSERT IGNORE INTO list_snapshots (' + Database.LIST_SNAPSHOT_COLUMNS.join(', ') + ') VALUES (' +
             Database.LIST_SNAPSHOT_COLUMNS.map(() => '?').join(', ') + ')');
         expect(params).to.deep.equal(Database.LIST_SNAPSHOT_COLUMNS.map(c => row[c]));
+        expect(Database.LIST_SNAPSHOT_COLUMNS.slice(10, 14)).to.deep.equal([
+            'members_hash', 'name', 'description', 'meta_hash'
+        ]);
         expect(Database.LIST_SNAPSHOT_COLUMNS.slice(-4)).to.deep.equal([
             'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'btc_chain_id'
         ]);
+    });
+
+    it('migrates the nullable metadata columns for an existing list_snapshots table', async function () {
+        const db = stubDb();
+        db.migrateAddNullableColumn = sinon.stub().resolves();
+
+        await db.migrateAdmissionColumns();
+
+        expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'name',
+            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL')).to.equal(true);
+        expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'description',
+            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL')).to.equal(true);
+        expect(db.migrateAddNullableColumn.calledWithExactly(
+            'list_snapshots', 'meta_hash', 'CHAR(64) NULL')).to.equal(true);
     });
 
     it('returns zero when no prior list version exists', async function () {
