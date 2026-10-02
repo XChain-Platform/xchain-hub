@@ -183,16 +183,13 @@ class CapabilitySnapshot {
         blockIndex = this.buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
 
+        // Resolve MIN_STAKE or refuse the read; the #S-F3 guard lives once, on snapshotThreshold.
+        const threshold = this.snapshotThreshold(capability, blockIndex);
+        if (!threshold.ok) return null;
+        let minStake = threshold.minStake;
         // min_stake rides in the cache key for the same reason as getSnapshot:
         // it determines the qualifying set, so a governance threshold change must
         // force a fresh fetch rather than serve a snapshot keyed to the old one.
-        let minStake = this.resolveMinStake(capability, blockIndex);
-        // Fail closed (#S-F3): see getSnapshot. A live registry with no threshold for
-        // this capability must not fall back to the indexer's local config (fork risk).
-        if (minStake === null && this.registryReady()) {
-            this.warnMinStakeMissing(capability);
-            return null;
-        }
         let key = 'w:' + this.netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();

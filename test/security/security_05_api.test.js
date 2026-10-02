@@ -56,7 +56,7 @@ function createApiHubStub() {
         getPriceSnapshots: sinon.stub().resolves([]),
         // The with_watermark envelope carries the price-age bound the hub
         // resolves for getprice; a fixed stand-in here, asserted below.
-        oracleMaxAgeSeconds: sinon.stub().returns(900),
+        oracleMaxAgeSecondsInForce: sinon.stub().resolves(900),
         getPrice: sinon.stub().resolves(null),
         getFeeQuote: sinon.stub().resolves({}),
         getOracle: sinon.stub().returns(null),
