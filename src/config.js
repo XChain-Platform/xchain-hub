@@ -154,6 +154,7 @@ const config = {
     get HUB_PRICE_CAPABILITY_DERIVE() { return process.env.HUB_PRICE_CAPABILITY_DERIVE; },
     get HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S() { return process.env.HUB_PRICE_CAPABILITY_DERIVE_INTERVAL_S; },
     get HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS() { return process.env.HUB_PRICE_CAPABILITY_DERIVE_LOOKBACK_BLOCKS; },
+    get HUB_PUBLIC_API_URL() { return process.env.HUB_PUBLIC_API_URL; },
     get HUB_RATE_LIMIT_EXEMPT_LOCAL() { return process.env.HUB_RATE_LIMIT_EXEMPT_LOCAL; },
     get HUB_RATE_LIMIT_RPM() { return process.env.HUB_RATE_LIMIT_RPM; },
     get HUB_REORG_API_KEY() { return process.env.HUB_REORG_API_KEY; },

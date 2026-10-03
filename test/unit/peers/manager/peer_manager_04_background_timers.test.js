@@ -155,10 +155,7 @@ function registerFeature17addToDedupCheckMsgRateRecordPeer() {
 let feature18p2PLifecycleRealLocalhostSocketsNodes;
 const feature18p2PLifecycleRealLocalhostSocketsNet = require('net');
 
-// Allocate an OS-assigned free port. PeerManager treats P2P_PORT:0 as
-// falsy and falls back to 10001, so we must pass a concrete free port.
-// Allocate an OS-assigned free port. PeerManager treats P2P_PORT:0 as
-// falsy and falls back to 10001, so we must pass a concrete free port.
+// Allocate an OS-assigned free port for the peer pair.
 function feature18p2PLifecycleRealLocalhostSocketsFreePort() {
   return new Promise((resolve, reject) => {
     let s = feature18p2PLifecycleRealLocalhostSocketsNet.createServer();

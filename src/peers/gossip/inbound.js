@@ -25,6 +25,7 @@ const nodeUtil = require('node:util');
 const { notePeerReject, stampRemoteIp } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+const { normalizeApiUrl } = require('../hub_advertisement.js');
 
 // The envelope a frame carries, or null when it is not one this hub will look
 // at: unparseable, the wrong shape, or timestamped outside the replay window.
@@ -125,6 +126,18 @@ function emitInboundEvents(pm, ws, envelope) {
     }
 }
 
+function recordDirectHubAdvertisement(peer, peerAddr, envelope) {
+    if (!peer || envelope.type !== 'HEARTBEAT' || envelope.sender !== peerAddr) return;
+    const apiUrl = normalizeApiUrl(envelope.data && envelope.data.api_url);
+    if (!apiUrl || typeof envelope.sig_pubkey !== 'string' || !envelope.sig_pubkey) {
+        delete peer.api_url;
+        delete peer.signing_pubkey;
+        return;
+    }
+    peer.api_url = apiUrl;
+    peer.signing_pubkey = envelope.sig_pubkey.toLowerCase();
+}
+
 class PeerInbound {
 
     handleInbound(ws, rawData, knownAddr) {
@@ -165,6 +178,7 @@ class PeerInbound {
         let peer = this.peers.get(peerAddr);
         if (peer) {
             peer.lastSeen = Date.now();
+            recordDirectHubAdvertisement(peer, peerAddr, envelope);
         }
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer

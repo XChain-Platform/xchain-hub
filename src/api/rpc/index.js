@@ -30,10 +30,11 @@ const { buildCrossChainRpc } = require('./cross_chain');
 const { buildAnchorRpc } = require('./anchor');
 const { buildGovernanceRpc } = require('./governance');
 const { buildAttestationRpc } = require('./attestation');
+const { buildHubsRpc } = require('./hubs');
 
 const FAMILIES = [
     buildSystemRpc, buildOracleRpc, buildFeedRpc, buildFeedReorgRpc, buildValidatorsRpc,
-    buildCrossChainRpc, buildAnchorRpc, buildGovernanceRpc, buildAttestationRpc,
+    buildCrossChainRpc, buildAnchorRpc, buildGovernanceRpc, buildAttestationRpc, buildHubsRpc,
 ];
 
 // A method name two families both define is refused at boot: merged silently, the

@@ -26,16 +26,17 @@ const configRedaction = require('./config_redaction.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
-// (xchain-indexer src/hub/hub_client.js): what landed on its chain, and the
-// retractions when a reorg takes it back. Every one is a WRITE_METHODS or
-// REORG_WRITE_METHODS member, so the x-api-key tiers apply to them here exactly as
-// on the private port; this set only narrows WHICH methods that port will consider.
+// (xchain-indexer src/hub/hub_client.js): hub discovery, what landed on its
+// chain, and the retractions when a reorg takes it back. Every member has its
+// own x-api-key tier; this set only narrows WHICH methods the port considers.
 // Adding to it widens a public attack surface: a method belongs here only if an
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
+    'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ]);
+const FEED_READ_METHODS = new Set(['gethubs']);
 
 // CREDENTIAL TIER. Served verbatim, the configs table hands the coin node's rpc
 // pass and every service's DB password in plaintext to any caller holding the
@@ -93,8 +94,8 @@ function reorgTierRefuses(calls, provided, { HUB_REORG_API_KEY, REORG_WRITE_METH
     return false;
 }
 
-// The bulk tier: every write, plus the sensitive reads while HUB_SENSITIVE_READ_AUTH
-// is on, answers to HUB_API_KEY.
+// The bulk tier: every write, feed discovery, and sensitive reads while
+// HUB_SENSITIVE_READ_AUTH is on answer to HUB_API_KEY.
 function bulkTierRefuses(calls, provided, ctx) {
     const { HUB_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY,
             REORG_WRITE_METHODS, WRITE_METHODS, SENSITIVE_READ_METHODS, SENSITIVE_READ_AUTH } = ctx;
@@ -114,7 +115,7 @@ function bulkTierRefuses(calls, provided, ctx) {
             // x-api-key header (xchain-explorer and xchain-sync send the
             // secrets key and nothing else).
             if (HUB_CONFIG_SECRETS_API_KEY && callWantsConfigSecrets(call)) return false;
-            return WRITE_METHODS.has(m) ||
+            return WRITE_METHODS.has(m) || FEED_READ_METHODS.has(m) ||
                 (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
         });
         if (gated && !timingEqual(provided, HUB_API_KEY)) return true;
@@ -167,13 +168,8 @@ function authGate(ctx) {
 // governance, slashing, swaps, anchor flush, effector spend, and every read)
 // stays reachable only on the private API port.
 //
-// These are the whole indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js),
-// and they are not a back door: each is a WRITE_METHODS/REORG_WRITE_METHODS
-// member that has just cleared the x-api-key gate above exactly as it would on
-// the private port, and each payload is validated and signature-checked before
-// anything is stored. Refusing them would leave a validator unable to learn that
-// its own published batch landed, which is what stops its publisher pruning and
-// keeps the takeover rail disarmed.
+// These are the whole indexer-to-hub vocabulary. Each method has just cleared
+// its x-api-key tier exactly as it would on the private port.
 //
 // Runs AFTER the key gate deliberately: an unauthenticated caller gets the same
 // 401 it would get anywhere, so this port answers "not available" only to a

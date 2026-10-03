@@ -24,6 +24,7 @@ const { waitUntil } = require('../../helpers/waitUntil');
 
 // The complete indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js).
 const FEED_METHODS = [
+    'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ];
