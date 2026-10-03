@@ -31,10 +31,10 @@ function attestRetractRpc(ctx) {
         // pushing indexer's chain (spec section 6.3, frontier row 55). The indexer names
         // the batch by its key, the window bounds that key is derived from, and the
         // action index the landing push carried; the hub clears `batch_action_index` on
-        // the rows that link names and re-broadcasts them. NOTHING IS DELETED here: a
-        // signed mirror row is legitimate whichever batch carried it, so the reorg
-        // invalidates the link and not the response (AttestationResponseMirror
-        // .retractBatchLink says why at length).
+        // the rows that link names, re-broadcasts them, and reopens the landed publication
+        // marker for chain reconciliation. NO RESPONSE IS DELETED here: a signed mirror
+        // row is legitimate whichever batch carried it, so the reorg invalidates the
+        // link and not the response (AttestationResponseMirror.retractBatchLink says why).
         //
         // The parameter list IS the interface, and the indexer's HubClient pins exactly
         // these names.

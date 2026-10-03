@@ -14,8 +14,9 @@
  *
  * AttestationResponseMirror: the batch retraction
  *
- * Clears the batch link a reorged DOGE batch stamped, after re-deriving the batch
- * identity, and never deletes a row. Installed on
+ * Clears the batch link a reorged DOGE batch stamped and reopens its landed
+ * publication marker, after re-deriving the batch identity, and never deletes a
+ * response row. Installed on
  * AttestationResponseMirror.prototype by src/attestation/response_mirror.js.
  *
  ********************************************************************/
@@ -29,8 +30,8 @@ const logger = getLogger();
 module.exports = {
 
     // The retraction twin of receiveValidatedBatch (spec §6.3, frontier row 55). A reorg
-    // on the DOGE rail un-landed a batch, so the link that batch stamped is no longer
-    // backed by chain, and the indexer that rolled it back says so here.
+    // on the DOGE rail un-landed a batch, so its coverage marker must be reopened and
+    // the link that batch stamped is no longer backed by chain.
     //
     // THIS CLEARS THE LINK AND NEVER DELETES A ROW. A mirror row is legitimate because
     // of the responsible set's signatures it carries, not because of which batch
@@ -65,6 +66,13 @@ module.exports = {
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function')
             return this.refuseRetraction(sourceChain, 'mirror database not ready');
+
+        // The marker is federation coverage, not a property of whichever response rows
+        // this hub happens to hold. Reopen it even when the link was already cleared or
+        // the batch carried no locally stored rows, so the next sweep asks chain again.
+        let publisher = this.hub && this.hub.attestationBatchPublisher;
+        if(publisher && typeof publisher.reopenLandedWindow === 'function')
+            await publisher.reopenLandedWindow(windowStart, windowEnd);
 
         // Read the affected rows BEFORE the clear: the re-broadcast below needs their
         // natural key, and after the UPDATE the link that selected them is gone.

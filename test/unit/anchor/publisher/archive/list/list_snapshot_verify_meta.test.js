@@ -8,10 +8,11 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const { listMetaHash } = require('../../../../../../src/cross_chain/list/canonical.js');
 const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const MEMBERS_HASH = 'ff0e5a860d907b646255b7ab798db5057319b71c20facd02b9856b9a956320cb';
-const META_HASH = 'ab'.repeat(32);
+const META_HASH = listMetaHash('Alpha list', 'Members of alpha');
 const OTHER_HASH = 'cd'.repeat(32);
 
 function listRow(extra){
@@ -19,7 +20,7 @@ function listRow(extra){
         id: 1,
         snapshot_id: 'c0e9a6b57adfc25378343388363aad10498fd201a36cd32dddb1ee35da265f21',
         snapshot_block: 160000,
-        network: 'testnet',
+        network: 'regtest',
         home_chain: 'DOGE',
         home_list_index: 880001,
         list_type: 2,
@@ -45,7 +46,7 @@ function metaFields(extra){
 function setup(held){
     const pub = new StateAnchorPublisher({
         db: { ...DB_METHODS, getListSnapshotBySnapshotId: async () => [held] },
-        network: 'testnet',
+        network: held.network,
         getIdentity: () => null,
         getPeerManager: () => ({ broadcast() {} }),
         p2pConfig: {}
@@ -69,10 +70,16 @@ describe('archive list snapshot verify with metadata', function () {
         expect(quorum.calledOnce).to.equal(true);
     });
 
-    for(const [label, override] of [
-        ['name', { name: 'Beta list' }],
-        ['description', { description: 'Members of beta' }],
-        ['meta_hash', { meta_hash: OTHER_HASH }]
+    for(const [label, override, warning] of [
+        ['name', {
+            name: 'Beta list',
+            meta_hash: listMetaHash('Beta list', 'Members of alpha')
+        }, /TERMS differ/],
+        ['description', {
+            description: 'Members of beta',
+            meta_hash: listMetaHash('Alpha list', 'Members of beta')
+        }, /TERMS differ/],
+        ['meta_hash', { meta_hash: OTHER_HASH }, /metadata hash mismatch/]
     ]){
         it('refuses an archived row whose ' + label + ' differs from the held row', async function () {
             const held = listRow(metaFields());
@@ -80,7 +87,7 @@ describe('archive list snapshot verify with metadata', function () {
             const warn = sinon.spy(require('../../../../../../src/observability').getLogger(), 'warn');
             try {
                 expect(await pub.verifyArchivedListSnapshot(archivedFrom(pub, held, override))).to.equal(false);
-                expect(warn.args.some(a => /TERMS differ/.test(a[0]))).to.equal(true);
+                expect(warn.args.some(a => warning.test(a[0]))).to.equal(true);
             } finally {
                 warn.restore();
             }
@@ -101,7 +108,9 @@ describe('archive list snapshot verify with metadata', function () {
     });
 
     it('reaches the quorum check for a null meta_hash against an archive without the fields', async function () {
-        const held = listRow({ name: null, description: null, meta_hash: null });
+        const held = listRow({
+            network: 'testnet', name: null, description: null, meta_hash: null
+        });
         const { pub, quorum } = setup(held);
         const archived = archivedFrom(pub, held);
 

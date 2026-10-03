@@ -77,3 +77,28 @@ describe('gate_registry: anchor fold rows', function () {
         });
     });
 });
+
+// The cut's arm writer inserts per-chain testnet keys and leaves the bare testnet
+// sentinel unarmed, so the publisher's fold check must resolve 'DOGE:testnet'.
+describe('anchor fold gate on the writer-produced per-chain testnet table', function () {
+    const { registry: core } = require('../../../../src/consensus/gate_registry/core.js');
+    const { isAnchorFoldActive } = require('../../../../src/anchor/publisher/canonical_forms.js');
+    const DOGE_HEIGHT = 67960786;
+    let saved;
+
+    beforeEach(function () {
+        if (!registry.has(KEYS[0])) this.skip();
+        saved = core.overlay;
+        core.overlay = (key, value) => {
+            const base = saved ? saved(key, value) : value;
+            if (key !== KEYS[0]) return base;
+            return Object.assign({}, base, { 'BTC:testnet': 154939, 'LTC:testnet': 4905307, 'DOGE:testnet': DOGE_HEIGHT });
+        };
+    });
+    afterEach(function () { if (saved !== undefined) core.overlay = saved; });
+
+    it('enters the fold era at the DOGE activation height inclusive', function () {
+        assert.strictEqual(isAnchorFoldActive(DOGE_HEIGHT - 1, 'testnet'), false);
+        assert.strictEqual(isAnchorFoldActive(DOGE_HEIGHT, 'testnet'), true);
+    });
+});
