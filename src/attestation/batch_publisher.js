@@ -98,6 +98,7 @@ const signing   = require('./batch_publisher/signing.js');
 const broadcast = require('./batch_publisher/broadcast.js');
 const markers   = require('./batch_publisher/markers.js');
 const chainReconcile = require('./batch_publisher/chain_reconcile.js');
+const signerDivergence = require('./batch_publisher/signer_divergence.js');
 const { XATTESTB_SIGN_REQ, XATTESTB_SIGN, MAX_CATCHUP_WINDOWS,
         ANCHOR_MAX_LAG_BLOCKS } = require('./batch_publisher/constants.js');
 const hubConfig = require('../config');
@@ -339,7 +340,7 @@ function installParts(target, parts){
 }
 
 installParts(AttestationBatchPublisher.prototype,
-    [windows, anchor, signing, broadcast, markers, chainReconcile]);
+    [windows, anchor, signing, broadcast, markers, chainReconcile, signerDivergence]);
 
 module.exports = Object.assign(AttestationBatchPublisher, {
     XATTESTB_SIGN_REQ,
