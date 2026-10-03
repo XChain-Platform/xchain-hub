@@ -1,5 +1,19 @@
 'use strict';
 
+/*********************************************************************
+ *
+ * Copyright © 2025-2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ ********************************************************************/
+
 const MIRRORED_TABLES = Object.freeze([
     'price_snapshots',
     'oracle_prices',
@@ -7,11 +21,11 @@ const MIRRORED_TABLES = Object.freeze([
     'capability_snapshots',
     'cross_chain_calls',
     'state_checkpoints',
+    'anchor_reward_attestations',
+    'attestation_responses',
     'bridge_transfers',
     'policy_snapshots',
-    'list_snapshots',
-    'anchor_reward_attestations',
-    'attestation_responses'
+    'list_snapshots'
 ]);
 
 const mirroredTableSet = new Set(MIRRORED_TABLES);
@@ -19,13 +33,13 @@ const verifiers = new Map();
 
 function registerCatchupVerifier(table, fn) {
     if (!mirroredTableSet.has(table)) {
-        throw new Error('Unknown hub DB catch-up table: ' + table);
+        throw new Error('Unknown mirrored table: ' + table);
     }
     if (typeof fn !== 'function') {
-        throw new TypeError('Catch-up verifier for ' + table + ' must be a function');
+        throw new TypeError('Catch-up verifier must be a function');
     }
     if (verifiers.has(table)) {
-        throw new Error('Catch-up verifier already registered for ' + table);
+        throw new Error('Catch-up verifier already registered for table: ' + table);
     }
     verifiers.set(table, fn);
     return fn;
@@ -33,9 +47,13 @@ function registerCatchupVerifier(table, fn) {
 
 function getCatchupVerifier(table) {
     if (!mirroredTableSet.has(table)) {
-        throw new Error('Unknown hub DB catch-up table: ' + table);
+        throw new Error('Unknown mirrored table: ' + table);
     }
     return verifiers.get(table);
 }
 
-module.exports = { registerCatchupVerifier, getCatchupVerifier, MIRRORED_TABLES };
+module.exports = {
+    MIRRORED_TABLES,
+    registerCatchupVerifier,
+    getCatchupVerifier
+};
