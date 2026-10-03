@@ -55,9 +55,10 @@ function requireDbSecret(logger) {
 // only log it and refuse the boot. Keyless operation is still available, but it
 // must be DECLARED (HUB_ALLOW_UNAUTHENTICATED=true) rather than being what you
 // get by forgetting a variable.
-function refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH }) {
+function refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_FEED_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH }) {
     const bootPosture = evaluateAuthPosture({
         apiKey:               HUB_API_KEY,
+        feedKey:              HUB_FEED_API_KEY,
         allowUnauthenticated: HUB_ALLOW_UNAUTHENTICATED,
         validatorMode:        !!P2P_VALIDATOR_ADDR,
         sensitiveReadAuth:    SENSITIVE_READ_AUTH

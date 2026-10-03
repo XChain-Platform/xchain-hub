@@ -93,6 +93,7 @@ const HUB_DB_KEEPALIVE_INTERVAL = parseInt(hubConfig.HUB_DB_KEEPALIVE_INTERVAL) 
 // operation is declared with HUB_ALLOW_UNAUTHENTICATED; see the posture
 // block below.
 const HUB_API_KEY        = hubConfig.HUB_API_KEY || '';
+const HUB_FEED_API_KEY   = hubConfig.HUB_FEED_API_KEY || '';
 // Explicit declaration that this hub runs keyless (private network, fronting
 // proxy, single-host regtest). It exists so a blind hard-require of HUB_API_KEY
 // does not crash-loop managed deploys the way the same over-tightening did to the
@@ -197,7 +198,7 @@ const P2P_VALIDATOR_ADDR = hubConfig.P2P_VALIDATOR_ADDR || '';
 const HUB_NETWORK = (hubConfig.HUB_NETWORK || '').toLowerCase();
 
 // Refuse an undeclared keyless write surface, then a bad ORACLE_EPOCH_START or HUB_NETWORK.
-refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH });
+refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_FEED_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH });
 refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK });
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
     HUB_NETWORK:            HUB_NETWORK,
@@ -305,7 +306,7 @@ function apiContext(hub) {
     return {
         hub, logger, hubConfig, p2pConfig, bigIntReplacer, COIN_CONSENSUS_HASHES, configFetchCounters,
         DB_PROBE_TIMEOUT_MS, HUB_NETWORK, HUB_PORT, HUB_HOST, HUB_DB_KEEPALIVE_INTERVAL,
-        HUB_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY, SENSITIVE_READ_AUTH,
+        HUB_API_KEY, HUB_FEED_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY, SENSITIVE_READ_AUTH,
         WRITE_METHODS, REORG_WRITE_METHODS, SENSITIVE_READ_METHODS,
         CORS_ORIGIN, HUB_RATE_LIMIT_RPM, HUB_RATE_LIMIT_EXEMPT_LOCAL,
         TELEMETRY_ENABLED, TELEMETRY_RETENTION_DAYS, TELEMETRY_IP_SALT, TELEMETRY_ADMIN_KEY,

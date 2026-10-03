@@ -63,7 +63,7 @@ function timingEqual(provided, expected) {
 // A predicate over requests: true when x-api-key equals any key this hub has
 // configured. A keyless hub has none, so every caller is public there.
 function authenticatedCaller(ctx) {
-    const keys = [ctx.HUB_API_KEY, ctx.HUB_REORG_API_KEY, ctx.HUB_CONFIG_SECRETS_API_KEY]
+    const keys = [ctx.HUB_API_KEY, ctx.HUB_FEED_API_KEY, ctx.HUB_REORG_API_KEY, ctx.HUB_CONFIG_SECRETS_API_KEY]
         .filter((key) => typeof key === 'string' && key.length > 0);
     return function isAuthenticated(req) {
         if (keys.length === 0) return false;
