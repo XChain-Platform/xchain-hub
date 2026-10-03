@@ -117,6 +117,7 @@ class HubDbSubscribers {
         logger.info('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
 
         const maxIds = await readMaxIds(this.db);
+        const caughtUp = this.isCaughtUp();
 
         try {
             // watermark_interval_ms lets the consumer size its heartbeat watchdog from
@@ -128,7 +129,7 @@ class HubDbSubscribers {
             // every reconnect stalls every height-keyed barrier for one watermarkIntervalMs
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
-            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() }));
+            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, caught_up: caughtUp, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights(undefined, caughtUp) }));
             this.replayDeletions(ws);
         } catch (e) { /* ignore */ }
     }

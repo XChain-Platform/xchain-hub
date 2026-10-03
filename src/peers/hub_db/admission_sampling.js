@@ -28,11 +28,39 @@ const logger = getLogger();
 
 class HubDbAdmissionSampling {
 
+    isCaughtUp() {
+        let provider = this._admissionHub && this._admissionHub.peerCatchup;
+        if (!provider) return true;
+        if (typeof provider.isCaughtUp !== 'function') return false;
+        try { return provider.isCaughtUp() === true; }
+        catch (e) { return false; }
+    }
+
+    holdAdmissionHeightsAtFloor(heights) {
+        let floor = this._admissionHoldFloor || {};
+        let held = {};
+        for (let table of Object.keys(heights || {})) {
+            let floorEntry = floor[table];
+            if (!floorEntry || typeof floorEntry !== 'object') continue;
+            let entry = {};
+            for (let chain of Object.keys(heights[table] || {})) {
+                let floorHeight = floorEntry[chain];
+                if (!Number.isSafeInteger(floorHeight) || floorHeight < 0) continue;
+                entry[chain] = Math.min(heights[table][chain], floorHeight);
+            }
+            if (Object.keys(entry).length > 0) held[table] = entry;
+        }
+        return held;
+    }
+
     // The `heights` object every carrier stamps. One accessor so the heartbeat, the ready
     // frame and the ten REST snapshot pages cannot drift into publishing three different
     // shapes, which a consumer on any one of the three could not tell from a real claim.
-    admissionHeights(nowMs) {
-        return this.admissionWatermark ? this.admissionWatermark.heights(nowMs) : {};
+    admissionHeights(nowMs, caughtUp) {
+        if (!this.admissionWatermark) return {};
+        let heights = this.admissionWatermark.heights(nowMs);
+        let ready = (caughtUp === undefined) ? this.isCaughtUp() : caughtUp;
+        return ready ? heights : this.holdAdmissionHeightsAtFloor(heights);
     }
 
     // Attach the hub the watermark is sampled from, and start sampling.
@@ -78,7 +106,9 @@ class HubDbAdmissionSampling {
         if (!this._admissionFloorLoaded) {
             this._admissionFloorLoaded = true;
             if (this.db && typeof this.db.getAdmissionWatermarkFloor === 'function') {
-                try { w.setFloor(await this.db.getAdmissionWatermarkFloor(hub.network)); }
+                try {
+                    this._admissionHoldFloor = w.setFloor(await this.db.getAdmissionWatermarkFloor(hub.network));
+                }
                 catch (e) {
                     logger.warn(nodeUtil.format('HubDbBroadcaster: could not read the admission watermark floor; this hub '
                         + 'publishes no heights until its own tip observations age past one round window:',
@@ -102,7 +132,12 @@ class HubDbAdmissionSampling {
         w.setTableCap('anchor_reward_attestations', 'BTC', (floor === null) ? null : floor - 1);
 
         if (this.db && typeof this.db.saveAdmissionWatermarkFloor === 'function') {
-            try { await this.db.saveAdmissionWatermarkFloor(hub.network, w.heights()); }
+            try {
+                let caughtUp = this.isCaughtUp();
+                let published = this.admissionHeights(undefined, caughtUp);
+                await this.db.saveAdmissionWatermarkFloor(hub.network, published);
+                if (caughtUp) this._admissionHoldFloor = JSON.parse(JSON.stringify(published));
+            }
             catch (e) {
                 logger.warn(nodeUtil.format('HubDbBroadcaster: could not persist the admission watermark floor; a restart '
                     + 'will republish nothing for one round window:', e && e.message ? e.message : e));
