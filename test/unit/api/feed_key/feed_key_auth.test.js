@@ -7,9 +7,9 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const { authGate, feedPortAllowlist } = require('../../../src/api/auth_gate.js');
-const { mountSnapshotAuth } = require('../../../src/api/rest/hub_db_snapshot.js');
-const { upgradeHandler, serveFeedOnP2pPort } = require('../../../src/api/server.js');
+const { authGate, feedPortAllowlist } = require('../../../../src/api/auth_gate.js');
+const { mountSnapshotAuth } = require('../../../../src/api/rest/hub_db_snapshot.js');
+const { upgradeHandler, serveFeedOnP2pPort } = require('../../../../src/api/server.js');
 
 const BULK_KEY = 'bulk-key';
 const FEED_KEY = 'feed-key';
@@ -80,7 +80,7 @@ function driveUpgrade(ctx, key) {
     return { wss, socket };
 }
 
-describe('read-only hub feed key tier', function () {
+function registerRpcTests() {
     it('authorizes gethubs with the feed or bulk key only', function () {
         expect(driveAuth(authContext(), 'gethubs', FEED_KEY).nexted).to.equal(true);
         expect(driveAuth(authContext(), 'gethubs', BULK_KEY).nexted).to.equal(true);
@@ -110,7 +110,9 @@ describe('read-only hub feed key tier', function () {
         expect(driveAuth(ctx, 'gethubs', BULK_KEY).nexted).to.equal(true);
         expect(driveAuth(ctx, 'gethubs').res.statusCode).to.equal(401);
     });
+}
 
+function registerSnapshotTests() {
     it('authorizes snapshots with the feed or bulk key only', function () {
         const ctx = authContext();
         expect(driveSnapshot(ctx, FEED_KEY).nexted).to.equal(true);
@@ -124,7 +126,9 @@ describe('read-only hub feed key tier', function () {
         expect(driveSnapshot(ctx, BULK_KEY).nexted).to.equal(true);
         expect(driveSnapshot(ctx, FEED_KEY).res.statusCode).to.equal(401);
     });
+}
 
+function registerWebSocketTests() {
     it('authorizes WebSocket subscribe with the feed or bulk bearer only', function () {
         for (const key of [FEED_KEY, BULK_KEY]) {
             const accepted = driveUpgrade(authContext(), key);
@@ -143,7 +147,9 @@ describe('read-only hub feed key tier', function () {
         expect(driveUpgrade(ctx, BULK_KEY).wss.handleUpgrade.calledOnce).to.equal(true);
         expect(driveUpgrade(ctx, FEED_KEY).socket.destroy.calledOnce).to.equal(true);
     });
+}
 
+function registerPeerPortTests() {
     it('serves the peer-port feed when a feed key is configured without a bulk key', function () {
         const setFeedHandlers = sinon.spy();
         const logger = { info: sinon.spy(), warn: sinon.spy() };
@@ -171,4 +177,11 @@ describe('read-only hub feed key tier', function () {
         expect(drive('gethubs').nexted).to.equal(true);
         expect(drive('getallconfigs').res.statusCode).to.equal(404);
     });
+}
+
+describe('read-only hub feed key tier', function () {
+    registerRpcTests();
+    registerSnapshotTests();
+    registerWebSocketTests();
+    registerPeerPortTests();
 });
