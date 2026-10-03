@@ -59,6 +59,13 @@ module.exports = {
         return this.doQuery('DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND status = ?', [network, windowStart, status]);
     },
 
+    // Reopens only the landed marker for the exact batch window a validated chain
+    // retraction names. The window-end and status predicates leave a replacement
+    // marker or any non-landed publication outcome untouched.
+    async deleteLandedAttestPublishedBatch(network, windowStart, windowEnd) {
+        return this.doQuery('DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND window_end = ? AND status = ?', [network, windowStart, windowEnd, 'landed']);
+    },
+
     // Deletes from attest_published_requests.
     // Moved here from src/attestation/publisher.js:728.
     async deleteAttestPublishedRequest(rid) {

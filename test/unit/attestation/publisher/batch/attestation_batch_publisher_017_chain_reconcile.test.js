@@ -86,7 +86,7 @@ function registerLandedTests(){
         });
     });
 
-    it('publishes an omitted window with its pending rank age', async function(){
+    it('publishes an omitted window from a non-truncated answer with its pending rank age', async function(){
         let { publisher } = makePublisher([{ windowStart: 90, age: 2 }]);
         publisher.indexerRpc.resolves(answer([]));
 
@@ -126,7 +126,7 @@ function registerFailureTests(){
         expect(publisher.getStats().chainReconcileFailures).to.equal(4);
     });
 
-    it('sheds listed windows from a truncated answer and publishes the remainder', async function(){
+    it('records listed windows from a truncated answer and defers the remainder', async function(){
         let pending = [
             { windowStart: 80, age: 2, reopenedSkipped: true },
             { windowStart: 90, age: 1 },
@@ -137,12 +137,10 @@ function registerFailureTests(){
             { window_start: 90, window_end: 100, tx_hash: null, row_count: 7 }
         ], true));
 
-        expect(await publisher.sweep(120)).to.deep.equal({ attempted: 2, published: 2 });
-        expect(publisher.publishWindow.args).to.deep.equal([
-            [80, 2, true],
-            [100, 0, undefined]
-        ]);
+        expect(await publisher.sweep(120)).to.deep.equal({ attempted: 0, published: 0 });
+        expect(publisher.publishWindow.called).to.equal(false);
         expect(markers.get(90)).to.deep.include({ status: 'landed', row_count: 7, txid: null });
+        expect(publisher.getStats().windowsDeferred).to.equal(2);
     });
 }
 
