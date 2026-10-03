@@ -83,6 +83,61 @@ function refusalReason(verdict) {
     return 'verifier refused row';
 }
 
+function admissionBlocks(row) {
+    return {
+        admit_block_btc: row.admit_block_btc,
+        admit_block_ltc: row.admit_block_ltc,
+        admit_block_doge: row.admit_block_doge
+    };
+}
+
+function storePriceSnapshot(db, row) {
+    const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
+    if (row.status === 'skipped') {
+        return db.setSkippedPriceSnapshotRound(
+            row.round_number, [row.coin_pair], row.reference_block, row.block_timestamp);
+    }
+    const common = [row.round_number, pairs, row.reference_block, row.reference_chain,
+        row.block_timestamp, row.validator_count, row.consensus_proof, row.source_action_index,
+        row.push_generation, row.created_at];
+    if (row.batch_block_time !== null && row.batch_block_time !== undefined) {
+        common.splice(9, 0, row.batch_block_time);
+        return db.setBatchPriceSnapshotRound(...common, admissionBlocks(row));
+    }
+    if (row.source_chain !== null && row.source_chain !== undefined) {
+        return db.setPushedPriceSnapshotRound(...common, admissionBlocks(row));
+    }
+    return db.setFinalizedPriceSnapshotRound(row.round_number,
+        [{ coinPair: row.coin_pair, price: row.price }], row.reference_block,
+        row.block_timestamp, row.validator_count, row.consensus_proof, admissionBlocks(row));
+}
+
+const ROW_WRITERS = Object.freeze({
+    price_snapshots: storePriceSnapshot,
+    oracle_prices: (db, row) => db.setOraclePriceByGeneration(row),
+    cross_chain_matches: (db, row) => db.createCrossChainMatch(row, row.btc_chain_id),
+    capability_snapshots: (db, row) => db.createCapabilitySnapshots([row], row.btc_chain_id),
+    cross_chain_calls: (db, row) => db.setCrossChainCallFinalized(row, row.btc_chain_id),
+    state_checkpoints: (db, row) => db.createStateCheckpoint(
+        row.chain, row.network, row.block_index, row.block_hash, row.ledger_hash, row.actions_hash,
+        row.contract_hash, row.checkpoint_seq, row.snapshot_block, row.state_root,
+        row.state_root_version, row.block_merkle_root, row.block_merkle_version,
+        row.validator_signatures),
+    anchor_reward_attestations: (db, row) => db.createAnchorRewardAttestation(
+        row.chain, row.network, row.reward_type, row.round_reference, row.snapshot_block,
+        row.publisher, row.reward_amount, row.publisher_attestations, row.doge_anchor_txid),
+    attestation_responses: (db, row) => db.createAttestationResponseMirrorRow(row),
+    bridge_transfers: (db, row) => db.insertBridgeTransfer(row),
+    policy_snapshots: (db, row) => db.insertPolicySnapshot(row),
+    list_snapshots: (db, row) => db.insertListSnapshot(row)
+});
+
+function storeVerifiedRow(db, table, row) {
+    const writer = ROW_WRITERS[table];
+    if (!writer) throw new Error('No hub DB catch-up writer for table: ' + table);
+    return writer(db, row);
+}
+
 class HubDbPeerCatchup {
     constructor(options) {
         const opts = options || {};
@@ -98,6 +153,7 @@ class HubDbPeerCatchup {
         this.fetchPage = opts.fetchPage || ((peer, table, cursor, limit) =>
             requestJson(peerFeedUrl(peer, table, cursor, limit), this.feedKey, this.requestTimeoutMs));
         this.getVerifier = opts.getVerifier || registry.getCatchupVerifier;
+        this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
         this.caughtUp = new Map(this.tables.map(table => [table, false]));
         this.runningPromise = null;
@@ -211,25 +267,16 @@ class HubDbPeerCatchup {
                         ' row ' + wireId + ' from ' + peer + ': ' + refusalReason(verdict));
                     continue;
                 }
-                await this.insertRow(table, row);
+                await this.storeRow(table, row);
             }
             if (page.rows.length < this.pageSize) return;
         }
-    }
-
-    async insertRow(table, row) {
-        const columns = Object.keys(row || {}).filter(column => column !== 'id');
-        if (columns.length === 0 || columns.some(column => !/^[a-z][a-z0-9_]*$/.test(column))) {
-            throw new Error('Snapshot row has no safe content columns');
-        }
-        const sql = 'INSERT INTO ' + table + ' (' + columns.join(', ') + ') VALUES (' +
-            columns.map(() => '?').join(', ') + ') ON DUPLICATE KEY UPDATE id = id';
-        await this.db.doQuery(sql, columns.map(column => row[column] === undefined ? null : row[column]));
     }
 }
 
 module.exports = Object.assign(HubDbPeerCatchup, {
     connectedSignerPeers,
     peerFeedUrl,
-    requestJson
+    requestJson,
+    storeVerifiedRow
 });

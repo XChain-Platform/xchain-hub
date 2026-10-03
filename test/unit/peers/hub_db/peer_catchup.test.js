@@ -17,25 +17,34 @@ function peerManager(connected) {
     return pm;
 }
 
+function priceDb(affectedRows) {
+    return {
+        setFinalizedPriceSnapshotRound: sinon.stub().resolves({
+            affectedRows: affectedRows === undefined ? 1 : affectedRows
+        })
+    };
+}
+
 function makeCatchup(overrides) {
     const opts = overrides || {};
     return new HubDbPeerCatchup({
-        db: opts.db || { doQuery: sinon.stub().resolves({ affectedRows: 1 }) },
+        db: opts.db || priceDb(),
         peerManager: opts.peerManager || peerManager(true),
         tables: opts.tables || ['price_snapshots'],
         getVerifier: opts.getVerifier || (() => async () => true),
         fetchPage: opts.fetchPage,
+        storeRow: opts.storeRow,
         pageSize: opts.pageSize || 2,
         warnIntervalMs: 60000,
         logger: opts.logger || { warn: sinon.stub(), error: sinon.stub() }
     });
 }
 
-describe('hub DB peer catch-up', function () {
-    afterEach(function () { sinon.restore(); });
+afterEach(function () { sinon.restore(); });
 
+describe('hub DB peer catch-up paging', function () {
     it('pages to the end, assigns local ids, and flips the table caught up', async function () {
-        const db = { doQuery: sinon.stub().resolves({ affectedRows: 1 }) };
+        const db = priceDb();
         const fetchPage = sinon.stub();
         fetchPage.onFirstCall().resolves({
             table: 'price_snapshots',
@@ -49,14 +58,13 @@ describe('hub DB peer catch-up', function () {
 
         expect(fetchPage.firstCall.args.slice(0, 4)).to.deep.equal([PEER, 'price_snapshots', 0, 2]);
         expect(fetchPage.secondCall.args[2]).to.equal(44);
-        expect(db.doQuery.callCount).to.equal(2);
-        expect(db.doQuery.firstCall.args[0]).to.not.include('(id,');
-        expect(db.doQuery.firstCall.args[0]).to.include('ON DUPLICATE KEY UPDATE id = id');
+        expect(db.setFinalizedPriceSnapshotRound.callCount).to.equal(2);
+        expect(db.setFinalizedPriceSnapshotRound.firstCall.args[0]).to.equal(7);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 
     it('skips a row already held by its content unique key', async function () {
-        const db = { doQuery: sinon.stub().resolves({ affectedRows: 0 }) };
+        const db = priceDb(0);
         const catchup = makeCatchup({
             db,
             fetchPage: sinon.stub().resolves({
@@ -67,14 +75,17 @@ describe('hub DB peer catch-up', function () {
         await catchup.start();
         catchup.stop();
 
-        expect(db.doQuery.calledOnce).to.equal(true);
-        expect(db.doQuery.firstCall.args[1]).to.deep.equal([3, 'BTC/USD']);
+        expect(db.setFinalizedPriceSnapshotRound.calledOnce).to.equal(true);
+        expect(db.setFinalizedPriceSnapshotRound.firstCall.args[1])
+            .to.deep.equal([{ coinPair: 'BTC/USD', price: undefined }]);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
+});
 
+describe('hub DB peer catch-up verification', function () {
     it('logs a verifier refusal and does not insert the row', async function () {
         const logger = { warn: sinon.stub(), error: sinon.stub() };
-        const db = { doQuery: sinon.stub().resolves({ affectedRows: 1 }) };
+        const db = priceDb();
         const catchup = makeCatchup({
             db,
             logger,
@@ -87,11 +98,49 @@ describe('hub DB peer catch-up', function () {
         await catchup.start();
         catchup.stop();
 
-        expect(db.doQuery.called).to.equal(false);
+        expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(logger.warn.calledWithMatch('bad quorum')).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 
+    it('skips an unregistered table and leaves it not caught up', async function () {
+        const fetchPage = sinon.stub();
+        const catchup = makeCatchup({ getVerifier: () => undefined, fetchPage });
+
+        await catchup.start();
+        catchup.stop();
+
+        expect(fetchPage.called).to.equal(false);
+        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
+    });
+});
+
+describe('hub DB peer catch-up persistence dispatch', function () {
+    it('uses the named content-key writer for every mirrored table', async function () {
+        const methodByTable = {
+            price_snapshots: 'setFinalizedPriceSnapshotRound',
+            oracle_prices: 'setOraclePriceByGeneration',
+            cross_chain_matches: 'createCrossChainMatch',
+            capability_snapshots: 'createCapabilitySnapshots',
+            cross_chain_calls: 'setCrossChainCallFinalized',
+            state_checkpoints: 'createStateCheckpoint',
+            anchor_reward_attestations: 'createAnchorRewardAttestation',
+            attestation_responses: 'createAttestationResponseMirrorRow',
+            bridge_transfers: 'insertBridgeTransfer',
+            policy_snapshots: 'insertPolicySnapshot',
+            list_snapshots: 'insertListSnapshot'
+        };
+        const db = {};
+        for (const method of Object.values(methodByTable)) db[method] = sinon.stub().resolves();
+
+        for (const [table, method] of Object.entries(methodByTable)) {
+            await HubDbPeerCatchup.storeVerifiedRow(db, table, {});
+            expect(db[method].calledOnce, table).to.equal(true);
+        }
+    });
+});
+
+describe('hub DB peer catch-up peer eligibility', function () {
     it('leaves every table not caught up and logs when no signer peer is reachable', async function () {
         const logger = { warn: sinon.stub(), error: sinon.stub() };
         const fetchPage = sinon.stub();
@@ -124,18 +173,9 @@ describe('hub DB peer catch-up', function () {
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
     });
+});
 
-    it('skips an unregistered table and leaves it not caught up', async function () {
-        const fetchPage = sinon.stub();
-        const catchup = makeCatchup({ getVerifier: () => undefined, fetchPage });
-
-        await catchup.start();
-        catchup.stop();
-
-        expect(fetchPage.called).to.equal(false);
-        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
-    });
-
+describe('hub DB peer catch-up lifecycle', function () {
     it('runs again when a peer link reconnects', async function () {
         const pm = peerManager(true);
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
