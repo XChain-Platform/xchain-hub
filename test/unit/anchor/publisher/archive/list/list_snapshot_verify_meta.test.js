@@ -108,8 +108,9 @@ describe('archive list snapshot verify with metadata', function () {
     });
 
     it('reaches the quorum check for a null meta_hash against an archive without the fields', async function () {
+        // mainnet stays below LIST_META; testnet block 160000 is above its v0.21.3 height.
         const held = listRow({
-            network: 'testnet', name: null, description: null, meta_hash: null
+            network: 'mainnet', name: null, description: null, meta_hash: null
         });
         const { pub, quorum } = setup(held);
         const archived = archivedFrom(pub, held);

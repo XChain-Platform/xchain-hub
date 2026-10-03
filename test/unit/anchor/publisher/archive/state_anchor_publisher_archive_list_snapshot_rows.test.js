@@ -9,6 +9,7 @@ const { expect } = require('chai');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity = require('../../../../../src/validators/identity');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const { listMetaHash } = require('../../../../../src/cross_chain/list/canonical.js');
 
 const BLOCK = 160000;
 const MEMBERS = ['bc1qmemberalpha', 'ltc1qmemberbeta'];
@@ -42,6 +43,11 @@ function listRow(){
         admit_block_ltc: 4905000,
         admit_block_doge: 68000010,
         finalizing_view: 0,
+        // Testnet block 160000 sits above the v0.21.3 LIST_META height, so the row carries
+        // the (empty) metadata fields an armed archive check requires.
+        name: null,
+        description: null,
+        meta_hash: listMetaHash(null, null),
         validator_signatures: '[]',
         status: 'finalized'
     };
@@ -75,8 +81,8 @@ function sign(pub, row, count){
 describe('archive list snapshot rows', () => {
     it('matches the list_share.json signed canonical vector plus the LIST_META field', () => {
         // Testnet block 160000 sits above the v0.21.3 LIST_META height, so the archive
-        // check signs the legacy vector bytes with the (empty) metadata hash appended.
-        expect(buildPub().listSnapshotCanonical(listRow())).to.equal(CANONICAL + '|');
+        // check signs the legacy vector bytes with the empty-metadata hash appended.
+        expect(buildPub().listSnapshotCanonical(listRow())).to.equal(CANONICAL + '|' + listMetaHash(null, null));
     });
 
     it('refuses a tampered added array', async () => {

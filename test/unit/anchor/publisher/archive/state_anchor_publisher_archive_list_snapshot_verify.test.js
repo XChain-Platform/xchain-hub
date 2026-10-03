@@ -111,8 +111,9 @@ describe('archive list snapshot follower integration', function () {
     });
 
     it('enforces absence of metadata below the gate', async function () {
-        const pub = publisher();
-        const signed = signedRow(pub, 3);
+        // mainnet stays below LIST_META; testnet block 160000 is above its v0.21.3 height.
+        const pub = publisher(undefined, undefined, 'mainnet');
+        const signed = signedRow(pub, 3, { network: 'mainnet' });
 
         expect(await pub.verifyArchivedListSnapshot(signed)).to.equal(true);
         for(const field of ['name', 'description', 'meta_hash']){

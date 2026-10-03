@@ -18,11 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Keyed token bridge and policy testnet gates separately for each supported chain.
 - Published hourly attestation batches only when responses are present.
-- Armed testnet mirror admission producers at BTC 154234, LTC 4903068 and DOGE 67936053.
-- Armed testnet mirror admission consumers at BTC 154291, LTC 4903291 and DOGE 67936888.
-- Armed the testnet anchor attestation barrier at BTC 154291.
-- Armed testnet token bridges at BTC 154567, LTC 4903068 and DOGE 67951140.
-- Armed testnet token policy inheritance at BTC 154567, LTC 4903068 and DOGE 67951140.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on BTC:testnet at 154971.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on LTC:testnet at 4905844.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on DOGE:testnet at 67961578.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on BTC:testnet at 1791039938.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on LTC:testnet at 1791039938.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on DOGE:testnet at 1791039938.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on BTC:testnet at 154971.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on LTC:testnet at 4905844.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on DOGE:testnet at 67961578.
+- Armed ANCHOR_FOLD_ACTIVATION on BTC:testnet at 154971.
+- Armed ANCHOR_FOLD_ACTIVATION on LTC:testnet at 4905844.
+- Armed ANCHOR_FOLD_ACTIVATION on DOGE:testnet at 67961578.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on BTC:testnet at 154971.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on LTC:testnet at 4905844.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on DOGE:testnet at 67961578.
+- Armed LIST_META_ACTIVATION on BTC:testnet at 154971.
+- Armed LIST_META_ACTIVATION on LTC:testnet at 4905844.
+- Armed LIST_META_ACTIVATION on DOGE:testnet at 67961578.
 
 ### Fixed
 - Required an explicit network when deriving oracle snapshots.
