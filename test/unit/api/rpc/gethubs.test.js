@@ -4,8 +4,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
-const { buildHubsRpc } = require('../../../src/api/rpc/hubs.js');
-const { authGate, feedPortAllowlist } = require('../../../src/api/auth_gate.js');
+const { buildHubsRpc } = require('../../../../src/api/rpc/hubs.js');
+const { authGate, feedPortAllowlist } = require('../../../../src/api/auth_gate.js');
 
 function response() {
     return {
