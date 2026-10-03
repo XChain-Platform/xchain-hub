@@ -146,9 +146,9 @@ function validOracleRow() {
     };
 }
 
-describe('price catch-up verifiers', function () {
-    afterEach(function () { sinon.restore(); });
+afterEach(function () { sinon.restore(); });
 
+describe('price snapshot catch-up verifier', function () {
     it('registers both mirrored price tables', function () {
         expect(registry.getCatchupVerifier('price_snapshots')).to.equal(verifyPriceSnapshot);
         expect(registry.getCatchupVerifier('oracle_prices')).to.equal(verifyOraclePrice);
@@ -164,6 +164,8 @@ describe('price catch-up verifiers', function () {
         expect(await verifyPriceSnapshot(row, context)).to.deep.equal({ ok: true });
         expect(await verifyPriceSnapshot(Object.assign({}, row, { price: '1' }), context))
             .to.deep.equal({ ok: false, reason: 'row does not match signed round' });
+        expect(await verifyPriceSnapshot(Object.assign({}, row, { consensus_round: 2 }), context))
+            .to.deep.equal({ ok: false, reason: 'row does not match signed round' });
 
         const forgedProof = data.sigs.map(item => ({ pubkey: item.pubkey, sig: 'ab'.repeat(64) }));
         const forgedRow = Object.assign({}, row, { consensus_proof: JSON.stringify(forgedProof) });
@@ -178,6 +180,8 @@ describe('price catch-up verifiers', function () {
         const context = { peer: 'ws://peer', hub, priceProof: { sourceChain: 'BTC', batchData: data } };
 
         expect(await verifyPriceSnapshot(row, context)).to.deep.equal({ ok: true });
+        expect(await verifyPriceSnapshot(Object.assign({}, row, { consensus_round: 2 }), context))
+            .to.deep.equal({ ok: false, reason: 'row does not match signed batch' });
         const forged = Object.assign({}, row, { consensus_proof: row.consensus_proof.replace(/.$/, '0') });
         expect((await verifyPriceSnapshot(forged, context)).ok).to.equal(false);
     });
@@ -190,14 +194,28 @@ describe('price catch-up verifiers', function () {
         expect(await verifyPriceSnapshot(row, { peer: 'ws://peer' }))
             .to.deep.equal({ ok: false, reason: 'complete signed round unavailable' });
     });
+});
 
+describe('oracle price catch-up verifier', function () {
     it('applies authentication, field, effective-time, and generation guards to oracle rows', async function () {
         const row = validOracleRow();
         const db = { getPriceIngestWatermark: sinon.stub().resolves(null) };
-        const context = { peer: 'ws://peer', db, network: 'testnet' };
+        const context = {
+            peer: 'ws://peer', authenticated: true, signerSetPeer: true,
+            db, network: 'testnet'
+        };
 
         expect(await verifyOraclePrice(row, context)).to.deep.equal({ ok: true });
-        expect((await verifyOraclePrice(row, { db })).reason).to.contain('authenticated signer-set peer');
+        for (const untrusted of [
+            { peer: 'ws://peer', db },
+            { peer: 'ws://peer', authenticated: true, db },
+            { peer: 'ws://peer', signerSetPeer: true, db },
+            { peer: 'ws://peer', authenticated: false, signerSetPeer: true, db },
+            { peer: 'ws://peer', authenticated: true, signerSetPeer: false, db }
+        ]) {
+            expect((await verifyOraclePrice(row, untrusted)).reason)
+                .to.contain('authenticated signer-set peer');
+        }
         expect((await verifyOraclePrice(Object.assign({}, row, { value: '0' }), context)).reason)
             .to.equal('invalid value');
         expect((await verifyOraclePrice(Object.assign({}, row, { effective_at: row.effective_at - 1 }), context)).reason)

@@ -53,6 +53,7 @@ function roundRowMatches(row, sourceChain, roundData, aggregator) {
     if (!sameValue(row.round_number, roundData.round) ||
         !sameValue(row.block_timestamp, roundData.timestamp) ||
         !sameValue(row.reference_block, roundData.block_index) ||
+        !sameValue(row.consensus_round, 1) ||
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, roundData.action_index == null ? null : roundData.action_index) ||
         !sameValue(row.push_generation, Number.isFinite(parseInt(roundData.push_generation))
@@ -101,6 +102,7 @@ function batchRowMatches(row, sourceChain, batchData, checked, aggregator) {
     if (!round || !matchingPair(row, round.pairs) ||
         !sameValue(row.block_timestamp, round.timestamp) ||
         !sameValue(row.reference_block, checked.head.referenceBlock) ||
+        !sameValue(row.consensus_round, 1) ||
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, batchData.action_index == null ? null : batchData.action_index) ||
         !sameValue(row.batch_block_time, checked.head.blockTime)) return false;
@@ -162,7 +164,7 @@ function oracleNetwork(context) {
 
 async function verifyOraclePrice(row, context) {
     if (!context || typeof context.peer !== 'string' || !context.peer ||
-        context.authenticated === false || context.signerSetPeer === false) {
+        context.authenticated !== true || context.signerSetPeer !== true) {
         return refuse('oracle price did not arrive from an authenticated signer-set peer');
     }
     if (!row || typeof row !== 'object' || !SOURCE_CHAINS.has(row.source_chain)) {
