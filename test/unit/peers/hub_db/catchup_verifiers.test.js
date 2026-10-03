@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
+const proxyquire = require('proxyquire');
 
 const MODULE_PATH = require.resolve('../../../../src/peers/hub_db/catchup_verifiers.js');
 const EXPECTED_TABLES = [
@@ -25,7 +26,12 @@ describe('catch-up verifier registry', function () {
 
     beforeEach(function () {
         delete require.cache[MODULE_PATH];
-        registry = require(MODULE_PATH);
+        registry = proxyquire(MODULE_PATH, {
+            './cross_chain_catchup_verifiers.js': {
+                registerCrossChainCatchupVerifiers: () => {},
+                '@noCallThru': true
+            }
+        });
     });
 
     afterEach(function () {
@@ -39,13 +45,9 @@ describe('catch-up verifier registry', function () {
 
     it('registers and returns a verifier for every mirrored table', function () {
         for (const table of EXPECTED_TABLES) {
-            if (!registry.getCatchupVerifier(table)) {
-                const verifier = () => table;
-                registry.registerCatchupVerifier(table, verifier);
-                expect(registry.getCatchupVerifier(table)).to.equal(verifier);
-            } else {
-                expect(registry.getCatchupVerifier(table)).to.be.a('function');
-            }
+            const verifier = () => table;
+            registry.registerCatchupVerifier(table, verifier);
+            expect(registry.getCatchupVerifier(table)).to.equal(verifier);
         }
     });
 
@@ -65,11 +67,11 @@ describe('catch-up verifier registry', function () {
     });
 
     it('refuses a non-function verifier without reserving the table', function () {
-        expect(() => registry.registerCatchupVerifier('attestation_responses', null))
+        expect(() => registry.registerCatchupVerifier('cross_chain_matches', null))
             .to.throw(TypeError, 'Catch-up verifier must be a function');
 
         const verifier = () => true;
-        registry.registerCatchupVerifier('attestation_responses', verifier);
-        expect(registry.getCatchupVerifier('attestation_responses')).to.equal(verifier);
+        registry.registerCatchupVerifier('cross_chain_matches', verifier);
+        expect(registry.getCatchupVerifier('cross_chain_matches')).to.equal(verifier);
     });
 });

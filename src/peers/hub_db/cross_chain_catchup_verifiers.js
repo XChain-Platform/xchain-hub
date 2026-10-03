@@ -46,8 +46,6 @@ function hubFromContext(context) {
 }
 
 function engineFor(table, context) {
-    if (context && context.engine) return context.engine;
-    if (context && typeof context.canonicalMatch === 'function') return context;
     const hub = hubFromContext(context);
     return (hub && hub[HUB_ENGINE_FIELDS[table]]) || FALLBACK_ENGINES[table];
 }
