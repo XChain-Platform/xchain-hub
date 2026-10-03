@@ -103,7 +103,7 @@ async function readMaxIds(db) {
 }
 
 async function readHubInstanceId(db) {
-    if (!db) return null;
+    if (!db || typeof db.getHubInstanceId !== 'function') return null;
     const hubInstanceId = await db.getHubInstanceId();
     if (typeof hubInstanceId !== 'string' || !hubInstanceId)
         throw new Error('Hub database instance identity is unavailable');

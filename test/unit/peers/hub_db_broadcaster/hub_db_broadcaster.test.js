@@ -148,6 +148,8 @@ function registerFeature2addSubscriberPart1() {
     expect(ws.send.calledOnce).to.be.true;
     let msg = JSON.parse(ws.send.firstCall.args[0]);
     expect(msg.type).to.equal('ready');
+    expect(msg).to.have.property('hub_instance_id', null);
+    expect(msg).to.have.property('caught_up', true);
   });
   it('includes max_ids when db is provided', async function () {
     let db = makeDb({
