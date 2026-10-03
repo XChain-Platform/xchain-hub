@@ -63,7 +63,9 @@ describe('cross-chain catch-up verifiers', function () {
             expect(accepted).to.equal(true);
         });
     }
+});
 
+describe('cross-chain catch-up verifier row eligibility', function () {
     it('skips pending rows before signer-set resolution', async function () {
         let resolved = false;
         const accepted = await registry.getCatchupVerifier('cross_chain_matches')({
@@ -103,7 +105,9 @@ describe('cross-chain catch-up verifiers', function () {
         const accepted = await registry.getCatchupVerifier('cross_chain_matches')(row, set.context);
         expect(accepted).to.equal(false);
     });
+});
 
+describe('cross-chain catch-up verifier signature validation', function () {
     it('deduplicates stake carried by two keys from one source', async function () {
         const set = signedContext(3);
         const validators = [
