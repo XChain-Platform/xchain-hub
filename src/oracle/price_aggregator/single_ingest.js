@@ -66,13 +66,15 @@ function validateOraclePriceIdentity(priceData) {
     return null;
 }
 
-// The value and the optional FEE, on the indexer's own bounds.
-function validateOraclePriceValue(priceData, network) {
+// The value and the optional FEE, on the indexer's own bounds. `coin` is the source
+// chain, so the armed '<COIN>:<network>' canonical-format key resolves before the
+// bare network sentinel the cut leaves unarmed.
+function validateOraclePriceValue(priceData, network, coin) {
     if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
         !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
         return 'invalid value';
     }
-    if (isPriceV1CanonicalActive(priceData.block_time, network) &&
+    if (isPriceV1CanonicalActive(priceData.block_time, network, coin) &&
         !isCanonicalPriceV1Value(priceData.value)) {
         return 'invalid value';
     }
@@ -85,7 +87,7 @@ function validateOraclePriceValue(priceData, network) {
         return 'invalid fee';
     }
     if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
-        isPriceV1CanonicalActive(priceData.block_time, network) &&
+        isPriceV1CanonicalActive(priceData.block_time, network, coin) &&
         !isCanonicalPriceV1Fee(priceData.fee)) {
         return 'invalid fee';
     }
@@ -223,7 +225,7 @@ module.exports = {
         let identityReason = validateOraclePriceIdentity(priceData);
         if (identityReason) return { accepted: false, reason: identityReason };
 
-        let valueReason = validateOraclePriceValue(priceData, this.hub && this.hub.network);
+        let valueReason = validateOraclePriceValue(priceData, this.hub && this.hub.network, sourceChain);
         if (valueReason) return { accepted: false, reason: valueReason };
 
         let wire = validateOraclePriceWireFields(priceData);
