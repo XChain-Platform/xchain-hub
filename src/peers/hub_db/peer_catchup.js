@@ -255,6 +255,10 @@ class HubDbPeerCatchup {
         return this.tables.every(table => this.tableCaughtUp(table));
     }
 
+    isCaughtUp() {
+        return this.allCaughtUp();
+    }
+
     async run() {
         const peers = connectedSignerPeers(this.peerManager);
         if (peers.length === 0) {

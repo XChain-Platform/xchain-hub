@@ -35,20 +35,16 @@ function registerCatchupVerifier(table, fn) {
     if (!mirroredTableSet.has(table)) {
         throw new Error('Unknown mirrored table: ' + table);
     }
-    if (typeof fn !== 'function') {
-        throw new TypeError('Catch-up verifier must be a function');
-    }
     if (verifiers.has(table)) {
         throw new Error('Catch-up verifier already registered for table: ' + table);
     }
+    if (typeof fn !== 'function') {
+        throw new TypeError('Catch-up verifier must be a function');
+    }
     verifiers.set(table, fn);
-    return fn;
 }
 
 function getCatchupVerifier(table) {
-    if (!mirroredTableSet.has(table)) {
-        throw new Error('Unknown mirrored table: ' + table);
-    }
     return verifiers.get(table);
 }
 

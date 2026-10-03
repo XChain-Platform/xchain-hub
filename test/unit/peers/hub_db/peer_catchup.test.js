@@ -84,6 +84,7 @@ describe('hub DB peer catch-up paging', function () {
         expect(db.setFinalizedPriceSnapshotRound.callCount).to.equal(2);
         expect(db.setFinalizedPriceSnapshotRound.firstCall.args[0]).to.equal(7);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
+        expect(catchup.isCaughtUp()).to.equal(true);
     });
 
     it('skips a held content key without relying on writer affectedRows', async function () {
@@ -135,6 +136,7 @@ describe('hub DB peer catch-up verification', function () {
 
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
+        expect(catchup.isCaughtUp()).to.equal(false);
     });
 });
 
