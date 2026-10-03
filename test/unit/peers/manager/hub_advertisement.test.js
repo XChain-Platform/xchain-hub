@@ -11,7 +11,6 @@ const ValidatorIdentity = require('../../../../src/validators/identity');
 function makeHub(addr, publicUrl) {
     const config = {
         P2P_VALIDATOR_ADDR: addr,
-        HUB_P2P_FEED_ENABLED: publicUrl === null ? 'false' : 'true',
         REQUIRE_SIGNATURES: true
     };
     if (publicUrl !== undefined && publicUrl !== null) config.HUB_PUBLIC_API_URL = publicUrl;
@@ -54,9 +53,10 @@ describe('hub API address advertisement', function () {
         ]);
     });
 
-    it('defaults to the http form of the validator address while the peer feed is on', function () {
+    it('does not default the public API URL from the validator signing address', function () {
         const hub = makeHub('wss://validator.example:10002');
-        expect(hub.manager.heartbeatData('test').api_url).to.equal('https://validator.example:10002');
+        expect(hub.manager.heartbeatData('test')).to.not.have.property('api_url');
+        expect(hub.manager.getHubAdvertisements()).to.deep.equal([]);
     });
 
     it('omits a peer that advertises no address', function () {

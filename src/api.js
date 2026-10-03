@@ -186,6 +186,7 @@ const HUB_REORG_API_KEY   = hubConfig.HUB_REORG_API_KEY || '';
 // facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
 // here at all; they live on the BTC indexer, where they are authoritative.
 const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);const SENSITIVE_READ_AUTH = hubConfig.HUB_SENSITIVE_READ_AUTH !== '0';
+
 // Credential tier key; src/api/auth_gate.js says what it protects and the rollout order.
 const HUB_CONFIG_SECRETS_API_KEY = hubConfig.HUB_CONFIG_SECRETS_API_KEY || '';
 
@@ -205,7 +206,6 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     SEED_NODES:             (hubConfig.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
     HUB_PUBLIC_API_URL:     hubConfig.HUB_PUBLIC_API_URL,
-    HUB_P2P_FEED_ENABLED:   hubConfig.HUB_P2P_FEED_ENABLED,
     SIGNING_PRIVKEY_HEX:    resolveSecretEnv('SIGNING_PRIVKEY_HEX') || '',
     REQUIRE_SIGNATURES:     (hubConfig.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
     P2P_HEARTBEAT_INTERVAL:    parseInt(hubConfig.P2P_HEARTBEAT_INTERVAL) || 15000,

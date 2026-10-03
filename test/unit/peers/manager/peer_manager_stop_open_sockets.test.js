@@ -37,7 +37,8 @@ const PeerManager = require('../../../../src/peers/manager');
         }
     }
 
-    // Reserve a concrete free port before constructing each manager.
+    // P2P_PORT 0 falls back to the default 10001, which another suite may still
+    // hold, so pick a free port first.
     function freePort() {
         return new Promise((resolve) => {
             let probe = net.createServer().listen(0, '127.0.0.1', () => {
