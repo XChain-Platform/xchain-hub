@@ -24,6 +24,7 @@
 // would catch it: PeerManagerListenerCeiling.test.js could stay green while
 // this went red.
 
+const net         = require('net');
 const path        = require('path');
 const proxyquire  = require('proxyquire');
 const { expect }  = require('chai');
@@ -34,6 +35,17 @@ const { DB_METHODS } = require('../../../helpers/mockHub');
 {
 
     let XChainHub, mockDb, hub;
+
+    function freePort() {
+        return new Promise((resolve, reject) => {
+            const probe = net.createServer();
+            probe.on('error', reject);
+            probe.listen(0, '127.0.0.1', () => {
+                const available = probe.address().port;
+                probe.close(() => resolve(available));
+            });
+        });
+    }
 
     // Collect process warnings raised while `fn` runs, including the ones Node
     // defers past the synchronous EventEmitter.on() call that triggers them.
@@ -52,8 +64,9 @@ const { DB_METHODS } = require('../../../helpers/mockHub');
     }
 
     async function bootsEveryRealMessageSubscribersModuleTest2() {
+        const port = await freePort();
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', {
-            P2P_PORT:            0,  // ephemeral; this test never dials out or accepts peers
+            P2P_PORT:            port,
             P2P_HOST:            '127.0.0.1',
             P2P_VALIDATOR_ADDR:  'ws://127.0.0.1:0',
             HUB_NETWORK:         'regtest',
