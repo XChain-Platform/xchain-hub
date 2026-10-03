@@ -91,6 +91,48 @@ function admissionBlocks(row) {
     };
 }
 
+function withoutWireId(row) {
+    return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
+}
+
+async function hasRows(promise) {
+    const rows = await promise;
+    return Array.isArray(rows) ? rows.length > 0 : Boolean(rows);
+}
+
+const CONTENT_KEY_READERS = Object.freeze({
+    price_snapshots: async (db, row) => {
+        const rows = await db.findPriceSnapshotsForRound(row.round_number);
+        return Array.isArray(rows) && rows.some(held => held && held.coin_pair === row.coin_pair);
+    },
+    oracle_prices: (db, row) => hasRows(
+        db.getOraclePrice(row.source_address, row.source_chain, row.action_index)),
+    cross_chain_matches: (db, row) => hasRows(db.getCrossChainMatchByMatchId(row.match_id)),
+    capability_snapshots: (db, row) => hasRows(db.getCapabilitySnapshot(
+        row.snapshot_block, row.capability, row.signing_pubkey, row.source)),
+    cross_chain_calls: (db, row) => hasRows(
+        db.getCrossChainCallByCallIdAndPhase(row.call_id, row.phase)),
+    state_checkpoints: (db, row) => hasRows(
+        db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(
+            row.chain, row.network, row.checkpoint_seq)),
+    anchor_reward_attestations: (db, row) => hasRows(db.getAnchorRewardAttestation(
+        row.chain, row.network, row.reward_type, row.round_reference, row.snapshot_block,
+        row.publisher)),
+    attestation_responses: (db, row) => hasRows(
+        db.getAttestationResponse(row.network, row.request_id, row.effective_time)),
+    bridge_transfers: (db, row) => hasRows(db.getBridgeTransferByTransferId(row.transfer_id)),
+    policy_snapshots: (db, row) => hasRows(db.getPolicySnapshotAtSeq(
+        row.network, row.origin_chain, row.tick, row.policy_seq)),
+    list_snapshots: (db, row) => hasRows(db.getListSnapshotAtSeq(
+        row.network, row.home_chain, row.home_list_index, row.seq))
+});
+
+async function rowAlreadyHeld(db, table, row) {
+    const reader = CONTENT_KEY_READERS[table];
+    if (!reader) throw new Error('No hub DB catch-up content reader for table: ' + table);
+    return reader(db, row);
+}
+
 function storePriceSnapshot(db, row) {
     const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
     if (row.status === 'skipped') {
@@ -135,7 +177,7 @@ const ROW_WRITERS = Object.freeze({
 function storeVerifiedRow(db, table, row) {
     const writer = ROW_WRITERS[table];
     if (!writer) throw new Error('No hub DB catch-up writer for table: ' + table);
-    return writer(db, row);
+    return writer(db, withoutWireId(row));
 }
 
 class HubDbPeerCatchup {
@@ -153,6 +195,7 @@ class HubDbPeerCatchup {
         this.fetchPage = opts.fetchPage || ((peer, table, cursor, limit) =>
             requestJson(peerFeedUrl(peer, table, cursor, limit), this.feedKey, this.requestTimeoutMs));
         this.getVerifier = opts.getVerifier || registry.getCatchupVerifier;
+        this.hasRow = opts.hasRow || ((table, row) => rowAlreadyHeld(this.db, table, row));
         this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
         this.caughtUp = new Map(this.tables.map(table => [table, false]));
@@ -267,7 +310,9 @@ class HubDbPeerCatchup {
                         ' row ' + wireId + ' from ' + peer + ': ' + refusalReason(verdict));
                     continue;
                 }
-                await this.storeRow(table, row);
+                const localRow = withoutWireId(row);
+                if (await this.hasRow(table, localRow)) continue;
+                await this.storeRow(table, localRow);
             }
             if (page.rows.length < this.pageSize) return;
         }
@@ -278,5 +323,6 @@ module.exports = Object.assign(HubDbPeerCatchup, {
     connectedSignerPeers,
     peerFeedUrl,
     requestJson,
+    rowAlreadyHeld,
     storeVerifiedRow
 });
