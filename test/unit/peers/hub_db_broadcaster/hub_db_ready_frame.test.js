@@ -28,18 +28,21 @@ function makeWs() {
     };
 }
 
-describe('hub DB ready frame identity and ceilings', function () {
-    let HubDbBroadcaster;
+let HubDbBroadcaster;
 
-    beforeEach(function () {
-        HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', {
-            ws: { OPEN: 1 }
-        });
+function loadBroadcaster() {
+    HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', {
+        ws: { OPEN: 1 }
     });
+}
 
-    afterEach(function () {
-        sinon.restore();
-    });
+function restoreStubs() {
+    sinon.restore();
+}
+
+describe('hub DB ready frame ceilings', function () {
+    beforeEach(loadBroadcaster);
+    afterEach(restoreStubs);
 
     it('advertises all mirrored-table ceilings with snapshot-equivalent filters', async function () {
         const queries = [];
@@ -80,6 +83,11 @@ describe('hub DB ready frame identity and ceilings', function () {
         expect(listMax).not.to.include('status');
         broadcaster.stop();
     });
+});
+
+describe('hub DB ready frame identity', function () {
+    beforeEach(loadBroadcaster);
+    afterEach(restoreStubs);
 
     it('keeps the identity for one database and creates a new one after rebuild', async function () {
         let stored = null;
