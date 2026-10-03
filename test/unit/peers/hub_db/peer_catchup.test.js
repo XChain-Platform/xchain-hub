@@ -252,6 +252,23 @@ describe('hub DB peer catch-up peer eligibility', function () {
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
     });
+
+    it('does not treat an empty effective signer set as unrestricted', async function () {
+        const pm = peerManager(true);
+        pm.effectiveSignerSet = new Set();
+        const logger = { warn: sinon.stub(), error: sinon.stub() };
+        const fetchPage = sinon.stub();
+        const catchup = makeCatchup({ peerManager: pm, logger, fetchPage });
+
+        await catchup.start();
+        catchup.warnIfNoPeer();
+        catchup.stop();
+
+        expect(fetchPage.called).to.equal(false);
+        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
+        expect(logger.warn.calledWithMatch('no connected signer-set peer')).to.equal(true);
+        expect(logger.warn.callCount).to.equal(1);
+    });
 });
 
 describe('hub DB peer catch-up lifecycle', function () {

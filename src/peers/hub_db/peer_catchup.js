@@ -60,13 +60,14 @@ function requestJson(url, feedKey, timeoutMs) {
 
 function connectedSignerPeers(peerManager) {
     if (!peerManager || !peerManager.peers || !peerManager.validatorPubkeys) return [];
+    const signerSet = peerManager.effectiveSignerSet;
+    if (!(signerSet instanceof Set) || signerSet.size === 0) return [];
     const peers = [];
     for (const [addr, peer] of peerManager.peers) {
         if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
         const pubkey = peerManager.validatorPubkeys.get(addr);
         if (!pubkey) continue;
-        const signerSet = peerManager.effectiveSignerSet;
-        if (signerSet && signerSet.size > 0 && !signerSet.has(String(pubkey).toLowerCase())) continue;
+        if (!signerSet.has(String(pubkey).toLowerCase())) continue;
         peers.push(addr);
     }
     return peers;
