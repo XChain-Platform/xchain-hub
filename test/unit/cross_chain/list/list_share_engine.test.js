@@ -110,7 +110,9 @@ describe('shared-list engine consensus contract', function () {
     it('uses the shared-list vector canonical exactly', function () {
         const engine = new ListShareEngine(makeHub('regtest', 0));
         const entry = vectors.canonicals[1];
-        assert.strictEqual(engine.canonicalMatch(vectorRow(entry), entry.view), entry.expected);
+        // The vector's testnet block 160000 sits above the v0.21.3 LIST_META height, so the
+        // engine appends the (empty) metadata hash field to the legacy vector bytes.
+        assert.strictEqual(engine.canonicalMatch(vectorRow(entry), entry.view), entry.expected + '|');
     });
 
     it('binds the dedicated PBFT channel and every-chain admission scope', function () {

@@ -68,7 +68,9 @@ describe('list share signed canonical vectors', function () {
                 added: entry.added,
                 removed: entry.removed
             };
-            assert.strictEqual(listSnapshotCanonical(row, entry.view), entry.expected);
+            // The vectors are the legacy (pre LIST_META) form; their testnet block 160000 sits
+            // above the v0.21.3 LIST_META height, so the gate reader is pinned off here.
+            assert.strictEqual(listSnapshotCanonical(row, entry.view, () => false), entry.expected);
         });
     });
 });
@@ -91,9 +93,9 @@ describe('list share signed canonical boundaries', function () {
             added: ['not-signed'],
             removed: ['also-not-signed']
         };
-        assert.strictEqual(listSnapshotCanonical(row, entry.view), entry.expected);
+        assert.strictEqual(listSnapshotCanonical(row, entry.view, () => false), entry.expected);
         assert.throws(
-            () => listSnapshotCanonical(Object.assign({}, row, { admit_blocks: null }), entry.view),
+            () => listSnapshotCanonical(Object.assign({}, row, { admit_blocks: null }), entry.view, () => false),
             /must carry an admission map/
         );
     });

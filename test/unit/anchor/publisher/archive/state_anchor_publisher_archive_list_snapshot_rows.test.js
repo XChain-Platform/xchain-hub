@@ -73,8 +73,10 @@ function sign(pub, row, count){
 }
 
 describe('archive list snapshot rows', () => {
-    it('matches the list_share.json signed canonical vector', () => {
-        expect(buildPub().listSnapshotCanonical(listRow())).to.equal(CANONICAL);
+    it('matches the list_share.json signed canonical vector plus the LIST_META field', () => {
+        // Testnet block 160000 sits above the v0.21.3 LIST_META height, so the archive
+        // check signs the legacy vector bytes with the (empty) metadata hash appended.
+        expect(buildPub().listSnapshotCanonical(listRow())).to.equal(CANONICAL + '|');
     });
 
     it('refuses a tampered added array', async () => {

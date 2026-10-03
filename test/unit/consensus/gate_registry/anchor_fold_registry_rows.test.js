@@ -41,13 +41,16 @@ describe('gate_registry: anchor fold rows', function () {
         assert.ok(present.length === 0 || present.length === 2);
     });
 
-    it('ships both activation maps inert on every network', function () {
+    it('ships both activation maps inert on mainnet and armed at the v0.21.3 testnet heights', function () {
         // These cases wait for this repo's SHARED-block twin to carry the pair.
         if (present.length !== 2) this.skip();
         withEnv(undefined, () => {
             for (const key of KEYS) {
                 assert.deepStrictEqual(registry.get(key), {
                     mainnet: 9999999999,
+                    'BTC:testnet': 154939,
+                    'LTC:testnet': 4905307,
+                    'DOGE:testnet': 67960786,
                     testnet: 9999999999,
                     regtest: null,
                 });

@@ -79,7 +79,9 @@ describe('list share legacy signed canonical vectors', function () {
                 listSnapshotCanonical(row, entry.view, () => false),
                 entry.expected
             );
-            assert.strictEqual(listSnapshotCanonical(row, entry.view), entry.expected);
+            // Testnet block 160000 sits above the v0.21.3 LIST_META height, so the
+            // registry default now takes the metadata form.
+            assert.strictEqual(listSnapshotCanonical(row, entry.view), listSnapshotCanonical(row, entry.view, () => true));
         });
     });
 });
