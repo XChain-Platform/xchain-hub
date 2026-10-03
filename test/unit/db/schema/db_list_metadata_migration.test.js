@@ -3,7 +3,7 @@
 const sinon = require('sinon');
 const { expect } = require('chai');
 
-const Database = require('../../../src/db');
+const Database = require('../../../../src/db');
 
 describe('list_snapshots metadata migration', function () {
     afterEach(function () { sinon.restore(); });
