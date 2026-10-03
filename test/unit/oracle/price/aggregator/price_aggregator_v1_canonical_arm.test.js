@@ -19,7 +19,7 @@ const { createMockHub } = require('../../../../helpers/mockHub');
 // leaves the bare `testnet` unarmed, so ingest must resolve the key of the source chain.
 describe('PriceAggregator.receiveOraclePrice() PRICE v1 canonical gate on the writer-produced table', function () {
     const priceScale = require('../../../../../src/consensus/gates/price_scale_gate.js');
-    const INSTANT = 1791039938;
+    const INSTANT = 1791061097;
     const table = priceScale.PRICE_V1_CANONICAL_ACTIVATION;
     let saved, hub, agg;
     const VALID = {

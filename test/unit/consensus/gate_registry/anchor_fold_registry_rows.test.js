@@ -48,9 +48,9 @@ describe('gate_registry: anchor fold rows', function () {
             for (const key of KEYS) {
                 assert.deepStrictEqual(registry.get(key), {
                     mainnet: 9999999999,
-                    'BTC:testnet': 154971,
-                    'LTC:testnet': 4905844,
-                    'DOGE:testnet': 67961578,
+                    'BTC:testnet': 155001,
+                    'LTC:testnet': 4906040,
+                    'DOGE:testnet': 67962387,
                     testnet: 9999999999,
                     regtest: null,
                 });
@@ -83,7 +83,7 @@ describe('gate_registry: anchor fold rows', function () {
 describe('anchor fold gate on the writer-produced per-chain testnet table', function () {
     const { registry: core } = require('../../../../src/consensus/gate_registry/core.js');
     const { isAnchorFoldActive } = require('../../../../src/anchor/publisher/canonical_forms.js');
-    const DOGE_HEIGHT = 67961578;
+    const DOGE_HEIGHT = 67962387;
     let saved;
 
     beforeEach(function () {
@@ -92,7 +92,7 @@ describe('anchor fold gate on the writer-produced per-chain testnet table', func
         core.overlay = (key, value) => {
             const base = saved ? saved(key, value) : value;
             if (key !== KEYS[0]) return base;
-            return Object.assign({}, base, { 'BTC:testnet': 154971, 'LTC:testnet': 4905844, 'DOGE:testnet': DOGE_HEIGHT });
+            return Object.assign({}, base, { 'BTC:testnet': 155001, 'LTC:testnet': 4906040, 'DOGE:testnet': DOGE_HEIGHT });
         };
     });
     afterEach(function () { if (saved !== undefined) core.overlay = saved; });

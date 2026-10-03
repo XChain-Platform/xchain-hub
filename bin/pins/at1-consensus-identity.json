@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "3544f0d46953fdc5484898869e2150883b7f5d97a0732ec8dbd53a87c435278f",
+  "consensus_rules_digest": "8e1a88bb4c24c549499350d2145777a70ef8cc1e3808ce481418768f451ab4a5",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -35,14 +35,14 @@
     "mirror_admission_activation.isAdmissionEra": "<function>",
     "mirror_admission_activation.admissionCanonicalField": "<function>",
     "token_bridge_activation.TOKEN_BRIDGE_ACTIVATION": "{\"BTC:testnet\":154567,\"DOGE:testnet\":67951140,\"LTC:testnet\":4903068,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION": "{\"BTC:testnet\":154971,\"DOGE:testnet\":67961578,\"LTC:testnet\":4905844,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION": "{\"BTC:testnet\":154778,\"DOGE:testnet\":67956923,\"LTC:testnet\":4905005,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":5082}",
-    "price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION": "{\"BTC:testnet\":1791039938,\"DOGE:testnet\":1791039938,\"LTC:testnet\":1791039938,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION": "{\"BTC:testnet\":1791061097,\"DOGE:testnet\":1791061097,\"LTC:testnet\":1791061097,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH": "19",
     "price_scale_activation.PRICE_V1_FEE_MAX_LENGTH": "20",
     "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154777}",
-    "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":154971,\"DOGE:testnet\":67961578,\"LTC:testnet\":4905844,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
+    "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
   },
   "gate_key_count": 42,
   "absent_gates": [],
