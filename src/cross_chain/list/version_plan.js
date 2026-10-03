@@ -109,4 +109,4 @@ function planListVersion({ read, originBlock, held, metaActive = false }) {
     };
 }
 
-module.exports = { planListVersion };
+module.exports = { hasValidListMeta, planListVersion };

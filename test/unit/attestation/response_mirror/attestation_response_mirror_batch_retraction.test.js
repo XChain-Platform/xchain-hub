@@ -32,6 +32,7 @@ const sinon  = require('sinon');
 const { expect } = require('chai');
 
 const AttestationResponseMirror = require('../../../../src/attestation/response_mirror.js');
+const AttestationBatchPublisher = require('../../../../src/attestation/batch_publisher.js');
 const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const abw = require('../../../../src/lib/attest_batch_wire.js');
 const { isAdmissionEra } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
@@ -43,15 +44,45 @@ const WINDOW_START = 1780000000;
 const WINDOW_END   = 1780003600;
 const NETWORK      = 'regtest';
 
+function queryMarkers(markers, sql, args){
+    if(/^INSERT INTO attest_published_batches/i.test(sql)){
+        let cols = sql.substring(sql.indexOf('(') + 1, sql.indexOf(')'))
+            .split(',').map(s => s.trim());
+        let row = {};
+        cols.forEach((c, i) => { row[c] = args[i]; });
+        let found = markers.find(r => r.network === row.network &&
+            Number(r.window_start) === Number(row.window_start));
+        if(found) Object.assign(found, row);
+        else markers.push(row);
+        return { affectedRows: found ? 0 : 1 };
+    }
+    if(/^DELETE FROM attest_published_batches/i.test(sql)){
+        let [network, start, end, status] = args;
+        let idx = markers.findIndex(r => r.network === network &&
+            Number(r.window_start) === Number(start) &&
+            Number(r.window_end) === Number(end) && r.status === status);
+        if(idx < 0) return { affectedRows: 0 };
+        markers.splice(idx, 1);
+        return { affectedRows: 1 };
+    }
+    if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
+        let found = markers.find(r => r.network === args[0] &&
+            Number(r.window_start) === Number(args[1]));
+        return found ? [Object.assign({}, found)] : [];
+    }
+    return undefined;
+}
+
 // The mirror table with the four statements this path uses: the INSERT IGNORE and
 // keyed select-back the receive half already needs, the window-scoped select the
 // retraction reads its victims from, and the clearing UPDATE.
 function makeDb(){
-    let table = [], nextId = 1;
+    let table = [], markers = [], nextId = 1;
     let key = r => r.network + '|' + r.request_id + '|' + r.effective_time;
     return { ...DB_METHODS,
-        table,
+        table, markers,
         row(rid){ return table.find(r => r.request_id === rid) || null; },
+        marker(start){ return markers.find(r => Number(r.window_start) === Number(start)) || null; },
         async doQuery(sql, args){
             if(/^INSERT IGNORE INTO attestation_responses/i.test(sql)){
                 let cols = sql.substring(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(s => s.trim());
@@ -95,6 +126,8 @@ function makeDb(){
                 found.batch_action_index = actionIndex;
                 return { affectedRows: 1 };
             }
+            let markerResult = queryMarkers(markers, sql, args);
+            if(markerResult !== undefined) return markerResult;
             throw new Error('unexpected statement: ' + sql);
         }
     };
@@ -165,7 +198,10 @@ function makeHub(opts){
             async getWeightSnapshot(){ return snapshot; },
             async getSnapshot(){ return snapshot; }
         },
-        attestationBatchPublisher: { recordLandedWindow: sinon.stub().resolves() }
+        attestationBatchPublisher: {
+            recordLandedWindow: sinon.stub().resolves(),
+            reopenLandedWindow: sinon.stub().resolves()
+        }
     };
 }
 
@@ -200,6 +236,42 @@ it('refuses a retraction for another network, and one with no usable identity', 
 
         expect(hub.db.table[0].batch_action_index,
             'no refusal may clear anything').to.equal(ACTION_INDEX);
+        expect(hub.attestationBatchPublisher.reopenLandedWindow.called).to.equal(false);
+    });
+}
+
+function registerBatchRetractionReopenTest() {
+it('reopens a landed window with no linked rows so the next sweep reconciles it', async function () {
+        let db = makeDb(), hub = makeHub({ db });
+        hub.resolveIndexerUrl = sinon.stub().resolves('doge-indexer');
+        let publisher = new AttestationBatchPublisher(hub);
+        hub.attestationBatchPublisher = publisher;
+        publisher._floorWindow = WINDOW_START;
+        publisher.windowStartFor = sinon.stub().returns(WINDOW_END);
+        publisher.indexerRpc = sinon.stub().resolves({ batches: [], truncated: false });
+        publisher.publishWindow = sinon.stub().resolves(true);
+
+        await publisher.recordLandedWindow(WINDOW_START, WINDOW_END, 'doge-tx', 1);
+        expect(db.marker(WINDOW_START).status).to.equal('landed');
+        let result = await new AttestationResponseMirror(hub)
+            .retractBatchLink('DOGE', makeRetraction());
+        expect(result).to.deep.include({ accepted: true, cleared: 0 });
+        expect(await publisher.sweep(WINDOW_END)).to.deep.equal({ attempted: 1, published: 1 });
+        expect(publisher.indexerRpc.calledOnce).to.equal(true);
+        expect(publisher.publishWindow.calledOnceWithExactly(WINDOW_START, 0, undefined)).to.equal(true);
+    });
+
+    it('does not remove a replacement marker with another status or window end', async function () {
+        let db = makeDb(), hub = makeHub({ db });
+        let publisher = new AttestationBatchPublisher(hub);
+        await publisher.recordLandedWindow(WINDOW_START, WINDOW_END, 'doge-tx', 1);
+        db.marker(WINDOW_START).status = 'sent';
+        await publisher.reopenLandedWindow(WINDOW_START, WINDOW_END);
+        expect(db.marker(WINDOW_START).status).to.equal('sent');
+        db.marker(WINDOW_START).status = 'landed';
+        db.marker(WINDOW_START).window_end = WINDOW_END + 1;
+        await publisher.reopenLandedWindow(WINDOW_START, WINDOW_END);
+        expect(db.marker(WINDOW_START).status).to.equal('landed');
     });
 }
 
@@ -320,6 +392,8 @@ describe('retractattestbatch: the hub retraction half', function () {
     afterEach(function () { sinon.restore(); });
 
     registerBatchRetractionCoreTests();
+
+    registerBatchRetractionReopenTest();
 
     registerBatchRetractionEdgeTests();
 });

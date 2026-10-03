@@ -202,6 +202,15 @@ module.exports = {
         await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd, rowCount, txidOrNull, 'landed');
     },
 
+    // A validated DOGE retraction makes the window unresolved again. Delete is the
+    // existing reopen idiom for markers, and the DB predicate keeps a concurrent
+    // transition to any other state intact.
+    async reopenLandedWindow(windowStart, windowEnd){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function') return;
+        await db.deleteLandedAttestPublishedBatch(this.network, windowStart, windowEnd);
+    },
+
     // ------------------------------------------------------------ the files
 
     // What a window was built from, appended when it publishes. Not a queue: the

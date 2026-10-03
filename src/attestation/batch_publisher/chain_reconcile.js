@@ -53,6 +53,13 @@ module.exports = {
             landed.add(start);
         }
         this.stats.chainReconcileLandedWindows += landed.size;
+        if(answer.truncated){
+            // A full page proves only that its listed windows landed. Any omitted
+            // window may have been pushed off the page, so absence is not evidence
+            // until a later non-truncated answer covers the range.
+            this.stats.windowsDeferred += pending.length - landed.size;
+            return [];
+        }
         return pending.filter(window => !landed.has(Number(window.windowStart)));
     },
 
