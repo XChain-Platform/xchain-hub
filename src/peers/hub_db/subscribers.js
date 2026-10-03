@@ -149,6 +149,7 @@ class HubDbSubscribers {
             try { ws.close(1011, 'Hub database identity unavailable'); } catch (closeError) { /* ignore */ }
             throw e;
         }
+        const caughtUp = this.isCaughtUp();
 
         try {
             // watermark_interval_ms lets the consumer size its heartbeat watchdog from
@@ -160,7 +161,7 @@ class HubDbSubscribers {
             // every reconnect stalls every height-keyed barrier for one watermarkIntervalMs
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
-            const ready = { type: 'ready', max_ids: maxIds, hub_instance_id: hubInstanceId, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() };
+            const ready = { type: 'ready', max_ids: maxIds, hub_instance_id: hubInstanceId, caught_up: caughtUp, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights(undefined, caughtUp) };
             ws.send(JSON.stringify(ready));
             this.replayDeletions(ws);
         } catch (e) { /* ignore */ }
