@@ -89,6 +89,27 @@ describe('hub DB ready frame identity', function () {
     beforeEach(loadBroadcaster);
     afterEach(restoreStubs);
 
+    it('refuses readiness when the database identity cannot be loaded', async function () {
+        const db = {
+            getHubInstanceId: sinon.stub().rejects(new Error('identity unavailable'))
+        };
+        const broadcaster = new HubDbBroadcaster({}, db);
+        const ws = makeWs();
+        let error;
+
+        try {
+            await broadcaster.addSubscriber(ws);
+        } catch (e) {
+            error = e;
+        }
+
+        expect(error).to.have.property('message', 'identity unavailable');
+        expect(ws.send.called).to.equal(false);
+        expect(ws.close.calledOnceWith(1011, 'Hub database identity unavailable')).to.equal(true);
+        expect(broadcaster.getSubscriberCount()).to.equal(0);
+        broadcaster.stop();
+    });
+
     it('keeps the identity for one database and creates a new one after rebuild', async function () {
         let stored = null;
         let created = 0;

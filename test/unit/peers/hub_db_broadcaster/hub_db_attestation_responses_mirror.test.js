@@ -72,6 +72,9 @@ function makeFakeDb(rowsByTable) {
         // object's doQuery below (spread never overwrites a key declared after it).
         ...DB_METHODS,
         calls: [],
+        async getHubInstanceId() {
+            return 'de305d54-75b4-431b-adb2-eb6b9e546014';
+        },
         async doQuery(sql, params) {
             this.calls.push({ sql: String(sql), params: params });
             let text  = String(sql);

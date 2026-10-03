@@ -57,6 +57,7 @@ function makeDb(overrides) {
         // doQuery this call site declares afterwards.
         ...DB_METHODS,
         doQuery: sinon.stub().resolves([]),
+        getHubInstanceId: async () => 'de305d54-75b4-431b-adb2-eb6b9e546014',
         ...(overrides || {})
     };
 }

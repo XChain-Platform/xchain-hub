@@ -104,11 +104,10 @@ async function readMaxIds(db) {
 
 async function readHubInstanceId(db) {
     if (!db) return null;
-    try {
-        return await db.getHubInstanceId();
-    } catch (e) {
-        return null;
-    }
+    const hubInstanceId = await db.getHubInstanceId();
+    if (typeof hubInstanceId !== 'string' || !hubInstanceId)
+        throw new Error('Hub database instance identity is unavailable');
+    return hubInstanceId;
 }
 
 class HubDbSubscribers {
@@ -142,7 +141,14 @@ class HubDbSubscribers {
         logger.info('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
 
         const maxIds = await readMaxIds(this.db);
-        const hubInstanceId = await readHubInstanceId(this.db);
+        let hubInstanceId;
+        try {
+            hubInstanceId = await readHubInstanceId(this.db);
+        } catch (e) {
+            this.removeSubscriber(ws);
+            try { ws.close(1011, 'Hub database identity unavailable'); } catch (closeError) { /* ignore */ }
+            throw e;
+        }
 
         try {
             // watermark_interval_ms lets the consumer size its heartbeat watchdog from
@@ -154,8 +160,7 @@ class HubDbSubscribers {
             // every reconnect stalls every height-keyed barrier for one watermarkIntervalMs
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
-            const ready = { type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() };
-            if (hubInstanceId) ready.hub_instance_id = hubInstanceId;
+            const ready = { type: 'ready', max_ids: maxIds, hub_instance_id: hubInstanceId, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() };
             ws.send(JSON.stringify(ready));
             this.replayDeletions(ws);
         } catch (e) { /* ignore */ }
