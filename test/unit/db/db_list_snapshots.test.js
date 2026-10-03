@@ -87,11 +87,11 @@ describe('list_snapshots hub table', function () {
         await db.migrateAdmissionColumns();
 
         expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'name',
-            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL')).to.equal(true);
+            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true)).to.equal(true);
         expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'description',
-            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL')).to.equal(true);
+            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true)).to.equal(true);
         expect(db.migrateAddNullableColumn.calledWithExactly(
-            'list_snapshots', 'meta_hash', 'CHAR(64) NULL')).to.equal(true);
+            'list_snapshots', 'meta_hash', 'CHAR(64) NULL', true)).to.equal(true);
     });
 
     it('returns zero when no prior list version exists', async function () {
