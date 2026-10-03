@@ -197,7 +197,7 @@ module.exports = {
             this.refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
             return;
         }
-        let verdict = this.matchesLocalWindow(d.rows, mine);
+        let verdict = this.coSignVerdict(d.rows, mine, set);
         if(!verdict.ok){
             this.refuse(windowStart, verdict.why);
             return;
@@ -267,11 +267,22 @@ module.exports = {
     // field mismatch on a hub that held one, so no such window could ever be co-signed
     // (regtest ladder, AT5 pass 19). The same request with the same stamp twice is
     // still a malformed window and is still refused.
+    //
+    // SIGNER METADATA IS THE ONE HONEST CONTENT-FREE DIFFERENCE. A round finalizes on
+    // the first `redundancy` valid signatures to arrive (consensus/commit.js), and above
+    // the zero-conf flag day the widening ladder seats a headroom member on every
+    // request, so the responsible set is larger than the quorum and two honest hubs
+    // finalize the same row under different signer subsets. Byte-comparing those two
+    // columns refused every such window on a 4-of-5 regtest set at redundancy 3, which
+    // is the testnet shape. They are returned as `signerChecks` for
+    // signer_divergence.js to verify instead. `widen` is skipped outright: it is each
+    // hub's own view of the ladder, and every verifier recomputes it.
     matchesLocalWindow(proposed, mine){
         const keyOf = (r) => String((r && r.request_id) || '').toLowerCase() + '@' +
                              String(r && r.effective_time == null ? '' : r.effective_time);
         let byKey = new Map(mine.map(r => [keyOf(r), r]));
         let seen  = new Set();
+        let signerChecks = [];
         for(let p of proposed){
             let rid = String((p && p.request_id) || '').toLowerCase();
             if(!rid) return { ok: false, why: 'a proposed row carries no request_id' };
@@ -282,10 +293,9 @@ module.exports = {
             if(!local)
                 return { ok: false, why: 'request ' + rid.substring(0, 16) + '... at effective_time ' +
                          String(p.effective_time) + ' is proposed but not held here' };
-            for(let f of abw.ATTEST_BATCH_ROW_FIELDS){
-                if(String(p[f] == null ? '' : p[f]) !== String(local[f] == null ? '' : local[f]))
-                    return { ok: false, why: 'request ' + rid.substring(0, 16) + '... differs on ' + f };
-            }
+            let field = this.rowFieldDivergence(p, local);
+            if(field === 'signers') signerChecks.push({ proposed: p, local: local });
+            else if(field) return { ok: false, why: 'request ' + rid.substring(0, 16) + '... differs on ' + field };
         }
         for(let local of mine){
             if(seen.has(keyOf(local))) continue;
@@ -293,7 +303,20 @@ module.exports = {
                      '... at effective_time ' + String(local.effective_time) +
                      ' is held here for this window but was not proposed' };
         }
-        return { ok: true, why: null };
+        return signerChecks.length ? { ok: true, why: null, signerChecks: signerChecks } : { ok: true, why: null };
+    },
+
+    // The first content field two copies of one row disagree on, 'signers' when only the
+    // signer metadata differs, or null when they match.
+    rowFieldDivergence(p, local){
+        let signers = false;
+        for(let f of abw.ATTEST_BATCH_ROW_FIELDS){
+            if(f === 'widen') continue;
+            if(String(p[f] == null ? '' : p[f]) === String(local[f] == null ? '' : local[f])) continue;
+            if(f !== 'signer_pubkeys' && f !== 'signatures') return f;
+            signers = true;
+        }
+        return signers ? 'signers' : null;
     },
 
     async handleSign(envelope){
