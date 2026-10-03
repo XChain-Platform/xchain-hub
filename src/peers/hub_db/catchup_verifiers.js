@@ -30,6 +30,8 @@ const MIRRORED_TABLES = Object.freeze([
 
 const mirroredTableSet = new Set(MIRRORED_TABLES);
 const verifiers = new Map();
+const { verifyStateCheckpointCatchupRow } = require('../../anchor/checkpoint_engine/catchup_verifier.js');
+const { verifyAnchorRewardCatchupRow } = require('../../anchor/publisher/reward_catchup_verifier.js');
 
 function registerCatchupVerifier(table, fn) {
     if (!mirroredTableSet.has(table)) {
@@ -47,6 +49,9 @@ function registerCatchupVerifier(table, fn) {
 function getCatchupVerifier(table) {
     return verifiers.get(table);
 }
+
+registerCatchupVerifier('state_checkpoints', verifyStateCheckpointCatchupRow);
+registerCatchupVerifier('anchor_reward_attestations', verifyAnchorRewardCatchupRow);
 
 module.exports = {
     MIRRORED_TABLES,
