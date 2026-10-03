@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-10-03
+
+### Added
+- Added folded ANCHOR v3 payloads with archived checkpoints, prices, bridge transfers, and policy snapshots.
+- Added shared-list policy references and the list share producer gate.
+- Added hourly PRICE batches with six rounds per wire.
+- Added list names and descriptions to shared-list versions.
+
+### Changed
+- Keyed token bridge and policy testnet gates separately for each supported chain.
+- Published hourly attestation batches only when responses are present.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on BTC:testnet at 155001.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on LTC:testnet at 4906040.
+- Armed ANCHOR_BUNDLE_ORDER_ACTIVATION on DOGE:testnet at 67962387.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on BTC:testnet at 1791061097.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on LTC:testnet at 1791061097.
+- Armed PRICE_V1_CANONICAL_ACTIVATION on DOGE:testnet at 1791061097.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on BTC:testnet at 155001.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on LTC:testnet at 4906040.
+- Armed STAKE_WEIGHT_COLLATION_ACTIVATION on DOGE:testnet at 67962387.
+- Armed ANCHOR_FOLD_ACTIVATION on BTC:testnet at 155001.
+- Armed ANCHOR_FOLD_ACTIVATION on LTC:testnet at 4906040.
+- Armed ANCHOR_FOLD_ACTIVATION on DOGE:testnet at 67962387.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on BTC:testnet at 155001.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on LTC:testnet at 4906040.
+- Armed ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION on DOGE:testnet at 67962387.
+- Armed LIST_META_ACTIVATION on BTC:testnet at 155001.
+- Armed LIST_META_ACTIVATION on LTC:testnet at 4906040.
+- Armed LIST_META_ACTIVATION on DOGE:testnet at 67962387.
+
+### Fixed
+- Required an explicit network when deriving oracle snapshots.
+
 ## [0.21.1] - 2026-10-01
 
 ### Added
