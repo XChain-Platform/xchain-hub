@@ -62,10 +62,10 @@
  * ONE OF THE FIVE IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
  * hashes gate VALUES, and a regtest venue arms some gates from its own
  * environment rather than from a committed height, so the same build reports one
- * digest in a bare checkout and another inside a configured container. Two
- * readings have to be taken with the same environment to be comparable, and the
- * `gates` map is what turns a mismatch into a named gate instead of two opaque
- * hashes.
+ * digest in a bare checkout and another inside a configured container. A reading
+ * records that environment as `env` (a pin with none was taken bare), --compare
+ * refuses (exit 2) a pin taken under another or shaped for another tool, and
+ * `consensus_rules_gates` in the JSON output names the gate behind a mismatch.
  *
  * USAGE
  *   node bin/consensus-identity.js                    human summary
@@ -180,7 +180,71 @@ function codeIdentity() {
         coin_pin_skipped_networks: coinPins.unpinnedNetworks,
         hub_schema_version: HUB_SCHEMA_VERSION,
         carrier_logic_digest: logicPin.digest(logicPin.readPin(REPO_ROOT)),
+        // The regtest arming this reading was taken under; --compare refuses a pin taken under another.
+        env: armingEnv(process.env),
     };
+}
+
+// Each arming variable read BY NAME, for the reason ENV_READERS in shared_rows.js gives.
+const ARMING_READERS = {
+    XC_ANCHOR_FOLD_REGTEST_ACTIVATION:    (env) => env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION,
+    XC_ANCHOR_STAKE_REGTEST_ACTIVATION:   (env) => env.XC_ANCHOR_STAKE_REGTEST_ACTIVATION,
+    XC_ANCHOR_SLASH_REGTEST_ACTIVATION:   (env) => env.XC_ANCHOR_SLASH_REGTEST_ACTIVATION,
+    XC_ROLLCALL_REGTEST_ACTIVATION:       (env) => env.XC_ROLLCALL_REGTEST_ACTIVATION,
+    XC_ROLLCALL_GATES_REGTEST_ACTIVATION: (env) => env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION,
+    XC_MIRROR_ADMISSION_ACTIVATION:       (env) => env.XC_MIRROR_ADMISSION_ACTIVATION,
+    XC_AMOUNTS_PRICE_REGTEST_ACTIVATION:  (env) => env.XC_AMOUNTS_PRICE_REGTEST_ACTIVATION,
+    XC_AMOUNTS_PRICE_REGTEST_TIME:        (env) => env.XC_AMOUNTS_PRICE_REGTEST_TIME,
+    XC_CONTRACTS_REGTEST_ACTIVATION:      (env) => env.XC_CONTRACTS_REGTEST_ACTIVATION,
+};
+
+/**
+ * Every variable REGTEST_ARMING names, mapped to its raw value, null when unset.
+ * @param {object} env the environment to read
+ * @returns {Object<string, string|null>}
+ */
+function armingEnv(env) {
+    const { REGTEST_ARMING } = require('../src/consensus/gate_registry/shared_rows.js');
+    const out = {};
+    for (const name of Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort()) {
+        // A variable with no reader would arm the digest unrecorded, so it is a refusal.
+        if (!ARMING_READERS[name]) throw new Error(`REGTEST_ARMING names ${name}, which armingEnv has no reader for`);
+        const raw = ARMING_READERS[name](env);
+        out[name] = raw === undefined ? null : String(raw);
+    }
+    return out;
+}
+
+function isPlainObject(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Refuse a pin --compare cannot judge, so a wrong input or a venue effect is
+ * one named line (exit 2), never a list of differences read as drift.
+ *
+ * @param {*} pin the parsed pin file
+ * @param {string} pinPath named in every refusal
+ * @param {object} nowEnv armingEnv() of this run; a pin with no `env` was taken bare
+ */
+function checkPin(pin, pinPath, nowEnv) {
+    if (!isPlainObject(pin)) throw new Error(`${pinPath}: a pin must be a JSON object`);
+    if ('bare_checkout' in pin || 'armed_regtest_venue' in pin || 'armed_map_fingerprint' in pin) {
+        throw new Error(`${pinPath}: an indexer identity; compare it with the indexer's bin/consensus-identity.js`);
+    }
+    if (typeof pin.consensus_rules_digest !== 'string' || !('hub_schema_version' in pin)) {
+        throw new Error(`${pinPath}: not a hub consensus identity`);
+    }
+    if ('env' in pin && !isPlainObject(pin.env)) throw new Error(`${pinPath}: env must be a JSON object`);
+    const pinEnv = pin.env || {};
+    const shown = (v) => (v === null || v === undefined ? 'unset' : JSON.stringify(String(v)));
+    const moved = Array.from(new Set(Object.keys(pinEnv).concat(Object.keys(nowEnv)))).sort()
+        .filter((name) => shown(pinEnv[name]) !== shown(nowEnv[name]))
+        .map((name) => `${name}: pin ${shown(pinEnv[name])}, now ${shown(nowEnv[name])}`);
+    if (moved.length) {
+        throw new Error(`${pinPath}: taken under a different regtest arming environment (${moved.join('; ')}); `
+            + 'take both readings under the same environment');
+    }
 }
 
 /**
@@ -264,6 +328,7 @@ function main() {
 
     if (opts.compare) {
         const pin = JSON.parse(fs.readFileSync(opts.compare, 'utf8'));
+        checkPin(pin, opts.compare, identity.env);
         const differences = compare(pin, identity);
         if (!differences.length) {
             console.log(`consensus identity holds against ${opts.compare}`);
@@ -293,6 +358,8 @@ function main() {
         console.log(`coin pins skipped on:     ${identity.coin_pin_skipped_networks.join(', ') || 'none'}`);
         console.log(`hub_schema_version:       ${identity.hub_schema_version}`);
         console.log(`carrier_logic_digest:     ${identity.carrier_logic_digest}`);
+        const armed = Object.keys(identity.env).filter((name) => identity.env[name] !== null);
+        console.log(`regtest arming env:       ${armed.map((n) => `${n}=${identity.env[n]}`).join(', ') || 'none'}`);
         if (opts.out) console.log(`\nwritten to ${opts.out}`);
     }
 
@@ -317,6 +384,8 @@ module.exports = {
     codeIdentity,
     coinConsensusPins,
     compare,
+    checkPin,
+    armingEnv,
     setRepoRoot,
     // The measured checkout, as a call rather than a binding: a consumer that
     // captured the value at require time would keep reading the default after

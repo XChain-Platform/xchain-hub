@@ -70,8 +70,8 @@ async function finishStoredRound(round, prices, referenceBlock, blockTimestamp) 
     return broadcastStoredRound.call(this, round);
 }
 
-// Stream the freshly stored rows to the hub-DB mirror subscribers, dropping them for a
-// resync when the re-read fails: a silent gap would certify a round no subscriber received.
+// Stream the freshly stored rows (finalized or skipped) to the hub-DB mirror subscribers, dropping
+// them for a resync when the re-read fails: a silent gap would certify a round no subscriber received.
 async function broadcastStoredRound(round) {
     // Broadcast the finalized rows to hub-DB mirror subscribers (distributed indexers),
     // mirroring StateCheckpointEngine/CrossChainDexEngine. This must happen AFTER the
@@ -233,13 +233,9 @@ module.exports = {
         // storeSnapshot. Both insert paths into the mirrored price_snapshots table must
         // feed HubDbBroadcaster or a live streaming mirror never receives the skipped
         // rows (it gets them only on the next re-bootstrap), diverging from a
-        // freshly-bootstrapped mirror. Best-effort; never block finalize.
-        if (coinPairs.length && this.hub && this.hub.hubDbBroadcaster) {
-            try {
-                let rows = await this.db.findPriceSnapshotsForRound(round);
-                for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
-            } catch (e) { /* broadcast is best-effort */ }
-        }
+        // freshly-bootstrapped mirror. Never blocks finalize; a failed re-read forces
+        // a subscriber resync exactly as the finalized path does.
+        if (coinPairs.length) await broadcastStoredRound.call(this, round);
         // #7: mark as LOCALLY skipped, not finalized, so a legitimate later PROPOSE
         // from the federation still processes and can upgrade the 'skipped' rows to
         // 'finalized'. markFinalized would have frozen this round's NULL price here.

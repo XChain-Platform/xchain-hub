@@ -41,13 +41,16 @@ describe('gate_registry: anchor fold rows', function () {
         assert.ok(present.length === 0 || present.length === 2);
     });
 
-    it('ships both activation maps inert on every network', function () {
+    it('ships both activation maps inert on mainnet and armed at the v0.21.3 testnet heights', function () {
         // These cases wait for this repo's SHARED-block twin to carry the pair.
         if (present.length !== 2) this.skip();
         withEnv(undefined, () => {
             for (const key of KEYS) {
                 assert.deepStrictEqual(registry.get(key), {
                     mainnet: 9999999999,
+                    'BTC:testnet': 155001,
+                    'LTC:testnet': 4906040,
+                    'DOGE:testnet': 67962387,
                     testnet: 9999999999,
                     regtest: null,
                 });
@@ -72,5 +75,30 @@ describe('gate_registry: anchor fold rows', function () {
                 assert.strictEqual(registry.activeAt(key, 'testnet', null, 99999999, null), false);
             }
         });
+    });
+});
+
+// The cut's arm writer inserts per-chain testnet keys and leaves the bare testnet
+// sentinel unarmed, so the publisher's fold check must resolve 'DOGE:testnet'.
+describe('anchor fold gate on the writer-produced per-chain testnet table', function () {
+    const { registry: core } = require('../../../../src/consensus/gate_registry/core.js');
+    const { isAnchorFoldActive } = require('../../../../src/anchor/publisher/canonical_forms.js');
+    const DOGE_HEIGHT = 67962387;
+    let saved;
+
+    beforeEach(function () {
+        if (!registry.has(KEYS[0])) this.skip();
+        saved = core.overlay;
+        core.overlay = (key, value) => {
+            const base = saved ? saved(key, value) : value;
+            if (key !== KEYS[0]) return base;
+            return Object.assign({}, base, { 'BTC:testnet': 155001, 'LTC:testnet': 4906040, 'DOGE:testnet': DOGE_HEIGHT });
+        };
+    });
+    afterEach(function () { if (saved !== undefined) core.overlay = saved; });
+
+    it('enters the fold era at the DOGE activation height inclusive', function () {
+        assert.strictEqual(isAnchorFoldActive(DOGE_HEIGHT - 1, 'testnet'), false);
+        assert.strictEqual(isAnchorFoldActive(DOGE_HEIGHT, 'testnet'), true);
     });
 });

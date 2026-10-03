@@ -36,8 +36,10 @@ const { listIdsOf } = require('./archive/list_rows_select.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 
+// The fold height is a DOGE height (the chain ANCHOR is mined on), so the armed
+// 'DOGE:<network>' key the cut writes resolves before the bare network sentinel.
 function isAnchorFoldActive(blockIndex, network){
-    return activeAt(ANCHOR_FOLD_GATE, String(network || ''), null, blockIndex, null);
+    return activeAt(ANCHOR_FOLD_GATE, String(network || ''), 'DOGE', blockIndex, null);
 }
 
 function isArchiveAnchorRow(row){

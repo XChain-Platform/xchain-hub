@@ -10,6 +10,7 @@ const { expect } = require('chai');
 const sinon = require('sinon');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity = require('../../../../../src/validators/identity');
+const { listMetaHash } = require('../../../../../src/cross_chain/list/canonical.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 const BLOCK = 160000;
@@ -44,7 +45,7 @@ function listRow(){
     };
 }
 
-function publisher(held, dbOverrides){
+function publisher(held, dbOverrides, network = 'testnet'){
     const db = {
         ...DB_METHODS,
         getListSnapshotBySnapshotId: async () => held ? [held] : [],
@@ -52,13 +53,13 @@ function publisher(held, dbOverrides){
     };
     const pub = new StateAnchorPublisher({
         db,
-        network: 'testnet',
+        network,
         getIdentity: () => IDENTITIES[0],
         getPeerManager: () => ({ broadcast() {} }),
         p2pConfig: {}
     });
     pub.resolveCapabilitySet = async (capability, block, network) =>
-        capability === 'cross_chain' && block === BLOCK && network === 'testnet' ? SET : [];
+        capability === 'cross_chain' && block === BLOCK && network === pub.network ? SET : [];
     return pub;
 }
 
@@ -88,6 +89,39 @@ function archiveFor(row){
 }
 
 describe('archive list snapshot follower integration', function () {
+    it('binds active metadata without relying on a held row', async function () {
+        const pub = publisher(null, null, 'regtest');
+        const name = 'Original label';
+        const description = 'Original description';
+        const signed = signedRow(pub, 3, {
+            network: 'regtest',
+            name,
+            description,
+            meta_hash: listMetaHash(name, description)
+        });
+
+        expect(await pub.verifyArchivedListSnapshot(signed)).to.equal(true);
+        for(const forged of [
+            { ...signed, name: 'Forged archive label' },
+            { ...signed, description: 'Forged archive description' },
+            { ...signed, meta_hash: '00'.repeat(32) }
+        ]){
+            expect(await pub.verifyArchivedListSnapshot(forged)).to.equal(false);
+        }
+    });
+
+    it('enforces absence of metadata below the gate', async function () {
+        // mainnet stays below LIST_META; testnet block 160000 is above its v0.21.3 height.
+        const pub = publisher(undefined, undefined, 'mainnet');
+        const signed = signedRow(pub, 3, { network: 'mainnet' });
+
+        expect(await pub.verifyArchivedListSnapshot(signed)).to.equal(true);
+        for(const field of ['name', 'description', 'meta_hash']){
+            expect(await pub.verifyArchivedListSnapshot({ ...signed, [field]: 'forged' }))
+                .to.equal(false);
+        }
+    });
+
     it('refuses an archive whose list row differs from the held row', async function () {
         const held = listRow();
         const pub = publisher(held);

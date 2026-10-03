@@ -16,11 +16,13 @@
  * design, §6.2).
  *
  * The cases here are the ones a reading of the diff cannot settle: that the window
- * is on the unix hour and not on the process's own start, that an EMPTY window still
- * publishes a coverage head, that an over-cap window dead-letters loudly rather than
- * truncating itself, that a restart cannot pay for a window twice, and that a window
- * whose quorum was unavailable is retried with the SAME bytes rather than a new
- * proposal. The DB is a small in-memory pair of tables rather than call-counting
+ * is on the unix hour and not on process start; that by the operator ruling of
+ * 2026-10-02 an empty window records a local skipped marker and publishes nothing,
+ * giving up chain-only proof that a quiet hour was quiet; that an over-cap
+ * window dead-letters loudly rather than truncating itself; that a restart cannot pay
+ * for a window twice; and that a window whose quorum was unavailable is retried with
+ * the SAME bytes rather than a new proposal. The DB is a small in-memory pair of
+ * tables rather than call-counting
  * stubs, because "the second publisher saw the first one's marker" is exactly the
  * assertion a canned stub cannot fail.
  *
@@ -243,7 +245,7 @@ const hookAt10827 = function () {
     };
 
 // ------------------------------------------------------------ publishing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('publishes an EMPTY window as a row_count 0 coverage head', async function () {
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('skips an empty window without publishing a coverage head', async function () {
             let hub = makeHub({ dir: dir });
             let p   = makePublisher(hub);
             let now = 200 * WINDOW_S;
@@ -251,15 +253,10 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
 
             let result = await p.sweep(now);
 
-            expect(result.published).to.equal(1);
-            expect(p.wires.length).to.equal(1);
-            let head = decodeHead(p.wires[0]);
-            expect(head.rowCount).to.equal(0);
-            expect(head.windowStart).to.equal(now - WINDOW_S);
-            expect(head.windowEnd).to.equal(now);
-            expect(head.totalChunks).to.equal(1);
+            expect(result.published).to.equal(0);
+            expect(p.wires.length).to.equal(0);
             expect(p.stats.windowsEmpty).to.equal(1);
-            expect(hub.db.marker(now - WINDOW_S).status).to.equal('sent');
+            expect(hub.db.marker(now - WINDOW_S)).to.include({ status: 'skipped', row_count: 0 });
         }); }); });
 
 // ------------------------------------------------------------ publishing
@@ -354,6 +351,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             hub.db.setTip(null);
             let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
             p._floorWindow = now - WINDOW_S;
 
             await p.sweep(now);

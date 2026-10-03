@@ -45,7 +45,8 @@ async function bootApi(oracle) {
         attestationRelay:     null,
         hubDbBroadcaster:     null,
         getOracle: () => oracle,
-        oracleMaxAgeSeconds: () => 1800,
+        // The tip-aware bound in force, distinct from the legacy 1800 so the RPC is seen reading it.
+        oracleMaxAgeSecondsInForce: async () => 4500,
         start: async () => {}, startP2P: async () => {}, startConsensus: async () => {},
         startOracle: async () => {}, startCrossChain: async () => {}, startReorgHandler: async () => {},
         startGovernance: async () => {}, startAttestation: async () => {}, startCapabilities: async () => {},
@@ -113,7 +114,7 @@ describe('getoraclesubmissions role reporting', function () {
         expect(result.error).to.equal(undefined);
         expect(result.currentRound).to.equal(42);
         expect(result.submissions).to.deep.equal(info.submissions);
-        expect(result.oracleMaxPriceAgeSeconds).to.equal(1800);
+        expect(result.oracleMaxPriceAgeSeconds).to.equal(4500);
     });
 
 });

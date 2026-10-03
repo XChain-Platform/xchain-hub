@@ -30,7 +30,7 @@ function buildListSnapshotRow({ version, network, homeChain, homeListIndex, snap
         throw new TypeError('version added and removed must be arrays');
     }
 
-    return {
+    const row = {
         snapshot_id: deriveListSnapshotId(
             network,
             homeChain,
@@ -50,6 +50,14 @@ function buildListSnapshotRow({ version, network, homeChain, homeListIndex, snap
         members_hash: version.members_hash,
         origin_block: Number(version.origin_block)
     };
+
+    if (typeof version.meta_hash === 'string') {
+        row.name = version.name == null ? null : version.name;
+        row.description = version.description == null ? null : version.description;
+        row.meta_hash = version.meta_hash;
+    }
+
+    return row;
 }
 
 module.exports = { listOriginBlockFrom, buildListSnapshotRow };

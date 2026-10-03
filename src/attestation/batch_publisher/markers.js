@@ -178,6 +178,19 @@ module.exports = {
         }
     },
 
+    async recordSkipped(windowStart, windowEnd){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function') return;
+        this.stats.windowsEmpty++;
+        try {
+            await db.setAttestPublishedBatchByNetworkAndWindowStart(
+                this.network, windowStart, windowEnd, 0, 'skipped');
+        } catch(e){
+            logger.error('AttestationBatchPublisher: could not record the skipped marker for window ' +
+                         windowStart + ': ' + (e && e.message));
+        }
+    },
+
     // Called by the receive half when a batch for this window is parsed off DOGE and
     // pushed back (D72). Authoritative for the WHOLE federation: any hub's batch landing
     // covers the window, so a hub that never published one stops considering it.
@@ -187,6 +200,15 @@ module.exports = {
         this.stats.landedRecorded++;
         this._quarantined.delete(Number(windowStart));
         await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd, rowCount, txidOrNull, 'landed');
+    },
+
+    // A validated DOGE retraction makes the window unresolved again. Delete is the
+    // existing reopen idiom for markers, and the DB predicate keeps a concurrent
+    // transition to any other state intact.
+    async reopenLandedWindow(windowStart, windowEnd){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function') return;
+        await db.deleteLandedAttestPublishedBatch(this.network, windowStart, windowEnd);
     },
 
     // ------------------------------------------------------------ the files

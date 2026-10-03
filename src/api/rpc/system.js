@@ -254,10 +254,13 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
     return { oracleAgeS, oracleStale, oracleThresholdS };
 }
 
-// The anchor, attestation and relay stats, read before the status code is set.
+// The anchor, attestation, batch and relay stats, read before the status code is set.
 function publisherStats(hub) {
     let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
     let attestStats = hub.attestationPublisher ? hub.attestationPublisher.getPublisherStats() : null;
+    let batchStats = (hub.attestationBatchPublisher
+        && typeof hub.attestationBatchPublisher.getStats === 'function')
+        ? hub.attestationBatchPublisher.getStats() : null;
     // Attestation relay. The relay drives the v3 request /v4 response
     // legs across chains and until now its only instrument was the process log,
     // so an operator could not see that a finalized v4 was sitting held for want
@@ -265,11 +268,11 @@ function publisherStats(hub) {
     // before the relay carried getStats(), matching hub_db_stream below.
     let relayStats = (hub.attestationRelay && typeof hub.attestationRelay.getStats === 'function')
         ? hub.attestationRelay.getStats() : null;
-    return { anchorStats, attestStats, relayStats };
+    return { anchorStats, attestStats, batchStats, relayStats };
 }
 
 // The /health response body; every section past config_fetch is telemetry only.
-function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayStats },
+function healthBody(hub, configFetchCounters, { anchorStats, attestStats, batchStats, relayStats },
                     { healthy, dbOk, dbCircuit, oracleAgeS, oracleStale, oracleThresholdS,
                       consensusInput, admissionTips }) {
     let healthResult = {
@@ -289,6 +292,7 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, relayS
     if (admissionTips) healthResult.admission_tips = admissionTips;
     if (anchorStats) healthResult.anchor = anchorStats;
     if (attestStats) healthResult.attest = attestStats;
+    if (batchStats) healthResult.attest_batch = batchStats;
     // Telemetry only, never a 503: a relay that is disabled, or holding
     // responses for an unconfigured origin chain, is a configuration fact
     // rather than a sick hub, and 503-ing the config oracle over it would

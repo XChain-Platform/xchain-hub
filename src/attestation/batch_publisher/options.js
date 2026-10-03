@@ -125,6 +125,7 @@ function initBatchRuntime(self){
         wiresBroadcast: 0, rowsPublished: 0,
         signRounds: 0, signQuorums: 0, signTimeouts: 0,
         signaturesProvided: 0, signRefusals: 0, signRefusalsNoChainTip: 0,
+        chainReconcileRuns: 0, chainReconcileLandedWindows: 0, chainReconcileFailures: 0,
         landedRecorded: 0, lastPublishedWindow: null, lastPublishedTxid: null
     };
 }

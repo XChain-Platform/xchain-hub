@@ -24,10 +24,10 @@
  * chain rebuilds the mirror table from those batches and re-derives every callback
  * without trusting any hub.
  *
- * EVERY WINDOW PUBLISHES, INCLUDING AN EMPTY ONE. A `row_count 0` head costs one
- * small transaction an hour and is what makes coverage PROVABLE rather than
- * assumed: a chain-only node finds a head for every window, instead of having to
- * believe that a silent hour carried nothing.
+ * ONLY WINDOWS WITH RESPONSES PUBLISH. By operator ruling of 2026-10-02, an empty
+ * window records a local `skipped` marker and spends nothing on chain. This gives up
+ * the ability for a chain-only node to prove that a quiet hour carried nothing, while
+ * preserving on-chain reconstruction of every terminal response that did arrive.
  *
  * IT SHARES NO STATE WITH PRICE OR ANCHOR. This is the third consumer of the one
  * operator signer, wallet and spend guard, and the OraclePublisher pattern it
@@ -97,6 +97,8 @@ const anchor    = require('./batch_publisher/anchor.js');
 const signing   = require('./batch_publisher/signing.js');
 const broadcast = require('./batch_publisher/broadcast.js');
 const markers   = require('./batch_publisher/markers.js');
+const chainReconcile = require('./batch_publisher/chain_reconcile.js');
+const signerDivergence = require('./batch_publisher/signer_divergence.js');
 const { XATTESTB_SIGN_REQ, XATTESTB_SIGN, MAX_CATCHUP_WINDOWS,
         ANCHOR_MAX_LAG_BLOCKS } = require('./batch_publisher/constants.js');
 const hubConfig = require('../config');
@@ -138,9 +140,11 @@ class AttestationBatchPublisher {
     setWalletSignHook(fn){ this.walletSignFn = fn; }
     setBalanceHook(fn){ this.getBalanceFn = fn; }
 
-    // The mirror has to be ARMED on this network for the batch to mean anything: below
-    // an unratified (null) activation entry no response ever becomes a mirror row, so a
-    // batch would publish an empty head every hour for a table that is empty by design.
+    // The mirror has to be ARMED on this network for the batch to mean anything. By the
+    // operator ruling of 2026-10-02, an armed empty window writes a local skipped marker
+    // and gives up chain-only proof that the quiet window was quiet. Below an unratified
+    // (null) activation entry no response becomes a mirror row, so scheduling would only
+    // write skipped markers for a table empty by design.
     // Read off the activation map itself rather than off a height, because the window
     // is a clock and has no block to evaluate the height gate against.
     isArmedNetwork(){
@@ -271,9 +275,11 @@ class AttestationBatchPublisher {
         try {
             let now     = Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds();
             let pending = await this.pendingWindows(now);
+            if(pending.length > 0)
+                pending = await this.reconcilePendingAgainstChain(pending);
             for(let w of pending){
                 attempted++;
-                let done = await this.publishWindow(w.windowStart, w.age);
+                let done = await this.publishWindow(w.windowStart, w.age, w.reopenedSkipped);
                 if(done) published++;
             }
         } finally {
@@ -333,7 +339,8 @@ function installParts(target, parts){
     }
 }
 
-installParts(AttestationBatchPublisher.prototype, [windows, anchor, signing, broadcast, markers]);
+installParts(AttestationBatchPublisher.prototype,
+    [windows, anchor, signing, broadcast, markers, chainReconcile, signerDivergence]);
 
 module.exports = Object.assign(AttestationBatchPublisher, {
     XATTESTB_SIGN_REQ,

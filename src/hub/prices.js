@@ -23,6 +23,7 @@
 const coins = require('../coins');
 const presence = require('../lib/oracle_round_presence.js');
 const { advisoryAgeSecondsAt } = require('./price_age_at.js');
+const { pinnedMaxPriceAgeMs } = require('../oracle/price_batch_cadence.js');
 const { bcmul, bcdiv } = require('../bcmath.js');
 const mathjs = require('mathjs');
 const hubConfig = require('../config');
@@ -142,8 +143,8 @@ class Prices {
         return { from_round: from, to_round: to, ...summary };
     }
 
-    // Oracle price staleness bound in seconds, mirroring the indexer's
-    // ORACLE_MAX_PRICE_AGE_SECONDS so advisory quotes reject the rounds the fee gate does.
+    // The pinned pre-hourly oracle staleness bound in seconds (the indexer's
+    // ORACLE_MAX_PRICE_AGE_SECONDS); oracleMaxAgeSecondsInForce adds the tip-aware hourly bound.
     // Precedence: a regtest-only p2pConfig/env override (where 0 disables the bound),
     // else the pinned registry value.
     //
@@ -156,14 +157,15 @@ class Prices {
     // as the platform's other consensus-adjacent seams (coins/index.js resolveFeeDestination,
     // OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS); standalone mode, where network is '',
     // fails closed to the pinned value for the same reason those do.
+    // Called with no pair it answers the hub-wide scalar, the tightest registry bound.
     oracleMaxAgeSeconds(coinPair) {
         let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
             ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
             : hubConfig.ORACLE_MAX_PRICE_AGE_SECONDS;
         let v = parseInt(raw, 10);
-        if (!Number.isFinite(v)) return this.registryOracleMaxAge(coinPair);
+        let pinned = coinPair ? this.registryOracleMaxAge(coinPair) : this.registryTightestOracleMaxAge();
+        if (!Number.isFinite(v)) return pinned;
         if (this.network === 'regtest') return v;
-        let pinned = this.registryOracleMaxAge(coinPair);
         // Warned once per hub, not per call: this resolves on every getprice, every fee
         // quote and every health poll, so a per-call line would bury the log.
         if (v !== pinned && !this._warnedOracleMaxAgeOverride) {
@@ -195,6 +197,37 @@ class Prices {
         return null;
     }
 
+    // The tightest pinned bound across registry coins, for the one scalar a health
+    // consumer clamps every pair to: no pair then reads fresh past its own getprice
+    // bound, and a coin with a looser bound only errs toward warning early.
+    registryTightestOracleMaxAge() {
+        let ms = pinnedMaxPriceAgeMs(this.network || 'mainnet');
+        return ms === null ? this.registryOracleMaxAge() : ms / 1000;
+    }
+
+    // Resolve the fee gate's tip-aware bound for getprice and the advertised scalar: a registry
+    // pair reads its own chain, any other the TIGHTEST across chains (never fresh past a gate).
+    // The sync resolver still answers a regtest override and warns on an ignored one.
+    async oracleMaxAgeSecondsInForce(coinPair) {
+        let legacy = this.oracleMaxAgeSeconds(coinPair);
+        let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
+            ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
+            : hubConfig.ORACLE_MAX_PRICE_AGE_SECONDS;
+        if (this.network === 'regtest' && Number.isFinite(parseInt(raw, 10))) return legacy;
+        let network = this.network || 'mainnet';
+        let base = String(coinPair || '').split('/')[0];
+        let ticks = (coins.ALLOWED_COINS || []).includes(base) ? [base] : (coins.ALLOWED_COINS || []);
+        let tightest = null;
+        for (let tick of ticks) {
+            try {
+                let bundle = coins.getCoinConfig(tick, network);
+                let age = bundle ? await this.advisoryMaxAgeSecondsAtTip(tick, network, bundle) : NaN;
+                if (Number.isFinite(age) && age > 0 && (tightest === null || age < tightest)) tightest = age;
+            } catch (e) { /* this tick is not configured on this network; the others still count */ }
+        }
+        return tightest === null ? legacy : tightest;
+    }
+
     async advisoryMaxAgeSecondsAtTip(chain, network, bundle) {
         let tip = null;
         try {
@@ -219,7 +252,7 @@ class Prices {
     // block_timestamp is never aged out, since its age is unknown.
     async getPriceStatus(coinPair, maxAgeSeconds) {
         let rows = await this.db.getFinalizedPriceSnapshotByCoinPair(coinPair);
-        let maxAge = maxAgeSeconds == null ? this.oracleMaxAgeSeconds(coinPair) : maxAgeSeconds;
+        let maxAge = maxAgeSeconds == null ? await this.oracleMaxAgeSecondsInForce(coinPair) : maxAgeSeconds;
         if (rows.length === 0)
             return { row: null, fresh: false, stale: false, missing: true, ageSeconds: null, maxAgeSeconds: maxAge };
         let row = rows[0];

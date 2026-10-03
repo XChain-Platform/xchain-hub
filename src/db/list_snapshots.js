@@ -43,7 +43,8 @@ module.exports = {
 
     async findListSnapshotChain(network, homeChain, homeListIndex, uptoSeq){
         return this.doQuery(
-            'SELECT seq, kind, list_type, added, removed, members_hash, origin_block FROM list_snapshots ' +
+            'SELECT seq, kind, list_type, added, removed, members_hash, name, description, meta_hash, origin_block ' +
+            'FROM list_snapshots ' +
             "WHERE network = ? AND home_chain = ? AND home_list_index = ? AND seq <= ? AND status = 'finalized' " +
             'ORDER BY seq ASC',
             [String(network || ''), String(homeChain || ''), Number(homeListIndex), Number(uptoSeq)]);

@@ -14,7 +14,11 @@
  *
  ********************************************************************/
 
-const { isCanonicalOrder, listMembersHash } = require('./canonical.js');
+const registry = require('../../consensus/gate_registry.js');
+const { isCanonicalOrder, listMembersHash, listMetaHash } = require('./canonical.js');
+const { hasValidListMeta } = require('./version_plan.js');
+
+const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
 
 function canonicalPositiveInteger(value) {
     if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0;
@@ -34,6 +38,27 @@ function canonicalArray(value) {
     }
 }
 
+function archivedListMetaRefusal(row) {
+    const active = registry.activeAt(
+        LIST_META_GATE_KEY,
+        row.network,
+        'BTC',
+        Number(row.snapshot_block),
+        null
+    );
+    if (!active) {
+        if (row.name != null || row.description != null || row.meta_hash != null) {
+            return 'metadata is present below activation';
+        }
+        return null;
+    }
+    if (!hasValidListMeta(row)) return 'metadata fields are invalid';
+    if (row.meta_hash !== listMetaHash(row.name, row.description)) {
+        return 'metadata hash mismatch';
+    }
+    return null;
+}
+
 function archivedListRowRefusal(row) {
     if (!row || !canonicalPositiveInteger(row.seq)) {
         return 'seq is not a canonical positive integer';
@@ -51,7 +76,7 @@ function archivedListRowRefusal(row) {
     if (seq === 1 && listMembersHash(added) !== row.members_hash) {
         return 'full row members hash mismatch';
     }
-    return null;
+    return archivedListMetaRefusal(row);
 }
 
 module.exports = { archivedListRowRefusal };

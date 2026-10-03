@@ -17,13 +17,18 @@
 const { isCanonicalOrder, listMembersHash } = require('./canonical.js');
 const { LIST_SHARE_MAX_MEMBERS } = require('./constants.js');
 
+function nullableMetaValue(value) {
+    return value === undefined || value === null ? null : value;
+}
+
 function ownReadVerdict({
     row,
     sharedLists,
     homeTip,
     confirmations,
     read,
-    heldListType = null
+    heldListType = null,
+    metaActive = false
 }) {
     if (!Array.isArray(sharedLists) ||
         !Number.isSafeInteger(homeTip) || homeTip < 0 ||
@@ -43,6 +48,19 @@ function ownReadVerdict({
     if (!isCanonicalOrder(read.members) ||
         read.members.length > LIST_SHARE_MAX_MEMBERS ||
         listMembersHash(read.members) !== row.members_hash) return 'refuse';
+    if (!metaActive &&
+        (nullableMetaValue(row.name) !== null ||
+            nullableMetaValue(row.description) !== null ||
+            nullableMetaValue(row.meta_hash) !== null)) return 'refuse';
+    const compareMeta = metaActive ||
+        (typeof row.meta_hash === 'string' && row.meta_hash.length > 0);
+    if (metaActive && typeof row.meta_hash !== 'string') return 'refuse';
+    if (compareMeta &&
+        (read.meta_hash !== row.meta_hash ||
+            nullableMetaValue(read.name) !== nullableMetaValue(row.name) ||
+            nullableMetaValue(read.description) !== nullableMetaValue(row.description))) {
+        return 'refuse';
+    }
 
     return 'pass';
 }

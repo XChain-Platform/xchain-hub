@@ -287,11 +287,62 @@ function registerClosedSetTests() {
     });
 }
 
+// Fail the Nth capability_snapshots re-read, by a throw or by an empty read-back.
+function failNthReread(n, mode) {
+    const select = db.doQuery;
+    let seen = 0;
+    db.doQuery = async (sql, args) => {
+        if (/^SELECT \* FROM capability_snapshots/.test(sql) && ++seen === n) {
+            if (mode === 'throw') throw new Error('connection reset');
+            return [];
+        }
+        return select(sql, args);
+    };
+}
+
+function registerMirrorGapTests() {
+    for (const mode of ['throw', 'empty']) {
+        it('forces a subscriber resync when a re-read mid-set comes back ' + mode + ', and the write still counts', async function () {
+            sinon.stub(console, 'error');
+            broadcaster.dropAllForResync = sinon.stub().returns(1);
+            failNthReread(2, mode);
+            const res = await agg.persistPriceCapabilitySnapshot(ANCHOR);
+            expect(res).to.deep.equal({ status: 'written', rows: 4 });
+            expect(broadcaster.broadcastRow.callCount, 'stream stops at the gap').to.equal(1);
+            expect(broadcaster.dropAllForResync.calledOnce, 'subscribers dropped for resync').to.be.true;
+            expect(broadcaster.dropAllForResync.firstCall.args[0]).to.equal('capability-snapshot broadcast gap');
+            expect(console.error.called, 'the gap is logged').to.be.true;
+        });
+    }
+    it('never fails the committed write when the resync repair itself throws', async function () {
+        sinon.stub(console, 'error');
+        broadcaster.dropAllForResync = sinon.stub().throws(new Error('broadcaster gone'));
+        failNthReread(1, 'throw');
+        const res = await agg.persistPriceCapabilitySnapshot(ANCHOR);
+        expect(res).to.deep.equal({ status: 'written', rows: 4 });
+        expect(broadcaster.dropAllForResync.calledOnce).to.be.true;
+    });
+    it('spends no re-read and drops nobody when there are no subscribers', async function () {
+        broadcaster.subscribers = new Set();
+        broadcaster.dropAllForResync = sinon.stub();
+        const res = await agg.persistPriceCapabilitySnapshot(ANCHOR);
+        expect(res).to.deep.equal({ status: 'written', rows: 4 });
+        expect(db.queries.filter(query => /^SELECT \* FROM capability_snapshots/.test(query.sql))).to.have.length(0);
+        expect(broadcaster.broadcastRow.called).to.be.false;
+        expect(broadcaster.dropAllForResync.called).to.be.false;
+    });
+}
+
 function registerDerivedCapabilitySuites() {
     describe('the rows', function () {
         registerFixtureHooks();
         registerRowTests();
         registerRowCacheTest();
+    });
+
+    describe('mirror delivery gap', function () {
+        registerFixtureHooks();
+        registerMirrorGapTests();
     });
 
     describe('fails closed', function () {

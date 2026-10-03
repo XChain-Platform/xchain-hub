@@ -17,9 +17,8 @@
  * Every step that changes a column rather than a key: adding one, widening a type,
  * a charset or an ENUM, and back-filling a value a later column made recoverable.
  * Each one is idempotent from information_schema, so the whole set runs on every
- * boot, and each one swallows its own failure loudly for the reason runMigrations
- * states: one sequential pass, so a throw here takes every later migration and the
- * hub boot with it.
+ * boot. Best-effort compatibility steps swallow failures loudly, while columns
+ * required by the advertised schema fail startup if their ALTER does not complete.
  *
  * src/db/index.js installs these on Database.prototype, so `this` is the Database.
  *
@@ -157,6 +156,12 @@ module.exports = {
         // it against heights[oracle_prices][source_chain] rather than against the reading
         // chain's own B, and every chain reads the row without needing an entry of its own.
         await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
+
+        await this.migrateAddNullableColumn('list_snapshots', 'name',
+            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true);
+        await this.migrateAddNullableColumn('list_snapshots', 'description',
+            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true);
+        await this.migrateAddNullableColumn('list_snapshots', 'meta_hash', 'CHAR(64) NULL', true);
     },
 
 
@@ -166,12 +171,9 @@ module.exports = {
     // per column. A table with NO columns is one this node has not created yet; the CREATE
     // TABLE from src/sql covers it, so this returns rather than failing the boot.
     //
-    // A failure is logged and swallowed, as migrateColumnType's is and for the same
-    // reason: runMigrations is one sequential pass, so a throw here takes every migration
-    // after it and the hub boot down with it. The consequence of the column being absent is
-    // bounded and stated: this hub cannot stamp admission heights, so above the activation
-    // it refuses to finalize those rows rather than producing rows no verifier can rebuild.
-    async migrateAddNullableColumn(table, column, columnDef){
+    // Best-effort failures are logged and swallowed. Required advertised-schema columns
+    // instead throw after logging so the hub cannot start with an incomplete row shape.
+    async migrateAddNullableColumn(table, column, columnDef, requiredForSchema = false){
         let db = await this.getConnection();
         try {
             let rows = await db.query(
@@ -185,6 +187,12 @@ module.exports = {
             await db.query('ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + columnDef);
             logger.info('Migration: added ' + table + '.' + column + ' ' + columnDef);
         } catch(e){
+            if(requiredForSchema){
+                logger.error(nodeUtil.format('MIGRATION FAILED: required schema column ' + table + '.' + column +
+                    ' is absent, so startup cannot continue with an incomplete advertised schema. Run by hand: ' +
+                    'ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + columnDef, e));
+                throw e;
+            }
             logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is absent. Until it exists this hub ' +
                 'cannot stamp an admission height for that table, so above the mirror admission activation it ' +
                 'will REFUSE to finalize those rows. Run by hand: ALTER TABLE `' + table + '` ADD COLUMN `' +

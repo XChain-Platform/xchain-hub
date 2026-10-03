@@ -46,13 +46,13 @@ function oracleStatusRpc(ctx) {
             // (item #4479). ORACLE_ROUND_INTERVAL is an unbounded deployment
             // knob, so a health consumer deriving freshness from the cadence
             // alone (the dashboard's cadenceThresholds) can call a row 'ok'
-            // that getprice already rejects as stale. Reuse oracleMaxAgeSeconds
+            // that getprice already rejects as stale. Reuse oracleMaxAgeSecondsInForce
             // rather than a literal, so the exposed number can never diverge
             // from what getprice enforces; called without a pair it resolves to
-            // the registry default, the correct representative scalar while all
-            // registry coins share one bound. Additive: callers that ignore the
-            // field are unaffected, and it is null when the registry read fails.
-            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds()};
+            // the tightest tip-aware bound across registry chains. Additive: callers
+            // that ignore the field are unaffected, and it is null when the registry
+            // read fails.
+            return {active: true, ...info, oracleMaxPriceAgeSeconds: await hub.oracleMaxAgeSecondsInForce()};
         },
 
         // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for
@@ -94,11 +94,11 @@ function priceReadsRpc(ctx) {
                 // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
                 // bound the consumer clamps freshness to travelled only on
                 // getoraclesubmissions, so it was lost exactly when that rail was
-                // down; same oracleMaxAgeSeconds source as there, never a literal.
+                // down; same oracleMaxAgeSecondsInForce source as there, never a literal.
                 if (with_watermark) {
                     return {
                         watermark: Math.floor(Date.now() / 1000),
-                        oracleMaxPriceAgeSeconds: hub.oracleMaxAgeSeconds(),
+                        oracleMaxPriceAgeSeconds: await hub.oracleMaxAgeSecondsInForce(),
                         snapshots,
                     };
                 }

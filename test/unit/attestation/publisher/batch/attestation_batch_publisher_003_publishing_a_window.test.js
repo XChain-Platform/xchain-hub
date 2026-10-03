@@ -16,11 +16,13 @@
  * design, §6.2).
  *
  * The cases here are the ones a reading of the diff cannot settle: that the window
- * is on the unix hour and not on the process's own start, that an EMPTY window still
- * publishes a coverage head, that an over-cap window dead-letters loudly rather than
- * truncating itself, that a restart cannot pay for a window twice, and that a window
- * whose quorum was unavailable is retried with the SAME bytes rather than a new
- * proposal. The DB is a small in-memory pair of tables rather than call-counting
+ * is on the unix hour and not on process start; that by the operator ruling of
+ * 2026-10-02 an empty window records a local skipped marker and publishes nothing,
+ * giving up chain-only proof that a quiet hour was quiet; that an over-cap
+ * window dead-letters loudly rather than truncating itself; that a restart cannot pay
+ * for a window twice; and that a window whose quorum was unavailable is retried with
+ * the SAME bytes rather than a new proposal. The DB is a small in-memory pair of
+ * tables rather than call-counting
  * stubs, because "the second publisher saw the first one's marker" is exactly the
  * assertion a canned stub cannot fail.
  *
@@ -270,6 +272,8 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             hub.db.setTip(null);
             let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
+            for(let i = 0; i <= 4; i++)
+                hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + i * WINDOW_S + 1 }));
             p._floorWindow = now - WINDOW_S;
 
             let warned = [];
@@ -322,6 +326,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             });
             let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
             p._floorWindow = now - WINDOW_S;
 
             let result = await p.sweep(now);
@@ -340,6 +345,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             });
             let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
             p._floorWindow = now - WINDOW_S;
 
             await p.sweep(now);
@@ -355,6 +361,7 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
             let p = makePublisher(hub);
             let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
             p._floorWindow = now - WINDOW_S;
 
             let warned = [];
