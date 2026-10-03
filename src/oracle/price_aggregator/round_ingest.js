@@ -290,6 +290,38 @@ async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
     return { accepted: true };
 }
 
+async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
+    let head = validateRoundFields.call(this, sourceChain, roundData);
+    if (head.reason) return { accepted: false, reason: head.reason };
+    let pairsReason = validateRoundPairs.call(this, roundData, head.timestamp);
+    if (pairsReason) return { accepted: false, reason: pairsReason };
+    let structural = validateRoundSigs(roundData);
+    if (structural.reason) return { accepted: false, reason: structural.reason };
+    if (checkDuplicate) {
+        let existing = await duplicateRoundRead.call(this, head.round);
+        if (existing && existing.length > 0) return { accepted: false, reason: 'duplicate' };
+    }
+
+    let weighted = weightedModeFor.call(this, head.btcBlockHeight);
+    let capSnap = this.hub.capabilitySnapshot;
+    let snapshot = null;
+    if (capSnap) {
+        snapshot = weighted
+            ? (typeof capSnap.getWeightSnapshot === 'function'
+                ? await capSnap.getWeightSnapshot('price', head.referenceBlock) : null)
+            : await capSnap.getSnapshot('price', head.referenceBlock);
+    }
+    let snapshotReason = refuseUnusableSnapshot(snapshot, weighted);
+    if (snapshotReason) return { accepted: false, reason: snapshotReason };
+    let built = buildRoundPayload.call(this, head.round, head.timestamp, roundData, head.btcBlockHeight);
+    if (built.reason) return { accepted: false, reason: built.reason };
+    let verifiedSigs = verifyRoundSigs.call(
+        this, structural.sigs, snapshot, built.payload, head.btcBlockHeight);
+    let quorumReason = roundQuorumReason(weighted, snapshot, verifiedSigs);
+    if (quorumReason) return { accepted: false, reason: quorumReason };
+    return { accepted: true, head, verifiedSigs };
+}
+
 module.exports = {
 
     // The pusher's local validation is NOT trusted: before any row is stored
@@ -298,42 +330,11 @@ module.exports = {
     // snapshot at block_index, and the verified count must meet PBFT quorum.
     // Returns: { accepted, reason } where reason explains the rejection
     async receiveValidatedRound(sourceChain, roundData) {
-        let head = validateRoundFields.call(this, sourceChain, roundData);
-        if (head.reason) return { accepted: false, reason: head.reason };
-        let { round, timestamp, referenceBlock, btcBlockHeight } = head;
-
-        let pairsReason = validateRoundPairs.call(this, roundData, timestamp);
-        if (pairsReason) return { accepted: false, reason: pairsReason };
-
-        let structural = validateRoundSigs(roundData);
-        if (structural.reason) return { accepted: false, reason: structural.reason };
-
-        let existing = await duplicateRoundRead.call(this, round);
-        if (existing && existing.length > 0) {
-            return { accepted: false, reason: 'duplicate' };
-        }
-
-        let weighted = weightedModeFor.call(this, btcBlockHeight);
-        let capSnap  = this.hub.capabilitySnapshot;
-        let snapshot = null;
-        if (capSnap) {
-            snapshot = weighted
-                ? (typeof capSnap.getWeightSnapshot === 'function'
-                    ? await capSnap.getWeightSnapshot('price', referenceBlock)
-                    : null)
-                : await capSnap.getSnapshot('price', referenceBlock);
-        }
-        let snapshotReason = refuseUnusableSnapshot(snapshot, weighted);
-        if (snapshotReason) return { accepted: false, reason: snapshotReason };
-
-        let built = buildRoundPayload.call(this, round, timestamp, roundData, btcBlockHeight);
-        if (built.reason) return { accepted: false, reason: built.reason };
-
-        let verifiedSigs = verifyRoundSigs.call(this, structural.sigs, snapshot, built.payload, btcBlockHeight);
-        let quorumReason = roundQuorumReason(weighted, snapshot, verifiedSigs);
-        if (quorumReason) return { accepted: false, reason: quorumReason };
-
-        return storeVerifiedRound.call(this, sourceChain, roundData, head, verifiedSigs);
+        let verified = await verifyValidatedRound.call(this, sourceChain, roundData, true);
+        if (!verified.accepted) return verified;
+        return storeVerifiedRound.call(this, sourceChain, roundData, verified.head, verified.verifiedSigs);
     }
 
 };
+
+Object.defineProperty(module.exports, 'verifyValidatedRound', { value: verifyValidatedRound });

@@ -20,116 +20,11 @@
  *
  ********************************************************************/
 
-const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
-        MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('../../constants.js');
-const { bcgt }          = require('../../bcmath.js');
-const { isPriceV1CanonicalActive, isCanonicalPriceV1Value,
-        isCanonicalPriceV1Fee } = require('../../consensus/gates/price_scale_gate.js');
+const { validateOraclePriceIdentity, validateOraclePriceValue,
+        validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-
-// PRICE v1 carries no PBFT signatures on the wire. It is a single
-// user's oracle price whose authenticity is the on-chain transaction
-// itself, which only the indexer that observed the chain can validate.
-// Unlike PRICE v0 rounds (re-verified in receiveValidatedRound), the
-// hub cannot re-check that cryptographically; the gates here are the
-// authenticated push channel, strict field validation (mirroring the
-// indexer's wire-format rules), and the uniform 24h effective_at delay.
-// Bound coin/tick/fiat/memo to the indexer's PRICE v1 wire-format
-// rules (actions/price.js parse_v1). The indexer already rejects these
-// on-chain, so anything outside them here is a malformed or Byzantine
-// push; without the bounds an attacker on the push channel could write
-// arbitrary-size or bogus-key rows into oracle_prices.
-// source_address is the row-identity/dedupe key; bound its type and
-// length like the sibling wire fields (the bare truthiness check above
-// lets a non-string coerce to a bogus identity, and an over-long value
-// errors or truncate-collides the INSERT into oracle_prices).
-function validateOraclePriceIdentity(priceData) {
-    if (typeof priceData.source_address !== 'string' || priceData.source_address.length === 0 ||
-        priceData.source_address.length > MAX_SOURCE_ADDRESS_LENGTH) {
-        return 'invalid source_address';
-    }
-    if (typeof priceData.coin !== 'string' || !PRICE_V1_COINS.includes(priceData.coin)) {
-        return 'invalid coin';
-    }
-    if (typeof priceData.tick !== 'string' || priceData.tick.length === 0 || priceData.tick.length > MAX_TICK_LENGTH) {
-        return 'invalid tick';
-    }
-    if (typeof priceData.fiat !== 'string' || !PRICE_V1_FIATS.includes(priceData.fiat)) {
-        return 'invalid fiat';
-    }
-    if (priceData.memo !== undefined && priceData.memo !== null &&
-        (typeof priceData.memo !== 'string' || priceData.memo.length > MAX_MEMO_LENGTH)) {
-        return 'invalid memo';
-    }
-    return null;
-}
-
-// The value and the optional FEE, on the indexer's own bounds. `coin` is the source
-// chain, so the armed '<COIN>:<network>' canonical-format key resolves before the
-// bare network sentinel the cut leaves unarmed.
-function validateOraclePriceValue(priceData, network, coin) {
-    if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
-        !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
-        return 'invalid value';
-    }
-    if (isPriceV1CanonicalActive(priceData.block_time, network, coin) &&
-        !isCanonicalPriceV1Value(priceData.value)) {
-        return 'invalid value';
-    }
-    // FEE upper bound uses exact bcmath, not parseFloat: an unbounded-precision
-    // value like '1.0000000000000000001' rounds to exactly 1.0 under IEEE-754 and
-    // would slip past a parseFloat `> 1` gate while exact math treats it as > 1.
-    // Mirrors the indexer's price-action FEE validation (wire-format parity).
-    if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
-        (!/^[0-9]+(\.[0-9]{1,18})?$/.test(String(priceData.fee)) || bcgt(String(priceData.fee), '1'))) {
-        return 'invalid fee';
-    }
-    if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
-        isPriceV1CanonicalActive(priceData.block_time, network, coin) &&
-        !isCanonicalPriceV1Fee(priceData.fee)) {
-        return 'invalid fee';
-    }
-    return null;
-}
-
-// Gate the two remaining required wire fields instead of coercing them. Unlike
-// push_generation, whose absence has a meaningful default (0 = pre-fence sender),
-// action_index and block_time are load-bearing identity/time values with no sane
-// default, and the old `parseInt(x) || 0` silently minted one for malformed input.
-// Digits only and inside the safe-integer range: both columns are BIGINT UNSIGNED
-// and parseInt rounds silently past 2^53, so an over-large value would mis-key the row.
-//
-// action_index keys the (source_chain, action_index) unique index, the dedupe SELECT
-// and the retraction fence below; collapsing it to 0 collided malformed pushes from
-// DIFFERENT operators on one chain onto a single index-0 row (the unique key carries no
-// source_address) and left the fence reading an index the action never had. A genuine
-// index of 0 is still accepted; only unparseable input is rejected.
-//
-// block_time is the base of the uniform 24h effective_at delay documented below;
-// coercing it to 0 produced effective_at 86400 (1970-01-02), which the
-// `effective_at <= now` read path serves immediately, i.e. the delay silently off.
-// Deliberately NOT bounded to a recency window against the hub clock: a rebuilt indexer
-// replays history and pushes genuine old block_times (see the fence warning above), so a
-// freshness bound would reject exactly the backfill the durable outbox exists to deliver.
-function validateOraclePriceWireFields(priceData) {
-    // Source-chain reorg fence (item 5308): the generation the source indexer carried on
-    // this push (0 when absent/malformed). See receiveValidatedRound.
-    let pushGeneration = parseInt(priceData.push_generation);
-    if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
-
-    if (!/^[0-9]+$/.test(String(priceData.action_index)) ||
-        !Number.isSafeInteger(Number(priceData.action_index))) {
-        return { reason: 'invalid action_index' };
-    }
-    if (!/^[0-9]+$/.test(String(priceData.block_time)) ||
-        !Number.isSafeInteger(Number(priceData.block_time)) ||
-        Number(priceData.block_time) <= 0) {
-        return { reason: 'invalid block_time' };
-    }
-    return { pushGeneration, actionIndex: parseInt(priceData.action_index, 10) };
-}
 
 // HUB-RETRACT-4: reject a stale replay of a rolled-back PRICE action. A fire-and-forget v1
 // push that failed and was re-enqueued, or an in-flight HTTP push, can land AFTER the reorg
@@ -148,19 +43,6 @@ function ingestWatermarkRead(sourceChain) {
 // when strictly newer). An equal-or-older generation is a true idempotent duplicate.
 function oraclePriceDedupeRead(priceData, sourceChain, actionIndex) {
     return this.db.getOraclePrice(priceData.source_address, sourceChain || '', actionIndex);
-}
-
-// Determine effective_at: every publish (first or update) is delayed by 24h
-// from its action's block_time. The delay on updates prevents front-running
-// attacks on dispensers. The delay on first publishes exists for consensus:
-// an immediate first publish was retroactively effective (effective_at =
-// block_time, which precedes the row's arrival in any hub/mirror by the
-// source chain's indexing lag), so a FIAT dispense settled live could replay
-// differently once the row existed (a ledger fork). A uniform +24h makes
-// every row land in every mirror long before any block can read it, which
-// is also what makes the hub-db sync stream watermark a sound barrier.
-function effectiveAtFor(blockTime) {
-    return blockTime + 86400;
 }
 
 // Generation-monotonic upsert (HUB-RETRACT-4): on the (source_chain, action_index) unique
@@ -272,3 +154,5 @@ module.exports = {
     }
 
 };
+
+require('./catchup_verifiers.js');
