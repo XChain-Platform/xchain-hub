@@ -34,7 +34,7 @@ const configRedaction = require('./config_redaction.js');
 const FEED_RPC_METHODS = new Set([
     'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ]);
 
 const FEED_READ_METHODS = new Set(['gethubs']);

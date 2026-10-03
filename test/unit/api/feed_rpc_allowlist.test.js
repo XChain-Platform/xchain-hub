@@ -26,7 +26,7 @@ const { waitUntil } = require('../../helpers/waitUntil');
 const FEED_METHODS = [
     'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ];
 
 // A deliberately broad sample of what must NOT be reachable from a public port:
@@ -35,7 +35,7 @@ const FEED_METHODS = [
 const REFUSED_METHODS = [
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator',
     'syncvalidators', 'propose', 'proposeslashpenalty', 'vote', 'requestattestation',
-    'reportreorg', 'initiateswap', 'anchorflush', 'pauseeffectorspend',
+    'reportreorg', 'pushbridgereorg', 'initiateswap', 'anchorflush', 'pauseeffectorspend',
     'resumeeffectorspend', 'getallconfigs', 'getvalidators', 'ping'
 ];
 
@@ -157,7 +157,7 @@ describe('hub public-port rpc allowlist (P2P feed)', function () {
     before(async function () { api = await bootApi(); });
     afterEach(function () { sinon.restore(); });
 
-    it('admits every indexer push method on the public port', function () {
+    it('admits every indexer feed method on the public port', function () {
         for (const m of FEED_METHODS) {
             expect(api.drive({ method: m, feed: true }).nexted, m).to.equal(true);
         }
