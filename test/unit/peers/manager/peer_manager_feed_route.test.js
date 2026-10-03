@@ -16,7 +16,6 @@
 // becomes a gossip peer (which is what would let it be relayed to or counted).
 
 const http               = require('http');
-const net                = require('net');
 const sinon              = require('sinon');
 const { expect }         = require('chai');
 const WebSocket          = require('ws');
@@ -42,17 +41,6 @@ function request(port, method, path) {
         });
         req.on('error', reject);
         req.end();
-    });
-}
-
-function freePort() {
-    return new Promise((resolve, reject) => {
-        const probe = net.createServer();
-        probe.on('error', reject);
-        probe.listen(0, '127.0.0.1', () => {
-            const available = probe.address().port;
-            probe.close(() => resolve(available));
-        });
     });
 }
 
@@ -196,10 +184,9 @@ function freePort() {
     function peermanagerReadOnlyMirrorFeedOnSuite1() {
         beforeEach(async function () {
             dbStub = { doQuery: sinon.stub().resolves([]) };
-            port = await freePort();
             pm = new PeerManager({
                 P2P_VALIDATOR_ADDR: 'ws://self:10002',
-                P2P_PORT: port,
+                P2P_PORT: 0,
                 P2P_HOST: '127.0.0.1',
                 SEED_NODES: [],
                 REQUIRE_SIGNATURES: false,
@@ -208,6 +195,7 @@ function freePort() {
                 P2P_DEDUP_PRUNE_INTERVAL: 3600000
             }, dbStub);
             await pm.start();
+            port = pm.httpServer.address().port;
         });
         afterEach(async function () {
             await pm.stop();

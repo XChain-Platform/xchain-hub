@@ -5,8 +5,8 @@
 
 const { expect } = require('chai');
 const WebSocket = require('ws');
-const PeerManager = require('../../../../src/peers/manager');
-const ValidatorIdentity = require('../../../../src/validators/identity');
+const PeerManager = require('../../../src/peers/manager');
+const ValidatorIdentity = require('../../../src/validators/identity');
 
 function makeHub(addr, publicUrl) {
     const config = {
