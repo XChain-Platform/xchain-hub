@@ -191,6 +191,9 @@ function registerFeature2addSubscriberPart2() {
     let db = makeDb({
       doQuery: sinon.stub().callsFake(async sql => {
         asked.push(String(sql));
+        if (String(sql).includes('SELECT value FROM consensus_state')) {
+          return [{ value: 'de305d54-75b4-431b-adb2-eb6b9e546014' }];
+        }
         return [{
           max_id: 7
         }];

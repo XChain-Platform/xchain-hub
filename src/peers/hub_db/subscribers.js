@@ -24,6 +24,21 @@
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+async function readFailoverMaxIds(db, maxIds) {
+    try {
+        let bt = await db.getBridgeTransfersMaxLiveId();
+        maxIds.bridge_transfers = (bt.length > 0 && bt[0].max_id != null) ? Number(bt[0].max_id) : 0;
+    } catch (e) { /* table may not exist yet */ }
+    try {
+        let ps = await db.getPolicySnapshotsMaxId();
+        maxIds.policy_snapshots = (ps.length > 0 && ps[0].max_id != null) ? Number(ps[0].max_id) : 0;
+    } catch (e) { /* table may not exist yet */ }
+    try {
+        let ls = await db.getListSnapshotsMaxId();
+        maxIds.list_snapshots = (ls.length > 0 && ls[0].max_id != null) ? Number(ls[0].max_id) : 0;
+    } catch (e) { /* table may not exist yet */ }
+}
+
 // The per-table max row IDs the 'ready' frame carries. Each read is guarded on its
 // own, so a table the schema has not created yet leaves its key absent instead
 // of failing the whole acknowledgement.
@@ -69,6 +84,7 @@ async function readMaxIds(db) {
             let cc = await db.getCrossChainCallsMaxLiveId();
             maxIds.cross_chain_calls = (cc.length > 0 && cc[0].max_id != null) ? Number(cc[0].max_id) : 0;
         } catch (e) { /* table may not exist yet */ }
+        await readFailoverMaxIds(db, maxIds);
         try {
             // Third member of the hub-state mirror set (see anchor_reward_attestations
             // above; this list must move in lockstep with HUB_STATE_TABLES). The catch
@@ -84,6 +100,15 @@ async function readMaxIds(db) {
         } catch (e) { /* table may not exist yet */ }
     }
     return maxIds;
+}
+
+async function readHubInstanceId(db) {
+    if (!db) return null;
+    try {
+        return await db.getHubInstanceId();
+    } catch (e) {
+        return null;
+    }
 }
 
 class HubDbSubscribers {
@@ -117,6 +142,7 @@ class HubDbSubscribers {
         logger.info('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
 
         const maxIds = await readMaxIds(this.db);
+        const hubInstanceId = await readHubInstanceId(this.db);
 
         try {
             // watermark_interval_ms lets the consumer size its heartbeat watchdog from
@@ -128,7 +154,9 @@ class HubDbSubscribers {
             // every reconnect stalls every height-keyed barrier for one watermarkIntervalMs
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
-            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() }));
+            const ready = { type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights() };
+            if (hubInstanceId) ready.hub_instance_id = hubInstanceId;
+            ws.send(JSON.stringify(ready));
             this.replayDeletions(ws);
         } catch (e) { /* ignore */ }
     }

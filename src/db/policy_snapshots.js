@@ -81,6 +81,10 @@ module.exports = {
         return this.doQuery('SELECT * FROM policy_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
+    async getPolicySnapshotsMaxId() {
+        return this.doQuery('SELECT MAX(id) AS max_id FROM policy_snapshots');
+    },
+
     // Reads one committed policy snapshot row back whole, for the hub-DB mirror stream.
     // Moved here from src/cross_chain/bridge_engine.js:1113, which read either this table
     // or bridge_transfers through one statement built from the table name.

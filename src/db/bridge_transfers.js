@@ -138,6 +138,11 @@ module.exports = {
         return this.doQuery(`SELECT * FROM bridge_transfers WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?`, [since, limit]);
     },
 
+    async getBridgeTransfersMaxLiveId() {
+        return this.doQuery(
+            "SELECT MAX(id) AS max_id FROM bridge_transfers WHERE status <> 'retracted'");
+    },
+
     // Updates bridge_transfers.
     // Moved here from src/cross_chain/bridge_engine.js:1157.
     async updateBridgeTransfer(transfer_id) {
