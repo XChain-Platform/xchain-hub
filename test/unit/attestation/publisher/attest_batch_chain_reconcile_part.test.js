@@ -40,7 +40,8 @@ function context(answer){
         stats: {
             chainReconcileRuns: 0,
             chainReconcileLandedWindows: 0,
-            chainReconcileFailures: 0
+            chainReconcileFailures: 0,
+            windowsDeferred: 0
         },
         recordLandedWindow: sinon.stub().resolves()
     };
@@ -129,18 +130,18 @@ function registerLandedBatchTests(){
         expectRpc(ctx.indexerRpc, 1);
     });
 
-    it('sheds only listed windows from a truncated answer', async function(){
+    // A full page proves only its listed windows landed; an omitted window may sit
+    // past the page, so it is deferred to a later sweep rather than published.
+    it('records listed windows and defers the omitted ones on a truncated answer', async function(){
         let ctx = context({
             batches: [{ window_start: 3600, window_end: 7200, row_count: 8 }],
             truncated: true
         });
 
-        expect(await ctx.reconcilePendingAgainstChain(pending())).to.deep.equal([
-            { windowStart: 7200, age: 0 },
-            { windowStart: 0, age: 2 }
-        ]);
+        expect(await ctx.reconcilePendingAgainstChain(pending())).to.deep.equal([]);
         expect(ctx.recordLandedWindow.calledOnceWithExactly(3600, 7200, null, 8)).to.equal(true);
         expect(ctx.stats.chainReconcileLandedWindows).to.equal(1);
+        expect(ctx.stats.windowsDeferred).to.equal(2);
         expectRpc(ctx.indexerRpc, 1);
     });
 }
