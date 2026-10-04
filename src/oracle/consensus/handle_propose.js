@@ -28,6 +28,8 @@ const { provenPubkey }  = require('../../lib/chain_signer_admission.js');
 const { noteDrop }      = require('../../consensus/diagnostics');
 const { coSignGateRejects } = require('./cosign_gate.js');
 const { bindAndCoSign } = require('./follower_round.js');
+const { nominalRoundSeconds, roundTimeMatches } = require('./round_time.js');
+const { roundTimeGateActive } = require('./round_time_gate.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -166,7 +168,7 @@ function electedFallback(round, envelope, submissions, leader) {
 }
 
 // Resolve and lock the round's snapshot, quorum and member set, then judge the proposer.
-async function lockProposeSnapshot(envelope, proposal, blockHeight) {
+async function lockProposeSnapshot(envelope, proposal, blockHeight, roundTimeActive) {
     let { round } = proposal;
     // Resolve the round's locked snapshot BEFORE validating the proposer
     // (Oracle M1): the fallback-proposer election below must run over the
@@ -206,7 +208,8 @@ async function lockProposeSnapshot(envelope, proposal, blockHeight) {
             memberPubkeys = this.memberPubkeySet(snap);
         }
     }
-    return judgeProposer.call(this, envelope, proposal, { blockHeight, wt, snap, quorumForRound, memberPubkeys });
+    return judgeProposer.call(this, envelope, proposal,
+        { blockHeight, wt, snap, quorumForRound, memberPubkeys, roundTimeActive });
 }
 
 // Accept the PROPOSE only from the round's leader or a legitimate fallback, and only once
@@ -333,6 +336,27 @@ module.exports = {
         let blockHeight = await this.boundedProposeHeight(round, btcBlockHeight);
         if (blockHeight === null) return;
 
+        let roundTimeActive = false;
+        try {
+            roundTimeActive = roundTimeGateActive({
+                network: this.hub ? this.hub.network : undefined,
+                btcHeight: blockHeight
+            });
+        } catch (e) {
+            if (!e || e.name !== 'RegistryMissError') throw e;
+        }
+        let hasBtcBlockTime = btcBlockTime !== null && btcBlockTime !== undefined;
+        if (roundTimeActive && hasBtcBlockTime && !roundTimeMatches(
+            btcBlockTime, round, this.oracleRound.epochStart, this.oracleRound.roundInterval
+        )) {
+            let nominal = nominalRoundSeconds(
+                round, this.oracleRound.epochStart, this.oracleRound.roundInterval
+            );
+            logger.warn('Oracle: dropping PROPOSE for round ' + round + ': wire BTC block time ' +
+                btcBlockTime + ' does not match nominal round time ' + nominal);
+            return;
+        }
+
         // Align the clamp reference to THIS round before the co-sign gate below reads
         // it. Placed after the digest, known-sender and freshness checks so neither an
         // unsigned or forged PROPOSE nor one carrying a height this hub is about to
@@ -346,6 +370,6 @@ module.exports = {
         if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
             await this.refreshLastFinalizedForRound(round);
         }
-        return lockProposeSnapshot.call(this, envelope, proposal, blockHeight);
+        return lockProposeSnapshot.call(this, envelope, proposal, blockHeight, roundTimeActive);
     }
 };
