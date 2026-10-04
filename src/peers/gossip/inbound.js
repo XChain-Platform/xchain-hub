@@ -178,11 +178,11 @@ class PeerInbound {
         let peer = this.peers.get(peerAddr);
         let inheritedFeedUrl = false;
         if (peer) {
-            if (knownAddr !== null && !peer.inbound) {
+            if (!peer.inbound) {
                 inheritedFeedUrl = this.recordValidatorFeedUrl(
                     envelope.sender, peer.feedUrl || knownAddr);
             }
-            if (knownAddr !== null && !peer.inbound && !peer.validatorAddr) {
+            if (!peer.inbound && !peer.validatorAddr) {
                 peer.validatorAddr = envelope.sender;
                 this.emit('peer:connect', peerAddr);
             }
