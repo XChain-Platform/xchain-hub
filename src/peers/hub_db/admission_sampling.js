@@ -72,13 +72,13 @@ class HubDbAdmissionSampling {
     attachAdmissionSource(hub) {
         if (!hub) return false;
         this._admissionHub = hub;
-        if (!this.peerCatchup && hub.peerManager && this.db) {
-            this.peerCatchup = new HubDbPeerCatchup({
+        if (!hub.peerCatchup && hub.peerManager && this.db) {
+            hub.peerCatchup = new HubDbPeerCatchup({
                 db: this.db,
                 peerManager: hub.peerManager,
                 feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
             });
-            this.peerCatchup.start().catch((e) =>
+            hub.peerCatchup.start().catch((e) =>
                 logger.error(nodeUtil.format('HubDbBroadcaster: initial peer catch-up failed:',
                     e && e.message ? e.message : e)));
         }

@@ -5,6 +5,7 @@ const https = require('https');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const registry = require('./catchup_verifiers.js');
+const { createCatchupState } = require('./catchup_state.js');
 
 const DEFAULT_PAGE_SIZE = 1000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
@@ -199,7 +200,7 @@ class HubDbPeerCatchup {
         this.hasRow = opts.hasRow || ((table, row) => rowAlreadyHeld(this.db, table, row));
         this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
-        this.caughtUp = new Map(this.tables.map(table => [table, false]));
+        this.state = createCatchupState(this.tables);
         this.runningPromise = null;
         this.rerunRequested = false;
         this.warnTimer = null;
@@ -244,22 +245,23 @@ class HubDbPeerCatchup {
     }
 
     tableCaughtUp(table) {
-        return this.caughtUp.get(table) === true;
+        return this.state.isTableCaughtUp(table);
     }
 
     caughtUpState() {
-        return Object.fromEntries(this.caughtUp);
+        return this.state.status();
     }
 
     allCaughtUp() {
-        return this.tables.every(table => this.tableCaughtUp(table));
+        return this.state.isCaughtUp();
     }
 
     isCaughtUp() {
-        return this.allCaughtUp();
+        return this.state.isCaughtUp();
     }
 
     async run() {
+        this.state.resetAll();
         const peers = connectedSignerPeers(this.peerManager);
         if (peers.length === 0) {
             this.warnIfNoPeer();
@@ -271,7 +273,7 @@ class HubDbPeerCatchup {
             for (const peer of peers) {
                 try {
                     await this.catchUpTable(peer, table, verifier);
-                    this.caughtUp.set(table, true);
+                    this.state.markCaughtUp(table);
                     break;
                 } catch (e) {
                     this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +

@@ -310,11 +310,13 @@ describe('hub DB peer catch-up lifecycle', function () {
         sampler.db = db;
         sampler.admissionSampleMs = 60000;
 
-        expect(sampler.attachAdmissionSource({ peerManager: pm })).to.equal(true);
+        const hub = { peerManager: pm };
+        expect(sampler.attachAdmissionSource(hub)).to.equal(true);
         await Promise.resolve();
 
         expect(start.calledOnce).to.equal(true);
         expect(options.db).to.equal(db);
         expect(options.peerManager).to.equal(pm);
+        expect(hub.peerCatchup).to.be.instanceOf(CatchupStub);
     });
 });
