@@ -119,6 +119,18 @@ function broadcasterWithSocket() {
     return { b, ws };
 }
 
+function readyFrameShape(b, heights) {
+    return {
+        type: 'ready',
+        max_ids: {},
+        hub_instance_id: null,
+        caught_up: true,
+        watermark: Math.floor(NOW / 1000),
+        watermark_interval_ms: b.watermarkIntervalMs,
+        heights,
+    };
+}
+
 function registerAdmissionSourceTest() {
 it('attachAdmissionSource samples the hub tips, the anchor queue and the floor', async function () {
         let { b, ws } = broadcasterWithSocket();
@@ -214,22 +226,32 @@ it('the heartbeat carries ts AND heights, and ts is still the wall clock in seco
     });
 
     it('the ready frame carries heights, so a reconnect needs no heartbeat first', async function () {
+        sinon.useFakeTimers({ now: NOW });
         let { b, ws } = broadcasterWithSocket();
         b.admissionWatermark = makeWatermark();
         b.admissionWatermark.observeTip('BTC', 900000, Date.now() - 500000);
         await b.addSubscriber(ws);
         let ready = JSON.parse(ws.send.firstCall.args[0]);
-        expect(ready.type).to.equal('ready');
-        expect(ready.watermark).to.be.a('number');          // the stream watermark, untouched
-        expect(ready.heights.cross_chain_matches).to.deep.equal({ BTC: 899999 });
+        expect(ready).to.deep.equal(readyFrameShape(b, {
+            cross_chain_matches:          { BTC: 899999 },
+            cross_chain_calls:            { BTC: 899999 },
+            bridge_transfers:             { BTC: 899999 },
+            policy_snapshots:             { BTC: 899999 },
+            list_snapshots:               { BTC: 899999 },
+            price_snapshots:              { BTC: 899999 },
+            oracle_prices:                { BTC: 899999 },
+            attestation_responses:        { BTC: 899999 },
+            anchor_reward_attestations:   { BTC: 899999 },
+        }));
         b.stop();
     });
 
     it('a broadcaster with no attached source publishes an EMPTY heights object on both frames', async function () {
+        sinon.useFakeTimers({ now: NOW });
         let { b, ws } = broadcasterWithSocket();
         await b.addSubscriber(ws);
         let ready = JSON.parse(ws.send.firstCall.args[0]);
-        expect(ready.heights).to.deep.equal({});
+        expect(ready).to.deep.equal(readyFrameShape(b, {}));
         ws.send.resetHistory();
         b.broadcastWatermark();
         expect(JSON.parse(ws.send.firstCall.args[0]).heights).to.deep.equal({});
