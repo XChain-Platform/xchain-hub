@@ -21,6 +21,8 @@
  ********************************************************************/
 
 const { noteRoundLost } = require('../../consensus/diagnostics');
+const { nominalRoundSeconds } = require('../consensus/round_time');
+const { roundTimeGateActive } = require('../consensus/round_time_gate');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -48,6 +50,8 @@ module.exports = {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
         let btcBlockTime   = this.currentBtcBlockTime;
+        if (roundTimeGateActive({ network: this.hub.network, btcHeight: btcBlockHeight }))
+            btcBlockTime = nominalRoundSeconds(round, this.epochStart, this.roundInterval);
         // Remember whether that height is the round-number stand-in rather than a
         // real BTC tip; the flag and the stand-in height are always set together.
         let anchorIsRoundNumber = !!this.chainTipFallbackActive;

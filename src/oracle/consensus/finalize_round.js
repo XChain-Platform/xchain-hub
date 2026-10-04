@@ -25,6 +25,8 @@
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const ocr               = require('../../oracle_clamp_reference_activation.js');
 const { takeSeat }      = require('./seats.js');
+const { nominalRoundSeconds } = require('./round_time.js');
+const { roundTimeGateActive } = require('./round_time_gate.js');
 const { singleSourcePairs } = require('./source_diversity.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -328,7 +330,9 @@ module.exports = {
 
         // Default to round number if BTC tip is unavailable (early bootstrap)
         btcBlockHeight = btcBlockHeight || round;
-        btcBlockTime   = btcBlockTime   || Math.floor(Date.now() / 1000);
+        btcBlockTime   = btcBlockTime   || (roundTimeGateActive({ network: this.hub.network, btcHeight: btcBlockHeight })
+            ? nominalRoundSeconds(round, this.oracleRound.epochStart, this.oracleRound.roundInterval)
+            : Math.floor(Date.now() / 1000));
 
         let submissions = this.oracleRound.getSubmissions(round);
         let skip = submissionCountSkip.call(this, round, submissions);
