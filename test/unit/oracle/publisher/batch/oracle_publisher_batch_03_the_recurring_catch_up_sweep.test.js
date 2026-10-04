@@ -55,6 +55,19 @@ function flakySigner(failFirst) {
             return signer;
         }
 
+async function advanceCatchupSweep(clock, publisher, delayMs) {
+            let tick, runCatchupSweepTick = publisher.runCatchupSweepTick.bind(publisher);
+            let observed = sinon.stub(publisher, 'runCatchupSweepTick').callsFake(() => {
+                tick = runCatchupSweepTick();
+                return tick;
+            });
+            try {
+                await clock.tickAsync(delayMs);
+                sinon.assert.calledOnce(observed);
+                await tick;
+            } finally { observed.restore(); }
+        }
+
 const testCase1 = async function () {
             let clock = sinon.useFakeTimers();
             let signer = flakySigner(1);
@@ -68,8 +81,7 @@ const testCase1 = async function () {
                 await h.p.assembleWindow(0);
                 expect(h.broadcasts, 'the first attempt misses quorum').to.have.length(0);
 
-                await clock.tickAsync(25);
-                await h.p._windowChain;
+                await advanceCatchupSweep(clock, h.p, 25);
                 expect(h.broadcasts).to.have.length(1);
                 expect(signer.calls).to.have.length(2);
                 // The re-proposal is the SAME window over the SAME rounds: a retry that
@@ -277,7 +289,7 @@ const testCase13 = async function () {
                     // Four per sweep is unchanged; what changed is that the next sweep is
                     // seconds away while a backlog remains, not an hour.
                     expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
-                    for (let i = 0; i < 3; i++) await clock.tickAsync(5);
+                    for (let i = 0; i < 3; i++) await advanceCatchupSweep(clock, h.p, 5);
                     expect(h.p.pendingCatchupWindows().length).to.be.at.most(4);
                     expect(h.broadcasts.length).to.be.at.least(16);
                 } finally {
@@ -304,7 +316,7 @@ const testCase14 = async function () {
                     });
 
                     await h.p.runCatchupSweepTick();
-                    for (let i = 0; i < 3; i++) await clock.tickAsync(1);
+                    for (let i = 0; i < 3; i++) await advanceCatchupSweep(clock, h.p, 1);
                     expect(h.p.pendingCatchupWindows().length).to.be.at.most(4);
                     expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
                 } finally {
