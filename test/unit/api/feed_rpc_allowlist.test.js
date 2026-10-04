@@ -26,7 +26,7 @@ const { waitUntil } = require('../../helpers/waitUntil');
 const FEED_METHODS = [
     'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ];
 
 // A deliberately broad sample of what must NOT be reachable from a public port:
@@ -35,7 +35,7 @@ const FEED_METHODS = [
 const REFUSED_METHODS = [
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator',
     'syncvalidators', 'propose', 'proposeslashpenalty', 'vote', 'requestattestation',
-    'reportreorg', 'pushbridgereorg', 'initiateswap', 'anchorflush', 'pauseeffectorspend',
+    'reportreorg', 'initiateswap', 'anchorflush', 'pauseeffectorspend',
     'resumeeffectorspend', 'getallconfigs', 'getvalidators', 'ping'
 ];
 
