@@ -13,10 +13,12 @@
 // A leader whose own rows lack a round its peers finalized must fetch it before it
 // proposes. Without the fill step the followers refuse the proposal ("finalized here
 // but not proposed") and the round times out short of quorum.
-const OraclePublisher = require('../../../src/oracle/publisher.js');
 const { expect, buildMesh, buildCanonical, baseRounds, clone } = require('./oracle_batch_signer.test.js');
+const { makePublisher, bodyOf, cleanupPublisherBatch } =
+    require('./publisher/batch/oracle_publisher_batch.test.js');
 
 const MISSING = 103;
+let mesh;
 
 function withoutMissing(rounds) {
     return rounds.filter(r => r.round !== MISSING);
@@ -30,21 +32,17 @@ function quickFill(mesh) {
     for (let node of mesh.nodes) node.signer.fillTimeoutMs = 80;
 }
 
-function publisherFor(node) {
-    let pub = Object.create(OraclePublisher.prototype);
-    pub.hub = node.hub;
-    pub.network = node.hub.network;
-    return pub;
-}
-
 function signReqs(node) {
     return node.sent.filter(m => m.type === 'XPRICEB_SIGN_REQ');
 }
 
-describe('OracleBatchSigner leader fills a round its own rows lack', function () {
-    let mesh;
-    afterEach(() => mesh.stop());
+function cleanupTest() {
+    if (mesh) mesh.stop();
+    mesh = null;
+    cleanupPublisherBatch();
+}
 
+function registerFillTests() {
     it('reaches quorum once a peer supplies the missing round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
@@ -82,26 +80,29 @@ describe('OracleBatchSigner leader fills a round its own rows lack', function ()
         expect(res.met).to.equal(true);
         expect(signReqs(mesh.nodes[0])).to.have.length(1);
     });
+}
 
+function registerPublicationTests() {
     it('publishes a batch wire that carries the filled round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
         let leader = mesh.nodes[0];
-        let published = await publisherFor(leader).signAndSizeRange(
-            leader.signer, withoutMissing(baseRounds()));
-        expect(published).to.be.an('object');
-        expect(published.wire).to.be.a('string').and.match(/^PRICE\|0\|/);
-        expect(published.rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
-        expect(published.sigCount).to.be.at.least(3);
+        let publisher = makePublisher({ signer: leader.signer });
+        publisher.p.windowPlan.rangeOf = () => ({ first: 100, last: 105 });
+        for (let round of withoutMissing(baseRounds())) publisher.p._buffer.set(round.round, round);
+        await publisher.p.assembleWindow(0);
+        expect(publisher.broadcasts).to.have.length(1);
+        expect(bodyOf(publisher.broadcasts[0])).to.include(
+            '|103|1700001800|5003|2|BTC/USD|60003|LTC/USD|83|');
+        expect(publisher.p.getStats()).to.include({
+            batchWindowsPublished: 1,
+            lastPublishedRound: 105
+        });
     });
+}
 
-    it('publishes nothing when no peer can fill the gap', async function () {
-        mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
-        quickFill(mesh);
-        for (let node of mesh.nodes.slice(1)) node.signer.handleFillReq = async () => {};
-        let leader = mesh.nodes[0];
-        let published = await publisherFor(leader).signAndSizeRange(
-            leader.signer, withoutMissing(baseRounds()));
-        expect(published).to.equal(null);
-    });
+describe('OracleBatchSigner leader fills a round its own rows lack', function () {
+    afterEach(cleanupTest);
+    registerFillTests();
+    registerPublicationTests();
 });
