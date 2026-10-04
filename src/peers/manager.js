@@ -263,6 +263,7 @@ class PeerManager extends EventEmitter {
         // or the relay makes room for them and a hub that does not still hears about
         // the first listener past its real boot load.
         this.setMaxListeners(PeerManager.messageSubscribers(config, hubConfig.env()).length);
+        if (config.P2P_PORT === 0) config.P2P_PORT = '0';
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;
