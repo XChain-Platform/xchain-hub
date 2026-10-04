@@ -60,7 +60,7 @@ async function bootController(env) {
   const hubStubs = {getAllConfigs:sinon.stub().resolves(configTree()),getLastSeq:sinon.stub().resolves(7),getConfigWatermark:sinon.stub().resolves(1788121413)};
   const mockHub = new Proxy(hubStubs, {get:(target,prop)=>{if(!(prop in target))target[prop]=sinon.stub().callsFake(async()=>({}));return target[prop];}});
   const saved = {};
-  for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_CONFIG_SECRETS_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
+  for (const k of ['HUB_API_KEY', 'HUB_FEED_API_KEY', 'HUB_REORG_API_KEY', 'HUB_CONFIG_SECRETS_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED', 'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
     saved[k] = process.env[k];
     delete process.env[k];
   }
