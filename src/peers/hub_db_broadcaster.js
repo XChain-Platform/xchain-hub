@@ -37,6 +37,7 @@ const { getLogger } = require('../observability');
 const logger = getLogger();
 const { AdmissionHeightWatermark, ADMISSION_WATERMARK_TABLES } = require('./hub_db/admission_height_watermark.js');
 const HubDbAdmissionSampling = require('./hub_db/admission_sampling.js');
+const { LandingWatermark } = require('./hub_db/landing_watermark.js');
 const HubDbDeletionReplay = require('./hub_db/deletion_replay.js');
 const HubDbSubscribers = require('./hub_db/subscribers.js');
 
@@ -128,6 +129,7 @@ class HubDbBroadcaster {
         this.admissionSampleMs  = positiveIntConfig(
             hubConfig.ADMISSION_WATERMARK_SAMPLE_MS || this.config.ADMISSION_WATERMARK_SAMPLE_MS,
             30000, 'ADMISSION_WATERMARK_SAMPLE_MS');
+        this.landingWatermark = new LandingWatermark(this.config);
         this._admissionHub   = null;
         this._admissionTimer = null;
         this._admissionFloorLoaded = false;
@@ -160,7 +162,7 @@ class HubDbBroadcaster {
         // `ts` is the stream watermark, a wall clock; `heights` is the height watermark, a
         // block height per chain per table. Separate fields on one carrier, because the
         // stream-stall detector and the liveness stamp both read `ts` and neither changes.
-        let message = JSON.stringify({ type: 'watermark', ts: ts, heights: this.admissionHeights(nowMs) });
+        let message = JSON.stringify({ type: 'watermark', ts: ts, heights: this.admissionHeights(nowMs), landed: this.landedMap() });
         let delivered = 0;
         for (let ws of this.subscribers) {
             if (this.send(ws, message)) delivered++;
@@ -360,5 +362,6 @@ module.exports = Object.assign(HubDbBroadcaster, {
     // The height watermark's producer and its table map, exported so the advance rule, the
     // round-abandon timeout and the relay republish rule are drivable without a hub.
     AdmissionHeightWatermark,
+    LandingWatermark,
     ADMISSION_WATERMARK_TABLES
 });

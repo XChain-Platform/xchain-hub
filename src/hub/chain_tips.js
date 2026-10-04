@@ -25,6 +25,7 @@ const admissionHeight = require('../lib/admission_height.js');
 const { blockIntervalS } = require('../lib/relay_margin.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const hubConfig = require('../config');
+const { readingOf } = require('../peers/hub_db/landing_watermark.js');
 const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
@@ -287,6 +288,36 @@ class ChainTips {
             return memo.get(c);
         }));
         want.forEach((c, i) => { out[c] = tips[i]; });
+        return out;
+    }
+
+    // Each landing chain's `hub_push_delivered` reading, read beside the admission tips.
+    // A chain whose indexer does not report one (an older indexer, a failed read, a
+    // malformed value) comes back null, which publishes nothing for it.
+    async resolveLandingReadings(chains, opts) {
+        let out = {};
+        let signal = opts && opts.signal;
+        let want = [];
+        for (let raw of (chains || [])) {
+            let c = admissionHeight.normalizeChain(raw);
+            if (c !== null && want.indexOf(c) === -1) want.push(c);
+        }
+        let readings = await Promise.all(want.map(async (c) => {
+            try {
+                let url = await this.resolveIndexerUrl(c);
+                if (!url) return null;
+                let res = await axiosFor(this).post(url, {
+                    jsonrpc: '2.0', id: Date.now(),
+                    method: 'getlatestblock', params: {}
+                }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
+                let result = res && res.data && res.data.result;
+                if (!result || result.error) return null;
+                return readingOf(result.hub_push_delivered);
+            } catch (err) {
+                return null;
+            }
+        }));
+        want.forEach((c, i) => { out[c] = readings[i]; });
         return out;
     }
 
