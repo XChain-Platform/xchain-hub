@@ -61,19 +61,26 @@ describe('hub DB ready frame ceilings', function () {
         await broadcaster.addSubscriber(ws);
         const ready = JSON.parse(ws.send.firstCall.args[0]);
 
-        expect(ready.hub_instance_id).to.equal(INSTANCE_ONE);
-        expect(ready.max_ids).to.deep.equal({
-            price_snapshots: 29,
-            oracle_prices: 29,
-            cross_chain_matches: 29,
-            capability_snapshots: 29,
-            state_checkpoints: 29,
-            anchor_reward_attestations: 29,
-            cross_chain_calls: 29,
-            bridge_transfers: 29,
-            policy_snapshots: 29,
-            list_snapshots: 29,
-            attestation_responses: 29
+        expect(ready).to.deep.equal({
+            type: 'ready',
+            max_ids: {
+                price_snapshots: 29,
+                oracle_prices: 29,
+                cross_chain_matches: 29,
+                capability_snapshots: 29,
+                state_checkpoints: 29,
+                anchor_reward_attestations: 29,
+                cross_chain_calls: 29,
+                bridge_transfers: 29,
+                policy_snapshots: 29,
+                list_snapshots: 29,
+                attestation_responses: 29
+            },
+            hub_instance_id: INSTANCE_ONE,
+            caught_up: true,
+            watermark: Math.floor(Date.now() / 1000),
+            watermark_interval_ms: broadcaster.watermarkIntervalMs,
+            heights: {}
         });
         const bridgeMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM bridge_transfers'));
         const policyMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM policy_snapshots'));
