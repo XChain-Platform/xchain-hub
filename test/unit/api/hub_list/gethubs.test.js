@@ -69,7 +69,8 @@ function appContext(hub) {
         hub, express, helmet, cors, rateLimit,
         hubConfig: {}, CORS_ORIGIN: false, logger: { info: noop, warn: noop, error: noop },
         HUB_RATE_LIMIT_RPM: 100, HUB_RATE_LIMIT_EXEMPT_LOCAL: true,
-        HUB_API_KEY: 'feed-key', HUB_REORG_API_KEY: '', HUB_CONFIG_SECRETS_API_KEY: '',
+        HUB_API_KEY: 'bulk-key', HUB_FEED_API_KEY: 'feed-key',
+        HUB_REORG_API_KEY: '', HUB_CONFIG_SECRETS_API_KEY: '',
         REORG_WRITE_METHODS: new Set(), WRITE_METHODS: new Set(),
         SENSITIVE_READ_METHODS: new Set(), SENSITIVE_READ_AUTH: false,
         HUB_NETWORK: 'regtest', TELEMETRY_ENABLED: false, TELEMETRY_ADMIN_KEY: '',
@@ -96,7 +97,8 @@ async function startFeed(hubs) {
 describe('gethubs feed read', function () {
     const hubs = [{ api_url: 'https://hub.example:10002', signing_pubkey: 'aabb' }];
     const ctx = {
-        HUB_API_KEY: 'feed-key',
+        HUB_API_KEY: 'bulk-key',
+        HUB_FEED_API_KEY: 'feed-key',
         HUB_REORG_API_KEY: '',
         HUB_CONFIG_SECRETS_API_KEY: '',
         REORG_WRITE_METHODS: new Set(),

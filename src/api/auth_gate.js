@@ -106,8 +106,8 @@ function reorgTierRefuses(calls, provided, { HUB_REORG_API_KEY, REORG_WRITE_METH
     return false;
 }
 
-// The bulk tier: every write, feed discovery, and sensitive reads while
-// HUB_SENSITIVE_READ_AUTH is on answer to HUB_API_KEY.
+// The bulk tier: every write, plus the sensitive reads while HUB_SENSITIVE_READ_AUTH
+// is on, answers to HUB_API_KEY.
 function bulkTierRefuses(calls, provided, ctx) {
     const { HUB_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY,
             REORG_WRITE_METHODS, WRITE_METHODS, SENSITIVE_READ_METHODS, SENSITIVE_READ_AUTH } = ctx;
@@ -127,7 +127,7 @@ function bulkTierRefuses(calls, provided, ctx) {
             // x-api-key header (xchain-explorer and xchain-sync send the
             // secrets key and nothing else).
             if (HUB_CONFIG_SECRETS_API_KEY && callWantsConfigSecrets(call)) return false;
-            return WRITE_METHODS.has(m) || FEED_READ_METHODS.has(m) ||
+            return WRITE_METHODS.has(m) ||
                 (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
         });
         if (gated && !timingEqual(provided, HUB_API_KEY)) return true;

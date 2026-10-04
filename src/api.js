@@ -196,7 +196,6 @@ const P2P_VALIDATOR_ADDR = hubConfig.P2P_VALIDATOR_ADDR || '';
 // HUB_NETWORK names the deployment network (mainnet|testnet|regtest) for the consensus
 // and ingest gates; src/api/boot_guard.js says when it is required and what it must name.
 const HUB_NETWORK = (hubConfig.HUB_NETWORK || '').toLowerCase();
-
 // Refuse an undeclared keyless write surface, then a bad ORACLE_EPOCH_START or HUB_NETWORK.
 refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_FEED_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH });
 refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK });
