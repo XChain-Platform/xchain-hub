@@ -301,6 +301,21 @@ describe('hub DB peer catch-up peer eligibility', function () {
     });
 });
 
+describe('hub DB peer catch-up without a peer registry', function () {
+    it('fetches from a chain signer', async function () {
+        const pm = peerManager(true);
+        delete pm.registryHasPubkey;
+        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
+        const catchup = makeCatchup({ peerManager: pm, fetchPage });
+
+        await catchup.start();
+        catchup.stop();
+
+        expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
+        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
+    });
+});
+
 describe('hub DB peer catch-up lifecycle', function () {
     it('is registered in the peer manager listener roster', function () {
         expect(PeerManager.LISTENER_ROSTER).to.deep.include({

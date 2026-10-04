@@ -70,7 +70,8 @@ function connectedSignerPeers(peerManager) {
         if (!pubkey) continue;
         const normalizedPubkey = String(pubkey).toLowerCase();
         const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
-        const inRegistry = peerManager.registryHasPubkey(normalizedPubkey);
+        const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
+            peerManager.registryHasPubkey(normalizedPubkey);
         if (!inSignerSet && !inRegistry) continue;
         peers.push(addr);
     }
