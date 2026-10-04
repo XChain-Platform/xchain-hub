@@ -69,17 +69,20 @@ function startServer(app, ctx, observability) {
     installShutdown({ hub, logger, server, wss, pingInterval, telemetryCleanupInterval, observability });
 }
 
-function upgradeHandler(wss, { hub, logger, HUB_API_KEY }) {
+function upgradeHandler(wss, { hub, logger, HUB_API_KEY, HUB_FEED_API_KEY }) {
     return (request, socket, head) => {
-        // Authenticate using the same hub API key used for write methods
+        // Authenticate using either read-only feed credential
         // (enforced only when a key is configured; an unconditional fail-closed
         // here 401s every indexer's hub_db_sync subscription on managed deploys,
         // severing the price-sync barrier and the state_checkpoints mirror).
-        if (HUB_API_KEY) {
+        if (HUB_API_KEY || HUB_FEED_API_KEY) {
             let authHeader = request.headers['authorization'];
-            let _bearer = 'Bearer ' + HUB_API_KEY;
-            let _ah = Buffer.from(authHeader || ''), _bh = Buffer.from(_bearer);
-            if (!authHeader || _ah.length !== _bh.length || !crypto.timingSafeEqual(_ah, _bh)) {
+            let matches = [HUB_API_KEY, HUB_FEED_API_KEY].filter(Boolean).some(key => {
+                let bearer = 'Bearer ' + key;
+                let a = Buffer.from(authHeader || ''), b = Buffer.from(bearer);
+                return Boolean(authHeader) && a.length === b.length && crypto.timingSafeEqual(a, b);
+            });
+            if (!matches) {
                 socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
                 socket.destroy();
                 return;
@@ -148,13 +151,13 @@ function startKeepalivePing({ hub, WebSocket, HUB_DB_KEEPALIVE_INTERVAL }) {
 // under /hub-db/snapshot to this same express app, and a /hub-db/subscribe
 // upgrade back to this server's own upgrade listener (auth, then
 // HubDbBroadcaster). Nothing else on that port reaches either. Fail closed
-// without a key: the snapshot middleware skips its check when HUB_API_KEY is
+// without a key: the snapshot middleware skips its check when both feed keys are
 // unset, which is tolerable on a loopback-bound API port and is not on a public
 // one, so an unkeyed hub simply keeps the port gossip-only.
-function serveFeedOnP2pPort(app, server, { hub, hubConfig, logger, HUB_API_KEY }) {
+function serveFeedOnP2pPort(app, server, { hub, hubConfig, logger, HUB_API_KEY, HUB_FEED_API_KEY }) {
     if (hub.peerManager && typeof hub.peerManager.setFeedHandlers === 'function') {
-        if (!HUB_API_KEY) {
-            logger.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
+        if (!HUB_API_KEY && !HUB_FEED_API_KEY) {
+            logger.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY and HUB_FEED_API_KEY are unset ' +
                 '(fail closed; the port stays gossip-only)');
         } else if (String(hubConfig.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
             logger.info('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
@@ -242,4 +245,4 @@ async function releaseResources({ hub, server, wss, observability }) {
     await observability.shutdown();
 }
 
-module.exports = { createApp, startServer };
+module.exports = { createApp, startServer, upgradeHandler, serveFeedOnP2pPort };

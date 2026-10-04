@@ -8,10 +8,10 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// Public-port method allowlist. The read-only mirror feed shares the PUBLIC P2P
-// port (PeerManager.setFeedHandlers), and an indexer must also report what landed
-// on its chain, so a small set of push methods is reachable there. The guard these
-// tests hold is that the set is EXACTLY those pushes: a request stamped as arriving
+// Public-port method allowlist. The mirror feed shares the PUBLIC P2P port
+// (PeerManager.setFeedHandlers), and an indexer must discover hubs and report what
+// landed on its chain, so a small RPC set is reachable there. The guard these
+// tests hold is that the set is EXACTLY those calls: a request stamped as arriving
 // on the public port may call nothing else, while the private API port keeps its
 // full surface. The x-api-key tiers are unchanged and tested in
 // sensitiveReadAuth.test.js; this file is only about which methods that port
@@ -24,8 +24,9 @@ const { waitUntil } = require('../../helpers/waitUntil');
 
 // The complete indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js).
 const FEED_METHODS = [
+    'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ];
 
 // A deliberately broad sample of what must NOT be reachable from a public port:
@@ -66,7 +67,7 @@ function makeBootDoubles() {
 
 function saveFeedEnvironment() {
     const saved = {};
-    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+    for (const k of ['HUB_API_KEY', 'HUB_FEED_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
                      'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
                      'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
         saved[k] = process.env[k];
@@ -156,7 +157,7 @@ describe('hub public-port rpc allowlist (P2P feed)', function () {
     before(async function () { api = await bootApi(); });
     afterEach(function () { sinon.restore(); });
 
-    it('admits every indexer push method on the public port', function () {
+    it('admits every indexer feed method on the public port', function () {
         for (const m of FEED_METHODS) {
             expect(api.drive({ method: m, feed: true }).nexted, m).to.equal(true);
         }

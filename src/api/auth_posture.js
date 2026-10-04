@@ -44,6 +44,7 @@ const EXAMPLE_WRITE_METHODS = 'updateconfig / registervalidator / reportreorg';
 
 // Evaluate the boot-time auth posture.
 //   apiKey               - HUB_API_KEY (string, '' when unset)
+//   feedKey              - HUB_FEED_API_KEY (string, '' when unset)
 //   allowUnauthenticated - HUB_ALLOW_UNAUTHENTICATED parsed to a boolean
 //   validatorMode        - true when P2P_VALIDATOR_ADDR is set
 //   sensitiveReadAuth    - false when HUB_SENSITIVE_READ_AUTH=0
@@ -51,6 +52,7 @@ const EXAMPLE_WRITE_METHODS = 'updateconfig / registervalidator / reportreorg';
 function evaluateAuthPosture(opts) {
     opts = opts || {};
     let apiKey               = opts.apiKey || '';
+    let feedKey              = opts.feedKey || '';
     let allowUnauthenticated = opts.allowUnauthenticated === true;
     let validatorMode        = opts.validatorMode === true;
     let sensitiveReadAuth    = opts.sensitiveReadAuth !== false;
@@ -74,7 +76,8 @@ function evaluateAuthPosture(opts) {
             };
         }
         warnings.push('WARNING: HUB_API_KEY is not set and HUB_ALLOW_UNAUTHENTICATED=true, so write methods (' +
-            EXAMPLE_WRITE_METHODS + ' and the push* consensus inputs) and WebSocket subscriptions are ' +
+            EXAMPLE_WRITE_METHODS + ' and the push* consensus inputs)' +
+            (feedKey ? ' are ' : ' and WebSocket subscriptions are ') +
             'UNAUTHENTICATED by explicit operator declaration' +
             (validatorMode ? ' ON A VALIDATOR HUB' : '') +
             '. This is only safe behind a private network or an authenticating proxy; set a strong ' +
