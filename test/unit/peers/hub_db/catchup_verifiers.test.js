@@ -10,6 +10,7 @@ const attestMethods = require('../../../../src/anchor/publisher/attest_round.js'
 const archiveAttestMethods = require('../../../../src/anchor/publisher/archive/attest.js');
 const rewardMethods = require('../../../../src/anchor/publisher/reward.js');
 const ar = require('../../../../src/consensus/gates/anchor_reward_gate.js');
+const proxyquire = require('proxyquire');
 
 const MODULE_PATH = require.resolve('../../../../src/peers/hub_db/catchup_verifiers.js');
 const EXPECTED_TABLES = [
@@ -119,7 +120,12 @@ describe('catch-up verifier registry', function () {
 
     beforeEach(function () {
         delete require.cache[MODULE_PATH];
-        registry = require(MODULE_PATH);
+        registry = proxyquire(MODULE_PATH, {
+            './cross_chain_catchup_verifiers.js': {
+                registerCrossChainCatchupVerifiers: () => {},
+                '@noCallThru': true
+            }
+        });
     });
 
     afterEach(function () {

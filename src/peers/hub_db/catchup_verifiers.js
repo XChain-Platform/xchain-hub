@@ -52,6 +52,8 @@ function getCatchupVerifier(table) {
 
 registerCatchupVerifier('state_checkpoints', verifyStateCheckpointCatchupRow);
 registerCatchupVerifier('anchor_reward_attestations', verifyAnchorRewardCatchupRow);
+require('./cross_chain_catchup_verifiers.js')
+    .registerCrossChainCatchupVerifiers(registerCatchupVerifier);
 
 module.exports = {
     MIRRORED_TABLES,
