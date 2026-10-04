@@ -36,6 +36,19 @@ function signReqs(node) {
     return node.sent.filter(m => m.type === 'XPRICEB_SIGN_REQ');
 }
 
+function within(promise, ms) {
+    return new Promise((resolve, reject) => {
+        let timer = setTimeout(() => reject(new Error('fill round did not stop at quorum')), ms);
+        promise.then(value => {
+            clearTimeout(timer);
+            resolve(value);
+        }, error => {
+            clearTimeout(timer);
+            reject(error);
+        });
+    });
+}
+
 function cleanupTest() {
     if (mesh) mesh.stop();
     mesh = null;
@@ -72,13 +85,15 @@ function registerFillTests() {
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 
-    it('still proposes when a quorum of peers confirms the round is absent everywhere', async function () {
+    it('skips once a quorum replies without the missing round', async function () {
         mesh = buildMesh(4, { rounds: withoutMissing(baseRounds()), timeoutMs: 400 });
-        quickFill(mesh);
-        let res = await mesh.nodes[0].signer.collectBatchSignatures(
+        mesh.nodes[0].signer.fillTimeoutMs = 1000;
+        mesh.nodes[3].signer.handleFillReq = async () => {};
+        let pending = mesh.nodes[0].signer.collectBatchSignatures(
             100, 105, 5005, withoutMissing(baseRounds()));
-        expect(res.met).to.equal(true);
-        expect(signReqs(mesh.nodes[0])).to.have.length(1);
+        let res = await within(pending, 150);
+        expect(res.met).to.equal(false);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 }
 
