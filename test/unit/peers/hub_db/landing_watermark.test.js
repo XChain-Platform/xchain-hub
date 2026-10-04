@@ -33,7 +33,7 @@ function frame(broadcaster) {
     return sent.find((m) => m.type === 'watermark');
 }
 
-describe('landing watermark', function () {
+describe('landing watermark ingest ordering', function () {
     afterEach(function () { this.broadcaster && this.broadcaster.stop(); });
 
     it('carries landed.DOGE only after the stamp for that block was emitted', async function () {
@@ -71,6 +71,10 @@ describe('landing watermark', function () {
         await broadcaster.sampleAdmission();
         expect(frame(broadcaster).landed).to.deep.equal({});
     });
+});
+
+describe('landing watermark publication', function () {
+    afterEach(function () { this.broadcaster && this.broadcaster.stop(); });
 
     it('publishes no advance for a regressing or null reading', async function () {
         let next = { DOGE: { block: 100, protocol_time: 1791144200 } };
@@ -116,19 +120,59 @@ describe('landing watermark', function () {
         const ready = sent.find((m) => m.type === 'ready');
         expect(ready.landed).to.deep.equal({ DOGE: { block: 7, protocol_time: 1791144000 } });
     });
+});
 
-    it('relay mode republishes upstream verbatim and mints nothing', async function () {
+describe('landing watermark relay', function () {
+    afterEach(function () { this.broadcaster && this.broadcaster.stop(); });
+
+    it('relay mode republishes a caught-up upstream page and mints nothing', async function () {
         const broadcaster = new HubDbBroadcaster({ HUB_ADMISSION_RELAY: '1' });
         this.broadcaster = broadcaster;
         broadcaster.isCaughtUp = () => true;
         const lw = broadcaster.landingWatermark;
         expect(lw.observe('DOGE', { block: 1, protocol_time: 5 }, { inFlight: 0, started: 0 }, { inFlight: 0, started: 0 })).to.equal(false);
-        lw.republishFrom({ DOGE: { block: 50, protocol_time: 1791144000 }, 'not a chain': { block: 1, protocol_time: 2 }, LTC: { block: -1, protocol_time: 2 } });
-        expect(broadcaster.landedMap()).to.deep.equal({ DOGE: { block: 50, protocol_time: 1791144000 } });
-        lw.republishFrom({ DOGE: { block: 40, protocol_time: 1791143000 } });
+
+        let stored = false;
+        let localReads = 0;
+        let upstream = { DOGE: { block: 50, protocol_time: 1791144000 } };
+        const relaySource = {
+            isCaughtUp: () => true,
+            allCaughtUp: () => stored,
+            fetchPage: async () => ({
+                table: 'price_snapshots',
+                rows: [{ id: 1 }],
+                landed: upstream
+            }),
+            async catchUpTable(peer, table) {
+                const page = await this.fetchPage(peer, table, 0, 1000);
+                if (!stored) expect(broadcaster.landedMap()).to.deep.equal({});
+                stored = page.rows.length === 1;
+            },
+            async run() {
+                await this.catchUpTable('upstream', 'price_snapshots');
+            }
+        };
+        broadcaster.attachAdmissionSource({
+            peerCatchup: relaySource,
+            resolveLandingReadings: async () => { localReads++; return upstream; }
+        });
+        expect(broadcaster.landedMap()).to.deep.equal({});
+
+        await broadcaster.sampleAdmission();
+        await relaySource.run();
+        expect(stored).to.equal(true);
+        expect(localReads).to.equal(0);
+        expect(frame(broadcaster).landed).to.deep.equal({
+            DOGE: { block: 50, protocol_time: 1791144000 }
+        });
+
+        upstream = { DOGE: { block: 40, protocol_time: 1791143000 } };
+        await relaySource.run();
         expect(broadcaster.landedMap().DOGE.block).to.equal(50);
     });
+});
 
+describe('landing watermark indexer readings', function () {
     it('reads hub_push_delivered from the indexer status and nulls a missing one', async function () {
         class Tips extends ChainTips {
             async resolveIndexerUrl(c) { return c === 'LTC' ? null : 'http://indexer'; }
