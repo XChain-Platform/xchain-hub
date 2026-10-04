@@ -186,7 +186,7 @@ function request(port, method, path) {
             dbStub = { doQuery: sinon.stub().resolves([]) };
             pm = new PeerManager({
                 P2P_VALIDATOR_ADDR: 'ws://self:10002',
-                P2P_PORT: 0,
+                P2P_PORT: '0',
                 P2P_HOST: '127.0.0.1',
                 SEED_NODES: [],
                 REQUIRE_SIGNATURES: false,
@@ -196,6 +196,7 @@ function request(port, method, path) {
             }, dbStub);
             await pm.start();
             port = pm.httpServer.address().port;
+            expect(port).to.be.within(1, 65535);
         });
         afterEach(async function () {
             await pm.stop();
