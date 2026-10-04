@@ -137,7 +137,7 @@ function wireOutboundSocket(pm, addr, peer, ws) {
 class PeerConnections {
 
     async start() {
-        let port = this.config.P2P_PORT || 10001;
+        let port = this.config.P2P_PORT == null ? 10001 : this.config.P2P_PORT;
         let host = this.config.P2P_HOST || '0.0.0.0';
 
         // Plain HTTP on this port answers ONLY the mirror-snapshot reads, and only
