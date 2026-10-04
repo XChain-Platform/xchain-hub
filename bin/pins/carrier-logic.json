@@ -52,6 +52,11 @@
         "xchain-indexer"
       ]
     },
+    "oracle/consensus/round_time_gate": {
+      "path": "src/oracle/consensus/round_time_gate.js",
+      "hash": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
+      "twins": []
+    },
     "oracle_clamp_reference_activation": {
       "path": "src/oracle_clamp_reference_activation.js",
       "hash": "7aa2f4093011c3801c25b231442a2a05702377154eb002e56f1204f47e1d993c",
@@ -715,6 +720,13 @@
       "from": "5fc76089117b4b42869d6bf11f2a14fa0c1842f99837bf8aaa73e6e64541efac",
       "to": "260da1c6f73a0778d12d7c29c2922067be53559d28bd019e754a6fa2ee601080",
       "reason": "add oracle round time activation digest gate",
+      "date": "2026-10-04"
+    },
+    {
+      "id": "oracle/consensus/round_time_gate",
+      "from": null,
+      "to": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
+      "reason": "oracle round time gate reader",
       "date": "2026-10-04"
     }
   ]
