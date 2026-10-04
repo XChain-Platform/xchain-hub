@@ -129,6 +129,10 @@ const CONDITIONAL_SUBSCRIBERS = Object.freeze([
     { entry: 'CrossChainDexConsensus:ATTEST_RELAY', attaches: attestRelayAttaches }
 ]);
 
+const PEER_EVENT_SUBSCRIBERS = Object.freeze([
+    Object.freeze({ event: 'peer:connect', subscriber: 'HubDbPeerCatchup' })
+]);
+
 // The limits an operator sets on a peer: who is refused outright, how many
 // connections one IP may hold, and how many messages a known or unknown peer
 // may send in a window.
@@ -225,11 +229,18 @@ class PeerManager extends EventEmitter {
         return Object.freeze(roster);
     }
 
+    static listenerRoster(config, env) {
+        const message = PeerManager.messageSubscribers(config, env).map(subscriber =>
+            Object.freeze({ event: 'message', subscriber }));
+        return Object.freeze([...message, ...PEER_EVENT_SUBSCRIBERS]);
+    }
+
     // The roster of a PeerManager carrying no configuration of its own, under this
     // process's environment: every unconditional subscriber, plus each conditional one
     // whose gate is open or unresolvable. It is the roster's widest honest reading, and
     // what the source-parity derivation in peer_manager_listener_ceiling.test.js compares
     // module names against. A CONFIGURED hub's ceiling comes from messageSubscribers().
+    static get LISTENER_ROSTER()      { return PeerManager.listenerRoster(null, hubConfig.env()); }
     static get MESSAGE_SUBSCRIBERS()   { return PeerManager.messageSubscribers(null, hubConfig.env()); }
     static get MAX_MESSAGE_LISTENERS() { return PeerManager.MESSAGE_SUBSCRIBERS.length; }
 
