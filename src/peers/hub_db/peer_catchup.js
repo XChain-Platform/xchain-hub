@@ -9,6 +9,7 @@ const { createCatchupState } = require('./catchup_state.js');
 
 const DEFAULT_PAGE_SIZE = 1000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
+const DEFAULT_RETRY_INTERVAL_MS = 5000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
@@ -62,13 +63,16 @@ function requestJson(url, feedKey, timeoutMs) {
 function connectedSignerPeers(peerManager) {
     if (!peerManager || !peerManager.peers || !peerManager.validatorPubkeys) return [];
     const signerSet = peerManager.effectiveSignerSet;
-    if (!(signerSet instanceof Set) || signerSet.size === 0) return [];
     const peers = [];
     for (const [addr, peer] of peerManager.peers) {
         if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
         const pubkey = peerManager.validatorPubkeys.get(addr);
         if (!pubkey) continue;
-        if (!signerSet.has(String(pubkey).toLowerCase())) continue;
+        const normalizedPubkey = String(pubkey).toLowerCase();
+        const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
+        const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
+            peerManager.registryHasPubkey(normalizedPubkey);
+        if (!inSignerSet && !inRegistry) continue;
         peers.push(addr);
     }
     return peers;
@@ -191,6 +195,8 @@ class HubDbPeerCatchup {
         this.pageSize = Number(opts.pageSize) > 0 ? Number(opts.pageSize) : DEFAULT_PAGE_SIZE;
         this.warnIntervalMs = Number(opts.warnIntervalMs) > 0
             ? Number(opts.warnIntervalMs) : DEFAULT_WARN_INTERVAL_MS;
+        this.retryIntervalMs = Number(opts.retryIntervalMs) > 0
+            ? Number(opts.retryIntervalMs) : DEFAULT_RETRY_INTERVAL_MS;
         this.requestTimeoutMs = Number(opts.requestTimeoutMs) > 0
             ? Number(opts.requestTimeoutMs) : DEFAULT_REQUEST_TIMEOUT_MS;
         this.logger = opts.logger || getLogger();
@@ -204,6 +210,7 @@ class HubDbPeerCatchup {
         this.runningPromise = null;
         this.rerunRequested = false;
         this.warnTimer = null;
+        this.retryTimer = null;
         this.lastNoPeerWarnAt = null;
         this.started = false;
         this.onPeerConnect = () => this.schedule();
@@ -217,12 +224,20 @@ class HubDbPeerCatchup {
         }
         this.warnTimer = setInterval(() => this.warnIfNoPeer(), this.warnIntervalMs);
         if (this.warnTimer.unref) this.warnTimer.unref();
+        this.retryTimer = setInterval(() => {
+            if (!this.isCaughtUp() && connectedSignerPeers(this.peerManager).length > 0) {
+                this.schedule();
+            }
+        }, this.retryIntervalMs);
+        if (this.retryTimer.unref) this.retryTimer.unref();
         return this.schedule();
     }
 
     stop() {
         if (this.warnTimer) clearInterval(this.warnTimer);
         this.warnTimer = null;
+        if (this.retryTimer) clearInterval(this.retryTimer);
+        this.retryTimer = null;
         if (this.peerManager && typeof this.peerManager.removeListener === 'function') {
             this.peerManager.removeListener('peer:connect', this.onPeerConnect);
         }
@@ -308,7 +323,9 @@ class HubDbPeerCatchup {
                 cursor = wireId;
                 let verdict;
                 try {
-                    verdict = await verifier(row, { table, peer, db: this.db });
+                    verdict = await verifier(row, {
+                        table, peer, db: this.db, authenticated: true, signerSetPeer: true
+                    });
                 } catch (e) {
                     verdict = { ok: false, reason: e && e.message ? e.message : String(e) };
                 }
