@@ -105,10 +105,10 @@ function registerRpcTests() {
         expect(driveAuth(authContext(), ['gethubs', 'pushchaintip'], BULK_KEY).nexted).to.equal(true);
     });
 
-    it('keeps gethubs bulk-keyed when the feed key is unset', function () {
+    it('keeps gethubs public when the feed key is unset', function () {
         const ctx = authContext({ HUB_FEED_API_KEY: '' });
         expect(driveAuth(ctx, 'gethubs', BULK_KEY).nexted).to.equal(true);
-        expect(driveAuth(ctx, 'gethubs').res.statusCode).to.equal(401);
+        expect(driveAuth(ctx, 'gethubs').nexted).to.equal(true);
     });
 }
 

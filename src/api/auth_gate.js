@@ -81,7 +81,7 @@ function timingEqual(provided, expected) {
 }
 
 function feedTierRefuses(calls, provided, { HUB_API_KEY, HUB_FEED_API_KEY }) {
-    if (!HUB_API_KEY && !HUB_FEED_API_KEY) return false;
+    if (!HUB_FEED_API_KEY) return false;
     let feedRead = calls.some(call => {
         let method = call && call.method;
         return method && FEED_READ_METHODS.has(method.toLowerCase());
