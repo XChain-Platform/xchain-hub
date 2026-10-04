@@ -74,7 +74,9 @@ function connectedSignerPeers(peerManager) {
         const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
             peerManager.registryHasPubkey(normalizedPubkey);
         if (!inSignerSet && !inRegistry) continue;
-        const feedUrl = peer.feedUrl || (peer.inbound ? null : addr);
+        const feedUrl = peer.feedUrl ||
+            (peerManager.validatorFeedUrls && peerManager.validatorFeedUrls.get(identity)) ||
+            (peer.inbound ? null : addr);
         peers.push({ addr, identity, feedUrl });
     }
     return peers;
