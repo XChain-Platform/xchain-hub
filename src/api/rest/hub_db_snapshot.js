@@ -74,24 +74,27 @@ function snapshotHelpers({ hub, HUB_NETWORK }) {
     return { admissionHeightsForSnapshot, btcChainIdForSnapshot };
 }
 
-function mountSnapshotAuth(app, { HUB_API_KEY }) {
+function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
     // Hub DB sync channel: REST snapshot endpoints
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
     //
-    // Auth (seq 3517): gate every /hub-db/snapshot/* GET behind HUB_API_KEY WHEN
-    // IT IS SET, mirroring the JSON-RPC write-method guard above and the WebSocket
-    // upgrade guard below. Unset key => unauthenticated (unchanged behavior for a
+    // Gate every /hub-db/snapshot/* GET behind either configured feed credential,
+    // mirroring the WebSocket upgrade guard. Both keys unset => unauthenticated
+    // (unchanged behavior for a
     // public bootstrap hub / regtest / xchain-node-managed deploys that inject no
-    // key); set key => these endpoints fail closed (401) so a production federation
+    // key); either key set => these endpoints fail closed (401) so a production federation
     // can lock its hub-DB mirror to authenticated indexers. The indexer's hub_db_sync
     // bootstrap sends the key as `x-api-key` (matching the write-method header), so
     // we check the same header with the same constant-time compare.
     app.use('/hub-db/snapshot', (req, res, next) => {
-        if (!HUB_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_FEED_API_KEY) return next();
         let provided = req.headers['x-api-key'] || '';
-        let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
-        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        let matches = [HUB_API_KEY, HUB_FEED_API_KEY].filter(Boolean).some(expected => {
+            let a = Buffer.from(provided), b = Buffer.from(expected);
+            return a.length === b.length && crypto.timingSafeEqual(a, b);
+        });
+        if (!matches) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         next();
@@ -355,4 +358,4 @@ function mountAttestSnapshots(app, ctx, helpers) {
     });
 }
 
-module.exports = { mountSnapshotRoutes };
+module.exports = { mountSnapshotRoutes, mountSnapshotAuth };

@@ -25,17 +25,18 @@ const crypto = require('crypto');
 const configRedaction = require('./config_redaction.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
-// setFeedHandlers). This is the complete set an indexer sends to its hub
-// (xchain-indexer src/hub/hub_client.js): hub discovery, what landed on its
-// chain, and the retractions when a reorg takes it back. Every member has its
-// own x-api-key tier; this set only narrows WHICH methods the port considers.
+// setFeedHandlers). This is the complete set an indexer sends to its hub:
+// discovery plus what landed on its chain and retractions after a reorg. The
+// x-api-key tiers apply exactly as on the private port; this set only narrows
+// WHICH methods that port will consider.
 // Adding to it widens a public attack surface: a method belongs here only if an
-// indexer must call it and it is signature- or content-validated hub-side.
+// indexer must call it and it is read-only or validated hub-side.
 const FEED_RPC_METHODS = new Set([
     'gethubs',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'pushbridgereorg', 'retractattestbatch'
 ]);
+
 const FEED_READ_METHODS = new Set(['gethubs']);
 
 // CREDENTIAL TIER. Served verbatim, the configs table hands the coin node's rpc
@@ -77,6 +78,17 @@ function callWantsConfigSecrets(call) {
 function timingEqual(provided, expected) {
     let a = Buffer.from(provided), b = Buffer.from(expected);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function feedTierRefuses(calls, provided, { HUB_API_KEY, HUB_FEED_API_KEY }) {
+    if (!HUB_FEED_API_KEY) return false;
+    let feedRead = calls.some(call => {
+        let method = call && call.method;
+        return method && FEED_READ_METHODS.has(method.toLowerCase());
+    });
+    if (!feedRead) return false;
+    return !(HUB_FEED_API_KEY && timingEqual(provided, HUB_FEED_API_KEY)) &&
+        (!HUB_API_KEY || !timingEqual(provided, HUB_API_KEY));
 }
 
 // With HUB_REORG_API_KEY set, the retraction rails answer ONLY to
@@ -123,14 +135,13 @@ function bulkTierRefuses(calls, provided, ctx) {
     return false;
 }
 
-// API key enforcement for write methods and sensitive reads (only when a
-// key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
-// in src/api.js). Everything not in either set is the public read tier, protected
-// only by the per-IP rate limit.
+// API key enforcement for the feed read, write and sensitive-read tiers.
+// Everything outside them is the public read tier, protected only by the
+// per-IP rate limit.
 function authGate(ctx) {
-    const { HUB_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY } = ctx;
+    const { HUB_API_KEY, HUB_FEED_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY } = ctx;
     return (req, res, next) => {
-        if (!HUB_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_FEED_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
         // array body, so the gate must inspect ALL of them: require a key if ANY
@@ -144,6 +155,7 @@ function authGate(ctx) {
             error: { code: -32001, message: 'Unauthorized' }
         });
         if (reorgTierRefuses(calls, provided, ctx)) return unauthorized();
+        if (feedTierRefuses(calls, provided, ctx)) return unauthorized();
         // Credential tier (see the CREDENTIAL TIER note above). A getallconfigs
         // that asks for the unredacted tree must satisfy the config-secrets key
         // when one is set, and the bulk key otherwise. Enforced here rather than
@@ -163,13 +175,16 @@ function authGate(ctx) {
 
 // Public-port method allowlist. A request stamped by PeerManager arrived on the
 // PUBLIC P2P port (see setFeedHandlers), where the only callers are indexers
-// mirroring this validator and reporting what landed on their chain. Hold those
+// mirroring this validator, discovering peers and reporting what landed on their chain. Hold those
 // to FEED_RPC_METHODS: every other method (config and validator administration,
-// governance, slashing, swaps, anchor flush, effector spend, and every read)
+// governance, slashing, swaps, anchor flush, effector spend, and every other read)
 // stays reachable only on the private API port.
 //
-// These are the whole indexer-to-hub vocabulary. Each method has just cleared
-// its x-api-key tier exactly as it would on the private port.
+// These are the whole indexer->hub vocabulary. Each has cleared its read-only,
+// bulk or reorg key tier exactly as it would on the private port, and every write
+// payload is validated before anything is stored. Refusing them would leave a validator unable to learn that
+// its own published batch landed, which is what stops its publisher pruning and
+// keeps the takeover rail disarmed.
 //
 // Runs AFTER the key gate deliberately: an unauthenticated caller gets the same
 // 401 it would get anywhere, so this port answers "not available" only to a

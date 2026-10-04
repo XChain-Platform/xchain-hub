@@ -146,6 +146,7 @@ const config = {
     get HUB_DB_NAME() { return process.env.HUB_DB_NAME; },
     get HUB_DB_PORT() { return process.env.HUB_DB_PORT; },
     get HUB_DB_USER() { return process.env.HUB_DB_USER; },
+    get HUB_FEED_API_KEY() { return process.env.HUB_FEED_API_KEY; },
     get HUB_HOST() { return process.env.HUB_HOST; },
     get HUB_MAX_RPC_BATCH() { return process.env.HUB_MAX_RPC_BATCH; },
     get HUB_NETWORK() { return process.env.HUB_NETWORK; },

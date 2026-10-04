@@ -56,7 +56,7 @@ async function bootApi(hubOverrides) {
 
     let controller = null;
     const saved = {};
-    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+    for (const k of ['HUB_API_KEY', 'HUB_FEED_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
                      'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
                      'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
         saved[k] = process.env[k];

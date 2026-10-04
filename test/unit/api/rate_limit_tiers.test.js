@@ -179,9 +179,11 @@ function bucketsSuite() {
 
     it('recognises every configured hub key and nothing else', function () {
         const isAuthenticated = authenticatedCaller({
-            HUB_API_KEY: 'bulk', HUB_REORG_API_KEY: 'reorg', HUB_CONFIG_SECRETS_API_KEY: ''
+            HUB_API_KEY: 'bulk', HUB_FEED_API_KEY: 'feed',
+            HUB_REORG_API_KEY: 'reorg', HUB_CONFIG_SECRETS_API_KEY: ''
         });
         expect(isAuthenticated({ headers: { 'x-api-key': 'bulk' } })).to.equal(true);
+        expect(isAuthenticated({ headers: { 'x-api-key': 'feed' } })).to.equal(true);
         expect(isAuthenticated({ headers: { 'x-api-key': 'reorg' } })).to.equal(true);
         expect(isAuthenticated({ headers: { 'x-api-key': '' } })).to.equal(false);
         expect(isAuthenticated({ headers: { 'x-api-key': 'bulkx' } })).to.equal(false);
