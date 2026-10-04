@@ -106,6 +106,7 @@ it('never touches a LEGACY row, which carries no admission height at all', funct
 
 describe('admission height watermark: the late-finalization refusal', function () {
 
+    afterEach(function () { sinon.restore(); });
 
     registerLateFinalizationBoundaryTests();
 
