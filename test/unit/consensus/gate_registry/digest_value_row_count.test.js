@@ -20,7 +20,7 @@ const registry = require('../../../../src/consensus/gate_registry.js');
 const REGISTRY_FILE = path.join(__dirname, '../../../../src/consensus/gate_registry.js');
 
 describe('gate_registry: digest value-row count @regression @tier1', function () {
-    it('keeps the registry comment synchronized with the shared digest keys', function () {
+    it('keeps the registry comment and shared digest counts pinned together', function () {
         const keys = SHARED_GATES.flatMap(([mod, names]) => names.map(name => mod + '.' + name));
         const valueRows = keys.filter(key => registry.has(key)).length;
         const functionKeys = keys.length - valueRows;
