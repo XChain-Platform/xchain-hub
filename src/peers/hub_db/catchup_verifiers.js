@@ -48,6 +48,9 @@ function getCatchupVerifier(table) {
     return verifiers.get(table);
 }
 
+require('./cross_chain_catchup_verifiers.js')
+    .registerCrossChainCatchupVerifiers(registerCatchupVerifier);
+
 module.exports = {
     MIRRORED_TABLES,
     registerCatchupVerifier,
