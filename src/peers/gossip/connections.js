@@ -136,6 +136,16 @@ function wireOutboundSocket(pm, addr, peer, ws) {
 
 class PeerConnections {
 
+    recordValidatorFeedUrl(validatorAddr, feedUrl) {
+        if (!validatorAddr || !feedUrl) return false;
+        this.validatorFeedUrls.set(validatorAddr, feedUrl);
+
+        const inboundPeer = this.peers.get(validatorAddr);
+        if (!inboundPeer || !inboundPeer.inbound || inboundPeer.feedUrl === feedUrl) return false;
+        inboundPeer.feedUrl = feedUrl;
+        return true;
+    }
+
     async start() {
         let port = this.config.P2P_PORT || 10001;
         let host = this.config.P2P_HOST || '0.0.0.0';
