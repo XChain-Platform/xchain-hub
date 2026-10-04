@@ -1,13 +1,13 @@
 'use strict';
-
 const EventEmitter = require('events');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
 const PeerManager = require('../../../../src/peers/manager.js');
-
 const PEER = 'ws://validator02.example:10002';
+const VALIDATOR_ADDR = 'rValidator02';
+const SIGNING_PUBKEY = 'aa'.repeat(32);
 const CONTENT_READS = {
     price_snapshots: ['findPriceSnapshotsForRound', [1], { round_number: 1, coin_pair: 'BTC/USD' }],
     oracle_prices: ['getOraclePrice', ['addr', 'DOGE', 2],
@@ -31,25 +31,24 @@ const CONTENT_READS = {
     list_snapshots: ['getListSnapshotAtSeq', ['testnet', 'LTC', 9, 10],
         { network: 'testnet', home_chain: 'LTC', home_list_index: 9, seq: 10 }]
 };
-
 function peerManager(connected) {
     const pm = new EventEmitter();
     pm.peers = new Map();
-    pm.validatorPubkeys = new Map([[PEER, 'aa'.repeat(32)]]);
-    pm.effectiveSignerSet = new Set(['aa'.repeat(32)]);
+    pm.validatorPubkeys = new Map([[VALIDATOR_ADDR, SIGNING_PUBKEY]]);
+    pm.effectiveSignerSet = new Set([SIGNING_PUBKEY]);
     pm.registryHasPubkey = pubkey => [...pm.validatorPubkeys.values()]
         .some(value => value && String(value).toLowerCase() === pubkey);
-    if (connected) pm.peers.set(PEER, { state: 'open' });
+    if (connected) pm.peers.set(PEER, {
+        state: 'open', inbound: false, feedUrl: PEER, validatorAddr: VALIDATOR_ADDR
+    });
     return pm;
 }
-
 function priceDb() {
     return {
         findPriceSnapshotsForRound: sinon.stub().resolves([]),
         setFinalizedPriceSnapshotRound: sinon.stub().resolves({ affectedRows: 1 })
     };
 }
-
 function makeCatchup(overrides) {
     const opts = overrides || {};
     return new HubDbPeerCatchup({
@@ -66,9 +65,7 @@ function makeCatchup(overrides) {
         logger: opts.logger || { warn: sinon.stub(), error: sinon.stub() }
     });
 }
-
 afterEach(function () { sinon.restore(); });
-
 describe('hub DB peer catch-up paging', function () {
     it('pages to the end, assigns local ids, and flips the table caught up', async function () {
         const db = priceDb();
@@ -79,10 +76,8 @@ describe('hub DB peer catch-up paging', function () {
         });
         fetchPage.onSecondCall().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ db, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.firstCall.args.slice(0, 4)).to.deep.equal([PEER, 'price_snapshots', 0, 2]);
         expect(fetchPage.secondCall.args[2]).to.equal(44);
         expect(db.setFinalizedPriceSnapshotRound.callCount).to.equal(2);
@@ -100,16 +95,13 @@ describe('hub DB peer catch-up paging', function () {
                 table: 'price_snapshots', rows: [{ id: 9, round_number: 3, coin_pair: 'BTC/USD' }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(db.findPriceSnapshotsForRound.calledOnceWithExactly(3)).to.equal(true);
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 });
-
 describe('hub DB peer catch-up verification', function () {
     it('accepts an oracle row from an authenticated connected signer peer', async function () {
         const storeRow = sinon.stub().resolves();
@@ -125,10 +117,8 @@ describe('hub DB peer catch-up verification', function () {
                 table: 'oracle_prices', rows: [{ id: 3, source_address: 'oracle-address' }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(verifier.calledOnce).to.equal(true);
         expect(verifier.firstCall.args[1]).to.include({
             table: 'oracle_prices', peer: PEER, authenticated: true, signerSetPeer: true
@@ -149,10 +139,8 @@ describe('hub DB peer catch-up verification', function () {
                 table: 'price_snapshots', rows: [{ id: 12, round_number: 4 }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(logger.warn.calledWithMatch('bad quorum')).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
@@ -161,10 +149,8 @@ describe('hub DB peer catch-up verification', function () {
     it('skips an unregistered table and leaves it not caught up', async function () {
         const fetchPage = sinon.stub();
         const catchup = makeCatchup({ getVerifier: () => undefined, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
         expect(catchup.isCaughtUp()).to.equal(false);
@@ -249,6 +235,34 @@ describe('hub DB peer catch-up content-key lookups', function () {
             expect(await HubDbPeerCatchup.rowAlreadyHeld(db, table, row), table).to.equal(true);
             expect(db[method].calledOnceWithExactly(...args), table).to.equal(true);
         }
+    });
+});
+
+describe('hub DB peer catch-up peer resolution', function () {
+    it('catches up every table from an outbound URL bound to a registry identity', async function () {
+        const tables = Object.keys(CONTENT_READS);
+        const fetchPage = sinon.stub().callsFake(async (peer, table) => ({ table, rows: [] }));
+        const catchup = makeCatchup({ tables, getVerifier: () => async () => true, fetchPage });
+        await catchup.start(); catchup.stop();
+        expect(fetchPage.callCount).to.equal(tables.length);
+        for (const call of fetchPage.getCalls()) expect(call.args[0]).to.equal(PEER);
+        expect(catchup.caughtUpState()).to.deep.equal(Object.fromEntries(
+            tables.map(table => [table, true])));
+        expect(catchup.isCaughtUp()).to.equal(true);
+    });
+    it('skips and throttles a signer peer known only by validator address', async function () {
+        const logger = { warn: sinon.stub(), error: sinon.stub() };
+        const pm = peerManager(false);
+        pm.peers.set(VALIDATOR_ADDR, { state: 'open', inbound: true,
+            feedUrl: null, validatorAddr: VALIDATOR_ADDR });
+        const fetchPage = sinon.stub();
+        const catchup = makeCatchup({ peerManager: pm, logger, fetchPage });
+        await catchup.start(); await catchup.schedule(); catchup.stop();
+        expect(fetchPage.called).to.equal(false);
+        expect(catchup.isCaughtUp()).to.equal(false);
+        expect(logger.warn.calledOnce).to.equal(true);
+        expect(logger.warn.firstCall.args[0]).to.include(VALIDATOR_ADDR)
+            .and.include('no fetchable feed URL');
     });
 });
 
@@ -375,7 +389,7 @@ describe('hub DB peer catch-up retry lifecycle', function () {
         await catchup.start();
         expect(fetchPage.called).to.equal(false);
 
-        pm.validatorPubkeys.set(PEER, 'aa'.repeat(32));
+        pm.validatorPubkeys.set(VALIDATOR_ADDR, SIGNING_PUBKEY);
         await clock.tickAsync(25);
 
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
