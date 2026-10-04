@@ -31,13 +31,39 @@ const registryActiveAt = gateRegistry.activeAt;
 let roundTimeGateEnabled = false;
 let capture;
 let consensus;
+let sandbox;
+let legacySandbox;
+
+function readsProducerCallSites(file) {
+    return file && (
+        file.endsWith('/test/unit/hub/scheduler_overlap_guards.test.js') ||
+        file.includes('/test/unit/oracle/consensus/oracle_consensus_') ||
+        (file.includes('/test/unit/oracle/round/') &&
+            !file.endsWith('/oracle_round_time_producer.test.js'))
+    );
+}
 
 beforeEach(function () {
-    sinon.stub(gateRegistry, 'activeAt').callsFake((key, ...args) =>
+    if (!readsProducerCallSites(this.currentTest && this.currentTest.file)) return;
+    legacySandbox = sinon.createSandbox();
+    legacySandbox.stub(gateRegistry, 'activeAt').callsFake((key, ...args) =>
+        key === ROUND_TIME_GATE
+            ? false
+            : registryActiveAt.call(gateRegistry, key, ...args));
+});
+
+afterEach(function () {
+    if (legacySandbox) legacySandbox.restore();
+    legacySandbox = null;
+});
+
+function setupRoundTimeGate() {
+    sandbox = sinon.createSandbox();
+    sandbox.stub(gateRegistry, 'activeAt').callsFake((key, ...args) =>
         key === ROUND_TIME_GATE
             ? roundTimeGateEnabled
             : registryActiveAt.call(gateRegistry, key, ...args));
-});
+}
 
 function stubRoundTimeGate(active) {
     roundTimeGateEnabled = active;
@@ -49,7 +75,7 @@ function setCadence(capture) {
     capture.round.roundInterval = ROUND_INTERVAL_MS;
 }
 
-afterEach(function () {
+function teardownRoundTimeGate() {
     if (capture) capture.restore();
     if (consensus) {
         for (const pending of consensus.pendingRounds.values()) {
@@ -63,10 +89,14 @@ afterEach(function () {
     capture = null;
     consensus = null;
     roundTimeGateEnabled = false;
-    sinon.restore();
-});
+    sandbox.restore();
+    sandbox = null;
+}
 
 describe('OracleRound nominal time finalization', function () {
+    beforeEach(setupRoundTimeGate);
+    afterEach(teardownRoundTimeGate);
+
     it('passes the nominal time to consensus when the pushed tip is 1h43m ahead', async function () {
         const activeAt = stubRoundTimeGate(true);
         capture = makeRoundTimeCapture({
@@ -105,6 +135,9 @@ describe('OracleRound nominal time finalization', function () {
 });
 
 describe('OracleRound nominal time lifecycle', function () {
+    beforeEach(setupRoundTimeGate);
+    afterEach(teardownRoundTimeGate);
+
     it('uses each in-flight round nominal time for shutdown skips', async function () {
         stubRoundTimeGate(true);
         capture = makeRoundTimeCapture({
@@ -150,6 +183,9 @@ describe('OracleRound nominal time lifecycle', function () {
 });
 
 describe('OracleConsensus nominal time default', function () {
+    beforeEach(setupRoundTimeGate);
+    afterEach(teardownRoundTimeGate);
+
     it('puts the nominal time in a PROPOSE when consensus receives no time', async function () {
         stubRoundTimeGate(true);
         const hub = createMockHub({ network: 'testnet' });
