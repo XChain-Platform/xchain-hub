@@ -21,6 +21,8 @@
  ********************************************************************/
 
 const { noteRoundLost } = require('../../consensus/diagnostics');
+const { nominalRoundSeconds } = require('../consensus/round_time');
+const { roundTimeGateActive } = require('../consensus/round_time_gate');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -94,8 +96,10 @@ module.exports = {
         this.finalizationTimers.clear();
         if (inFlight.length) {
             let btcBlockHeight = this.currentBtcBlockHeight;
-            let btcBlockTime   = this.currentBtcBlockTime;
             await Promise.allSettled(inFlight.map(round => {
+                let btcBlockTime = roundTimeGateActive({ network: this.hub.network, btcHeight: btcBlockHeight })
+                    ? nominalRoundSeconds(round, this.epochStart, this.roundInterval)
+                    : this.currentBtcBlockTime;
                 noteRoundLost({ phase: 'shutdown', round, cause: 'stopped_before_finalization' });
                 logger.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
                 if (!this.oracleConsensus || typeof this.oracleConsensus.storeSkippedRound !== 'function') return null;
