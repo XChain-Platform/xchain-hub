@@ -22,7 +22,7 @@ const { waitUntil } = require('../../helpers/waitUntil');
 const { DB_METHODS } = require('../../helpers/mockHub');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('../../../src/constants.js');
 
-const ENV_KEYS = ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+const ENV_KEYS = ['HUB_API_KEY', 'HUB_FEED_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
                   'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
                   'P2P_VALIDATOR_ADDR', 'HUB_NETWORK', 'ORACLE_EPOCH_START',
                   'ORACLE_ROUND_INTERVAL', 'ORACLE_SUBMISSION_WINDOW'];
