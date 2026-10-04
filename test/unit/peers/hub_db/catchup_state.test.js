@@ -7,7 +7,7 @@ const { expect } = require('chai');
 const { MIRRORED_TABLES } = require('../../../../src/peers/hub_db/catchup_verifiers.js');
 const { createCatchupState } = require('../../../../src/peers/hub_db/catchup_state.js');
 
-describe('catch-up state', function () {
+describe('catch-up state transitions', function () {
     it('starts every mirrored table behind', function () {
         const state = createCatchupState();
 
@@ -53,7 +53,9 @@ describe('catch-up state', function () {
             MIRRORED_TABLES.map(() => false)
         );
     });
+});
 
+describe('catch-up state boundaries', function () {
     it('throws for an unknown table on every per-table operation', function () {
         const state = createCatchupState();
 
