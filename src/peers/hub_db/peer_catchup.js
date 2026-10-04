@@ -66,14 +66,16 @@ function connectedSignerPeers(peerManager) {
     const peers = [];
     for (const [addr, peer] of peerManager.peers) {
         if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
-        const pubkey = peerManager.validatorPubkeys.get(addr);
+        const identity = peer.validatorAddr || addr;
+        const pubkey = peerManager.validatorPubkeys.get(identity);
         if (!pubkey) continue;
         const normalizedPubkey = String(pubkey).toLowerCase();
         const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
         const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
             peerManager.registryHasPubkey(normalizedPubkey);
         if (!inSignerSet && !inRegistry) continue;
-        peers.push(addr);
+        const feedUrl = peer.feedUrl || (peer.inbound ? null : addr);
+        peers.push({ addr, identity, feedUrl });
     }
     return peers;
 }
@@ -212,6 +214,7 @@ class HubDbPeerCatchup {
         this.warnTimer = null;
         this.retryTimer = null;
         this.lastNoPeerWarnAt = null;
+        this.lastNoFeedUrlWarnAt = new Map();
         this.started = false;
         this.onPeerConnect = () => this.schedule();
     }
@@ -282,17 +285,22 @@ class HubDbPeerCatchup {
             this.warnIfNoPeer();
             return this.caughtUpState();
         }
+        const fetchablePeers = peers.filter((peer) => {
+            if (peer.feedUrl) return true;
+            this.warnIfNoFeedUrl(peer);
+            return false;
+        });
         for (const table of this.tables) {
             const verifier = this.getVerifier(table);
             if (!verifier) continue;
-            for (const peer of peers) {
+            for (const peer of fetchablePeers) {
                 try {
-                    await this.catchUpTable(peer, table, verifier);
+                    await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity);
                     this.state.markCaughtUp(table);
                     break;
                 } catch (e) {
                     this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +
-                        ' from ' + peer + ':', e && e.message ? e.message : e));
+                        ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
                 }
             }
         }
@@ -308,7 +316,18 @@ class HubDbPeerCatchup {
         return true;
     }
 
-    async catchUpTable(peer, table, verifier) {
+    warnIfNoFeedUrl(peer) {
+        const name = peer.identity || peer.addr;
+        const now = Date.now();
+        const lastWarnAt = this.lastNoFeedUrlWarnAt.get(name);
+        if (lastWarnAt !== undefined && now - lastWarnAt < this.warnIntervalMs) return false;
+        this.lastNoFeedUrlWarnAt.set(name, now);
+        this.logger.warn('Hub DB peer catch-up: connected signer-set peer ' + name +
+            ' has no fetchable feed URL; skipping');
+        return true;
+    }
+
+    async catchUpTable(peer, table, verifier, peerIdentity) {
         let cursor = 0;
         for (;;) {
             const page = await this.fetchPage(peer, table, cursor, this.pageSize);
@@ -324,7 +343,8 @@ class HubDbPeerCatchup {
                 let verdict;
                 try {
                     verdict = await verifier(row, {
-                        table, peer, db: this.db, authenticated: true, signerSetPeer: true
+                        table, peer, peerIdentity, db: this.db,
+                        authenticated: true, signerSetPeer: true
                     });
                 } catch (e) {
                     verdict = { ok: false, reason: e && e.message ? e.message : String(e) };
