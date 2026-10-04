@@ -13,7 +13,9 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const RewardTracker = require('../../../src/anchor/reward_tracker');
+const OracleConsensus = require('../../../src/oracle/consensus');
 const validatorQueries = require('../../../src/db/validators');
+const { createMockHub } = require('../../helpers/mockHub');
 
 function pubkey(n) {
     return n.toString(16).padStart(64, '0');
@@ -41,6 +43,33 @@ function expectAnchorOnlyQuery(call) {
     const sql = call.args[0];
     expect(sql).to.include("WHERE reward_type LIKE 'anchor\\_%'");
     expect(sql).to.not.include('oracle_round');
+}
+
+async function finalizedParticipants(prepares) {
+    const consensus = new OracleConsensus(createMockHub(), {
+        getSubmissions: sinon.stub().returns(new Map())
+    });
+    const commonVoters = prepares.slice(0, 3);
+    const pending = {
+        prepares: new Set(prepares),
+        commits: new Set(commonVoters),
+        signatures: new Map(commonVoters.map(pk => [pk, 'sig-' + pk])),
+        prices: [{ coinPair: 'BTC/USD', price: '100000' }],
+        btcBlockHeight: 950000,
+        btcBlockTime: 1759276800,
+        finalized: true
+    };
+    let event;
+
+    sinon.stub(consensus, 'storeSnapshot').resolves();
+    consensus.pendingRounds.set(3141, pending);
+    consensus.on('round:finalized', value => { event = value; });
+
+    await consensus.finalizeCommittedRound(3141);
+
+    expect(event).to.be.an('object');
+    expect(event.participants).to.deep.equal(prepares);
+    return event.participants;
 }
 
 describe('oracle round reward advisory', function () {
@@ -80,11 +109,13 @@ describe('oracle round reward advisory', function () {
         ]);
     });
 
-    it('reflects each tracker commit-time participant set in the per-validator split', async function () {
+    it('derives each reward split from the consensus commit-time prepare set', async function () {
         const fourMemberTracker = trackerHarness();
         const fiveMemberTracker = trackerHarness();
-        const fourParticipants = [1, 2, 3, 4].map(pubkey);
-        const fiveParticipants = [1, 2, 3, 4, 5].map(pubkey);
+        const fourPrepares = [1, 2, 3, 4].map(pubkey);
+        const fivePrepares = [1, 2, 3, 4, 5].map(pubkey);
+        const fourParticipants = await finalizedParticipants(fourPrepares);
+        const fiveParticipants = await finalizedParticipants(fivePrepares);
 
         await fourMemberTracker.tracker.distributeRewards(3141, fourParticipants, 950000);
         await fiveMemberTracker.tracker.distributeRewards(3141, fiveParticipants, 950000);
