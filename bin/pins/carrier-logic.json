@@ -52,6 +52,11 @@
         "xchain-indexer"
       ]
     },
+    "oracle/consensus/round_time_gate": {
+      "path": "src/oracle/consensus/round_time_gate.js",
+      "hash": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
+      "twins": []
+    },
     "oracle_clamp_reference_activation": {
       "path": "src/oracle_clamp_reference_activation.js",
       "hash": "7aa2f4093011c3801c25b231442a2a05702377154eb002e56f1204f47e1d993c",
@@ -709,6 +714,13 @@
       "to": "49dd656650002b1570d1e1733f140f37f4ffd334ebeeae9daf6d9ff6f2cbf2ef",
       "reason": "v0213 cross-arming review: resolve the per-chain testnet key the cut writer inserts (X-arm-2)",
       "date": "2026-10-03"
+    },
+    {
+      "id": "oracle/consensus/round_time_gate",
+      "from": null,
+      "to": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
+      "reason": "oracle round time gate reader",
+      "date": "2026-10-04"
     }
   ]
 }
