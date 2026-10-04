@@ -61,7 +61,9 @@ describe('round_validation validateRoundSigs', function () {
         ['no sigs', {}],
         ['an empty list', { sigs: [] }],
         ['a short pubkey', { sigs: [{ pubkey: 'ab', sig: SIG }] }],
-        ['a short sig', { sigs: [{ pubkey: PUBKEY, sig: 'cd' }] }]
+        ['a short sig', { sigs: [{ pubkey: PUBKEY, sig: 'cd' }] }],
+        ['a non-hex pubkey', { sigs: [{ pubkey: 'GG'.repeat(32), sig: SIG }] }],
+        ['a non-hex sig', { sigs: [{ pubkey: PUBKEY, sig: 'ZZ'.repeat(64) }] }]
     ];
     for (const [label, data] of bad) {
         it('refuses ' + label, function () {
