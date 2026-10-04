@@ -81,6 +81,40 @@ class HubDbAdmissionSampling {
         for (let c of Object.keys(readings || {})) lw.observe(c, readings[c], before[c], lw.ingestMark(c));
     }
 
+    trackLandingRelay(source) {
+        let lw = this.landingWatermark;
+        if (!lw || !lw.relay || !source || typeof source.fetchPage !== 'function'
+            || typeof source.run !== 'function') return false;
+        if (!this._landingRelaySources) this._landingRelaySources = new WeakSet();
+        if (this._landingRelaySources.has(source)) return true;
+        this._landingRelaySources.add(source);
+
+        let pending;
+        let fetchPage = source.fetchPage.bind(source);
+        source.fetchPage = async (...args) => {
+            let page = await fetchPage(...args);
+            if (page && typeof page === 'object'
+                && Object.prototype.hasOwnProperty.call(page, 'landed')) {
+                pending = page.landed;
+            }
+            return page;
+        };
+
+        let run = source.run.bind(source);
+        source.run = async (...args) => {
+            pending = undefined;
+            try {
+                let result = await run(...args);
+                let complete = typeof source.allCaughtUp === 'function' && source.allCaughtUp();
+                if (complete && pending !== undefined) lw.republishFrom(pending);
+                return result;
+            } finally {
+                pending = undefined;
+            }
+        };
+        return true;
+    }
+
     // Attach the hub the watermark is sampled from, and start sampling.
     //
     // The broadcaster is constructed with (p2pConfig, db) and has no hub handle, so the
@@ -91,12 +125,17 @@ class HubDbAdmissionSampling {
         if (!hub) return false;
         this._admissionHub = hub;
         if (this.landingWatermark) this.landingWatermark.trackIngest(hub.priceAggregator);
+        let startPeerCatchup = false;
         if (!hub.peerCatchup && hub.peerManager && this.db) {
             hub.peerCatchup = new HubDbPeerCatchup({
                 db: this.db,
                 peerManager: hub.peerManager,
                 feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
             });
+            startPeerCatchup = true;
+        }
+        this.trackLandingRelay(hub.peerCatchup);
+        if (startPeerCatchup) {
             hub.peerCatchup.start().catch((e) =>
                 logger.error(nodeUtil.format('HubDbBroadcaster: initial peer catch-up failed:',
                     e && e.message ? e.message : e)));
