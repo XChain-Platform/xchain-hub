@@ -153,7 +153,11 @@ async function openRecoveryServers(fixture) {
 }
 
 function configureRecoverySync(fixture, port) {
-    fixture.sync = new HubDbSync({ doQuery: sinon.stub().resolves([]) }, {
+    const doQuery = sinon.stub().callsFake(async query =>
+        /^SHOW COLUMNS FROM [a-z_]+ WHERE Field = 'id'$/.test(query)
+            ? [{ Field: 'id', Extra: 'auto_increment' }]
+            : []);
+    fixture.sync = new HubDbSync({ doQuery: doQuery }, {
         hubUrl: 'http://127.0.0.1:' + port,
         network: 'testnet'
     });
