@@ -13,6 +13,7 @@
 // A leader whose own rows lack a round its peers finalized must fetch it before it
 // proposes. Without the fill step the followers refuse the proposal ("finalized here
 // but not proposed") and the round times out short of quorum.
+const OraclePublisher = require('../../../src/oracle/publisher.js');
 const { expect, buildMesh, buildCanonical, baseRounds, clone } = require('./oracle_batch_signer.test.js');
 
 const MISSING = 103;
@@ -27,6 +28,13 @@ function leaderLacksRound(i) {
 
 function quickFill(mesh) {
     for (let node of mesh.nodes) node.signer.fillTimeoutMs = 80;
+}
+
+function publisherFor(node) {
+    let pub = Object.create(OraclePublisher.prototype);
+    pub.hub = node.hub;
+    pub.network = node.hub.network;
+    return pub;
 }
 
 function signReqs(node) {
@@ -73,5 +81,27 @@ describe('OracleBatchSigner leader fills a round its own rows lack', function ()
             100, 105, 5005, withoutMissing(baseRounds()));
         expect(res.met).to.equal(true);
         expect(signReqs(mesh.nodes[0])).to.have.length(1);
+    });
+
+    it('publishes a batch wire that carries the filled round', async function () {
+        mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
+        quickFill(mesh);
+        let leader = mesh.nodes[0];
+        let published = await publisherFor(leader).signAndSizeRange(
+            leader.signer, withoutMissing(baseRounds()));
+        expect(published).to.be.an('object');
+        expect(published.wire).to.be.a('string').and.match(/^PRICE\|0\|/);
+        expect(published.rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
+        expect(published.sigCount).to.be.at.least(3);
+    });
+
+    it('publishes nothing when no peer can fill the gap', async function () {
+        mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
+        quickFill(mesh);
+        for (let node of mesh.nodes.slice(1)) node.signer.handleFillReq = async () => {};
+        let leader = mesh.nodes[0];
+        let published = await publisherFor(leader).signAndSizeRange(
+            leader.signer, withoutMissing(baseRounds()));
+        expect(published).to.equal(null);
     });
 });
