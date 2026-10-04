@@ -19,7 +19,7 @@ function response(body, status = 200) {
     };
 }
 
-describe('hub DB catch-up snapshot pager', function () {
+function registerPagingCases() {
     it('fetches three pages from zero and hands every row over in order', async function () {
         const requests = [];
         const pages = [
@@ -60,7 +60,9 @@ describe('hub DB catch-up snapshot pager', function () {
         expect(result).to.deep.equal({ complete: true, rows: 0, lastId: 0 });
         expect(calls).to.equal(1);
     });
+}
 
+function registerIncompleteCases() {
     it('ends incomplete when fetching throws', async function () {
         const failure = new Error('offline');
         const result = await pageSnapshotTable({
@@ -115,7 +117,9 @@ describe('hub DB catch-up snapshot pager', function () {
         expect(result.error).to.equal(failure);
         expect(handedOff).to.deep.equal([1]);
     });
+}
 
+function registerValidationCases() {
     it('refuses an unknown table and invalid limit before fetching', function () {
         let fetches = 0;
         const options = {
@@ -129,7 +133,9 @@ describe('hub DB catch-up snapshot pager', function () {
             .to.throw(RangeError, 'Snapshot page limit must be an integer from 1 to 10000');
         expect(fetches).to.equal(0);
     });
+}
 
+function registerAuthenticationCases() {
     it('sends a configured key only in x-api-key and omits it from errors', async function () {
         const key = 'secret-feed-key';
         let request;
@@ -168,4 +174,11 @@ describe('hub DB catch-up snapshot pager', function () {
         await fetchPage({ table: TABLE, sinceId: 0, limit: 1000 });
         expect(headers).not.to.have.property('x-api-key');
     });
+}
+
+describe('hub DB catch-up snapshot pager', function () {
+    registerPagingCases();
+    registerIncompleteCases();
+    registerValidationCases();
+    registerAuthenticationCases();
 });
