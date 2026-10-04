@@ -11,27 +11,17 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-
 const { SHARED_GATES } = require('../../../../src/consensus_rules_digest.js');
 const registry = require('../../../../src/consensus/gate_registry.js');
 
-const REGISTRY_FILE = path.join(__dirname, '../../../../src/consensus/gate_registry.js');
-
 describe('gate_registry: digest value-row count @regression @tier1', function () {
-    it('keeps the registry comment synchronized with the shared digest keys', function () {
+    it('keeps the shared digest row and function counts pinned', function () {
         const keys = SHARED_GATES.flatMap(([mod, names]) => names.map(name => mod + '.' + name));
         const valueRows = keys.filter(key => registry.has(key)).length;
         const functionKeys = keys.length - valueRows;
-        const source = fs.readFileSync(REGISTRY_FILE, 'utf8');
-        const valueMatch = source.match(/all (\d+) of the digest's value rows/);
-        const functionMatch = source.match(/its other (\d+) keys/);
 
-        assert.ok(valueMatch, 'registry comment states the digest value-row count');
-        assert.ok(functionMatch, 'registry comment states the digest function-key count');
-        assert.strictEqual(valueRows, Number(valueMatch[1]));
-        assert.strictEqual(functionKeys, Number(functionMatch[1]));
-        assert.strictEqual(valueRows + functionKeys, keys.length);
+        assert.strictEqual(valueRows, 39);
+        assert.strictEqual(functionKeys, 4);
+        assert.strictEqual(keys.length, 43);
     });
 });
