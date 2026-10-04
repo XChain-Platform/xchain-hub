@@ -1,7 +1,6 @@
 'use strict';
 
 const swq = require('../../consensus/stake_weighted_quorum.js');
-const ValidatorIdentity = require('../../validators/identity.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
 const { DERIVED_CAPABILITIES } = require('./derived_capabilities.js');
@@ -42,24 +41,9 @@ function matchingSnapshotRow(validators, identity, weighted) {
     });
 }
 
-function capabilitySnapshotCanonical(identity) {
-    return 'XCHAIN_CAPABILITY_SNAPSHOT_V1|' + JSON.stringify([
-        identity.block,
-        identity.capability,
-        identity.pubkey,
-        identity.source,
-        identity.amount
-    ]);
-}
-
 async function verifyCapabilitySnapshotRow(row, context) {
     const identity = rowIdentity(row);
     if (!identity) return refusal('malformed capability snapshot row');
-    const signature = String(row.signature == null ? '' : row.signature).toLowerCase();
-    if (!/^[0-9a-f]{128}$/.test(signature)) return refusal('malformed capability snapshot signature');
-    if (!ValidatorIdentity.verify(capabilitySnapshotCanonical(identity), signature, identity.pubkey)) {
-        return refusal('capability snapshot signature did not verify');
-    }
 
     const hub = catchupHub(context);
     const snapshots = hub && hub.capabilitySnapshot;
@@ -83,6 +67,5 @@ registerCatchupVerifier('capability_snapshots', verifyCapabilitySnapshotRow);
 module.exports = {
     verifyCapabilitySnapshotRow,
     rowIdentity,
-    matchingSnapshotRow,
-    capabilitySnapshotCanonical
+    matchingSnapshotRow
 };
