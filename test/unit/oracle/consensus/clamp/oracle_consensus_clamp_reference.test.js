@@ -181,6 +181,8 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
 let oracleConsensusTheProposeSideClampReferencSuite2Hub, oracleConsensusTheProposeSideClampReferencSuite2Pm, oracleConsensusTheProposeSideClampReferencSuite2Oc, oracleConsensusTheProposeSideClampReferencSuite2OracleRound, oracleConsensusTheProposeSideClampReferencSuite2Leader, oracleConsensusTheProposeSideClampReferencSuite2Refresh;
 const oracleConsensusTheProposeSideClampReferencSuite2ROUND = 1;
+const oracleConsensusTheProposeSideClampReferencSuite2TIME = 1700000000;
+const oracleConsensusTheProposeSideClampReferencSuite2INTERVAL = 15000;
 // A PROPOSE whose height this hub ACCEPTS, which is what makes an assertion about
 // the gate meaningful: the follower freshness bound runs ahead of the gate, so a
 // height the bound refuses never reaches it and "no re-read" would hold for the
@@ -200,7 +202,7 @@ function oracleConsensusTheProposeSideClampReferencSuite2Propose(btcBlockHeight,
       prices,
       digest: oracleConsensusTheProposeSideClampReferencSuite2Oc.digest(oracleConsensusTheProposeSideClampReferencSuite2ROUND, prices),
       btcBlockHeight,
-      btcBlockTime: 1700000000
+      btcBlockTime: oracleConsensusTheProposeSideClampReferencSuite2TIME
     }
   };
 }
@@ -210,6 +212,9 @@ function registerOracleConsensusTheProposeSideClampReferencSuite2Part1() {
     oracleConsensusTheProposeSideClampReferencSuite2Pm = oracleConsensusTheProposeSideClampReferencSuite2Hub._peerManager;
     oracleConsensusTheProposeSideClampReferencSuite2Pm.validatorPubkeys = new Set(); // size 0, so isKnownSender accepts any sender
     oracleConsensusTheProposeSideClampReferencSuite2OracleRound = {
+      epochStart: oracleConsensusTheProposeSideClampReferencSuite2TIME * 1000 -
+        oracleConsensusTheProposeSideClampReferencSuite2ROUND * oracleConsensusTheProposeSideClampReferencSuite2INTERVAL,
+      roundInterval: oracleConsensusTheProposeSideClampReferencSuite2INTERVAL,
       getSubmissions: sinon.stub().returns(new Map())
     };
     oracleConsensusTheProposeSideClampReferencSuite2Hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
