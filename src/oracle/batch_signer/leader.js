@@ -57,9 +57,6 @@ module.exports = {
 
         this.stats.batchSignRounds++;
 
-        let canonical = this.leaderCanonical(first, last, anchor, rounds);
-        if(canonical === null) return empty;
-
         // The SIGNING set is the price-capable set at the BATCH ANCHOR, which is the
         // same set (and the same anchor) the indexer's _parseV0 resolves the wire's
         // quorum against. Resolving it anywhere else would let this hub collect a
@@ -77,6 +74,14 @@ module.exports = {
         if(me === null) return empty;
         let snapCount = signingSet.length;
 
+        if(!(await this.fillWindowGaps(first, last, rounds, signingSet, me))){
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round no peer could ' +
+                         'supply and too few peers answered to call it absent; window skipped');
+            return empty;
+        }
+        let canonical = this.leaderCanonical(first, last, anchor, rounds);
+        if(canonical === null) return empty;
+
         let mySig      = this.identity.sign(canonical);
         let signatures = new Map();
         signatures.set(me, mySig);
@@ -91,6 +96,69 @@ module.exports = {
 
         return await this.openSignRound({ first, last, anchor, canonical, signingSet, snapCount,
                                           signatures, rounds });
+    },
+
+    // Fill the rounds of [first,last] this hub lacks but a peer finalized, splicing them
+    // into `rounds` in place so the caller packs and emits the window it was signed under.
+    // True when the window may be proposed: nothing was missing, every gap was filled, or
+    // enough peers answered without a round to show it is absent everywhere. False skips
+    // the window. A filled round is only a proposal: followers still sign nothing they
+    // cannot reproduce from their own rows.
+    async fillWindowGaps(first, last, rounds, signingSet, me){
+        let have = new Set(rounds.map(r => parseInt(r.round)));
+        let gaps = new Set();
+        for(let n = first; n <= last; n++) if(!have.has(n)) gaps.add(n);
+        if(gaps.size === 0 || !this.peerManager) return true;
+
+        let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
+        let needed = Math.max(0, bftQuorumOrSingle(signingSet.length, 1) - 1);
+        let found  = await this.openFillRound({ first, last, gaps, peers, needed });
+        for(let r of found.values()) rounds.push(r);
+        rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
+        return found.size === gaps.size || found.enough;
+    },
+
+    // Ask every peer for its finalized rounds of the window and collect the answers
+    // until the gaps are filled, every peer has answered, or the fill timeout expires.
+    openFillRound({ first, last, gaps, peers, needed }){
+        return new Promise((resolve) => {
+            let found = new Map();
+            let round = { first, last, gaps, peers: new Set(peers), responders: new Set(), found };
+            let finish = () => {
+                if(this._fillRound !== round) return;
+                clearTimeout(round.timer);
+                this._fillRound = null;
+                found.enough = round.responders.size >= needed;
+                resolve(found);
+            };
+            round.finish = finish;
+            round.timer = setTimeout(finish, this.fillTimeoutMs);
+            if(round.timer.unref) round.timer.unref();
+            this._fillRound = round;
+            this.peerManager.broadcast(this.constructor.XPRICEB_FILL_REQ,
+                { first_round: first, last_round: last });
+        });
+    },
+
+    // Take one peer's answer to the fill request: only rounds this hub lacks, only from
+    // a price-capable peer, and only the canonical input fields.
+    async handleFill(envelope){
+        let d     = envelope.data;
+        let round = this._fillRound;
+        if(!round || !d) return;
+        if(parseInt(d.first_round) !== round.first || parseInt(d.last_round) !== round.last) return;
+        let sender = String(envelope.sig_pubkey || '').toLowerCase();
+        if(!round.peers.has(sender) || round.responders.has(sender)) return;
+        round.responders.add(sender);
+        for(let r of (Array.isArray(d.rounds) ? d.rounds : [])){
+            let n = parseInt(r && r.round);
+            if(!round.gaps.has(n) || round.found.has(n) || !Array.isArray(r.pairs)) continue;
+            let kept = { round: n, timestamp: parseInt(r.timestamp),
+                         btcBlockHeight: parseInt(r.btcBlockHeight), pairs: r.pairs };
+            if(r.admitBlocks !== undefined && r.admitBlocks !== null) kept.admitBlocks = r.admitBlocks;
+            round.found.set(n, kept);
+        }
+        if(round.found.size === round.gaps.size || round.responders.size === round.peers.size) round.finish();
     },
 
     // The ONE canonical builder's bytes for this window, or null when the engine that
