@@ -8,7 +8,6 @@ const {
     sinon,
     expect,
     OraclePublisher,
-    waitUntil,
     PRICE_BATCH_COMPRESSION_MARKER,
     inflatePriceBatchBody,
     DB_METHODS,
@@ -56,25 +55,45 @@ function flakySigner(failFirst) {
             return signer;
         }
 
+async function advanceCatchupSweep(clock, publisher, delayMs) {
+            let tick, runCatchupSweepTick = publisher.runCatchupSweepTick.bind(publisher);
+            let observed = sinon.stub(publisher, 'runCatchupSweepTick').callsFake(() => {
+                tick = runCatchupSweepTick();
+                return tick;
+            });
+            try {
+                await clock.tickAsync(delayMs);
+                sinon.assert.calledOnce(observed);
+                await tick;
+            } finally { observed.restore(); }
+        }
+
 const testCase1 = async function () {
+            let clock = sinon.useFakeTimers();
             let signer = flakySigner(1);
             let h = makePublisher({ signer: signer, cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 25 } });
-            await h.p.start();
-            // Window 0 is closed by construction: window 1 holds a higher round.
-            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
-            h.p._buffer.set(6, bufferedFixture(6));
+            try {
+                await h.p.start();
+                // Window 0 is closed by construction: window 1 holds a higher round.
+                for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+                h.p._buffer.set(6, bufferedFixture(6));
 
-            await h.p.assembleWindow(0);
-            expect(h.broadcasts, 'the first attempt misses quorum').to.have.length(0);
+                await h.p.assembleWindow(0);
+                expect(h.broadcasts, 'the first attempt misses quorum').to.have.length(0);
 
-            await waitUntil(() => h.broadcasts.length === 1, 3000);
-            expect(signer.calls).to.have.length(2);
-            // The re-proposal is the SAME window over the SAME rounds: a retry that
-            // proposed different content would be a second honest batch, not a retry.
-            expect(signer.calls[1].first).to.equal(signer.calls[0].first);
-            expect(signer.calls[1].last).to.equal(signer.calls[0].last);
-            expect(signer.calls[1].rounds).to.deep.equal(signer.calls[0].rounds);
-            expect(h.p._assembledWindows.has(0), 'memoized once it publishes').to.equal(true);
+                await advanceCatchupSweep(clock, h.p, 25);
+                expect(h.broadcasts).to.have.length(1);
+                expect(signer.calls).to.have.length(2);
+                // The re-proposal is the SAME window over the SAME rounds: a retry that
+                // proposed different content would be a second honest batch, not a retry.
+                expect(signer.calls[1].first).to.equal(signer.calls[0].first);
+                expect(signer.calls[1].last).to.equal(signer.calls[0].last);
+                expect(signer.calls[1].rounds).to.deep.equal(signer.calls[0].rounds);
+                expect(h.p._assembledWindows.has(0), 'memoized once it publishes').to.equal(true);
+            } finally {
+                h.p.stop();
+                clock.restore();
+            }
         };
 
 const testCase2 = async function () {
@@ -258,38 +277,52 @@ const testCase13 = async function () {
                 this.timeout(10000);
                 // The hourly idle IS the structural stall: at four windows an hour these
                 // twenty windows need five hours, and the fleet's 697 need seven months.
+                let clock = sinon.useFakeTimers();
                 let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
                                                ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
-                await h.p.start();
-                for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
-                expect(h.p.pendingCatchupWindows()).to.have.length(20);
+                try {
+                    await h.p.start();
+                    for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
+                    expect(h.p.pendingCatchupWindows()).to.have.length(20);
 
-                await h.p.runCatchupSweepTick();
-                // Four per sweep is unchanged; what changed is that the next sweep is
-                // seconds away while a backlog remains, not an hour.
-                expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
-                await waitUntil(() => h.p.pendingCatchupWindows().length <= 4, 3000);
-                expect(h.broadcasts.length).to.be.at.least(16);
+                    await h.p.runCatchupSweepTick();
+                    // Four per sweep is unchanged; what changed is that the next sweep is
+                    // seconds away while a backlog remains, not an hour.
+                    expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
+                    for (let i = 0; i < 3; i++) await advanceCatchupSweep(clock, h.p, 5);
+                    expect(h.p.pendingCatchupWindows().length).to.be.at.most(4);
+                    expect(h.broadcasts.length).to.be.at.least(16);
+                } finally {
+                    h.p.stop();
+                    clock.restore();
+                }
             };
 
 const testCase14 = async function () {
                 this.timeout(10000);
+                let clock = sinon.useFakeTimers();
                 let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
                                                ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 1 } });
-                await h.p.start();
-                for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
+                try {
+                    await h.p.start();
+                    for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
 
-                // Count how many assemblies are in flight at once across the whole drain.
-                let inFlight = 0, peak = 0;
-                let real = h.p.assembleWindow.bind(h.p);
-                sinon.stub(h.p, 'assembleWindow').callsFake(async (w, o) => {
-                    inFlight++; peak = Math.max(peak, inFlight);
-                    try { return await real(w, o); } finally { inFlight--; }
-                });
+                    // Count how many assemblies are in flight at once across the whole drain.
+                    let inFlight = 0, peak = 0;
+                    let real = h.p.assembleWindow.bind(h.p);
+                    sinon.stub(h.p, 'assembleWindow').callsFake(async (w, o) => {
+                        inFlight++; peak = Math.max(peak, inFlight);
+                        try { return await real(w, o); } finally { inFlight--; }
+                    });
 
-                await h.p.runCatchupSweepTick();
-                await waitUntil(() => h.p.pendingCatchupWindows().length <= 4, 3000);
-                expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
+                    await h.p.runCatchupSweepTick();
+                    for (let i = 0; i < 3; i++) await advanceCatchupSweep(clock, h.p, 1);
+                    expect(h.p.pendingCatchupWindows().length).to.be.at.most(4);
+                    expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
+                } finally {
+                    h.p.stop();
+                    clock.restore();
+                }
             };
 
 const testCase15 = async function () {
