@@ -37,18 +37,29 @@ function createHarness(gateActive, overrides = {}) {
     return harness;
 }
 
-describe('OracleConsensus follower PROPOSE round time', function () {
-    let harness;
+let harness;
 
-    afterEach(function () {
-        if (harness) harness.restore();
-        harness = null;
-    });
+afterEach(function () {
+    if (harness) harness.restore();
+    harness = null;
+});
 
+describe('OracleConsensus active follower PROPOSE round time', function () {
     it('accepts and signs the nominal timestamp when the gate is active', async function () {
         harness = createHarness(true);
 
         let result = await harness.deliver({ btcBlockTime: NOMINAL_TIME });
+        let pending = harness.oc.pendingRounds.get(ROUND);
+
+        expect(result.reachedSnapshot).to.equal(true);
+        expect(result.pendingTime).to.equal(NOMINAL_TIME);
+        expect(pending.signatures.has(harness.oc.selfPubkey())).to.equal(true);
+    });
+
+    it('accepts an absent timestamp and signs the nominal timestamp when the gate is active', async function () {
+        harness = createHarness(true);
+
+        let result = await harness.deliver({ omitTime: true });
         let pending = harness.oc.pendingRounds.get(ROUND);
 
         expect(result.reachedSnapshot).to.equal(true);
@@ -70,7 +81,9 @@ describe('OracleConsensus follower PROPOSE round time', function () {
             expect(result.pendingTime).to.equal(null);
         });
     }
+});
 
+describe('OracleConsensus follower PROPOSE round time compatibility', function () {
     it('accepts an arbitrary supplied timestamp while the gate is inactive', async function () {
         harness = createHarness(false);
         let arbitraryTime = NOMINAL_TIME + 60 * 60 + 43 * 60;

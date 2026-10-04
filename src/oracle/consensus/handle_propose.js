@@ -345,7 +345,8 @@ module.exports = {
         } catch (e) {
             if (!e || e.name !== 'RegistryMissError') throw e;
         }
-        if (roundTimeActive && !roundTimeMatches(
+        let hasBtcBlockTime = btcBlockTime !== null && btcBlockTime !== undefined;
+        if (roundTimeActive && hasBtcBlockTime && !roundTimeMatches(
             btcBlockTime, round, this.oracleRound.epochStart, this.oracleRound.roundInterval
         )) {
             let nominal = nominalRoundSeconds(
