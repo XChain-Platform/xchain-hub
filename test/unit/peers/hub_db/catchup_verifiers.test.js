@@ -75,6 +75,21 @@ function signCheckpoint(row, signers) {
     return row;
 }
 
+function capabilityDb(signers, amounts) {
+    const calls = [];
+    return {
+        calls,
+        async findCapabilitySnapshotsBySnapshotBlock(block, capability) {
+            calls.push({ block, capability });
+            return signers.map((s, index) => ({
+                signing_pubkey: s.getPubkeyHex(),
+                source: amounts ? 'source-' + index : '',
+                amount: amounts ? amounts[index] : '1'
+            }));
+        }
+    };
+}
+
 function rewardHub(signers, network) {
     const signingSet = signers.map(s => ({
         pubkey: s.getPubkeyHex(), source: '', amount: '1'
@@ -220,6 +235,7 @@ describe('state checkpoint catch-up verifier', function () {
         validators.truncated = true;
         expect(await verify(row, hub)).to.equal(false);
     });
+
 });
 
 describe('anchor reward catch-up verifier', function () {
@@ -272,5 +288,51 @@ describe('anchor reward catch-up verifier', function () {
         expect(await verify(row, hub)).to.equal(true);
         hub.signingSet.truncated = true;
         expect(await verify(row, hub)).to.equal(false);
+    });
+
+});
+
+describe('signed-row verifiers in the catch-up framework', function () {
+    let registry;
+
+    before(function () {
+        registry = require(MODULE_PATH);
+    });
+
+    it('verifies checkpoints from the database context without a live engine', async function () {
+        const keys = identities(4);
+        const db = capabilityDb(keys);
+        const verify = registry.getCatchupVerifier('state_checkpoints');
+        const row = signCheckpoint(checkpointRow(100), keys.slice(0, 3));
+
+        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer', db })).to.equal(true);
+        expect(db.calls).to.deep.equal([{ block: 100, capability: 'oracle_publish' }]);
+        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer' })).to.equal(false);
+
+        const weightedDb = capabilityDb(keys.slice(0, 3), ['70', '20', '10']);
+        const weighted = signCheckpoint(
+            Object.assign(checkpointRow(12), { network: 'testnet' }), [keys[0]]);
+        expect(await verify(weighted, { db: weightedDb })).to.equal(true);
+    });
+
+    it('verifies rewards from the database context and production canonical', async function () {
+        const keys = identities(4);
+        const db = capabilityDb(keys);
+        const verify = registry.getCatchupVerifier('anchor_reward_attestations');
+        const publisher = keys[0].getPubkeyHex();
+        const row = signReward(rewardRow('anchor_bundle', 100, publisher), keys.slice(0, 3), publisher);
+        const context = {
+            table: 'anchor_reward_attestations', peer: 'peer', db,
+            attestationCanonical: () => 'substitute-canonical'
+        };
+
+        expect(await verify(row, context)).to.equal(true);
+        expect(db.calls).to.deep.equal([{ block: 100, capability: 'oracle_publish' }]);
+        expect(await verify(row, { table: 'anchor_reward_attestations', peer: 'peer' })).to.equal(false);
+
+        const weightedDb = capabilityDb(keys.slice(0, 3), ['70', '20', '10']);
+        const weighted = Object.assign(rewardRow('anchor_bundle', 12, publisher), { network: 'testnet' });
+        signReward(weighted, [keys[0]], publisher);
+        expect(await verify(weighted, { db: weightedDb })).to.equal(true);
     });
 });
