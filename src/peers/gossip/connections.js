@@ -245,6 +245,8 @@ class PeerConnections {
                 reconnectDelay: this.config.P2P_RECONNECT_BASE || 2000,
                 reconnectTimer: null,
                 inbound:        false,
+                feedUrl:        addr,
+                validatorAddr:  null,
                 failures:       0,
                 lastError:      null
             });

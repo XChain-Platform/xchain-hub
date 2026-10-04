@@ -1,13 +1,14 @@
 'use strict';
-
 const EventEmitter = require('events');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
 const PeerManager = require('../../../../src/peers/manager.js');
-
 const PEER = 'ws://validator02.example:10002';
+const VALIDATOR_ADDR = 'rValidator02';
+const SIGNING_PUBKEY = 'aa'.repeat(32);
 const CONTENT_READS = {
     price_snapshots: ['findPriceSnapshotsForRound', [1], { round_number: 1, coin_pair: 'BTC/USD' }],
     oracle_prices: ['getOraclePrice', ['addr', 'DOGE', 2],
@@ -31,25 +32,53 @@ const CONTENT_READS = {
     list_snapshots: ['getListSnapshotAtSeq', ['testnet', 'LTC', 9, 10],
         { network: 'testnet', home_chain: 'LTC', home_list_index: 9, seq: 10 }]
 };
-
 function peerManager(connected) {
     const pm = new EventEmitter();
     pm.peers = new Map();
-    pm.validatorPubkeys = new Map([[PEER, 'aa'.repeat(32)]]);
-    pm.effectiveSignerSet = new Set(['aa'.repeat(32)]);
+    pm.validatorPubkeys = new Map([[VALIDATOR_ADDR, SIGNING_PUBKEY]]);
+    pm.effectiveSignerSet = new Set([SIGNING_PUBKEY]);
     pm.registryHasPubkey = pubkey => [...pm.validatorPubkeys.values()]
         .some(value => value && String(value).toLowerCase() === pubkey);
-    if (connected) pm.peers.set(PEER, { state: 'open' });
+    if (connected) pm.peers.set(PEER, {
+        state: 'open', inbound: false, feedUrl: PEER, validatorAddr: VALIDATOR_ADDR
+    });
     return pm;
 }
-
+function outboundHandshakePeerManager() {
+    const sockets = [];
+    class FakeWebSocket extends EventEmitter {
+        constructor() { super(); sockets.push(this); }
+    }
+    Object.assign(FakeWebSocket, { OPEN: 1, '@noCallThru': true });
+    const PeerConnections = proxyquire('../../../../src/peers/gossip/connections.js', {
+        ws: FakeWebSocket
+    });
+    const identity = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+    const pm = new PeerManager({
+        P2P_VALIDATOR_ADDR: 'rValidator01', REQUIRE_SIGNATURES: true,
+        P2P_MSG_DEDUP_TTL: 60000, P2P_RECONNECT_BASE: 2000
+    }, null);
+    const pubkey = identity.getPubkeyHex();
+    pm.setValidatorPubkeys(new Map([[VALIDATOR_ADDR, pubkey]]));
+    pm.setEffectiveSignerSet(new Set([pubkey.toLowerCase()]));
+    PeerConnections.prototype.connectToPeer.call(pm, PEER);
+    const ws = sockets[0];
+    ws.readyState = FakeWebSocket.OPEN;
+    ws.emit('open');
+    const envelope = {
+        id: 'handshake-1', type: 'TEST', sender: VALIDATOR_ADDR,
+        timestamp: Date.now(), data: {}, sig_pubkey: pubkey
+    };
+    envelope.sig = identity.signEnvelope(envelope);
+    pm.handleInbound(ws, JSON.stringify(envelope), PEER);
+    return pm;
+}
 function priceDb() {
     return {
         findPriceSnapshotsForRound: sinon.stub().resolves([]),
         setFinalizedPriceSnapshotRound: sinon.stub().resolves({ affectedRows: 1 })
     };
 }
-
 function makeCatchup(overrides) {
     const opts = overrides || {};
     return new HubDbPeerCatchup({
@@ -66,9 +95,7 @@ function makeCatchup(overrides) {
         logger: opts.logger || { warn: sinon.stub(), error: sinon.stub() }
     });
 }
-
 afterEach(function () { sinon.restore(); });
-
 describe('hub DB peer catch-up paging', function () {
     it('pages to the end, assigns local ids, and flips the table caught up', async function () {
         const db = priceDb();
@@ -79,10 +106,8 @@ describe('hub DB peer catch-up paging', function () {
         });
         fetchPage.onSecondCall().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ db, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.firstCall.args.slice(0, 4)).to.deep.equal([PEER, 'price_snapshots', 0, 2]);
         expect(fetchPage.secondCall.args[2]).to.equal(44);
         expect(db.setFinalizedPriceSnapshotRound.callCount).to.equal(2);
@@ -90,7 +115,6 @@ describe('hub DB peer catch-up paging', function () {
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
         expect(catchup.isCaughtUp()).to.equal(true);
     });
-
     it('skips a held content key without relying on writer affectedRows', async function () {
         const db = priceDb();
         db.findPriceSnapshotsForRound.resolves([{ round_number: 3, coin_pair: 'BTC/USD' }]);
@@ -100,16 +124,13 @@ describe('hub DB peer catch-up paging', function () {
                 table: 'price_snapshots', rows: [{ id: 9, round_number: 3, coin_pair: 'BTC/USD' }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(db.findPriceSnapshotsForRound.calledOnceWithExactly(3)).to.equal(true);
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 });
-
 describe('hub DB peer catch-up verification', function () {
     it('accepts an oracle row from an authenticated connected signer peer', async function () {
         const storeRow = sinon.stub().resolves();
@@ -125,10 +146,8 @@ describe('hub DB peer catch-up verification', function () {
                 table: 'oracle_prices', rows: [{ id: 3, source_address: 'oracle-address' }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(verifier.calledOnce).to.equal(true);
         expect(verifier.firstCall.args[1]).to.include({
             table: 'oracle_prices', peer: PEER, authenticated: true, signerSetPeer: true
@@ -137,7 +156,6 @@ describe('hub DB peer catch-up verification', function () {
             'oracle_prices', { source_address: 'oracle-address' })).to.equal(true);
         expect(catchup.isCaughtUp()).to.equal(true);
     });
-
     it('logs a verifier refusal and does not insert the row', async function () {
         const logger = { warn: sinon.stub(), error: sinon.stub() };
         const db = priceDb();
@@ -149,28 +167,22 @@ describe('hub DB peer catch-up verification', function () {
                 table: 'price_snapshots', rows: [{ id: 12, round_number: 4 }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(logger.warn.calledWithMatch('bad quorum')).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
-
     it('skips an unregistered table and leaves it not caught up', async function () {
         const fetchPage = sinon.stub();
         const catchup = makeCatchup({ getVerifier: () => undefined, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
         expect(catchup.isCaughtUp()).to.equal(false);
     });
 });
-
 describe('hub DB peer catch-up persistence dispatch', function () {
     it('uses the named content-key writer for every mirrored table', async function () {
         const methodByTable = {
@@ -188,16 +200,13 @@ describe('hub DB peer catch-up persistence dispatch', function () {
         };
         const db = {};
         for (const method of Object.values(methodByTable)) db[method] = sinon.stub().resolves();
-
         for (const [table, method] of Object.entries(methodByTable)) {
             await HubDbPeerCatchup.storeVerifiedRow(db, table, {});
             expect(db[method].calledOnce, table).to.equal(true);
         }
     });
 });
-
 describe('hub DB peer catch-up local ids', function () {
-
     it('removes the peer wire id before direct row-object writers receive a row', async function () {
         const methodByTable = {
             oracle_prices: 'setOraclePriceByGeneration',
@@ -209,7 +218,6 @@ describe('hub DB peer catch-up local ids', function () {
             policy_snapshots: 'insertPolicySnapshot',
             list_snapshots: 'insertListSnapshot'
         };
-
         for (const [table, method] of Object.entries(methodByTable)) {
             const db = { [method]: sinon.stub().resolves() };
             const peerRow = { id: 91, marker: 'content' };
@@ -220,7 +228,6 @@ describe('hub DB peer catch-up local ids', function () {
             expect(peerRow, table).to.deep.equal({ id: 91, marker: 'content' });
         }
     });
-
     it('removes the wire id before an injected persistence writer receives a row', async function () {
         const storeRow = sinon.stub().resolves();
         const catchup = makeCatchup({
@@ -230,17 +237,14 @@ describe('hub DB peer catch-up local ids', function () {
                 table: 'price_snapshots', rows: [{ id: 77, round_number: 5 }]
             })
         });
-
         await catchup.start();
         catchup.stop();
-
         expect(storeRow.calledOnce).to.equal(true);
         expect(storeRow.firstCall.args).to.deep.equal([
             'price_snapshots', { round_number: 5 }
         ]);
     });
 });
-
 describe('hub DB peer catch-up content-key lookups', function () {
     it('checks the schema content key for every mirrored table', async function () {
         for (const [table, [method, args, row]] of Object.entries(CONTENT_READS)) {
@@ -251,7 +255,38 @@ describe('hub DB peer catch-up content-key lookups', function () {
         }
     });
 });
-
+describe('hub DB peer catch-up peer resolution', function () {
+    it('learns an outbound signer binding at handshake and catches up every table', async function () {
+        const tables = Object.keys(CONTENT_READS);
+        const fetchPage = sinon.stub().callsFake(async (peer, table) => ({ table, rows: [] }));
+        const pm = outboundHandshakePeerManager();
+        const peer = pm.peers.get(PEER);
+        expect(peer).to.include({ feedUrl: PEER, validatorAddr: VALIDATOR_ADDR });
+        const catchup = makeCatchup({
+            peerManager: pm, tables, getVerifier: () => async () => true, fetchPage
+        });
+        await catchup.start(); catchup.stop();
+        expect(fetchPage.callCount).to.equal(tables.length);
+        for (const call of fetchPage.getCalls()) expect(call.args[0]).to.equal(PEER);
+        expect(catchup.caughtUpState()).to.deep.equal(Object.fromEntries(
+            tables.map(table => [table, true])));
+        expect(catchup.isCaughtUp()).to.equal(true);
+    });
+    it('skips and throttles a signer peer known only by validator address', async function () {
+        const logger = { warn: sinon.stub(), error: sinon.stub() };
+        const pm = peerManager(false);
+        pm.peers.set(VALIDATOR_ADDR, { state: 'open', inbound: true,
+            feedUrl: null, validatorAddr: VALIDATOR_ADDR });
+        const fetchPage = sinon.stub();
+        const catchup = makeCatchup({ peerManager: pm, logger, fetchPage });
+        await catchup.start(); await catchup.schedule(); catchup.stop();
+        expect(fetchPage.called).to.equal(false);
+        expect(catchup.isCaughtUp()).to.equal(false);
+        expect(logger.warn.calledOnce).to.equal(true);
+        expect(logger.warn.firstCall.args[0]).to.include(VALIDATOR_ADDR)
+            .and.include('no fetchable feed URL');
+    });
+});
 describe('hub DB peer catch-up peer eligibility', function () {
     it('leaves every table not caught up and logs when no signer peer is reachable', async function () {
         const logger = { warn: sinon.stub(), error: sinon.stub() };
@@ -262,80 +297,64 @@ describe('hub DB peer catch-up peer eligibility', function () {
             logger,
             fetchPage
         });
-
         await catchup.start();
         catchup.warnIfNoPeer();
         catchup.stop();
-
         expect(fetchPage.called).to.equal(false);
         expect(catchup.caughtUpState()).to.deep.equal({ price_snapshots: false, oracle_prices: false });
         expect(logger.warn.calledWithMatch('no connected signer-set peer')).to.equal(true);
         expect(logger.warn.callCount).to.equal(1);
     });
-
     it('does not fetch from a connected peer outside the effective signer set and registry', async function () {
         const pm = peerManager(true);
         pm.effectiveSignerSet = new Set(['bb'.repeat(32)]);
         pm.registryHasPubkey = sinon.stub().returns(false);
         const fetchPage = sinon.stub();
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.called).to.equal(false);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
     });
-
     it('fetches from a registry peer when the effective signer set is empty', async function () {
         const pm = peerManager(true);
         pm.effectiveSignerSet = new Set();
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 });
-
 describe('hub DB peer catch-up without a peer registry', function () {
     it('fetches from a chain signer', async function () {
         const pm = peerManager(true);
         delete pm.registryHasPubkey;
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
-
         await catchup.start();
         catchup.stop();
-
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
     });
 });
-
 describe('hub DB peer catch-up lifecycle', function () {
     it('is registered in the peer manager listener roster', function () {
         expect(PeerManager.LISTENER_ROSTER).to.deep.include({
             event: 'peer:connect', subscriber: 'HubDbPeerCatchup'
         });
     });
-
     it('runs again when a peer link reconnects', async function () {
         const pm = peerManager(true);
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
-
         await catchup.start();
         pm.emit('peer:connect', PEER);
         await catchup.runningPromise;
         catchup.stop();
-
         expect(fetchPage.callCount).to.equal(2);
     });
-
     it('attaches at hub startup through the admission source hook', async function () {
         let options;
         const start = sinon.stub().resolves();
@@ -351,18 +370,15 @@ describe('hub DB peer catch-up lifecycle', function () {
         const pm = peerManager(false);
         sampler.db = db;
         sampler.admissionSampleMs = 60000;
-
         const hub = { peerManager: pm };
         expect(sampler.attachAdmissionSource(hub)).to.equal(true);
         await Promise.resolve();
-
         expect(start.calledOnce).to.equal(true);
         expect(options.db).to.equal(db);
         expect(options.peerManager).to.equal(pm);
         expect(hub.peerCatchup).to.be.instanceOf(CatchupStub);
     });
 });
-
 describe('hub DB peer catch-up retry lifecycle', function () {
     it('retries after a connected peer is registered and clears its timer on stop', async function () {
         const clock = sinon.useFakeTimers();
@@ -371,13 +387,10 @@ describe('hub DB peer catch-up retry lifecycle', function () {
         pm.effectiveSignerSet = new Set();
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage, retryIntervalMs: 25 });
-
         await catchup.start();
         expect(fetchPage.called).to.equal(false);
-
-        pm.validatorPubkeys.set(PEER, 'aa'.repeat(32));
+        pm.validatorPubkeys.set(VALIDATOR_ADDR, SIGNING_PUBKEY);
         await clock.tickAsync(25);
-
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
         expect(catchup.isCaughtUp()).to.equal(true);
         catchup.stop();
