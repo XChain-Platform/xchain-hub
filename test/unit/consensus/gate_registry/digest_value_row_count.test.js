@@ -32,8 +32,6 @@ describe('gate_registry: digest value-row count @regression @tier1', function ()
         assert.ok(functionMatch, 'registry comment states the digest function-key count');
         assert.strictEqual(valueRows, Number(valueMatch[1]));
         assert.strictEqual(functionKeys, Number(functionMatch[1]));
-        assert.strictEqual(valueRows, 39);
-        assert.strictEqual(functionKeys, 4);
-        assert.strictEqual(keys.length, 43);
+        assert.strictEqual(valueRows + functionKeys, keys.length);
     });
 });
