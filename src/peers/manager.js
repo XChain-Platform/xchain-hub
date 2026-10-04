@@ -195,6 +195,8 @@ function initConnectionState(pm) {
     // it drives both the backoff ceiling and the retry log line.
     pm.peers = new Map();
 
+    pm.validatorFeedUrls = new Map();
+
     // Message deduplication: Map<id, expiresAt>
     pm.seenIds = new Map();
 
