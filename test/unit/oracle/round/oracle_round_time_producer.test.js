@@ -32,30 +32,6 @@ let roundTimeGateEnabled = false;
 let capture;
 let consensus;
 let sandbox;
-let legacySandbox;
-
-function readsProducerCallSites(file) {
-    return file && (
-        file.endsWith('/test/unit/hub/scheduler_overlap_guards.test.js') ||
-        file.includes('/test/unit/oracle/consensus/oracle_consensus_') ||
-        (file.includes('/test/unit/oracle/round/') &&
-            !file.endsWith('/oracle_round_time_producer.test.js'))
-    );
-}
-
-beforeEach(function () {
-    if (!readsProducerCallSites(this.currentTest && this.currentTest.file)) return;
-    legacySandbox = sinon.createSandbox();
-    legacySandbox.stub(gateRegistry, 'activeAt').callsFake((key, ...args) =>
-        key === ROUND_TIME_GATE
-            ? false
-            : registryActiveAt.call(gateRegistry, key, ...args));
-});
-
-afterEach(function () {
-    if (legacySandbox) legacySandbox.restore();
-    legacySandbox = null;
-});
 
 function setupRoundTimeGate() {
     sandbox = sinon.createSandbox();
