@@ -32,6 +32,7 @@ const PeerMessages    = require('./gossip/messages.js');
 const PeerInbound     = require('./gossip/inbound.js');
 const PeerRules       = require('./gossip/rules.js');
 const PeerUpkeep      = require('./gossip/upkeep.js');
+const { resolvePublicApiUrl } = require('./hub_advertisement.js');
 
 // Bootstrap peers every new hub can reach. One hostname per validator; the
 // PORT selects the network, so a seed on the wrong port reaches the wrong
@@ -185,7 +186,7 @@ function initConnectionState(pm) {
 
     // Peer connections:
     // Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound,
-    //             failures, lastError }>
+    //             failures, lastError, api_url, signing_pubkey }>
     // failures counts consecutive failed dials since the last successful open;
     // it drives both the backoff ceiling and the retry log line.
     pm.peers = new Map();
@@ -266,6 +267,7 @@ class PeerManager extends EventEmitter {
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;
+        this.publicApiUrl  = resolvePublicApiUrl(config);
 
         // Validator identity (set via setIdentity, used for signing/verification)
         this.identity         = null;   // ValidatorIdentity instance
