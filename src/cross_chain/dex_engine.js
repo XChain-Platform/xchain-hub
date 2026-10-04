@@ -156,7 +156,7 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     // ORDER↔ORDER book match with partial fills. Mirrors the indexer's local matcher
-    // (xchain-indexer/src/actions/order_match.js): structural cross-compat, price-cross
+    // (xchain-indexer/src/actions/order_match/match.js): structural cross-compat, price-cross
     // gate, then the bottleneck clamp with orderInfo = taker (later) / matchInfo = maker
     // (earlier). Fill quantities are computed on effective_remaining (committed-aware), so
     // the same mirrored state always re-derives the same fill (PBFT determinism).
