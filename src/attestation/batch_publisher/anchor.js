@@ -186,16 +186,16 @@ module.exports = {
                          a + ': ' + (e && e.message));
             return 0;
         }
-        this._persistedAnchors.add(a);
-        if(this._persistedAnchors.size > 256){
-            let oldest = this._persistedAnchors.values().next().value;
-            this._persistedAnchors.delete(oldest);
-        }
         if(this.hub && this.hub.hubDbBroadcaster){
             for(let row of rows){
                 let r = await db.getCapabilitySnapshot(a, 'attestation', row.signing_pubkey, row.source);
                 if(r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
+        }
+        this._persistedAnchors.add(a);
+        if(this._persistedAnchors.size > 256){
+            let oldest = this._persistedAnchors.values().next().value;
+            this._persistedAnchors.delete(oldest);
         }
         return rows.length;
     },
