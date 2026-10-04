@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-04
+
+### Added
+- Added HUB_FEED_API_KEY authentication for subscriptions, snapshots, and hub discovery.
+- Added peer hub discovery with advertised public API addresses.
+- Added verified peer catch-up for snapshots, prices, cross-chain rows, attestations, and rewards.
+- Added ready-frame identity and per-table watermarks for failover admission.
+
+### Changed
+- Held peer admission until catch-up completes and signed canonical rows pass verification.
+- Restricted bridge reorganization calls to the private feed while preserving supported peer feed methods.
+- Armed ORACLE_ROUND_TIME_ACTIVATION on BTC:testnet at 155158.
+- Armed ORACLE_ROUND_TIME_ACTIVATION on LTC:testnet at 4907593.
+- Armed ORACLE_ROUND_TIME_ACTIVATION on DOGE:testnet at 67966647.
+
+### Fixed
+- Preserved legacy ready-frame compatibility and ephemeral peer listener configuration.
+- Restored public hub discovery fallback and feed reachability across API and peer ports.
+
 ## [0.21.3] - 2026-10-03
 
 ### Added
