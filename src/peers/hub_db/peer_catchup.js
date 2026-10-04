@@ -211,6 +211,11 @@ class HubDbPeerCatchup {
         this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
         this.state = createCatchupState(this.tables);
+        // Usable peers seen by the last run. Zero means no signer-set peer this hub can
+        // fetch from, so there is nothing to catch up against; the hub then serves as
+        // v0.21.3 did (always caught up) rather than freezing admission for every reader.
+        this.lastUsablePeerCount = 0;
+        this.lastUngatedWarnAt = null;
         this.runningPromise = null;
         this.rerunRequested = false;
         this.warnTimer = null;
@@ -230,7 +235,7 @@ class HubDbPeerCatchup {
         this.warnTimer = setInterval(() => this.warnIfNoPeer(), this.warnIntervalMs);
         if (this.warnTimer.unref) this.warnTimer.unref();
         this.retryTimer = setInterval(() => {
-            if (!this.isCaughtUp() && connectedSignerPeers(this.peerManager).length > 0) {
+            if (!this.allCaughtUp() && connectedSignerPeers(this.peerManager).length > 0) {
                 this.schedule();
             }
         }, this.retryIntervalMs);
@@ -277,13 +282,26 @@ class HubDbPeerCatchup {
     }
 
     isCaughtUp() {
+        if (this.lastUsablePeerCount === 0) {
+            this.warnIfUngated();
+            return true;
+        }
         return this.state.isCaughtUp();
+    }
+
+    warnIfUngated() {
+        const now = Date.now();
+        if (this.lastUngatedWarnAt !== null && now - this.lastUngatedWarnAt < this.warnIntervalMs) return false;
+        this.lastUngatedWarnAt = now;
+        this.logger.warn('Hub DB peer catch-up: no usable signer-set peer; admission is not gated on catch-up');
+        return true;
     }
 
     async run() {
         this.state.resetAll();
         const peers = connectedSignerPeers(this.peerManager);
         if (peers.length === 0) {
+            this.lastUsablePeerCount = 0;
             this.warnIfNoPeer();
             return this.caughtUpState();
         }
@@ -292,6 +310,7 @@ class HubDbPeerCatchup {
             this.warnIfNoFeedUrl(peer);
             return false;
         });
+        this.lastUsablePeerCount = fetchablePeers.length;
         for (const table of this.tables) {
             const verifier = this.getVerifier(table);
             if (!verifier) continue;

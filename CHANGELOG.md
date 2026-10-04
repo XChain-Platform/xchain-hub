@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-10-04
+
+### Fixed
+- Fell back to ungated admission when peer catch-up has no usable signer-set peer.
+
 ## [0.22.1] - 2026-10-04
 
 ### Fixed
