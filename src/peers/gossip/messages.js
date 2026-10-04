@@ -177,6 +177,22 @@ class PeerMessages {
         return status;
     }
 
+    getHubAdvertisements() {
+        const hubs = [];
+        if (this.publicApiUrl && this.identity) {
+            hubs.push({
+                api_url: this.publicApiUrl,
+                signing_pubkey: String(this.identity.getPubkeyHex()).toLowerCase()
+            });
+        }
+        for (const peer of this.peers.values()) {
+            if (peer.state !== 'open' || !peer.api_url || !peer.signing_pubkey) continue;
+            if (this.effectiveSignerSet && !this.effectiveSignerSet.has(peer.signing_pubkey)) continue;
+            hubs.push({ api_url: peer.api_url, signing_pubkey: peer.signing_pubkey });
+        }
+        return hubs;
+    }
+
     makeId() {
         return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }

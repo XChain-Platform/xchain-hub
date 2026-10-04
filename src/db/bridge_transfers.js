@@ -139,8 +139,7 @@ module.exports = {
     },
 
     async getBridgeTransfersMaxLiveId() {
-        return this.doQuery(
-            "SELECT MAX(id) AS max_id FROM bridge_transfers WHERE status <> 'retracted'");
+        return this.doQuery(`SELECT MAX(id) AS max_id FROM bridge_transfers WHERE status <> 'retracted'`);
     },
 
     // Updates bridge_transfers.

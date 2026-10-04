@@ -60,6 +60,7 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { rememberCatchupHub } = require('../../peers/hub_db/catchup_context.js');
 require('./capability_catchup_verifier.js');
+require('./catchup_verifiers.js');
 
 // FAIL CLOSED, LOUDLY. resolveBtcLatestBlock returns null for an unreachable
 // indexer, a stale pushed tip and an over-lagged direct tip alike, and every
