@@ -6,9 +6,7 @@ const proxyquire = require('proxyquire');
 const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
 const PeerManager = require('../../../../src/peers/manager.js');
-const PEER = 'ws://validator02.example:10002';
-const VALIDATOR_ADDR = 'rValidator02';
-const SIGNING_PUBKEY = 'aa'.repeat(32);
+const { PEER, VALIDATOR_ADDR, peerManager, priceDb, makeCatchup } = require('./helpers/peer_catchup_harness.js');
 const CONTENT_READS = {
     price_snapshots: ['findPriceSnapshotsForRound', [1], { round_number: 1, coin_pair: 'BTC/USD' }],
     oracle_prices: ['getOraclePrice', ['addr', 'DOGE', 2],
@@ -32,18 +30,6 @@ const CONTENT_READS = {
     list_snapshots: ['getListSnapshotAtSeq', ['testnet', 'LTC', 9, 10],
         { network: 'testnet', home_chain: 'LTC', home_list_index: 9, seq: 10 }]
 };
-function peerManager(connected) {
-    const pm = new EventEmitter();
-    pm.peers = new Map();
-    pm.validatorPubkeys = new Map([[VALIDATOR_ADDR, SIGNING_PUBKEY]]);
-    pm.effectiveSignerSet = new Set([SIGNING_PUBKEY]);
-    pm.registryHasPubkey = pubkey => [...pm.validatorPubkeys.values()]
-        .some(value => value && String(value).toLowerCase() === pubkey);
-    if (connected) pm.peers.set(PEER, {
-        state: 'open', inbound: false, feedUrl: PEER, validatorAddr: VALIDATOR_ADDR
-    });
-    return pm;
-}
 function outboundHandshakePeerManager() {
     const sockets = [];
     class FakeWebSocket extends EventEmitter {
@@ -72,28 +58,6 @@ function outboundHandshakePeerManager() {
     envelope.sig = identity.signEnvelope(envelope);
     pm.handleInbound(ws, JSON.stringify(envelope), PEER);
     return pm;
-}
-function priceDb() {
-    return {
-        findPriceSnapshotsForRound: sinon.stub().resolves([]),
-        setFinalizedPriceSnapshotRound: sinon.stub().resolves({ affectedRows: 1 })
-    };
-}
-function makeCatchup(overrides) {
-    const opts = overrides || {};
-    return new HubDbPeerCatchup({
-        db: opts.db || priceDb(),
-        peerManager: opts.peerManager || peerManager(true),
-        tables: opts.tables || ['price_snapshots'],
-        getVerifier: opts.getVerifier || (() => async () => true),
-        fetchPage: opts.fetchPage,
-        hasRow: opts.hasRow,
-        storeRow: opts.storeRow,
-        pageSize: opts.pageSize || 2,
-        warnIntervalMs: 60000,
-        retryIntervalMs: opts.retryIntervalMs,
-        logger: opts.logger || { warn: sinon.stub(), error: sinon.stub() }
-    });
 }
 afterEach(function () { sinon.restore(); });
 describe('hub DB peer catch-up paging', function () {
@@ -341,75 +305,5 @@ describe('hub DB peer catch-up peer eligibility', function () {
         catchup.stop();
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
-    });
-});
-describe('hub DB peer catch-up without a peer registry', function () {
-    it('fetches from a chain signer', async function () {
-        const pm = peerManager(true);
-        delete pm.registryHasPubkey;
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
-        const catchup = makeCatchup({ peerManager: pm, fetchPage });
-        await catchup.start();
-        catchup.stop();
-        expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
-        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
-    });
-});
-describe('hub DB peer catch-up lifecycle', function () {
-    it('is registered in the peer manager listener roster', function () {
-        expect(PeerManager.LISTENER_ROSTER).to.deep.include({
-            event: 'peer:connect', subscriber: 'HubDbPeerCatchup'
-        });
-    });
-    it('runs again when a peer link reconnects', async function () {
-        const pm = peerManager(true);
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
-        const catchup = makeCatchup({ peerManager: pm, fetchPage });
-        await catchup.start();
-        pm.emit('peer:connect', PEER);
-        await catchup.runningPromise;
-        catchup.stop();
-        expect(fetchPage.callCount).to.equal(2);
-    });
-    it('attaches at hub startup through the admission source hook', async function () {
-        let options;
-        const start = sinon.stub().resolves();
-        function CatchupStub(opts) {
-            options = opts;
-            this.start = start;
-        }
-        const HubDbAdmissionSampling = proxyquire('../../../../src/peers/hub_db/admission_sampling.js', {
-            './peer_catchup.js': CatchupStub
-        });
-        const sampler = new HubDbAdmissionSampling();
-        const db = { doQuery: sinon.stub() };
-        const pm = peerManager(false);
-        sampler.db = db;
-        sampler.admissionSampleMs = 60000;
-        const hub = { peerManager: pm };
-        expect(sampler.attachAdmissionSource(hub)).to.equal(true);
-        await Promise.resolve();
-        expect(start.calledOnce).to.equal(true);
-        expect(options.db).to.equal(db);
-        expect(options.peerManager).to.equal(pm);
-        expect(hub.peerCatchup).to.be.instanceOf(CatchupStub);
-    });
-});
-describe('hub DB peer catch-up retry lifecycle', function () {
-    it('retries after a connected peer is registered and clears its timer on stop', async function () {
-        const clock = sinon.useFakeTimers();
-        const pm = peerManager(true);
-        pm.validatorPubkeys.clear();
-        pm.effectiveSignerSet = new Set();
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
-        const catchup = makeCatchup({ peerManager: pm, fetchPage, retryIntervalMs: 25 });
-        await catchup.start();
-        expect(fetchPage.called).to.equal(false);
-        pm.validatorPubkeys.set(VALIDATOR_ADDR, SIGNING_PUBKEY);
-        await clock.tickAsync(25);
-        expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
-        expect(catchup.isCaughtUp()).to.equal(true);
-        catchup.stop();
-        expect(clock.countTimers()).to.equal(0);
     });
 });
