@@ -92,6 +92,7 @@ const batch      = require('./response_mirror/batch.js');
 const retraction = require('./response_mirror/retraction.js');
 const gossip     = require('./response_mirror/gossip.js');
 const verify     = require('./response_mirror/verify.js');
+require('./response_mirror/catchup_verifier.js');
 const { MIRROR_COLUMNS, TERMINAL_STATUSES, ATTEST_RESULT, GOSSIP_COLUMNS,
         PARK_MAX, PARK_RETRY_MS } = require('./response_mirror/constants.js');
 const { getLogger } = require('../observability');
