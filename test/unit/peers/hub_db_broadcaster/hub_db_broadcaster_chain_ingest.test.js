@@ -92,6 +92,7 @@ function requireIndexer(context) {
 function recoveryFixture() {
     const hubRows = [];
     const db = {
+        getHubInstanceId: sinon.stub().resolves('de305d54-75b4-431b-adb2-eb6b9e546014'),
         getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
             max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
         }])
