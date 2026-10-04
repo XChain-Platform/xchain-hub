@@ -5,6 +5,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
+const PeerManager = require('../../../../src/peers/manager.js');
 
 const PEER = 'ws://validator02.example:10002';
 const CONTENT_READS = {
@@ -274,6 +275,12 @@ describe('hub DB peer catch-up peer eligibility', function () {
 });
 
 describe('hub DB peer catch-up lifecycle', function () {
+    it('is registered in the peer manager listener roster', function () {
+        expect(PeerManager.LISTENER_ROSTER).to.deep.include({
+            event: 'peer:connect', subscriber: 'HubDbPeerCatchup'
+        });
+    });
+
     it('runs again when a peer link reconnects', async function () {
         const pm = peerManager(true);
         const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
