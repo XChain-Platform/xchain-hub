@@ -10,8 +10,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// installParts puts part methods on a prototype as non-enumerable, writable,
-// configurable own properties, and refuses to overwrite an own name.
+// Verify installed part members stay hidden from enumeration while remaining
+// replaceable and removable by later prototype assembly.
 
 const { expect }        = require('chai');
 const { installParts }  = require('../../../../src/anchor/install_parts');
@@ -35,9 +35,11 @@ describe('anchor installParts', function () {
 
     it('keeps a getter as a getter', function () {
         const proto = {};
-        installParts(proto, [{ get g() { return 7; } }]);
+        const part = { get g() { return 7; } };
+        const getter = Object.getOwnPropertyDescriptor(part, 'g').get;
+        installParts(proto, [part]);
         const d = Object.getOwnPropertyDescriptor(proto, 'g');
-        expect(d.get).to.be.a('function');
+        expect(d.get).to.equal(getter);
         expect(d.enumerable).to.equal(false);
         expect(proto.g).to.equal(7);
     });
