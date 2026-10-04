@@ -111,7 +111,9 @@ describe('Attestation batch snapshot mirror retry', function () {
         expect(h.streamed).to.deep.equal(SET.map(v => v.pubkey));
         expect(h.publisher._persistedAnchors.has(ANCHOR)).to.equal(true);
     });
+});
 
+describe('Attestation batch leader snapshot gate', function () {
     it('does not start the leader signing round until snapshot delivery succeeds', async function () {
         let h = makeHarness();
         let signingRounds = 0;
@@ -146,7 +148,9 @@ describe('Attestation batch snapshot mirror retry', function () {
         expect(signingRounds).to.equal(1);
         expect(h.publisher._persistedAnchors.has(ANCHOR)).to.equal(true);
     });
+});
 
+describe('Attestation batch follower snapshot gate', function () {
     it('does not send a follower signature until snapshot delivery succeeds', async function () {
         let h = makeHarness();
         let signatures = 0;
