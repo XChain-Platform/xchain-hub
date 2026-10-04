@@ -45,31 +45,30 @@ function peerManager(connected) {
     });
     return pm;
 }
-function outboundHandshakePeerManager(options) {
-    const { localAddr = 'rValidator01', remoteAddr = VALIDATOR_ADDR,
-        peerUrl = PEER, identity: suppliedIdentity, inboundFirst } = options || {};
+function testnetPeerManager(localAddr, remoteAddr, remoteIdentity) {
     const sockets = [];
     class FakeWebSocket extends EventEmitter { constructor() { super(); sockets.push(this); } }
     Object.assign(FakeWebSocket, { OPEN: 1, '@noCallThru': true });
     const PeerConnections = proxyquire('../../../../src/peers/gossip/connections.js', { ws: FakeWebSocket });
-    const identity = suppliedIdentity || new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
     const pm = new PeerManager({
         P2P_VALIDATOR_ADDR: localAddr, REQUIRE_SIGNATURES: true,
         P2P_MSG_DEDUP_TTL: 60000, P2P_RECONNECT_BASE: 2000
     }, null);
-    const pubkey = identity.getPubkeyHex();
-    pm.setValidatorPubkeys(new Map([[remoteAddr, pubkey]]));
-    pm.setEffectiveSignerSet(new Set([pubkey.toLowerCase()]));
-    if (inboundFirst) pm.registerInboundPeer({}, remoteAddr);
-    PeerConnections.prototype.connectToPeer.call(pm, peerUrl);
+    pm.setValidatorPubkeys(new Map([[remoteAddr, remoteIdentity.getPubkeyHex()]]));
+    pm.setEffectiveSignerSet(new Set([remoteIdentity.getPubkeyHex().toLowerCase()]));
+    PeerConnections.prototype.connectToPeer.call(pm, remoteAddr);
     const ws = sockets[0];
     ws.readyState = FakeWebSocket.OPEN;
     ws.emit('open');
-    const envelope = { id: 'handshake-' + remoteAddr, type: 'TEST', sender: remoteAddr,
-        timestamp: Date.now(), data: {}, sig_pubkey: pubkey };
-    envelope.sig = identity.signEnvelope(envelope);
-    pm.handleInbound(ws, JSON.stringify(envelope), peerUrl);
-    return pm;
+    pm._testOutboundWs = ws; return pm;
+}
+function deliverOwnOutboundMessage(source, destination, identity) {
+    const inboundWs = { _peerAddr: null, _remoteIp: '127.0.0.1', close: sinon.stub() };
+    source._testOutboundWs.send = (raw, callback) => {
+        destination.handleInbound(inboundWs, raw, null); callback();
+    };
+    source.setIdentity(identity); source.effectiveSignerSet.add(identity.getPubkeyHex().toLowerCase());
+    expect(source.sendToPeer(destination.validatorAddr, 'TEST', {})).to.equal(true);
 }
 function priceDb() {
     return { findPriceSnapshotsForRound: sinon.stub().resolves([]),
@@ -245,29 +244,30 @@ describe('hub DB peer catch-up content-key lookups', function () {
     });
 });
 describe('hub DB peer catch-up peer resolution', function () {
-    it('pairs both sides when direct peer traffic is present only on inbound sockets', async function () {
+    it('pairs and catches up both testnet sides when each sends only on its outbound socket', async function () {
+        const validator01Addr = 'ws://validator01.example:10002';
+        const validator02Addr = 'ws://validator02.example:10002';
         const validator01 = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const validator02 = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const sides = [
             {
-                pm: outboundHandshakePeerManager({ localAddr: 'rValidator01',
-                    remoteAddr: 'rValidator02', peerUrl: PEER, identity: validator02 }),
-                remoteAddr: 'rValidator02', peerUrl: 'ws://validator02.example:10002'
+                pm: testnetPeerManager(validator01Addr, validator02Addr, validator02),
+                identity: validator01, remoteAddr: validator02Addr
             },
             {
-                pm: outboundHandshakePeerManager({ localAddr: 'rValidator02',
-                    remoteAddr: 'rValidator01', peerUrl: 'ws://validator01.example:10002',
-                    identity: validator01, inboundFirst: true }),
-                remoteAddr: 'rValidator01', peerUrl: 'ws://validator01.example:10002'
+                pm: testnetPeerManager(validator02Addr, validator01Addr, validator01),
+                identity: validator02, remoteAddr: validator01Addr
             }
         ];
+        deliverOwnOutboundMessage(sides[0].pm, sides[1].pm, sides[0].identity);
+        deliverOwnOutboundMessage(sides[1].pm, sides[0].pm, sides[1].identity);
         const tables = Object.keys(CONTENT_READS);
         for (const side of sides) {
-            expect(side.pm.validatorFeedUrls.get(side.remoteAddr)).to.equal(side.peerUrl);
-            side.pm.peers.delete(side.peerUrl);
-            if (!side.pm.peers.has(side.remoteAddr)) side.pm.registerInboundPeer({}, side.remoteAddr);
+            expect(side.pm.validatorFeedUrls.get(side.remoteAddr)).to.equal(side.remoteAddr);
+            side.pm.peers.delete(side.remoteAddr);
+            side.pm.registerInboundPeer({}, side.remoteAddr);
             expect(side.pm.peers.get(side.remoteAddr)).to.include({
-                inbound: true, validatorAddr: side.remoteAddr, feedUrl: side.peerUrl
+                inbound: true, validatorAddr: side.remoteAddr, feedUrl: side.remoteAddr
             });
             side.pm.peers.get(side.remoteAddr).feedUrl = null;
             const fetchPage = sinon.stub().callsFake(async (peer, table) => ({ table, rows: [] }));
@@ -275,7 +275,7 @@ describe('hub DB peer catch-up peer resolution', function () {
                 peerManager: side.pm, tables, getVerifier: () => async () => true, fetchPage
             });
             expect(fetchPage.callCount).to.equal(tables.length);
-            for (const call of fetchPage.getCalls()) expect(call.args[0]).to.equal(side.peerUrl);
+            for (const call of fetchPage.getCalls()) expect(call.args[0]).to.equal(side.remoteAddr);
             expect(catchup.isCaughtUp()).to.equal(true);
         }
     });
