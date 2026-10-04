@@ -4,11 +4,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const crypto = require('crypto');
-const EventEmitter = require('events');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
-const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
 const registry = require('../../../../src/peers/hub_db/catchup_verifiers.js');
 const { verifyPriceSnapshot, verifyOraclePrice } =
     require('../../../../src/oracle/price_aggregator/catchup_verifiers.js');
@@ -148,15 +146,6 @@ function validOracleRow() {
     };
 }
 
-function signerPeerManager() {
-    const peer = 'ws://peer';
-    const manager = new EventEmitter();
-    manager.peers = new Map([[peer, { state: 'open' }]]);
-    manager.validatorPubkeys = new Map([[peer, 'aa'.repeat(32)]]);
-    manager.effectiveSignerSet = new Set(['aa'.repeat(32)]);
-    return manager;
-}
-
 afterEach(function () { sinon.restore(); });
 
 describe('price snapshot catch-up verifier', function () {
@@ -235,84 +224,5 @@ describe('oracle price catch-up verifier', function () {
         db.getPriceIngestWatermark.resolves({ retraction_generation: 3, from_action_index: 40 });
         expect(await verifyOraclePrice(row, context))
             .to.deep.equal({ ok: false, reason: 'stale (retracted generation)' });
-    });
-});
-
-describe('price verifier peer catch-up integration', function () {
-    it('reconstructs and verifies a database-shaped PBFT round before storing its rows', async function () {
-        const validators = [validator(), validator(), validator(), validator()];
-        const { hub, aggregator } = setupAggregator(validators);
-        const data = signedRound(aggregator, validators);
-        data.block_index = data.btc_block_height;
-        const first = Object.assign(roundRow(data), {
-            id: 31, source_chain: null, source_action_index: null, push_generation: 0
-        });
-        const second = Object.assign({}, first, {
-            id: 32, coin_pair: data.pairs[1].pair, price: data.pairs[1].price
-        });
-        const db = {
-            findPriceSnapshotsForRound: sinon.stub().resolves([]),
-            setFinalizedPriceSnapshotRound: sinon.stub().resolves({ affectedRows: 1 })
-        };
-        const fetchPage = sinon.stub();
-        fetchPage.onCall(0).resolves({ table: 'price_snapshots', rows: [first] });
-        fetchPage.onCall(1).resolves({ table: 'price_snapshots', rows: [second] });
-        fetchPage.onCall(2).resolves({ table: 'price_snapshots', rows: [] });
-        const catchup = new HubDbPeerCatchup({
-            db, hub, peerManager: signerPeerManager(), tables: ['price_snapshots'], pageSize: 1,
-            getVerifier: registry.getCatchupVerifier,
-            fetchPage,
-            logger: { warn: sinon.stub(), error: sinon.stub() }
-        });
-
-        await catchup.start();
-        catchup.stop();
-
-        expect(db.setFinalizedPriceSnapshotRound.callCount).to.equal(2);
-        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
-    });
-
-    it('reconstructs and verifies a database-shaped signed batch before storing its row', async function () {
-        const validators = [validator(), validator(), validator(), validator()];
-        const { hub, aggregator } = setupAggregator(validators);
-        const row = batchRow(signedBatch(aggregator, validators));
-        const db = {
-            findPriceSnapshotsForRound: sinon.stub().resolves([]),
-            setBatchPriceSnapshotRound: sinon.stub().resolves({ affectedRows: 1 })
-        };
-        const catchup = new HubDbPeerCatchup({
-            db, hub, peerManager: signerPeerManager(), tables: ['price_snapshots'],
-            getVerifier: registry.getCatchupVerifier,
-            fetchPage: sinon.stub().resolves({ table: 'price_snapshots', rows: [row] }),
-            logger: { warn: sinon.stub(), error: sinon.stub() }
-        });
-
-        await catchup.start();
-        catchup.stop();
-
-        expect(db.setBatchPriceSnapshotRound.calledOnce).to.equal(true);
-    });
-});
-
-describe('oracle verifier peer catch-up integration', function () {
-    it('supplies authenticated signer-set provenance to an unsigned oracle row', async function () {
-        const row = Object.assign(validOracleRow(), { id: 41 });
-        const db = {
-            getPriceIngestWatermark: sinon.stub().resolves(null),
-            getOraclePrice: sinon.stub().resolves([]),
-            setOraclePriceByGeneration: sinon.stub().resolves({ affectedRows: 1 })
-        };
-        const catchup = new HubDbPeerCatchup({
-            db, hub: { network: 'testnet' }, peerManager: signerPeerManager(),
-            tables: ['oracle_prices'], getVerifier: registry.getCatchupVerifier,
-            fetchPage: sinon.stub().resolves({ table: 'oracle_prices', rows: [row] }),
-            logger: { warn: sinon.stub(), error: sinon.stub() }
-        });
-
-        await catchup.start();
-        catchup.stop();
-
-        expect(db.setOraclePriceByGeneration.calledOnce).to.equal(true);
-        expect(catchup.tableCaughtUp('oracle_prices')).to.equal(true);
     });
 });

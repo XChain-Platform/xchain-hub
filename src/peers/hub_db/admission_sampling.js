@@ -22,14 +22,12 @@
 
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
-const hubConfig = require('../../config');
-const HubDbPeerCatchup = require('./peer_catchup.js');
 const logger = getLogger();
 
 class HubDbAdmissionSampling {
 
     isCaughtUp() {
-        let provider = this.peerCatchup || (this._admissionHub && this._admissionHub.peerCatchup);
+        let provider = this._admissionHub && this._admissionHub.peerCatchup;
         if (!provider) return true;
         if (typeof provider.isCaughtUp !== 'function') return false;
         try { return provider.isCaughtUp() === true; }
@@ -72,17 +70,6 @@ class HubDbAdmissionSampling {
     attachAdmissionSource(hub) {
         if (!hub) return false;
         this._admissionHub = hub;
-        if (!this.peerCatchup && hub.peerManager && this.db) {
-            this.peerCatchup = new HubDbPeerCatchup({
-                db: this.db,
-                hub,
-                peerManager: hub.peerManager,
-                feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
-            });
-            this.peerCatchup.start().catch((e) =>
-                logger.error(nodeUtil.format('HubDbBroadcaster: initial peer catch-up failed:',
-                    e && e.message ? e.message : e)));
-        }
         if (this._admissionTimer) return true;
         let tick = () => {
             this.sampleAdmission().catch((e) =>

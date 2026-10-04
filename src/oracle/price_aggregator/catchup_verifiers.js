@@ -29,14 +29,6 @@ function parseProof(raw) {
     catch (e) { return null; }
 }
 
-function priceProofGroup(row) {
-    if (!row || typeof row.consensus_proof !== 'string') return null;
-    const proof = parseProof(row.consensus_proof);
-    if (Array.isArray(proof)) return 'round:' + String(row.round_number) + ':' + row.consensus_proof;
-    if (proof && proof.batch && Array.isArray(proof.sigs)) return 'batch:' + row.consensus_proof;
-    return null;
-}
-
 function aggregatorFrom(context) {
     if (context && context.priceAggregator) return context.priceAggregator;
     return context && context.hub && context.hub.priceAggregator;
@@ -57,92 +49,15 @@ function matchingPair(row, pairs) {
         sameValue(pair.price, row.price));
 }
 
-function rowAdmission(row, aggregator) {
-    try { return aggregator.admission.rowAdmitBlocks(row); }
-    catch (_err) { return null; }
-}
-
-function roundProofData(rows, aggregator) {
-    const row = rows[0];
-    const localRound = row.source_chain == null;
-    const admitBlocks = rowAdmission(row, aggregator);
-    const btcBlockHeight = localRound ? row.reference_block :
-        (admitBlocks && admitBlocks.BTC != null ? admitBlocks.BTC : row.reference_block);
-    return {
-        sourceChain: row.source_chain || row.reference_chain,
-        roundData: {
-            round: row.round_number,
-            timestamp: row.block_timestamp,
-            btc_block_height: btcBlockHeight,
-            block_index: row.reference_block,
-            action_index: localRound ? null : row.source_action_index,
-            push_generation: localRound ? 0 : row.push_generation,
-            admit_blocks: admitBlocks,
-            pairs: rows.map(item => ({ pair: item.coin_pair, price: item.price }))
-        }
-    };
-}
-
-function batchProofData(rows, aggregator, proof) {
-    const byRound = new Map();
-    for (const row of rows) {
-        if (!byRound.has(String(row.round_number))) byRound.set(String(row.round_number), []);
-        byRound.get(String(row.round_number)).push(row);
-    }
-    const rounds = [...byRound.values()].map(items => {
-        const row = items[0];
-        const admitBlocks = rowAdmission(row, aggregator);
-        const lastRound = sameValue(row.round_number, proof.batch.last_round);
-        const btcBlockHeight = admitBlocks && admitBlocks.BTC != null
-            ? admitBlocks.BTC : (lastRound ? proof.batch.btc_block_height : null);
-        return {
-            round: row.round_number,
-            timestamp: row.block_timestamp,
-            btc_block_height: btcBlockHeight,
-            admit_blocks: admitBlocks,
-            pairs: items.map(item => ({ pair: item.coin_pair, price: item.price }))
-        };
-    }).sort((a, b) => Number(a.round) - Number(b.round));
-    const row = rows[0];
-    return {
-        sourceChain: row.source_chain || row.reference_chain,
-        batchData: {
-            first_round: proof.batch.first_round,
-            last_round: proof.batch.last_round,
-            btc_block_height: proof.batch.btc_block_height,
-            block_index: row.reference_block,
-            block_time: row.batch_block_time,
-            action_index: row.source_action_index,
-            push_generation: row.push_generation,
-            rounds
-        }
-    };
-}
-
-function preparePriceProofs(rows, context) {
-    const aggregator = aggregatorFrom(context);
-    const proofs = new Map();
-    if (!aggregator || !Array.isArray(rows) || rows.length === 0) return proofs;
-    const parsed = parseProof(rows[0].consensus_proof);
-    const proof = Array.isArray(parsed)
-        ? roundProofData(rows, aggregator)
-        : batchProofData(rows, aggregator, parsed);
-    for (const row of rows) proofs.set(row, proof);
-    return proofs;
-}
-
 function roundRowMatches(row, sourceChain, roundData, aggregator) {
-    const localRound = row.source_chain == null;
     if (!sameValue(row.round_number, roundData.round) ||
         !sameValue(row.block_timestamp, roundData.timestamp) ||
         !sameValue(row.reference_block, roundData.block_index) ||
         !sameValue(row.consensus_round, 1) ||
-        !sameValue(row.reference_chain, sourceChain) ||
-        (!localRound && !sameValue(row.source_chain, sourceChain)) ||
-        !sameValue(row.source_action_index, localRound ? null :
-            (roundData.action_index == null ? null : roundData.action_index)) ||
-        !sameValue(row.push_generation, localRound ? 0 : (Number.isFinite(parseInt(roundData.push_generation))
-            && parseInt(roundData.push_generation) >= 0 ? parseInt(roundData.push_generation) : 0)) ||
+        !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
+        !sameValue(row.source_action_index, roundData.action_index == null ? null : roundData.action_index) ||
+        !sameValue(row.push_generation, Number.isFinite(parseInt(roundData.push_generation))
+            && parseInt(roundData.push_generation) >= 0 ? parseInt(roundData.push_generation) : 0) ||
         !matchingPair(row, roundData.pairs)) return false;
     return rowHasAdmission(row, admissionColumns(aggregator, roundData.admit_blocks));
 }
@@ -281,7 +196,4 @@ async function verifyOraclePrice(row, context) {
 registerCatchupVerifier('price_snapshots', verifyPriceSnapshot);
 registerCatchupVerifier('oracle_prices', verifyOraclePrice);
 
-verifyPriceSnapshot.groupRowsBy = priceProofGroup;
-verifyPriceSnapshot.prepareRows = preparePriceProofs;
-
-module.exports = { verifyPriceSnapshot, verifyOraclePrice, verifyBatchBody, preparePriceProofs };
+module.exports = { verifyPriceSnapshot, verifyOraclePrice, verifyBatchBody };
