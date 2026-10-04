@@ -281,10 +281,26 @@ describe('hub DB peer catch-up peer resolution', function () {
         const catchup = makeCatchup({ peerManager: pm, logger, fetchPage });
         await catchup.start(); await catchup.schedule(); catchup.stop();
         expect(fetchPage.called).to.equal(false);
-        expect(catchup.isCaughtUp()).to.equal(false);
+        expect(catchup.allCaughtUp()).to.equal(false);
         expect(logger.warn.calledOnce).to.equal(true);
         expect(logger.warn.firstCall.args[0]).to.include(VALIDATOR_ADDR)
             .and.include('no fetchable feed URL');
+        // No usable peer, so admission is not gated on catch-up (the v0.21.3 behaviour).
+        expect(catchup.isCaughtUp()).to.equal(true);
+        expect(logger.warn.calledWithMatch('admission is not gated')).to.equal(true);
+    });
+    it('reports caught up, ungated, when no signer peer is connected at all', async function () {
+        const logger = { warn: sinon.stub(), error: sinon.stub() };
+        const catchup = makeCatchup({ peerManager: peerManager(false), logger, fetchPage: sinon.stub() });
+        await catchup.start(); catchup.stop();
+        expect(catchup.allCaughtUp()).to.equal(false);
+        expect(catchup.isCaughtUp()).to.equal(true);
+    });
+    it('still gates admission while a usable signer peer has not caught every table up', async function () {
+        const catchup = makeCatchup({ getVerifier: () => undefined, fetchPage: sinon.stub() });
+        await catchup.start(); catchup.stop();
+        expect(catchup.lastUsablePeerCount).to.be.above(0);
+        expect(catchup.isCaughtUp()).to.equal(false);
     });
 });
 describe('hub DB peer catch-up peer eligibility', function () {
