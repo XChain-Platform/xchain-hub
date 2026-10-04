@@ -60,14 +60,18 @@ describe('abandonBuild', function () {
             expect(encoder.calls).to.deep.equal([['42']]);
         });
 
-        for (const who of ['rail', undefined]) {
-            it('resolves false without throwing when release rejects (who ' +
-               (who === undefined ? 'omitted' : 'given') + ')', async function () {
-                const encoder = makeEncoder(async () => { throw new Error('x'); });
-                const out = await abandonBuild(encoder, { reservation: { id: 42 } }, who);
-                expect(out).to.equal(false);
-                expect(encoder.calls).to.have.length(1);
-            });
-        }
+        it('resolves false without throwing when release rejects with who given', async function () {
+            const encoder = makeEncoder(async () => { throw new Error('x'); });
+            const out = await abandonBuild(encoder, { reservation: { id: 42 } }, 'rail');
+            expect(out).to.equal(false);
+            expect(encoder.calls).to.have.length(1);
+        });
+
+        it('resolves false without throwing when release rejects with who omitted', async function () {
+            const encoder = makeEncoder(async () => { throw new Error('x'); });
+            const out = await abandonBuild(encoder, { reservation: { id: 42 } });
+            expect(out).to.equal(false);
+            expect(encoder.calls).to.have.length(1);
+        });
     });
 });
