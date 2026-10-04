@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
+const proxyquire = require('proxyquire');
 
 const MODULE_PATH = require.resolve('../../../../src/peers/hub_db/catchup_verifiers.js');
 const EXPECTED_TABLES = [
@@ -25,7 +26,12 @@ describe('catch-up verifier registry', function () {
 
     beforeEach(function () {
         delete require.cache[MODULE_PATH];
-        registry = require(MODULE_PATH);
+        registry = proxyquire(MODULE_PATH, {
+            './cross_chain_catchup_verifiers.js': {
+                registerCrossChainCatchupVerifiers: () => {},
+                '@noCallThru': true
+            }
+        });
     });
 
     afterEach(function () {
