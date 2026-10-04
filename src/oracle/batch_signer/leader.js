@@ -75,8 +75,8 @@ module.exports = {
         let snapCount = signingSet.length;
 
         if(!(await this.fillWindowGaps(first, last, rounds, signingSet, me))){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round no peer could ' +
-                         'supply and too few peers answered to call it absent; window skipped');
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] still has a missing round ' +
+                         'after peer responses; window skipped');
             return empty;
         }
         let canonical = this.leaderCanonical(first, last, anchor, rounds);
@@ -98,12 +98,9 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Fill the rounds of [first,last] this hub lacks but a peer finalized, splicing them
-    // into `rounds` in place so the caller packs and emits the window it was signed under.
-    // True when the window may be proposed: nothing was missing, every gap was filled, or
-    // enough peers answered without a round to show it is absent everywhere. False skips
-    // the window. A filled round is only a proposal: followers still sign nothing they
-    // cannot reproduce from their own rows.
+    // Fill rounds this hub lacks in place so the caller packs the signed window.
+    // Return true only when every round is present; a response quorum ends the wait but
+    // cannot make a hole safe to propose.
     async fillWindowGaps(first, last, rounds, signingSet, me){
         let have = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
@@ -115,26 +112,26 @@ module.exports = {
         let found  = await this.openFillRound({ first, last, gaps, peers, needed });
         for(let r of found.values()) rounds.push(r);
         rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
-        return found.size === gaps.size || found.enough;
+        return found.size === gaps.size;
     },
 
-    // Ask every peer for its finalized rounds of the window and collect the answers
-    // until the gaps are filled, every peer has answered, or the fill timeout expires.
+    // Ask peers for finalized rounds until the gaps are filled, a response quorum arrives,
+    // or the fill timeout expires.
     openFillRound({ first, last, gaps, peers, needed }){
         return new Promise((resolve) => {
             let found = new Map();
-            let round = { first, last, gaps, peers: new Set(peers), responders: new Set(), found };
+            let round = { first, last, gaps, peers: new Set(peers), responders: new Set(), found, needed };
             let finish = () => {
                 if(this._fillRound !== round) return;
                 clearTimeout(round.timer);
                 this._fillRound = null;
-                found.enough = round.responders.size >= needed;
                 resolve(found);
             };
             round.finish = finish;
             round.timer = setTimeout(finish, this.fillTimeoutMs);
             if(round.timer.unref) round.timer.unref();
             this._fillRound = round;
+            if(needed === 0){ finish(); return; }
             this.peerManager.broadcast(this.constructor.XPRICEB_FILL_REQ,
                 { first_round: first, last_round: last });
         });
@@ -158,7 +155,7 @@ module.exports = {
             if(r.admitBlocks !== undefined && r.admitBlocks !== null) kept.admitBlocks = r.admitBlocks;
             round.found.set(n, kept);
         }
-        if(round.found.size === round.gaps.size || round.responders.size === round.peers.size) round.finish();
+        if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
     },
 
     // The ONE canonical builder's bytes for this window, or null when the engine that
