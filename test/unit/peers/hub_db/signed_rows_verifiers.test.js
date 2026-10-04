@@ -3,19 +3,30 @@
 const sinon = require('sinon');
 const { expect } = require('chai');
 const swq = require('../../../../src/consensus/stake_weighted_quorum.js');
+const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
 const capabilityVerifier = require('../../../../src/oracle/price_aggregator/capability_catchup_verifier.js');
 const attestationVerifier = require('../../../../src/attestation/response_mirror/catchup_verifier.js');
 
-const PUBKEY = 'ab'.repeat(32);
+function capabilityIdentity() {
+    return new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+}
 
-describe('capability_snapshots catch-up verifier', function () {
+function signCapabilityRow(row, identity) {
+    row.signature = identity.sign(capabilityVerifier.capabilitySnapshotCanonical(
+        capabilityVerifier.rowIdentity(row)));
+    return row;
+}
+
+describe('capability_snapshots catch-up signature verifier', function () {
     afterEach(function () { sinon.restore(); });
 
     it('accepts only a row in the locally resolved signed snapshot', async function () {
         sinon.stub(swq, 'isStakeWeightedQuorumActive').returns(true);
+        const identity = capabilityIdentity();
+        const pubkey = identity.getPubkeyHex();
         const getWeightSnapshot = sinon.stub().resolves({
-            validators: [{ pubkey: PUBKEY, source: 'stake-source', weight: '125.50' }]
+            validators: [{ pubkey, source: 'stake-source', weight: '125.50' }]
         });
         const hub = {
             db: {},
@@ -23,35 +34,58 @@ describe('capability_snapshots catch-up verifier', function () {
             capabilitySnapshot: { getWeightSnapshot }
         };
         rememberCatchupHub(hub);
-        const row = {
+        const row = signCapabilityRow({
             snapshot_block: 900000,
             capability: 'attestation',
-            signing_pubkey: PUBKEY,
+            signing_pubkey: pubkey,
             source: 'stake-source',
             amount: '125.50'
-        };
+        }, identity);
 
         expect(await capabilityVerifier.verifyCapabilitySnapshotRow(row, { db: hub.db })).to.deep.equal({ ok: true });
         expect(getWeightSnapshot.calledOnceWith('attestation', 900000)).to.equal(true);
 
+        const signature = row.signature;
+        delete row.signature;
+        expect(await capabilityVerifier.verifyCapabilitySnapshotRow(row, { hub })).to.deep.equal({
+            ok: false,
+            reason: 'malformed capability snapshot signature'
+        });
+        row.signature = '00'.repeat(64);
+        expect(await capabilityVerifier.verifyCapabilitySnapshotRow(row, { hub })).to.deep.equal({
+            ok: false,
+            reason: 'capability snapshot signature did not verify'
+        });
+
+        row.signature = signature;
         row.amount = '125.51';
+        expect(await capabilityVerifier.verifyCapabilitySnapshotRow(row, { hub })).to.deep.equal({
+            ok: false,
+            reason: 'capability snapshot signature did not verify'
+        });
+        signCapabilityRow(row, identity);
         expect(await capabilityVerifier.verifyCapabilitySnapshotRow(row, { hub })).to.deep.equal({
             ok: false,
             reason: 'row is absent from the local capability snapshot'
         });
     });
+});
+
+describe('capability_snapshots catch-up snapshot resolver', function () {
+    afterEach(function () { sinon.restore(); });
 
     it('fails closed on an unresolved, truncated, or malformed snapshot', async function () {
         sinon.stub(swq, 'isStakeWeightedQuorumActive').returns(false);
+        const identity = capabilityIdentity();
         const getSnapshot = sinon.stub();
         const hub = { network: 'testnet', capabilitySnapshot: { getSnapshot } };
-        const row = {
+        const row = signCapabilityRow({
             snapshot_block: 900000,
             capability: 'price',
-            signing_pubkey: PUBKEY,
+            signing_pubkey: identity.getPubkeyHex(),
             source: '',
             amount: '10'
-        };
+        }, identity);
 
         getSnapshot.onFirstCall().resolves(null);
         getSnapshot.onSecondCall().resolves({ truncated: true, validators: [] });
