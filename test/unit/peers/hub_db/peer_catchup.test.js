@@ -244,6 +244,8 @@ describe('hub DB peer catch-up peer resolution', function () {
             expect(catchup.isCaughtUp()).to.equal(true);
         }
     });
+});
+describe('hub DB peer catch-up admission gating', function () {
     it('skips and throttles a signer peer known only by validator address', async function () {
         const logger = { warn: sinon.stub(), error: sinon.stub() };
         const pm = peerManager(false);

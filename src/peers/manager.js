@@ -195,9 +195,6 @@ function initConnectionState(pm) {
     // it drives both the backoff ceiling and the retry log line.
     pm.peers = new Map();
 
-    // Validator identities and dialable feed endpoints can arrive on opposite
-    // halves of the bidirectional peer link. Keep their authenticated pairing
-    // independently of either socket record.
     pm.validatorFeedUrls = new Map();
 
     // Message deduplication: Map<id, expiresAt>
