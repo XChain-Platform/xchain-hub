@@ -53,7 +53,7 @@ const { DB_METHODS } = require('../../../helpers/mockHub');
 
     async function bootsEveryRealMessageSubscribersModuleTest2() {
         hub = new XChainHub('host', 3306, 'db', 'user', 'pass', {
-            P2P_PORT:            0,  // ephemeral; this test never dials out or accepts peers
+            P2P_PORT:            '0',  // ephemeral; this test never dials out or accepts peers
             P2P_HOST:            '127.0.0.1',
             P2P_VALIDATOR_ADDR:  'ws://127.0.0.1:0',
             HUB_NETWORK:         'regtest',
@@ -74,6 +74,9 @@ const { DB_METHODS } = require('../../../helpers/mockHub');
             await hub.startReorgHandler();
             await hub.startGovernance();
         });
+
+        const boundPort = hub.peerManager.httpServer.address().port;
+        expect(boundPort).to.be.within(1, 65535);
 
         const exceeded = warnings.filter((w) => w.name === 'MaxListenersExceededWarning');
         expect(exceeded.map((w) => w.message)).to.deep.equal([],
