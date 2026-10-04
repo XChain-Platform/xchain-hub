@@ -55,6 +55,10 @@ module.exports = {
             'SELECT * FROM list_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
+    async getListSnapshotsMaxId(){
+        return this.doQuery('SELECT MAX(id) AS max_id FROM list_snapshots');
+    },
+
     async getListSnapshotBySnapshotId(snapshotId){
         return this.doQuery(
             'SELECT * FROM list_snapshots WHERE snapshot_id = ? LIMIT 1', [snapshotId]);
