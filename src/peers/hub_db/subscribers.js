@@ -162,6 +162,10 @@ class HubDbSubscribers {
             // before the first heartbeat arrives, on a path that runs after every dropped
             // socket and every resync.
             const ready = { type: 'ready', max_ids: maxIds, hub_instance_id: hubInstanceId, caught_up: caughtUp, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs, heights: this.admissionHeights(undefined, caughtUp) };
+            // Omitted while empty: the ready frame's shape stays the one a consumer already
+            // pins, and an absent map reads as no claim exactly as an empty one does.
+            const landed = this.landedMap(caughtUp);
+            if (Object.keys(landed).length > 0) ready.landed = landed;
             ws.send(JSON.stringify(ready));
             this.replayDeletions(ws);
         } catch (e) { /* ignore */ }

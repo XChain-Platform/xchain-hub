@@ -63,6 +63,58 @@ class HubDbAdmissionSampling {
         return ready ? heights : this.holdAdmissionHeightsAtFloor(heights);
     }
 
+    // The `landed` object every carrier stamps, beside `heights`. A hub that has not caught
+    // up publishes none, like the heights hold, because its own mirror may lack the rows.
+    landedMap(caughtUp) {
+        if (!this.landingWatermark) return {};
+        let ready = (caughtUp === undefined) ? this.isCaughtUp() : caughtUp;
+        return ready ? this.landingWatermark.landed() : {};
+    }
+
+    async sampleLanding(hub) {
+        let lw = this.landingWatermark;
+        if (!lw || lw.relay || typeof hub.resolveLandingReadings !== 'function') return;
+        let chains = this.admissionWatermark.federationChains;
+        let before = {};
+        for (let c of chains) before[c] = lw.ingestMark(c);
+        let readings = await hub.resolveLandingReadings(chains);
+        for (let c of Object.keys(readings || {})) lw.observe(c, readings[c], before[c], lw.ingestMark(c));
+    }
+
+    trackLandingRelay(source) {
+        let lw = this.landingWatermark;
+        if (!lw || !lw.relay || !source || typeof source.fetchPage !== 'function'
+            || typeof source.run !== 'function') return false;
+        if (!this._landingRelaySources) this._landingRelaySources = new WeakSet();
+        if (this._landingRelaySources.has(source)) return true;
+        this._landingRelaySources.add(source);
+
+        let pending;
+        let fetchPage = source.fetchPage.bind(source);
+        source.fetchPage = async (...args) => {
+            let page = await fetchPage(...args);
+            if (page && typeof page === 'object'
+                && Object.prototype.hasOwnProperty.call(page, 'landed')) {
+                pending = page.landed;
+            }
+            return page;
+        };
+
+        let run = source.run.bind(source);
+        source.run = async (...args) => {
+            pending = undefined;
+            try {
+                let result = await run(...args);
+                let complete = typeof source.allCaughtUp === 'function' && source.allCaughtUp();
+                if (complete && pending !== undefined) lw.republishFrom(pending);
+                return result;
+            } finally {
+                pending = undefined;
+            }
+        };
+        return true;
+    }
+
     // Attach the hub the watermark is sampled from, and start sampling.
     //
     // The broadcaster is constructed with (p2pConfig, db) and has no hub handle, so the
@@ -72,12 +124,18 @@ class HubDbAdmissionSampling {
     attachAdmissionSource(hub) {
         if (!hub) return false;
         this._admissionHub = hub;
+        if (this.landingWatermark) this.landingWatermark.trackIngest(hub.priceAggregator);
+        let startPeerCatchup = false;
         if (!hub.peerCatchup && hub.peerManager && this.db) {
             hub.peerCatchup = new HubDbPeerCatchup({
                 db: this.db,
                 peerManager: hub.peerManager,
                 feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
             });
+            startPeerCatchup = true;
+        }
+        this.trackLandingRelay(hub.peerCatchup);
+        if (startPeerCatchup) {
             hub.peerCatchup.start().catch((e) =>
                 logger.error(nodeUtil.format('HubDbBroadcaster: initial peer catch-up failed:',
                     e && e.message ? e.message : e)));
@@ -122,6 +180,8 @@ class HubDbAdmissionSampling {
             let at   = Date.now();
             for (let c of Object.keys(tips || {})) w.observeTip(c, tips[c], at);
         }
+
+        await this.sampleLanding(hub);
 
         // The anchor-attest queue-drain rule. A queued entry at snapshot S means
         // the row for S is not written yet, so the entry may not pass S - 1. An empty queue
