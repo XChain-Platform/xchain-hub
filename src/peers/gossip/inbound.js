@@ -176,7 +176,12 @@ class PeerInbound {
 
         let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
         let peer = this.peers.get(peerAddr);
+        let inheritedFeedUrl = false;
         if (peer) {
+            if (knownAddr !== null && !peer.inbound) {
+                inheritedFeedUrl = this.recordValidatorFeedUrl(
+                    envelope.sender, peer.feedUrl || knownAddr);
+            }
             if (knownAddr !== null && !peer.inbound && !peer.validatorAddr) {
                 peer.validatorAddr = envelope.sender;
                 this.emit('peer:connect', peerAddr);
@@ -184,6 +189,7 @@ class PeerInbound {
             peer.lastSeen = Date.now();
             recordDirectHubAdvertisement(peer, peer.validatorAddr || peerAddr, envelope);
         }
+        if (inheritedFeedUrl) this.emit('peer:connect', envelope.sender);
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
@@ -227,7 +233,7 @@ class PeerInbound {
             reconnectDelay: this.config.P2P_RECONNECT_BASE || 2000,
             reconnectTimer: null,
             inbound:        true,
-            feedUrl:        null,
+            feedUrl:        this.validatorFeedUrls.get(addr) || null,
             validatorAddr:  addr
         });
 
