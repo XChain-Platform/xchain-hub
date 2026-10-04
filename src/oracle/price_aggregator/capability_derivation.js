@@ -58,6 +58,9 @@ const hubConfig = require('../../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+const { rememberCatchupHub } = require('../../peers/hub_db/catchup_context.js');
+require('./capability_catchup_verifier.js');
+require('./catchup_verifiers.js');
 
 // FAIL CLOSED, LOUDLY. resolveBtcLatestBlock returns null for an unreachable
 // indexer, a stale pushed tip and an over-lagged direct tip alike, and every
@@ -227,6 +230,7 @@ module.exports = {
     // pass itself decides whether this hub needs it, because start() runs BEFORE
     // startP2P/startOracle and cannot yet tell a validator from a standalone hub.
     startPriceCapabilityDerivation() {
+        rememberCatchupHub(this.hub);
         if (this._priceCapDeriveTimer) return false;
         if (!this.priceCapabilityDerivationEnabled()) {
             logger.warn('PriceAggregator: HUB_PRICE_CAPABILITY_DERIVE=off, so this hub will not derive '

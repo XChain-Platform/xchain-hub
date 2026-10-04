@@ -146,7 +146,11 @@ function registerHubDbSnapshotRoutesBIGINTSerializationMatcSuite1Part4() {
       // (never loaded, just needs its OPEN constant) so bigIntReplacer
       // itself is the actual production module-private function.
       let HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster', {ws:{OPEN:1}});
-      let broadcaster = new HubDbBroadcaster({}, {...DB_METHODS,doQuery:async()=>[]});
+      let broadcaster = new HubDbBroadcaster({}, {
+        ...DB_METHODS,
+        doQuery: async()=>[],
+        getHubInstanceId: async()=>'de305d54-75b4-431b-adb2-eb6b9e546014'
+      });
       let ws = {readyState:1,bufferedAmount:0,_hubBuffered:0,send:sinon.stub(),close:sinon.stub(),on:sinon.stub()};
       await broadcaster.addSubscriber(ws);
       ws.send.resetHistory();

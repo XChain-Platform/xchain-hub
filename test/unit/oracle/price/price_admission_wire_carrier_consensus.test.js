@@ -190,6 +190,8 @@ function snapshotFor(V) {
         const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../../../helpers/fixtures');
 
         const ROUND = 7;
+        const ROUND_TIME = 1700000000;
+        const ROUND_INTERVAL = 15000;
 
         // The leader's map: tip + the price margin (1) on every federation chain.
         const TIPS  = { BTC: ADMIT_AT, LTC: 2400000, DOGE: 5000000 };
@@ -218,7 +220,11 @@ function snapshotFor(V) {
                 if (!tips) return null;
                 let out = {}; for (let c of readSet) { if (tips[c] == null) return null; out[c] = tips[c] + 1; } return out;
             });
-            oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+            oracleRound = {
+                epochStart: ROUND_TIME * 1000 - ROUND * ROUND_INTERVAL,
+                roundInterval: ROUND_INTERVAL,
+                getSubmissions: sinon.stub().returns(new Map())
+            };
             oc = new armed.OracleConsensus(hub, oracleRound);
             oc.setValidatorSet(VALIDATORS_3);
             oc.allowUnverifiedPairs = true;
@@ -235,7 +241,7 @@ function snapshotFor(V) {
 
         function envelope(anchor, admitBlocks) {
             let prices = PRICES;
-            let data = { round: ROUND, prices, digest: oc.digest(ROUND, prices), btcBlockHeight: anchor, btcBlockTime: 1700000000 };
+            let data = { round: ROUND, prices, digest: oc.digest(ROUND, prices), btcBlockHeight: anchor, btcBlockTime: ROUND_TIME };
             if (admitBlocks !== undefined) data.admitBlocks = admitBlocks;
             return { sender: leader.addr, sig_pubkey: leader.pubkey, data };
         }

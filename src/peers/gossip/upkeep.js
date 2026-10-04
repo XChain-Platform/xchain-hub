@@ -28,6 +28,12 @@ const logger = getLogger();
 
 class PeerUpkeep {
 
+    heartbeatData(version) {
+        let data = { version: version, rules: rulesDigest.computeConsensusRulesDigest().digest };
+        if (this.publicApiUrl) data.api_url = this.publicApiUrl;
+        return data;
+    }
+
     startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
         let version = '0.0.0';
@@ -41,7 +47,7 @@ class PeerUpkeep {
             // directions: an older hub verifies a newer sender's signature over the data
             // it actually received and simply ignores the key it does not know, and a
             // newer hub reports `rules: null` for an older sender rather than a mismatch.
-            this.broadcast('HEARTBEAT', { version: version, rules: rulesDigest.computeConsensusRulesDigest().digest });
+            this.broadcast('HEARTBEAT', this.heartbeatData(version));
         }, interval);
     }
 

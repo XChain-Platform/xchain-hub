@@ -92,6 +92,7 @@ function requireIndexer(context) {
 function recoveryFixture() {
     const hubRows = [];
     const db = {
+        getHubInstanceId: sinon.stub().resolves('de305d54-75b4-431b-adb2-eb6b9e546014'),
         getPriceSnapshotsMaxId: sinon.stub().callsFake(async () => [{
             max_id: hubRows.length === 0 ? null : Math.max(...hubRows.map(row => row.id))
         }])
@@ -152,7 +153,11 @@ async function openRecoveryServers(fixture) {
 }
 
 function configureRecoverySync(fixture, port) {
-    fixture.sync = new HubDbSync({ doQuery: sinon.stub().resolves([]) }, {
+    const doQuery = sinon.stub().callsFake(async query =>
+        /^SHOW COLUMNS FROM [a-z_]+ WHERE Field = 'id'$/.test(query)
+            ? [{ Field: 'id', Extra: 'auto_increment' }]
+            : []);
+    fixture.sync = new HubDbSync({ doQuery: doQuery }, {
         hubUrl: 'http://127.0.0.1:' + port,
         network: 'testnet'
     });

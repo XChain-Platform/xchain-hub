@@ -23,6 +23,7 @@
 'use strict';
 
 const { ORACLE_PREPARE } = require('./constants.js');
+const { nominalRoundSeconds } = require('./round_time.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -57,7 +58,7 @@ function admissionEraOf(round, envelope, blockHeight, admitBlocks) {
 // by the has() re-check here.
 function openFollowerRound(proposal, locked, proposedAdmit) {
     let { round, prices, digest, btcBlockTime } = proposal;
-    let { blockHeight, wt, snap, quorumForRound, memberPubkeys } = locked;
+    let { blockHeight, wt, snap, quorumForRound, memberPubkeys, roundTimeActive } = locked;
     if (!this.pendingRounds.has(round) && quorumForRound !== null) {
         let quorum = quorumForRound;
         let pending = {
@@ -65,7 +66,9 @@ function openFollowerRound(proposal, locked, proposedAdmit) {
             prices:         prices,
             digest:         digest,
             btcBlockHeight: blockHeight,
-            btcBlockTime:   btcBlockTime   || Math.floor(Date.now() / 1000),
+            btcBlockTime:   btcBlockTime   || (roundTimeActive
+                ? nominalRoundSeconds(round, this.oracleRound.epochStart, this.oracleRound.roundInterval)
+                : Math.floor(Date.now() / 1000)),
             admitBlocks:    proposedAdmit,
             prepares:       new Set(),
             commits:        new Set(),

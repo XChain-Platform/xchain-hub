@@ -27,6 +27,21 @@
 
 module.exports = {
 
+    async getHubInstanceId(){
+        const select = 'SELECT value FROM consensus_state WHERE key_name = ?';
+        let rows = await this.doQuery(select, ['hub_instance_id']);
+        if(rows && rows.length && typeof rows[0].value === 'string' && rows[0].value)
+            return rows[0].value;
+
+        await this.doQuery(
+            'INSERT IGNORE INTO consensus_state (key_name, value) VALUES (?, UUID())',
+            ['hub_instance_id']);
+        rows = await this.doQuery(select, ['hub_instance_id']);
+        if(!rows || !rows.length || typeof rows[0].value !== 'string' || !rows[0].value)
+            throw new Error('Unable to create hub database instance identity');
+        return rows[0].value;
+    },
+
     // Returns 0 on a fresh node or unparseable value.
     async getLastSeq(){
         let rows = await this.doQuery(

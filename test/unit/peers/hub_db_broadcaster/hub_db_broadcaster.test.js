@@ -57,6 +57,7 @@ function makeDb(overrides) {
         // doQuery this call site declares afterwards.
         ...DB_METHODS,
         doQuery: sinon.stub().resolves([]),
+        getHubInstanceId: async () => 'de305d54-75b4-431b-adb2-eb6b9e546014',
         ...(overrides || {})
     };
 }
@@ -147,6 +148,8 @@ function registerFeature2addSubscriberPart1() {
     expect(ws.send.calledOnce).to.be.true;
     let msg = JSON.parse(ws.send.firstCall.args[0]);
     expect(msg.type).to.equal('ready');
+    expect(msg).to.have.property('hub_instance_id', null);
+    expect(msg).to.have.property('caught_up', true);
   });
   it('includes max_ids when db is provided', async function () {
     let db = makeDb({
@@ -191,6 +194,9 @@ function registerFeature2addSubscriberPart2() {
     let db = makeDb({
       doQuery: sinon.stub().callsFake(async sql => {
         asked.push(String(sql));
+        if (String(sql).includes('SELECT value FROM consensus_state')) {
+          return [{ value: 'de305d54-75b4-431b-adb2-eb6b9e546014' }];
+        }
         return [{
           max_id: 7
         }];
