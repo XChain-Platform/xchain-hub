@@ -67,13 +67,15 @@ describe('round_validation validateRoundSigs', function () {
     ];
     for (const [label, data] of bad) {
         it('refuses ' + label, function () {
-            expect(validateRoundSigs(data)).to.deep.equal({ reason: 'invalid sigs' });
+            expect(validateRoundSigs.call({}, data)).to.deep.equal({ reason: 'invalid sigs' });
         });
     }
 
     it('lower-cases valid entries in order', function () {
         const other = 'EF'.repeat(32);
-        const result = validateRoundSigs({ sigs: [{ pubkey: PUBKEY, sig: SIG }, { pubkey: other, sig: SIG }] });
+        const result = validateRoundSigs.call({}, {
+            sigs: [{ pubkey: PUBKEY, sig: SIG }, { pubkey: other, sig: SIG }]
+        });
         expect(result).to.deep.equal({
             sigs: [
                 { pubkey: PUBKEY.toLowerCase(), sig: SIG.toLowerCase() },
