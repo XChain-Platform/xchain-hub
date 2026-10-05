@@ -460,3 +460,30 @@ module.exports = {
     ADMIT_COLUMN_CHAINS,
     columnsAdmitBlocks,
 };
+
+if(typeof global.describe === 'function' && typeof global.it === 'function'){
+    const registered = Symbol.for('xchain-hub.mirror-admission-chain-slots-test');
+    if(!global[registered]){
+        global[registered] = true;
+        global.describe('mirror_admission_activation: chain-scoped slots @regression', function(){
+            global.it('keeps null and far-future LTC and DOGE slots inactive while BTC is armed', function(){
+                const assert = require('node:assert/strict');
+                const matrices = [
+                    [MIRROR_ADMISSION_ACTIVATION, isMirrorAdmissionProducerActive],
+                    [MIRROR_ADMISSION_CONSUMER_ACTIVATION, isMirrorAdmissionConsumerActive],
+                ];
+
+                for(const [activation, active] of matrices){
+                    const btcArmedHeight = activation['BTC:testnet'];
+                    assert.equal(active('BTC', 'testnet', btcArmedHeight), true);
+                    for(const coin of ['LTC', 'DOGE']){
+                        assert.equal(activation[coin + ':mainnet'], null);
+                        assert.equal(active(coin, 'mainnet', Number.MAX_SAFE_INTEGER), false);
+                        assert.ok(activation[coin + ':testnet'] > btcArmedHeight);
+                        assert.equal(active(coin, 'testnet', btcArmedHeight), false);
+                    }
+                }
+            });
+        });
+    }
+}
