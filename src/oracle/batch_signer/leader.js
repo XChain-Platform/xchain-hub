@@ -105,16 +105,18 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Add every round this hub or an answering peer finalized inside the window to a
-    // buffered proposal in place; a proposal handed in directly is signed as given. Returns the numbers the proposal must hold, or null when a round
-    // some hub finalized cannot be obtained. A round no answering hub holds is a
-    // legitimate absence and stays out.
+    // Add every missing peer round, plus locally finalized rounds for buffered
+    // publisher candidates, to the proposal in place. Direct signer callers retain
+    // follower refusal semantics for data they omitted despite holding it locally.
+    // Returns the numbers the proposal must hold, or null when a peer-held round
+    // cannot be obtained. A round no answering hub holds is a legitimate absence.
     async fillWindowGaps(first, last, rounds, signingSet, me){
         let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
         for(let n = first; n <= last; n++) if(!held.has(n)) gaps.add(n);
-        if(gaps.size === 0 || !this.isBufferedProposal(rounds)) return held;
+        if(gaps.size === 0) return held;
 
+        let repairLocal = this.isBufferedProposal(rounds);
         let local;
         try {
             local = await this.deriveWindow(first, last);
@@ -124,9 +126,11 @@ module.exports = {
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
-            let { batchSourced, ...proposalRound } = r;
-            rounds.push(proposalRound);
-            held.add(n);
+            if(repairLocal){
+                let { batchSourced, ...proposalRound } = r;
+                rounds.push(proposalRound);
+                held.add(n);
+            }
             gaps.delete(n);
         }
         if(gaps.size > 0 && !(await this.fillFromPeers(first, last, gaps, signingSet, me, rounds, held))) return null;
