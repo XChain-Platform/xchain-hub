@@ -23,6 +23,7 @@ const EventEmitter = require('events');
 const { DB_METHODS } = require('../../helpers/mockHub');
 
 const zcMod = require('../../../src/attestation/attest_zero_conf_gate.js');
+const logger = require('../../../src/observability').getLogger();
 
 const MY_PUBKEY = 'aa'.repeat(32);
 
@@ -131,7 +132,7 @@ it('refuses a re-poll of a request this hub already finalized before any provide
         // drops the named method back off the double would still look like a pass on
         // the two assertions below (it just pays the provider once more, on a table
         // this test never counts). Pin the warn itself so that regresses loudly.
-        let warnStub = sinon.stub(console, 'warn');
+        let warnStub = sinon.stub(logger, 'warn');
         await ar.startRound(request, 500);
         sinon.restore();
         expect(warnStub.getCalls().some(c => String(c.args[0]).includes('fetch-cache read failed')),
@@ -190,7 +191,7 @@ describe('the boot ordering assertion (spec §3.2 a)', function () {
         it('warns instead of throwing on a non-consensus network', function () {
             let saved = zcMod.ATTEST_ZERO_CONF_ACTIVATION.regtest;
             zcMod.ATTEST_ZERO_CONF_ACTIVATION.regtest = -1;     // below regtest's mirror/widening 0
-            let warn = sinon.stub(console, 'warn');
+            let warn = sinon.stub(logger, 'warn');
             try {
                 new AttestationRound(makeHub({ network: 'regtest' }), makeProviderRegistry());
             } finally {
@@ -203,7 +204,7 @@ describe('the boot ordering assertion (spec §3.2 a)', function () {
         });
 
         it('is silent on a correctly ordered network and on a hub with no network', function () {
-            let warn = sinon.stub(console, 'warn');
+            let warn = sinon.stub(logger, 'warn');
             new AttestationRound(makeHub({ network: 'regtest' }), makeProviderRegistry());
             new AttestationRound(makeHub({}), makeProviderRegistry());
             sinon.restore();
@@ -268,7 +269,7 @@ describe('the round-start line (spec §10 ZC1)', function () {
             ar.computeResponsibleSet.returns([{ pubkey: 'ff'.repeat(32), hash: '00' }]);
             let logs = [];
             sinon.stub(console, 'log').callsFake(l => logs.push(String(l)));
-            sinon.stub(console, 'warn');
+            sinon.stub(logger, 'warn');
             await ar.startRound(request, 500);
             sinon.restore();
             expect(logs.filter(l => l.indexOf('AttestationRound: starting ') === 0)).to.have.length(0);
