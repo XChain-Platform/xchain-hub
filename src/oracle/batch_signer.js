@@ -67,6 +67,10 @@ const PARTS = [leaderPart, followerMethods];
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
+const XPRICEB_FILL_REQ = 'XPRICEB_FILL_REQ';
+const XPRICEB_FILL     = 'XPRICEB_FILL';
+const MESSAGE_HANDLERS = { [XPRICEB_SIGN_REQ]: 'handleSignReq', [XPRICEB_SIGN]: 'handleSign',
+                           [XPRICEB_FILL_REQ]: 'handleFillReq', [XPRICEB_FILL]: 'handleFill' };
 
 // Bound on the co-signed-window memo below. It exists only so OraclePublisher's
 // takeover cooldown can ask "did we hand this window's leader the last thing it
@@ -139,6 +143,9 @@ class OracleBatchSigner {
         this.signTimeoutMs = positiveIntConfig(cfg.ORACLE_BATCH_SIGN_TIMEOUT_MS, 60000,
             'ORACLE_BATCH_SIGN_TIMEOUT_MS');
 
+        this.fillTimeoutMs = positiveIntConfig(cfg.ORACLE_BATCH_FILL_TIMEOUT_MS, 15000,
+            'ORACLE_BATCH_FILL_TIMEOUT_MS');
+        this._fillRound = null;
         // At most one signing round is in flight, mirroring StateAnchorPublisher's
         // single _attestRound. Windows are assembled serially by the publisher's
         // scheduler, so a second concurrent round would mean a bug upstream, not a
@@ -177,6 +184,7 @@ class OracleBatchSigner {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
         }
+        if(this._fillRound) this._fillRound.finish();
         if(this._signRound){
             if(this._signRound.timer){ clearTimeout(this._signRound.timer); this._signRound.timer = null; }
             if(!this._signRound.done){
@@ -249,17 +257,10 @@ class OracleBatchSigner {
     // ---------------------------------------------------------------- peers
 
     handleMessage(envelope){
-        if(!envelope || !envelope.data) return;
-        switch(envelope.type){
-            case XPRICEB_SIGN_REQ:
-                this.handleSignReq(envelope).catch(e =>
-                    logger.error('OracleBatchSigner: XPRICEB_SIGN_REQ error: ' + (e && e.message)));
-                break;
-            case XPRICEB_SIGN:
-                this.handleSign(envelope).catch(e =>
-                    logger.error('OracleBatchSigner: XPRICEB_SIGN error: ' + (e && e.message)));
-                break;
-        }
+        let handler = envelope && envelope.data ? MESSAGE_HANDLERS[envelope.type] : null;
+        if(!handler) return;
+        this[handler](envelope).catch(e =>
+            logger.error('OracleBatchSigner: ' + envelope.type + ' error: ' + (e && e.message)));
     }
 
     async handleSign(envelope){
@@ -393,5 +394,7 @@ module.exports = Object.assign(OracleBatchSigner, {
     // Named exports so the publisher and the tests reference the wire type strings
     // from one place, exactly as StateAnchorPublisher exports XANCPUB_SIGN_REQ/SIGN.
     XPRICEB_SIGN_REQ,
-    XPRICEB_SIGN
+    XPRICEB_SIGN,
+    XPRICEB_FILL_REQ,
+    XPRICEB_FILL
 });

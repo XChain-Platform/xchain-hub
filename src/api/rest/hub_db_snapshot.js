@@ -55,6 +55,15 @@ function snapshotHelpers({ hub, HUB_NETWORK }) {
         return {};
     }
 
+    // The landing watermark, served on every page for the same reason as the heights.
+    function landedForSnapshot() {
+        try {
+            if (hub.hubDbBroadcaster && typeof hub.hubDbBroadcaster.landedMap === 'function')
+                return hub.hubDbBroadcaster.landedMap();
+        } catch (err) { /* no reading is no claim */ }
+        return {};
+    }
+
     // The identity of the Bitcoin chain this hub follows (hash of that chain's block 1),
     // learned from the Bitcoin indexer's pushchaintip. It rides the three cross-chain
     // envelopes because a DOGE/LTC mirror cannot derive it locally: the envelope is the
@@ -71,7 +80,7 @@ function snapshotHelpers({ hub, HUB_NETWORK }) {
         }
     }
 
-    return { admissionHeightsForSnapshot, btcChainIdForSnapshot };
+    return { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot };
 }
 
 function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
@@ -103,7 +112,7 @@ function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
 
 function mountPriceSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot } = helpers;
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -111,7 +120,7 @@ function mountPriceSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findPriceSnapshotsById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -134,7 +143,7 @@ function mountPriceSnapshots(app, ctx, helpers) {
                 limit: req.query.limit ? parseInt(req.query.limit) : undefined,
             });
             let rows = await hub.db[method](...params);
-            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -144,7 +153,7 @@ function mountPriceSnapshots(app, ctx, helpers) {
 
 function mountMatchSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -158,7 +167,7 @@ function mountMatchSnapshots(app, ctx, helpers) {
             // (not ='finalized') excludes exactly what the stream deletes and keeps every
             // other status the stream retains.
             let rows = await hub.db.findCrossChainMatchesById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -172,7 +181,7 @@ function mountMatchSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findCapabilitySnapshotsById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -182,7 +191,7 @@ function mountMatchSnapshots(app, ctx, helpers) {
 
 function mountCallCheckpointSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     // GET /hub-db/snapshot/cross_chain_calls: full snapshot of cross_chain_calls table.
     // Explicit column list: batch_seq/archived_status/anchor_txid are hub-side ANCHOR
     // audit metadata and are NOT mirrored (the indexer mirror schema has no such columns).
@@ -202,7 +211,7 @@ function mountCallCheckpointSnapshots(app, ctx, helpers) {
             // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
             // mirror must skip them to stay byte-identical with streamed mirrors.
             let rows = await hub.db.findCrossChainCallsById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -224,7 +233,7 @@ function mountCallCheckpointSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findStateCheckpointsById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -234,7 +243,7 @@ function mountCallCheckpointSnapshots(app, ctx, helpers) {
 
 function mountBridgeSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     // GET /hub-db/snapshot/bridge_transfers: bootstrap snapshot of the signed transfer
     // records (the base bridge spec section 6). SELECT * deliberately, as the
     // cross_chain_matches sibling does: finalizing_view rebuilds the EQUIV header VIEW,
@@ -255,7 +264,7 @@ function mountBridgeSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findBridgeTransfers(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -275,7 +284,7 @@ function mountBridgeSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findPolicySnapshots(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -287,7 +296,7 @@ function mountBridgeSnapshots(app, ctx, helpers) {
 
 function mountListSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot, btcChainIdForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     // GET /hub-db/snapshot/list_snapshots: bootstrap the append-only shared-list
     // versions. A higher seq supersedes membership without retracting an older row.
     app.get('/hub-db/snapshot/list_snapshots', async (req, res) => {
@@ -297,7 +306,7 @@ function mountListSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { const sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             const since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             const rows = await hub.db.findListSnapshots(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'list_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'list_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -307,7 +316,7 @@ function mountListSnapshots(app, ctx, helpers) {
 
 function mountAttestSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
-    const { admissionHeightsForSnapshot } = helpers;
+    const { admissionHeightsForSnapshot, landedForSnapshot } = helpers;
     // GET /hub-db/snapshot/anchor_reward_attestations: full snapshot of the
     // anchor-reward attestation table. Explicit column list (id-parity mirror; the BTC
     // indexer rebuilds the XANCPUB canonical from reward_type/round_reference/snapshot_block/
@@ -319,7 +328,7 @@ function mountAttestSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findAnchorRewardAttestations(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
@@ -350,7 +359,7 @@ function mountAttestSnapshots(app, ctx, helpers) {
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.findAttestationResponsesById(since, limit);
-            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             logger.error(nodeUtil.format('hub snapshot endpoint error:', err));
             res.status(500).json({ error: 'snapshot error' });
