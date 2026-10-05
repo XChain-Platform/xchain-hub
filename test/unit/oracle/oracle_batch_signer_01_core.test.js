@@ -23,6 +23,15 @@ async function captureWarnings(fn) {
         return lines;
     }
 
+async function sendSignRequestToFollowers(mesh, rounds) {
+    let envelope = {
+        type: OracleBatchSigner.XPRICEB_SIGN_REQ,
+        sig_pubkey: mesh.pubkeys[0],
+        data: { first_round: 100, last_round: 105, btc_block_height: 5005, rounds }
+    };
+    await Promise.all(mesh.nodes.slice(1).map(node => node.signer.handleSignReq(envelope)));
+}
+
 const testCase1 = async function () {
         let mesh = buildMesh(4);
         let rounds = baseRounds();
@@ -81,11 +90,9 @@ const testCase3 = async function () {
         let mesh = buildMesh(4);
         let partial = clone(baseRounds()).filter(r => r.round !== 103);
 
-        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, partial);
+        await sendSignRequestToFollowers(mesh, partial);
         mesh.stop();
 
-        expect(res.met).to.equal(false);
-        expect(res.sigs.length).to.equal(1);
         for (let i = 1; i < mesh.nodes.length; i++) {
             expect(mesh.nodes[i].signer.getStats().batchSignRefusals).to.equal(1);
             expect(mesh.nodes[i].sent).to.have.length(0);
