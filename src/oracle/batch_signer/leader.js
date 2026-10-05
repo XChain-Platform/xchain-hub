@@ -98,35 +98,58 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Fill rounds this hub lacks in place so the caller packs the signed window.
-    // Return true only when every round is present; a response quorum ends the wait but
-    // cannot make a hole safe to propose.
+    // Fill rounds this hub's database lacks in place so the caller packs the signed window.
+    // Leave caller omissions of locally finalized data untouched; follower re-derivation
+    // must continue to reject such proposals rather than silently correcting them.
     async fillWindowGaps(first, last, rounds, signingSet, me){
         let have = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
         for(let n = first; n <= last; n++) if(!have.has(n)) gaps.add(n);
         if(gaps.size === 0) return true;
+
+        let local;
+        try {
+            local = await this.deriveWindow(first, last);
+        } catch(e){
+            return false;
+        }
+        for(let r of local) gaps.delete(parseInt(r.round));
+        if(gaps.size === 0) return true;
+
+        let quorum = bftQuorumOrSingle(signingSet.length, 1);
+        let skipped;
+        try {
+            skipped = await this.deriveSkippedRounds(first, last);
+        } catch(e){
+            return false;
+        }
+        if(quorum <= 1) return Array.from(gaps).every(n => skipped.has(n));
         if(!this.peerManager) return false;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
-        let needed = Math.max(0, bftQuorumOrSingle(signingSet.length, 1) - 1);
-        let found  = await this.openFillRound({ first, last, gaps, peers, needed });
-        for(let r of found.values()) rounds.push(r);
+        let result = await this.openFillRound({ first, last, gaps, peers, quorum, me, skipped });
+        for(let r of result.found.values()) rounds.push(r);
         rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
-        return found.size === gaps.size;
+        return Array.from(gaps).every(n => result.found.has(n) ||
+            (result.skipped.get(n) || new Set()).size >= quorum);
     },
 
     // Ask peers for finalized rounds until the gaps are filled, a response quorum arrives,
     // or the fill timeout expires.
-    openFillRound({ first, last, gaps, peers, needed }){
+    openFillRound({ first, last, gaps, peers, quorum, me, skipped }){
         return new Promise((resolve) => {
             let found = new Map();
-            let round = { first, last, gaps, peers: new Set(peers), responders: new Set(), found, needed };
+            let skippedVotes = new Map();
+            for(let n of skipped)
+                if(gaps.has(n)) skippedVotes.set(n, new Set([me]));
+            let needed = Math.max(0, quorum - 1);
+            let round = { first, last, gaps, peers: new Set(peers), responders: new Set(),
+                          found, skipped: skippedVotes, needed };
             let finish = () => {
                 if(this._fillRound !== round) return;
                 clearTimeout(round.timer);
                 this._fillRound = null;
-                resolve(found);
+                resolve({ found, skipped: skippedVotes });
             };
             round.finish = finish;
             round.timer = setTimeout(finish, this.fillTimeoutMs);
@@ -155,6 +178,12 @@ module.exports = {
                          btcBlockHeight: parseInt(r.btcBlockHeight), pairs: r.pairs };
             if(r.admitBlocks !== undefined && r.admitBlocks !== null) kept.admitBlocks = r.admitBlocks;
             round.found.set(n, kept);
+        }
+        for(let value of (Array.isArray(d.skipped_rounds) ? d.skipped_rounds : [])){
+            let n = parseInt(value);
+            if(!round.gaps.has(n) || round.found.has(n)) continue;
+            if(!round.skipped.has(n)) round.skipped.set(n, new Set());
+            round.skipped.get(n).add(sender);
         }
         if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
     },

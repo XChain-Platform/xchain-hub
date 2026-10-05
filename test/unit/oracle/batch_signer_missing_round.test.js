@@ -125,8 +125,21 @@ function registerPublicationTests() {
     });
 }
 
+function registerSkippedRoundTests() {
+    it('keeps a locally recorded skip valid for a single-validator set', async function () {
+        let rounds = baseRounds().map(r => r.round === MISSING
+            ? Object.assign({}, r, { status: 'skipped' }) : r);
+        mesh = buildMesh(1, { rounds });
+        mesh.nodes[0].signer.peerManager = null;
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(
+            100, 105, 5005, withoutMissing(baseRounds()));
+        expect(res.met).to.equal(true);
+    });
+}
+
 describe('OracleBatchSigner leader fills a round its own rows lack', function () {
     afterEach(cleanupTest);
     registerFillTests();
     registerPublicationTests();
+    registerSkippedRoundTests();
 });

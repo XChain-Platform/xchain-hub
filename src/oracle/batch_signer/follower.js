@@ -98,14 +98,31 @@ module.exports = {
         } catch(e){
             return;
         }
+        let skipped;
+        try {
+            skipped = await this.deriveSkippedRounds(first, last);
+        } catch(e){
+            return;
+        }
         this.peerManager.broadcast(this.constructor.XPRICEB_FILL, {
             first_round: first,
             last_round:  last,
+            skipped_rounds: Array.from(skipped),
             rounds:      mine.filter(r => !r.batchSourced).map(r => {
                 let { batchSourced, ...rest } = r;
                 return rest;
             })
         });
+    },
+
+    async deriveSkippedRounds(firstRound, lastRound){
+        let rows = await this.db.findPriceSnapshotsByRoundNumber(firstRound, lastRound, 'skipped');
+        let rounds = new Set();
+        for(let row of (rows || [])){
+            let n = parseInt(row.round_number);
+            if(Number.isFinite(n)) rounds.add(n);
+        }
+        return rounds;
     },
 
     // The anchor this window would be signed under, or null when it is not signable
