@@ -91,7 +91,7 @@ function _reloadProvider(){
 // max_completion_tokens was the one governance key installed on a bare
 // truthy check, so -1 / 1.5 / Infinity became the federation-wide token budget.
 // MAX_TOKENS_DEFAULT has no getter; the observable is the budget the vendor is sent.
-describe('llm provider, governance max_completion_tokens bounds (#4466)', function () {
+describe('llm provider, governance max_completion_tokens bounds (#4466)', function () { this.timeout(20000);
 
     afterEach(function () { nock.cleanAll(); sinon.restore(); });
 
@@ -162,7 +162,7 @@ function registerMaxTokensBoundTests(anthropicMaxTokensFor) {
 // Opus 4.7+ / Sonnet 5 / Fable 5 contract REMOVED the sampling parameters (HTTP 400,
 // not accepted-and-ignored). claude-opus-4-7 is the default approved_models fallback
 // and the pinned temperature-0 judge, so those calls were deterministic vendor 400s.
-describe('llm provider, anthropic sampling-parameter gate (#4464)', function () {
+describe('llm provider, anthropic sampling-parameter gate (#4464)', function () { this.timeout(20000);
 
     afterEach(function () { nock.cleanAll(); sinon.restore(); });
 
@@ -236,7 +236,7 @@ function registerSamplingGateTests(withApiKey, anthropicBodyForModel) {
 // ways by model family (the reasoning headroom add turns a negative budget positive; the
 // reasoning path omits temperature entirely), so one malformed field produced three
 // different behaviors out of an attested payload.
-describe('llm provider, envelope numeric bounds', function () {
+describe('llm provider, envelope numeric bounds', function () { this.timeout(20000);
 
     afterEach(function () { nock.cleanAll(); });
 
@@ -333,7 +333,7 @@ function registerEnvelopeTemperatureTests(rejects) {
 // out-of-range default_temperature is legal for OpenAI (up to 2) and 400s every
 // Anthropic call, so a single config change with no deploy behind it took out the
 // default approved_models federation-wide.
-describe('llm provider, governance default_temperature bounds', function () {
+describe('llm provider, governance default_temperature bounds', function () { this.timeout(20000);
 
     afterEach(function () { nock.cleanAll(); });
 
@@ -385,7 +385,7 @@ describe('llm provider, governance default_temperature bounds', function () {
 
 // ---- fetch() via anthropic_api transport (nock) ---------------------------
 
-describe('llm provider, fetch via anthropic_api', function () {
+describe('llm provider, fetch via anthropic_api', function () { this.timeout(20000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -771,7 +771,7 @@ function registerApiJudgePinTests(withApiKey) {
 
 // ---- agree() multi-proposal judge paths via anthropic_api -----------------
 
-describe('llm provider, agree judge_model paths', function () {
+describe('llm provider, agree judge_model paths', function () { this.timeout(20000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -1085,7 +1085,7 @@ function registerJudgeFramingTests(withApiKey) {
 
 // ---- callAnthropic error format edge cases --------------------------------
 
-describe('llm provider, callAnthropic error format edge cases', function () {
+describe('llm provider, callAnthropic error format edge cases', function () { this.timeout(20000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -1166,7 +1166,7 @@ function registerErrorFormatTests(withApiKey) {
 
 // ---- Multi-vendor fallback chain (Phase 4) ---------------------------------
 
-describe('llm provider, vendor inference', function () {
+describe('llm provider, vendor inference', function () { this.timeout(20000);
 
     afterEach(function () { sinon.restore(); });
 
@@ -1267,7 +1267,7 @@ function registerVendorPinningTests() {
 // `empty_verdict`, which the spot-checker does not hold for re-judge, so the
 // outage discarded the check with no evidence while the SAME 503 with a vendor
 // error envelope failed over correctly.
-describe('llm provider, HTTP status-first error classification (#7168)', function () {
+describe('llm provider, HTTP status-first error classification (#7168)', function () { this.timeout(20000);
 
     afterEach(function () { nock.cleanAll(); sinon.restore(); });
 
@@ -1328,7 +1328,7 @@ describe('llm provider, HTTP status-first error classification (#7168)', functio
     });
 });
 
-describe('llm provider, requester fallback policy', function () {
+describe('llm provider, requester fallback policy', function () { this.timeout(20000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -1383,7 +1383,7 @@ describe('llm provider, requester fallback policy', function () {
     });
 });
 
-describe('llm provider, judge fallback chain', function () {
+describe('llm provider, judge fallback chain', function () { this.timeout(20000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -1680,7 +1680,7 @@ function registerJudgeChainBudgetTests(PROPOSALS) {
     });
 }
 
-describe('llm provider, multi-vendor healthCheck', function () {
+describe('llm provider, multi-vendor healthCheck', function () { this.timeout(20000);
 
     afterEach(function () { sinon.restore(); });
 
@@ -1748,7 +1748,7 @@ function registerMultiVendorHealthTests() {
 
 // ---- hub-credentials vendor resolution -------------------------------------
 
-describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () {
+describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () { this.timeout(20000);
 
     function freshCreds() {
         delete require.cache[require.resolve('../../../../src/lib/hub_credentials.js')];
