@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.4] - 2026-10-05
+
+### Added
+- Published a landed watermark on hub DB frames and relayed it through peer catch-up.
+
+### Fixed
+- Filled price rounds a batch leader lacks from local rows and answering peers before proposing a batch.
+- Synced the gate registry shared rows with the indexer canonical copy.
+
 ## [0.22.2] - 2026-10-04
 
 ### Fixed
