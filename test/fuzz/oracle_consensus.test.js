@@ -17,6 +17,7 @@ const OracleConsensus = require('../../src/oracle/consensus');
 const { createMockHub }    = require('../helpers/mockHub');
 const { buildSubmissions } = require('../helpers/fixtures');
 const gen                  = require('./helpers/generators');
+const logger               = require('../../src/observability').getLogger();
 
 
 
@@ -33,6 +34,8 @@ function submissionsForPair(prices, coinPair) {
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        sinon.stub(logger, 'warn');
+        sinon.stub(logger, 'error');
         hub = createMockHub();
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         oc = new OracleConsensus(hub, oracleRound);

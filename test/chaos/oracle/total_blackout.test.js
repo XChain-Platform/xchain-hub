@@ -20,6 +20,21 @@ const { VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
+// Pin round-executing tests to a known wall-clock round and fake their timers so
+// scheduled finalization cannot outlive the test.
+const PINNED_ROUND = 143000;
+
+let clock = null;
+let oracle;
+
+function pinClockToRound(oracle, round) {
+    clock = sinon.useFakeTimers({
+        now:    oracle.epochStart + round * oracle.roundInterval + 1000,
+        toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']
+    });
+    return clock;
+}
+
 function registerBeforeHook() {
 
     before(function () {
@@ -37,6 +52,7 @@ function registerAfterHook() {
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        oracle = null;
         mockApi.reset();
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
@@ -47,6 +63,14 @@ function registerBeforeEachHook() {
 function registerAfterEachHook() {
 
     afterEach(function () {
+        if (oracle) {
+            for (let timer of oracle.finalizationTimers.values()) clearTimeout(timer);
+            oracle.finalizationTimers.clear();
+        }
+        if (clock) {
+            clock.restore();
+            clock = null;
+        }
         sinon.restore();
     });
 }
@@ -56,7 +80,8 @@ function registerAllSourcesUnavailableFetchPricesReturnsEmptyTest() {
     it('all sources unavailable → fetchPrices returns empty array', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  1000
+            PRICE_FETCH_TIMEOUT:  1000,
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         mockApi.mockCoinGeckoError(500);
@@ -72,7 +97,8 @@ function registerAllSourcesTimeoutFetchPricesReturnsEmptyTest() {
     it('all sources timeout → fetchPrices returns empty array', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  500 // Very short timeout
+            PRICE_FETCH_TIMEOUT:  500,   // Very short timeout
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         mockApi.mockCoinGeckoTimeout(5000);
@@ -87,19 +113,22 @@ function registerOracleRoundSkipsWhenNoPricesTest() {
 
     it('oracle round skips when no prices available', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
+        pinClockToRound(oracle, PINNED_ROUND);
 
-        let prevRound = oracle.currentRound;
         await oracle.executeRound();
 
-        // Round incremented but no broadcast
-        expect(oracle.currentRound).to.equal(prevRound + 1);
+        // Round advanced to the wall-clock round but nothing was broadcast
+        expect(oracle.currentRound).to.equal(PINNED_ROUND);
         expect(hub._peerManager.broadcast.called).to.be.false;
 
         // Warning logged
         expect(console.warn.calledWithMatch('No prices available')).to.be.true;
+
+        // Finalization is still armed so the round leaves a durable skipped record
+        expect(oracle.finalizationTimers.has(PINNED_ROUND)).to.be.true;
     });
 }
 
@@ -107,7 +136,7 @@ function registerOracleRoundSkipsWhenFetchPricesThrowsTest() {
 
     it('oracle round skips when fetchPrices throws', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         sinon.stub(oracle.priceFetcher, 'fetchPrices')
             .rejects(new Error('Network error'));
@@ -123,7 +152,7 @@ function registerConsensusStoresSkippedRoundWhenNoTest() {
 
     it('consensus stores skipped round when no submissions', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
         let oracleConsensus = new OracleConsensus(hub, oracle);
 
         // No submissions for round 5
@@ -131,13 +160,17 @@ function registerConsensusStoresSkippedRoundWhenNoTest() {
 
         await oracleConsensus.finalizeRound(5);
 
-        // Should store skipped round (3 coin pairs)
-        expect(hub.db.doQuery.callCount).to.equal(3);
-        let firstCall = hub.db.doQuery.getCall(0).args;
-        expect(firstCall[0]).to.include('skipped');
-        expect(firstCall[1][0]).to.equal(5);
+        // One multi-row INSERT lands a skipped marker for every fetched pair, four
+        // params per row: (round, pair, reference_block, block_timestamp)
+        expect(hub.db.doQuery.callCount).to.equal(1);
+        let [sql, params] = hub.db.doQuery.getCall(0).args;
+        expect(sql).to.include('skipped');
+        let pairs = PriceFetcher.getCoinPairs();
+        expect(params).to.have.length(pairs.length * 4);
+        expect(pairs.map((_, i) => params[i * 4])).to.deep.equal(pairs.map(() => 5));
+        expect(pairs.map((_, i) => params[i * 4 + 1])).to.deep.equal(pairs);
 
-        // Round should be marked as LOCALLY skipped (#7), not finalized, so a
+        // Round should be marked as locally skipped, not finalized, so a
         // later legitimate PROPOSE from the federation can still process it.
         expect(oracleConsensus.locallySkipped.has(5)).to.be.true;
         expect(oracleConsensus.finalized.has(5)).to.be.false;
@@ -148,7 +181,7 @@ function registerConsensusStoresSkippedRoundWhenBelowTest() {
 
     it('consensus stores skipped round when below min submissions', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
         let oracleConsensus = new OracleConsensus(hub, oracle);
         oracleConsensus.minSubmissions = 3;
 
@@ -171,16 +204,24 @@ function registerNonOracleSubsystemsUnaffectedDuringPriceTest() {
 
     it('non-oracle subsystems unaffected during price blackout', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
+        pinClockToRound(oracle, PINNED_ROUND);
 
         // Execute failed oracle round
         await oracle.executeRound();
 
         // Hub's other methods remain callable
         expect(hub.applyConfig.called).to.be.false;  // Not touched
-        expect(hub.db.doQuery.called).to.be.false;    // No DB writes for empty round
+
+        // No price or submission rows written for the empty round; the only
+        // statement allowed is the routine oracle_submissions retention sweep
+        let statements = hub.db.doQuery.getCalls().map(c => c.args[0]);
+        expect(statements.filter(q => /\bINSERT\b/i.test(q))).to.be.empty;
+        for (let q of statements) {
+            expect(q).to.match(/^DELETE FROM oracle_submissions WHERE round_number < \?/);
+        }
     });
 }
 
@@ -188,20 +229,25 @@ function registerRecoverySourcesComeBackNextRoundTest() {
 
     it('recovery: sources come back → next round produces valid prices', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
+
+        pinClockToRound(oracle, PINNED_ROUND);
 
         // Round 1: blackout
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
         await oracle.executeRound();
         expect(hub._peerManager.broadcast.called).to.be.false;
 
-        // Round 2: recovery
+        // Round 2: recovery, one interval later
         oracle.priceFetcher.fetchPrices.restore();
-        sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves(SAMPLE_PRICES);
+        sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves(SAMPLE_PRICES.map(p => ({ ...p })));
+        clock.tick(oracle.roundInterval);
         await oracle.executeRound();
 
+        expect(oracle.currentRound).to.equal(PINNED_ROUND + 1);
         expect(hub._peerManager.broadcast.calledOnce).to.be.true;
         let data = hub._peerManager.broadcast.getCall(0).args[1];
+        expect(data.round).to.equal(PINNED_ROUND + 1);
         expect(data.prices).to.have.length(3);
         expect(parseFloat(data.prices[0].price)).to.be.gt(0);
     });
@@ -211,16 +257,20 @@ function registerMultipleConsecutiveBlackoutRoundsNoCrashTest() {
 
     it('multiple consecutive blackout rounds → no crash or state corruption', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([]);
+        pinClockToRound(oracle, PINNED_ROUND);
 
-        // Run 5 consecutive blackout rounds
+        // Run 5 consecutive blackout rounds, one round interval apart
         for (let i = 0; i < 5; i++) {
+            if (i > 0) clock.tick(oracle.roundInterval);
             await oracle.executeRound();
         }
 
-        expect(oracle.currentRound).to.equal(5);
+        expect(oracle.currentRound).to.equal(PINNED_ROUND + 4);
+        expect(oracle.lastExecutedRound).to.equal(PINNED_ROUND + 4);
+        expect(oracle.priceFetcher.fetchPrices.callCount).to.equal(5);
         expect(hub._peerManager.broadcast.called).to.be.false;
 
         // Submissions map should only have current and previous round
