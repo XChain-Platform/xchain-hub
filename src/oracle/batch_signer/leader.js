@@ -81,6 +81,12 @@ module.exports = {
         }
         let canonical = this.leaderCanonical(first, last, anchor, rounds);
         if(canonical === null) return empty;
+        let missing = this.missingProposalRounds(first, last, rounds);
+        if(missing.length){
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
+                         missing.join(',') + ' immediately before signing; window skipped');
+            return empty;
+        }
 
         let mySig      = this.identity.sign(canonical);
         let signatures = new Map();
@@ -98,9 +104,7 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Fill rounds this hub's database lacks in place so the caller packs the signed window.
-    // Leave caller omissions of locally finalized data untouched; follower re-derivation
-    // must continue to reject such proposals rather than silently correcting them.
+    // Fill every proposal gap in place so the caller packs the complete signed window.
     async fillWindowGaps(first, last, rounds, signingSet, me){
         let have = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
@@ -113,43 +117,40 @@ module.exports = {
         } catch(e){
             return false;
         }
-        for(let r of local) gaps.delete(parseInt(r.round));
+        for(let r of local){
+            let n = parseInt(r.round);
+            if(!gaps.has(n)) continue;
+            let { batchSourced, ...proposalRound } = r;
+            rounds.push(proposalRound);
+            gaps.delete(n);
+        }
+        rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
         if(gaps.size === 0) return true;
 
         let quorum = bftQuorumOrSingle(signingSet.length, 1);
-        let skipped;
-        try {
-            skipped = await this.deriveSkippedRounds(first, last);
-        } catch(e){
-            return false;
-        }
-        if(quorum <= 1) return Array.from(gaps).every(n => skipped.has(n));
+        if(quorum <= 1) return false;
         if(!this.peerManager) return false;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
-        let result = await this.openFillRound({ first, last, gaps, peers, quorum, me, skipped });
-        for(let r of result.found.values()) rounds.push(r);
+        let found = await this.openFillRound({ first, last, gaps, peers, quorum });
+        for(let r of found.values()) rounds.push(r);
         rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
-        return Array.from(gaps).every(n => result.found.has(n) ||
-            (result.skipped.get(n) || new Set()).size >= quorum);
+        return Array.from(gaps).every(n => found.has(n));
     },
 
     // Ask peers for finalized rounds until the gaps are filled, a response quorum arrives,
     // or the fill timeout expires.
-    openFillRound({ first, last, gaps, peers, quorum, me, skipped }){
+    openFillRound({ first, last, gaps, peers, quorum }){
         return new Promise((resolve) => {
             let found = new Map();
-            let skippedVotes = new Map();
-            for(let n of skipped)
-                if(gaps.has(n)) skippedVotes.set(n, new Set([me]));
             let needed = Math.max(0, quorum - 1);
             let round = { first, last, gaps, peers: new Set(peers), responders: new Set(),
-                          found, skipped: skippedVotes, needed };
+                          found, needed };
             let finish = () => {
                 if(this._fillRound !== round) return;
                 clearTimeout(round.timer);
                 this._fillRound = null;
-                resolve({ found, skipped: skippedVotes });
+                resolve(found);
             };
             round.finish = finish;
             round.timer = setTimeout(finish, this.fillTimeoutMs);
@@ -179,13 +180,14 @@ module.exports = {
             if(r.admitBlocks !== undefined && r.admitBlocks !== null) kept.admitBlocks = r.admitBlocks;
             round.found.set(n, kept);
         }
-        for(let value of (Array.isArray(d.skipped_rounds) ? d.skipped_rounds : [])){
-            let n = parseInt(value);
-            if(!round.gaps.has(n) || round.found.has(n)) continue;
-            if(!round.skipped.has(n)) round.skipped.set(n, new Set());
-            round.skipped.get(n).add(sender);
-        }
         if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
+    },
+
+    missingProposalRounds(first, last, rounds){
+        let held = new Set(rounds.map(r => parseInt(r && r.round)));
+        let missing = [];
+        for(let n = first; n <= last; n++) if(!held.has(n)) missing.push(n);
+        return missing;
     },
 
     // The ONE canonical builder's bytes for this window, or null when the engine that

@@ -55,7 +55,7 @@ function cleanupTest() {
     cleanupPublisherBatch();
 }
 
-function registerFillTests() {
+function registerPeerFillTests() {
     it('reaches quorum once a peer supplies the missing round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
@@ -74,7 +74,9 @@ function registerFillTests() {
         expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
         expect(rounds[3]).to.deep.equal(clone(baseRounds())[3]);
     });
+}
 
+function registerUnfilledWindowTests() {
     it('skips the window without a wire when no peer can fill the gap', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
@@ -106,6 +108,29 @@ function registerFillTests() {
     });
 }
 
+function registerLocalFillTests() {
+    it('adds a locally finalized round omitted from the initial proposal', async function () {
+        mesh = buildMesh(4, { timeoutMs: 400 });
+        let rounds = withoutMissing(baseRounds());
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
+        expect(res.met).to.equal(true);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
+        expect(rounds[3]).to.deep.equal(clone(baseRounds())[3]);
+    });
+
+    it('rejects a proposal edited after gap filling', async function () {
+        mesh = buildMesh(4, { timeoutMs: 400 });
+        let signer = mesh.nodes[0].signer;
+        signer.fillWindowGaps = async (first, last, rounds) => {
+            rounds.splice(rounds.findIndex(r => r.round === MISSING), 1);
+            return true;
+        };
+        let res = await signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+        expect(res.met).to.equal(false);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+    });
+}
+
 function registerPublicationTests() {
     it('publishes a batch wire that carries the filled round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
@@ -126,20 +151,23 @@ function registerPublicationTests() {
 }
 
 function registerSkippedRoundTests() {
-    it('keeps a locally recorded skip valid for a single-validator set', async function () {
+    it('does not treat a recorded skip as proposal content', async function () {
         let rounds = baseRounds().map(r => r.round === MISSING
             ? Object.assign({}, r, { status: 'skipped' }) : r);
         mesh = buildMesh(1, { rounds });
         mesh.nodes[0].signer.peerManager = null;
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
             100, 105, 5005, withoutMissing(baseRounds()));
-        expect(res.met).to.equal(true);
+        expect(res.met).to.equal(false);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 }
 
 describe('OracleBatchSigner leader fills a round its own rows lack', function () {
     afterEach(cleanupTest);
-    registerFillTests();
+    registerPeerFillTests();
+    registerUnfilledWindowTests();
+    registerLocalFillTests();
     registerPublicationTests();
     registerSkippedRoundTests();
 });
