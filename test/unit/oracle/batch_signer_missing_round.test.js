@@ -118,6 +118,15 @@ function registerUnfilledWindowTests() {
 }
 
 function registerLocalFillTests() {
+    it('adds a locally finalized round to a direct proposal', async function () {
+        mesh = buildMesh(4, { timeoutMs: 400 });
+        let rounds = withoutMissing(baseRounds());
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
+        expect(res.met).to.equal(true);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
+        expect(res.canonical).to.equal(buildCanonical(100, 105, 5005, baseRounds()));
+    });
+
     it('adds a locally finalized round omitted from the initial proposal', async function () {
         mesh = buildMesh(4, { timeoutMs: 400 });
         let rounds = bufferedProposal(withoutMissing(baseRounds()));
