@@ -32,7 +32,8 @@ function priceFetcherSuite() {
 
             let fetcher = new PriceFetcher({
                 COINMARKETCAP_API_KEY: 'test-key',
-                PRICE_FETCH_TIMEOUT: 5000
+                PRICE_FETCH_TIMEOUT: 5000,
+                PRICE_FETCH_JITTER_MS: 0
             });
 
             let prices = await fetcher.fetchPrices();
@@ -58,23 +59,26 @@ function medianSuite() {
         let fetcher;
 
         before(function () {
-            fetcher = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
+            fetcher = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000, PRICE_FETCH_JITTER_MS: 0 });
         });
 
+        // computeMedian returns an 8-decimal bignumber string, the exact form a
+        // submitted local price carries, so the assertions compare strings.
         it('median of odd-length array', function () {
-            expect(fetcher.computeMedian([100, 200, 300])).to.equal(200);
+            expect(fetcher.computeMedian([300, 100, 200])).to.equal('200.00000000');
         });
 
         it('median of even-length array', function () {
-            expect(fetcher.computeMedian([10, 20])).to.equal(15);
+            expect(fetcher.computeMedian([10, 20])).to.equal('15.00000000');
+            expect(fetcher.computeMedian([0.1, 0.2])).to.equal('0.15000000');
         });
 
         it('median of single element', function () {
-            expect(fetcher.computeMedian([5])).to.equal(5);
+            expect(fetcher.computeMedian([5])).to.equal('5.00000000');
         });
 
         it('median of empty array returns 0', function () {
-            expect(fetcher.computeMedian([])).to.equal(0);
+            expect(fetcher.computeMedian([])).to.equal('0.00000000');
         });
     }
 
@@ -146,4 +150,3 @@ function hubSmokeSuite() {
 }
 
 describe('Smoke: xchain-hub', hubSmokeSuite);
-

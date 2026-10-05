@@ -238,9 +238,10 @@ function registerTallyProposalQuorumArithmeticTestCases1() {
             return fc.assert(fc.asyncProperty(
                 fc.integer({ min: 1, max: 20 }),
                 async function (N) {
-                    gov.setValidatorSet(gen.fc_validatorSet(N));
-                    let votes = Array.from({ length: N }, function (_, i) {
-                        return { voter_pubkey: 'pk' + i, vote: 'approve' };
+                    let set = gen.fc_validatorSet(N);
+                    gov.setValidatorSet(set);
+                    let votes = set.map(function (v) {
+                        return { voter_pubkey: v.pubkey, vote: 'approve' };
                     });
                     // First call: get votes. Second call: update status
                     hub.db.doQuery.onFirstCall().resolves(votes);
@@ -293,9 +294,10 @@ function registerTallyProposalQuorumArithmeticTestCases2() {
             return fc.assert(fc.asyncProperty(
                 fc.integer({ min: 1, max: 20 }),
                 async function (N) {
-                    gov.setValidatorSet(gen.fc_validatorSet(N));
-                    let votes = Array.from({ length: N }, function (_, i) {
-                        return { voter_pubkey: 'pk' + i, vote: 'reject' };
+                    let set = gen.fc_validatorSet(N);
+                    gov.setValidatorSet(set);
+                    let votes = set.map(function (v) {
+                        return { voter_pubkey: v.pubkey, vote: 'reject' };
                     });
                     hub.db.doQuery.onFirstCall().resolves(votes);
                     hub.db.doQuery.onSecondCall().resolves([]);
