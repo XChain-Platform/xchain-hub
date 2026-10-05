@@ -14,31 +14,13 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const crypto     = require('crypto');
 const Consensus  = require('../../../src/consensus/pbft');
-const { createMockHub }    = require('../../helpers/mockHub');
-const { VALIDATORS_4, makeFederationSnapshot }     = require('../../helpers/fixtures');
-const { buildEnvelope }    = require('../../helpers/testPeerNetwork');
-const { waitUntil }        = require('../../helpers/waitUntil');
+const { VALIDATORS_4 } = require('../../helpers/fixtures');
+const { waitUntil }    = require('../../helpers/waitUntil');
+const { SNAPSHOT_BLOCK, signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
+    require('../helpers/pbft_chaos');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
-}
-
-// Give a chaos hub the deterministic federation snapshot a real federated hub
-// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
-// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
-// with a NULL snapshot now correctly refuses to propose. These experiments
-// inject a CRASH, not an indexer outage, so they must clear that guard to reach
-// the behaviour they measure. Quorum is stubbed to what getQuorum() returns
-// for the set under test, leaving each experiment's arithmetic unchanged.
-function wireFederationSnapshot(hub, quorum) {
-    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
-    hub.capabilitySnapshot = {
-        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
-        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
-        getQuorum:                  sinon.stub().returns(quorum)
-    };
-    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
-    return snapshot;
 }
 
 function registerBeforeEachHook() {
@@ -61,9 +43,10 @@ function registerFollowerDetectsLeaderTimeoutAndInitiatesTest() {
 
     it('follower detects leader timeout and initiates view change', async function () {
         // Validator-2 is a follower; leader (validator-1) will crash
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[1].addr });
+        let hub = createValidatorHub(VALIDATORS_4[1]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         con.timeout = 200;
         hub.db.doQuery.resolves([]);
 
@@ -75,14 +58,14 @@ function registerFollowerDetectsLeaderTimeoutAndInitiatesTest() {
         // Leader sends PRE_PREPARE then "crashes". seq 4, view 0 → (4+0)%4 = 0,
         // so validators[0] is the legitimate leader and this node (validators[1])
         // is a follower.
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 4, view: 0, configDigest: digest, config: config
-        }, VALIDATORS_4[0].addr));
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PRE_PREPARE', {
+            seq: 4, view: 0, configDigest: digest, config: config, btcBlockHeight: SNAPSHOT_BLOCK
+        }, VALIDATORS_4[0]));
 
-        let proposal = con.pendingProposals.get(4);
-        expect(proposal).to.exist;
+        let proposal = await waitForRound(con, 4);
+        expect(proposal.prepares.has(VALIDATORS_4[1].addr)).to.be.true;
+        expect(hub._peerManager.broadcast.calledWith('PBFT_PREPARE')).to.be.true;
 
-        // Wait for follower timeout (2x leader timeout = 400ms)
         // Wait for the follower timeout (2x the leader timeout) to clear the proposal.
         await waitUntil(() => !con.pendingProposals.has(4), { timeoutMs: 5000, label: 'the follower timeout to drop the crashed leader proposal' });
 
@@ -97,10 +80,10 @@ function registerViewChangeProducesNewLeaderTest() {
 
     it('view change produces new leader', async function () {
         // Validator-1 proposes and times out; view change rotates leader
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         // seq=3 → nextSeq=4 → leader=validators[(4+0)%4]=validators[0] (this node)
         con.seq = 3;
         con.timeout = 100;
@@ -130,7 +113,7 @@ function registerViewChangeQuorumAchievedNewLeaderTest() {
 
     it('view change quorum achieved → new leader broadcasts NEW_VIEW', async function () {
         // Validator-3 (index 2) becomes new leader after view change
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[2].addr });
+        let hub = createValidatorHub(VALIDATORS_4[2]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
         hub.db.doQuery.resolves([]);
@@ -138,17 +121,17 @@ function registerViewChangeQuorumAchievedNewLeaderTest() {
         await con.start();
 
         // Receive VIEW_CHANGE votes for view=1, seq=1
-        hub._peerManager.emit('message', buildEnvelope('PBFT_VIEW_CHANGE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_VIEW_CHANGE', {
             view: 1, seq: 1
-        }, VALIDATORS_4[0].addr));
+        }, VALIDATORS_4[0]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_VIEW_CHANGE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_VIEW_CHANGE', {
             view: 1, seq: 1
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_VIEW_CHANGE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_VIEW_CHANGE', {
             view: 1, seq: 1
-        }, VALIDATORS_4[3].addr));
+        }, VALIDATORS_4[3]));
 
         // Quorum = 3 for N=4; 3 votes → view change succeeds
         expect(con.view).to.equal(1);
@@ -166,7 +149,7 @@ function registerViewChangeQuorumAchievedNewLeaderTest() {
 function registerNEWVIEWUpdatesFollowersViewNumberTest() {
 
     it('NEW_VIEW updates followers view number', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[3].addr });
+        let hub = createValidatorHub(VALIDATORS_4[3]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
         hub.db.doQuery.resolves([]);
@@ -175,9 +158,9 @@ function registerNEWVIEWUpdatesFollowersViewNumberTest() {
 
         expect(con.view).to.equal(0);
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_NEW_VIEW', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_NEW_VIEW', {
             view: 1, seq: 1
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         expect(con.view).to.equal(1);
 
@@ -187,17 +170,12 @@ function registerNEWVIEWUpdatesFollowersViewNumberTest() {
 
 function registerConfigWriteCompletesUnderNewLeaderTest() {
 
-    // #4168: the two experiments below already fail at HEAD on a pre-existing
-    // race (the PREPARE is emitted synchronously before propose() awaits its
-    // snapshot lock and registers the proposal). They are wired anyway so that
-    // failure keeps reporting ITS cause instead of being masked by the
-    // federation guard, which would send whoever fixes them after the wrong bug.
     it('config write completes under new leader after view change', async function () {
         // New leader (validator-3, index 2) proposes after view change
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[2].addr });
+        let hub = createValidatorHub(VALIDATORS_4[2]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         con.view = 1;
         // seq=0 → nextSeq=1 → leader=validators[(1+1)%4]=validators[2] (this node)
         con.timeout = 5000;
@@ -212,24 +190,25 @@ function registerConfigWriteCompletesUnderNewLeaderTest() {
 
         let done = false;
         let promise = con.propose(config).then(() => { done = true; });
+        await waitForRound(con, 1);
 
         // Other validators send PREPARE
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 1, configDigest: digest
-        }, VALIDATORS_4[0].addr));
+        }, VALIDATORS_4[0]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 1, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         // COMMITs
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 1, configDigest: digest
-        }, VALIDATORS_4[0].addr));
+        }, VALIDATORS_4[0]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 1, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         await promise;
         expect(done).to.be.true;
@@ -243,10 +222,10 @@ function registerConfigWriteCompletesUnderNewLeaderTest() {
 function registerNoDoubleApplyWhenLateCOMMITsTest() {
 
     it('no double-apply when late COMMITs arrive after finalization', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         // seq=3 → nextSeq=4 → leader=validators[0]
         con.seq = 3;
         con.timeout = 5000;
@@ -258,28 +237,29 @@ function registerNoDoubleApplyWhenLateCOMMITsTest() {
         let digest = makeDigest(config);
 
         let promise = con.propose(config);
+        await waitForRound(con, 4);
 
         // PREPAREs (quorum=3: self + 2)
         for (let i = 1; i <= 2; i++) {
-            hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+            hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
                 seq: 4, configDigest: digest
-            }, VALIDATORS_4[i].addr));
+            }, VALIDATORS_4[i]));
         }
 
         // COMMITs (quorum=3: self + 2)
         for (let i = 1; i <= 2; i++) {
-            hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+            hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
                 seq: 4, configDigest: digest
-            }, VALIDATORS_4[i].addr));
+            }, VALIDATORS_4[i]));
         }
 
         await promise;
         expect(hub.applyConfig.callCount).to.equal(1);
 
         // Late COMMIT from validator-4
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[3].addr));
+        }, VALIDATORS_4[3]));
 
         // The round is already applied, and the late-COMMIT dedup is decided inside the
         // synchronous handler above, so there is nothing left to settle for.

@@ -28,6 +28,20 @@ function schemaTableCount() {
 
 // ── Test Suite ───────────────────────────────────────────────────
 
+// Run from the test directory so a caller's root .env cannot replace a variable
+// deliberately omitted by an environment-validation case.
+function bootHub(env, timeoutMs) {
+    let result = { threw: false, stderr: '', status: null, signal: null };
+    try {
+        execFileSync('node', [API_ENTRY], {
+            cwd: __dirname, env: env, timeout: timeoutMs, stdio: ['pipe', 'pipe', 'pipe']
+        });
+    } catch (e) {
+        result = { threw: true, stderr: (e.stderr || '').toString(), status: e.status, signal: e.signal };
+    }
+    return result;
+}
+
 // ─── SMOKE-HUB-001: Environment Variable Validation ─────────
 function environmentValidationSuite() {
         const REQUIRED = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
@@ -50,18 +64,9 @@ function environmentValidationSuite() {
                 const env = Object.assign({}, validEnv);
                 delete env[envVar];
 
-                let threw = false;
-                let stderr = '';
-                try {
-                    // execFileSync runs node directly (no shell), so an environment
-                    // value can never be reinterpreted as shell syntax.
-                    execFileSync('node', [API_ENTRY], { env: env, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
-                } catch (e) {
-                    threw = true;
-                    stderr = (e.stderr || '').toString();
-                }
-                expect(threw, 'process should have exited with non-zero code').to.be.true;
-                expect(stderr).to.include(envVar);
+                let boot = bootHub(env, 3000);
+                expect(boot.threw, 'process should have exited with non-zero code').to.be.true;
+                expect(boot.stderr).to.include(envVar);
             });
         }
 
@@ -70,19 +75,15 @@ function environmentValidationSuite() {
         // Run as a real subprocess so this proves the process actually exits,
         // not just that a decision function returned refuse.
         it('refuses to boot with no HUB_API_KEY and no keyless declaration', function () {
-            let threw  = false;
-            let stderr = '';
-            try {
-                // execFileSync runs node directly (no shell), so an environment
-                // value can never be reinterpreted as shell syntax.
-                execFileSync('node', [API_ENTRY], { env: validEnv, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
-            } catch (e) {
-                threw  = true;
-                stderr = (e.stderr || '').toString();
-            }
-            expect(threw, 'hub should have refused to boot unauthenticated').to.be.true;
-            expect(stderr).to.include('REFUSING TO BOOT');
-            expect(stderr).to.include('HUB_ALLOW_UNAUTHENTICATED');
+            // Allow cold module loading to reach the auth-posture refusal, and
+            // prove the child exits on its own.
+            this.timeout(45000);
+            let boot = bootHub(validEnv, 40000);
+            expect(boot.threw, 'hub should have refused to boot unauthenticated').to.be.true;
+            expect(boot.signal, 'hub was killed by the test timeout instead of exiting').to.equal(null);
+            expect(boot.status).to.equal(1);
+            expect(boot.stderr).to.include('REFUSING TO BOOT');
+            expect(boot.stderr).to.include('HUB_ALLOW_UNAUTHENTICATED');
         });
     }
 
