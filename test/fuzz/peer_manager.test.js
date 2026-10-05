@@ -15,6 +15,7 @@ const { expect }   = require('chai');
 const fc           = require('fast-check');
 const EventEmitter = require('events');
 const gen          = require('./helpers/generators');
+const logger       = require('../../src/observability').getLogger();
 
 // PeerManager is constructed directly, so we need to mock its dependencies
 // but call handleInbound, buildEnvelope, makeId directly.
@@ -91,6 +92,7 @@ function registerHandleInboundRobustnessTestCases1() {
         });
 
         it('non-JSON strings never crash handleInbound', function () {
+            sinon.stub(logger, 'warn');
             fc.assert(fc.property(
                 fc.string({ minLength: 0, maxLength: 500 }),
                 function (raw) {

@@ -15,6 +15,7 @@ const { expect } = require('chai');
 const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
 const gen        = require('./helpers/generators');
+const logger     = require('../../src/observability').getLogger();
 
 
 
@@ -22,6 +23,11 @@ let axiosStub, PriceFetcher, pf;
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        sinon.stub(console, 'log');
+        sinon.stub(console, 'warn');
+        sinon.stub(console, 'error');
+        sinon.stub(logger, 'warn');
+        sinon.stub(logger, 'error');
         axiosStub    = { get: sinon.stub() };
         PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
         pf           = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000, PRICE_FETCH_JITTER_MS: 0 });
