@@ -105,7 +105,8 @@ module.exports = {
         let have = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
         for(let n = first; n <= last; n++) if(!have.has(n)) gaps.add(n);
-        if(gaps.size === 0 || !this.peerManager) return true;
+        if(gaps.size === 0) return true;
+        if(!this.peerManager) return false;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
         let needed = Math.max(0, bftQuorumOrSingle(signingSet.length, 1) - 1);
