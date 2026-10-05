@@ -30,6 +30,7 @@ const local          = require('../../../src/attestation/attest_zero_conf_gate.j
 const localWidening  = require('../../../src/consensus/gates/attest_responsible_widening_gate.js');
 const localRegistry  = require('../../../src/consensus/gate_registry');
 const localGates     = require('../../../src/consensus/gates/rollcall_gates_gate.js');
+const logger         = require('../../../src/observability').getLogger();
 
 const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const ZC_KEY     = 'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION';
@@ -50,9 +51,8 @@ const CONSTANTS_PATH   = path.join(DOCS_DIR, 'protocol', 'constants.js');
 let idx = null, canon = null;
 
 function withPatchedWarn(fn) {
-    const orig = console.warn;
-    console.warn = (...args) => warnSpy.push(args.join(' '));
-    try { fn(); } finally { console.warn = orig; }
+    const stub = sinon.stub(logger, 'warn').callsFake((...args) => warnSpy.push(args.join(' ')));
+    try { fn(); } finally { stub.restore(); }
 }
 
 let warnSpy;
