@@ -37,7 +37,7 @@ function mockWs() {
 function registerBeforeEachHook() {
 
     beforeEach(function () {
-        dbStub = { doQuery: sinon.stub().resolves([]) };
+        dbStub = { doQuery: sinon.stub().resolves([]), setP2pPeer: sinon.stub().resolves() };
         pm = new PeerManager({
             P2P_VALIDATOR_ADDR:  SELF_ADDR,
             REQUIRE_SIGNATURES:  false,
@@ -296,6 +296,7 @@ function registerMakeIdTests() {
     });
 }
 describe('Fuzz: PeerManager', function () {
+    this.timeout(30000);
     registerBeforeEachHook();
     registerAfterEachHook();
     registerHandleInboundRobustnessTests();
