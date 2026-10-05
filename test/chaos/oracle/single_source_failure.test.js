@@ -20,6 +20,8 @@ const { SAMPLE_PRICES }        = require('../../helpers/fixtures');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
+let oracle;
+
 function registerBeforeHook() {
 
     before(function () {
@@ -37,6 +39,7 @@ function registerAfterHook() {
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        oracle = null;
         mockApi.reset();
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
@@ -47,6 +50,10 @@ function registerBeforeEachHook() {
 function registerAfterEachHook() {
 
     afterEach(function () {
+        if (oracle) {
+            for (let timer of oracle.finalizationTimers.values()) clearTimeout(timer);
+            oracle.finalizationTimers.clear();
+        }
         sinon.restore();
     });
 }
@@ -56,7 +63,8 @@ function registerCoinGecko500UsesCoinMarketCapDataOnlyTest() {
     it('CoinGecko 500 → uses CoinMarketCap data only', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  5000
+            PRICE_FETCH_TIMEOUT:  5000,
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         await runExperiment({
@@ -93,7 +101,8 @@ function registerCoinMarketCap503UsesCoinGeckoDataOnlyTest() {
     it('CoinMarketCap 503 → uses CoinGecko data only', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  5000
+            PRICE_FETCH_TIMEOUT:  5000,
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         await runExperiment({
@@ -123,7 +132,8 @@ function registerCoinGecko429RateLimitedDegradesGracefullyTest() {
     it('CoinGecko 429 rate limited → degrades gracefully', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  5000
+            PRICE_FETCH_TIMEOUT:  5000,
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         mockApi.mockCoinGeckoError(429);
@@ -141,7 +151,7 @@ function registerSourceFailureDoesNotAffectOracleTest() {
 
     it('source failure does not affect oracle round broadcast', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         // Stub the price fetcher to simulate partial failure
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([
@@ -165,7 +175,8 @@ function registerRecoveryBothSourcesReturnSourceCountTest() {
     it('recovery: both sources return → source count restores to 2', async function () {
         let fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  5000
+            PRICE_FETCH_TIMEOUT:  5000,
+            PRICE_FETCH_JITTER_MS: 0
         });
 
         // Phase 1: CoinGecko down

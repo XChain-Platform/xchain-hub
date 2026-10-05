@@ -15,6 +15,7 @@ const { expect } = require('chai');
 const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
 const gen        = require('./helpers/generators');
+const logger     = require('../../src/observability').getLogger();
 
 
 
@@ -22,9 +23,14 @@ let axiosStub, PriceFetcher, pf;
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        sinon.stub(console, 'log');
+        sinon.stub(console, 'warn');
+        sinon.stub(console, 'error');
+        sinon.stub(logger, 'warn');
+        sinon.stub(logger, 'error');
         axiosStub    = { get: sinon.stub() };
         PriceFetcher = proxyquire('../../src/oracle/price_fetcher', { axios: axiosStub });
-        pf           = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
+        pf           = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000, PRICE_FETCH_JITTER_MS: 0 });
     });
 }
 
@@ -43,19 +49,20 @@ function registerMedianTests() {
 
     describe('computeMedian()', function () {
 
-        it('output is always a finite number for non-empty arrays of finite numbers', function () {
+        it('output is always an 8-decimal string of a finite number for non-empty arrays of finite numbers', function () {
             fc.assert(fc.property(gen.fc_priceArray(1, 50), function (values) {
                 let result = pf.computeMedian(values);
-                expect(Number.isFinite(result)).to.be.true;
+                expect(result).to.match(/^\d+\.\d{8}$/);
+                expect(Number.isFinite(Number(result))).to.be.true;
             }), { numRuns: 300 });
         });
 
         it('result is within the range [min(input), max(input)]', function () {
             fc.assert(fc.property(gen.fc_priceArray(1, 50), function (values) {
-                let result = pf.computeMedian(values);
+                let result = Number(pf.computeMedian(values));
                 let sorted = [...values].sort(function (a, b) { return a - b; });
-                expect(result).to.be.at.least(sorted[0] - 1e-10);
-                expect(result).to.be.at.most(sorted[sorted.length - 1] + 1e-10);
+                expect(result).to.be.at.least(sorted[0] - 1e-8);
+                expect(result).to.be.at.most(sorted[sorted.length - 1] + 1e-8);
             }), { numRuns: 300 });
         });
 
@@ -67,21 +74,21 @@ function registerMedianTests() {
             }), { numRuns: 200 });
         });
 
-        it('single-element array always returns that element', function () {
+        it('single-element array returns that element formatted to 8 decimals', function () {
             fc.assert(fc.property(gen.fc_price(), function (v) {
-                expect(pf.computeMedian([v])).to.equal(v);
+                expect(Number(pf.computeMedian([v]))).to.be.closeTo(v, 1e-8);
             }), { numRuns: 200 });
         });
 
         it('empty array returns 0', function () {
-            expect(pf.computeMedian([])).to.equal(0);
+            expect(pf.computeMedian([])).to.equal('0.00000000');
         });
 
         it('two-element array returns the arithmetic mean', function () {
             fc.assert(fc.property(gen.fc_price(), gen.fc_price(), function (a, b) {
-                let result = pf.computeMedian([a, b]);
+                let result = Number(pf.computeMedian([a, b]));
                 let expected = (a + b) / 2;
-                expect(result).to.be.closeTo(expected, Math.abs(expected) * 1e-10 + 1e-15);
+                expect(result).to.be.closeTo(expected, Math.abs(expected) * 1e-10 + 1e-8);
             }), { numRuns: 200 });
         });
     });
