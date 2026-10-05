@@ -75,10 +75,8 @@ function environmentValidationSuite() {
         // Run as a real subprocess so this proves the process actually exits,
         // not just that a decision function returned refuse.
         it('refuses to boot with no HUB_API_KEY and no keyless declaration', function () {
-            // The auth-posture refusal runs only after api.js has required the
-            // whole hub module graph, which takes several seconds on a cold start,
-            // so the child gets a generous budget and the test checks it exited
-            // on its own rather than being killed by that budget.
+            // Allow cold module loading to reach the auth-posture refusal, and
+            // prove the child exits on its own.
             this.timeout(45000);
             let boot = bootHub(validEnv, 40000);
             expect(boot.threw, 'hub should have refused to boot unauthenticated').to.be.true;

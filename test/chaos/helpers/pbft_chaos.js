@@ -41,10 +41,8 @@ function createValidatorHub(validator) {
     return createMockHub({ validatorAddr: validator.addr, identity: identity });
 }
 
-// The deterministic federation snapshot a real federated hub locks every round.
-// These experiments inject crashes, partitions, quorum loss and churn, not an
-// indexer outage, so they must clear the fail-closed snapshot guards to reach
-// the behaviour they measure. Quorum is stubbed to the value under test.
+// Stub the federation snapshot so chaos injections reach the behavior under
+// test instead of the fail-closed indexer-outage guard. Keep quorum explicit.
 function wireFederationSnapshot(hub, quorum, validators) {
     let snapshot = makeFederationSnapshot(validators || VALIDATORS_4, SNAPSHOT_BLOCK);
     hub.capabilitySnapshot = {
