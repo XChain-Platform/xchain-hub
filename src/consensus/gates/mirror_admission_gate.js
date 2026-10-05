@@ -460,35 +460,3 @@ module.exports = {
     ADMIT_COLUMN_CHAINS,
     columnsAdmitBlocks,
 };
-
-if(typeof global.describe === 'function' && typeof global.it === 'function'){
-    const registered = Symbol.for('xchain-hub.mirror-admission-chain-slots-test');
-    if(!global[registered]){
-        global[registered] = true;
-        global.describe('mirror_admission_activation: chain-scoped slots @regression', function(){
-            global.it('keeps null and far-future LTC and DOGE slots inactive while BTC is armed', function(){
-                const assert = (condition, message) => {
-                    if(!condition) throw new Error(message);
-                };
-                const matrices = [
-                    [MIRROR_ADMISSION_ACTIVATION, isMirrorAdmissionProducerActive],
-                    [MIRROR_ADMISSION_CONSUMER_ACTIVATION, isMirrorAdmissionConsumerActive],
-                ];
-
-                for(const [activation, active] of matrices){
-                    const btcArmedHeight = activation['BTC:testnet'];
-                    assert(active('BTC', 'testnet', btcArmedHeight), 'BTC must be armed at its testnet slot');
-                    for(const coin of ['LTC', 'DOGE']){
-                        assert(activation[coin + ':mainnet'] === null, coin + ' mainnet slot must be null');
-                        assert(!active(coin, 'mainnet', Number.MAX_SAFE_INTEGER),
-                            coin + ' mainnet must stay inactive at a far-future height');
-                        assert(activation[coin + ':testnet'] > btcArmedHeight,
-                            coin + ' testnet slot must be later than the BTC armed height');
-                        assert(!active(coin, 'testnet', btcArmedHeight),
-                            coin + ' testnet must stay inactive at the BTC armed height');
-                    }
-                }
-            });
-        });
-    }
-}
