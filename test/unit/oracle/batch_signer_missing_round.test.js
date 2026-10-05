@@ -85,6 +85,15 @@ function registerFillTests() {
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 
+    it('skips an incomplete window when the peer manager is unavailable', async function () {
+        mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
+        mesh.nodes[0].signer.peerManager = null;
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(
+            100, 105, 5005, withoutMissing(baseRounds()));
+        expect(res.met).to.equal(false);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+    });
+
     it('skips once a quorum replies without the missing round', async function () {
         mesh = buildMesh(4, { rounds: withoutMissing(baseRounds()), timeoutMs: 400 });
         mesh.nodes[0].signer.fillTimeoutMs = 1000;
