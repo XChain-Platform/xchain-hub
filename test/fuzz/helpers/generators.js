@@ -150,7 +150,7 @@ function fc_p2pEnvelope(selfAddr) {
         sender:    fc.string({ unit: fc.constantFrom('a','b','c','d','1','2','3'), minLength: 3, maxLength: 15 })
             .map(s => 'ws://' + s + ':10001')
             .filter(s => s !== selfAddr),
-        timestamp: fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER }),
+        timestamp: fc.integer({ min: -5000, max: 5000 }).map(skew => Date.now() + skew),
         data:      fc.record({})
     });
 }

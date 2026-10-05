@@ -16,31 +16,12 @@ const crypto     = require('crypto');
 const Consensus       = require('../../../src/consensus/pbft');
 const OracleConsensus = require('../../../src/oracle/consensus');
 const OracleRound     = require('../../../src/oracle/round');
-const { createMockHub }                         = require('../../helpers/mockHub');
-const { VALIDATORS_4, makeFederationSnapshot, makeValidator, SAMPLE_PRICES } = require('../../helpers/fixtures');
-const { buildEnvelope }                         = require('../../helpers/testPeerNetwork');
+const { VALIDATORS_4, makeValidator } = require('../../helpers/fixtures');
+const { signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
+    require('../helpers/pbft_chaos');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
-}
-
-// Give a chaos hub the deterministic federation snapshot a real federated hub
-// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
-// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
-// with a NULL snapshot now correctly refuses to propose. These experiments
-// inject validator CHURN, not an indexer outage, so they must clear that guard
-// to reach the behaviour they measure. Quorum is stubbed to what getQuorum()
-// returns for the set under test, leaving each experiment's arithmetic
-// unchanged.
-function wireFederationSnapshot(hub, quorum) {
-    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
-    hub.capabilitySnapshot = {
-        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
-        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
-        getQuorum:                  sinon.stub().returns(quorum)
-    };
-    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
-    return snapshot;
 }
 
 function registerBeforeEachHook() {
@@ -62,10 +43,10 @@ function registerAfterEachHook() {
 function registerAddingAValidatorMidRoundDoesTest() {
 
     it('adding a validator mid-round does not disrupt current consensus', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4]; // 4 validators, quorum=3
-        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // round quorum locked from the N=4 snapshot
         // seq=3 → nextSeq=4 → leader=validators[(4+0)%4]=validators[0]
         con.seq = 3;
         con.timeout = 5000;
@@ -78,29 +59,31 @@ function registerAddingAValidatorMidRoundDoesTest() {
 
         let done = false;
         let promise = con.propose(config).then(() => { done = true; });
+        let proposal = await waitForRound(con, 4);
 
-        // Mid-round: add 5th validator
+        // Mid-round: add 5th validator. The live quorum moves with the set, the
+        // open round keeps the quorum it locked from its snapshot.
         let v5 = makeValidator(5);
         con.validatorSet.push(v5);
-        // Quorum is now recalculated as 3 for N=5 (f=1, 2f+1=3)
+        expect(proposal.quorum).to.equal(3);
 
         // PREPAREs from original validators
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         // COMMITs
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         await promise;
         expect(done).to.be.true;
@@ -112,11 +95,11 @@ function registerAddingAValidatorMidRoundDoesTest() {
 
 function registerRemovingAValidatorMidRoundMayTest() {
 
-    it('removing a validator mid-round may reduce quorum', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+    it('removing a validator mid-round does not reduce the round-locked quorum', async function () {
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4]; // N=4, quorum=3
-        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // round quorum locked from the N=4 snapshot
         con.seq = 3;
         con.timeout = 5000;
         hub.db.doQuery.resolves([]);
@@ -128,20 +111,30 @@ function registerRemovingAValidatorMidRoundMayTest() {
 
         let done = false;
         let promise = con.propose(config).then(() => { done = true; });
+        let proposal = await waitForRound(con, 4);
 
-        // Mid-round: remove validator 4 (reduce to N=3)
-        // N=3: f=0, quorum=1
+        // Mid-round: remove validator 4. The live quorum for N=3 drops to 2, but
+        // the round still needs the 3 votes its snapshot locked.
         con.validatorSet.pop();
+        expect(con.getQuorum()).to.equal(2);
+        expect(proposal.quorum).to.equal(3);
 
-        // Now only need 1 PREPARE beyond self
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        // Self + 1 PREPARE clears the live quorum but not the locked one
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
+        expect(hub._peerManager.broadcast.calledWith('PBFT_COMMIT')).to.be.false;
 
-        // 1 COMMIT beyond self
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[2]));
+        expect(hub._peerManager.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
+
+        for (let i = 1; i <= 2; i++) {
+            hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
+                seq: 4, configDigest: digest
+            }, VALIDATORS_4[i]));
+        }
 
         await promise;
         expect(done).to.be.true;
@@ -154,7 +147,7 @@ function registerRemovingAValidatorMidRoundMayTest() {
 function registerLeaderRotationReflectsUpdatedValidatorSetTest() {
 
     it('leader rotation reflects updated validator set', function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4];
 
@@ -176,7 +169,7 @@ function registerLeaderRotationReflectsUpdatedValidatorSetTest() {
 function registerQuorumCalculationAdjustsWithValidatorSetTest() {
 
     it('quorum calculation adjusts with validator set changes', function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
 
         // N=4: f=1, quorum=3
@@ -201,7 +194,7 @@ function registerQuorumCalculationAdjustsWithValidatorSetTest() {
 function registerOracleLeaderChangesWhenValidatorSetTest() {
 
     it('oracle leader changes when validator set changes between rounds', function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let oracle = new OracleRound(hub);
         let oracleCon = new OracleConsensus(hub, oracle);
         oracleCon.validatorSet = [...VALIDATORS_4];
@@ -225,10 +218,11 @@ function registerNewValidatorCanParticipateInSubsequentTest() {
 
     it('new validator can participate in subsequent round', async function () {
         let v5 = makeValidator(5);
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4, v5]; // N=5, quorum=3
-        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
+        // v5 has joined the on-chain set, so the round snapshot carries it too
+        wireFederationSnapshot(hub, 3, con.validatorSet);
         // seq=4 → nextSeq=5 → leader=validators[(5+0)%5]=validators[0]
         con.seq = 4;
         con.timeout = 5000;
@@ -240,24 +234,25 @@ function registerNewValidatorCanParticipateInSubsequentTest() {
         let digest = makeDigest(config);
 
         let promise = con.propose(config);
+        await waitForRound(con, 5);
 
         // v5 and validator-2 send PREPARE
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 5, configDigest: digest
-        }, v5.addr));
+        }, v5));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 5, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         // COMMITs
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 5, configDigest: digest
-        }, v5.addr));
+        }, v5));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 5, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         let result = await promise;
         expect(result).to.be.true;
@@ -270,7 +265,7 @@ function registerNewValidatorCanParticipateInSubsequentTest() {
 function registerRapidChurnMultipleAddsRemovesDoTest() {
 
     it('rapid churn: multiple adds/removes do not crash consensus', function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4];
 
@@ -282,8 +277,8 @@ function registerRapidChurnMultipleAddsRemovesDoTest() {
 
         // Remove most validators
         con.validatorSet = [VALIDATORS_4[0], VALIDATORS_4[1]];
-        // N=2: f = floor((2-1)/3) = 0, quorum = 2*0+1 = 1
-        expect(con.getQuorum()).to.equal(1);
+        // N=2: max(2f+1, majority) = max(1, 2) = 2
+        expect(con.getQuorum()).to.equal(2);
 
         // Single validator
         con.validatorSet = [VALIDATORS_4[0]];

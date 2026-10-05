@@ -173,6 +173,9 @@ else
 fi
 
 run_tier "boundary (test:boundary)" npm run test:boundary
+run_tier "fuzz (test:fuzz)" npm run test:fuzz
+run_tier "chaos (test:chaos)" npm run test:chaos
+run_tier "smoke (test:smoke)" npm run test:smoke
 
 # --- job: perf -------------------------------------------------------------
 # The workflow gives this job its own MariaDB service container; here the DB is
