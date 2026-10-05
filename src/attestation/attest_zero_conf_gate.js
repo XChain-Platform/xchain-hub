@@ -77,6 +77,8 @@
 // call (the ordering cases below) without touching the block.
 const gateRegistry = require('../consensus/gate_registry');
 const { ATTEST_RESPONSIBLE_WIDENING_ACTIVATION } = require('../consensus/gates/attest_responsible_widening_gate.js');
+const { getLogger } = require('../observability');
+const logger = getLogger();
 
 // Per-network activation height, a copy of the registry row. Compared against
 // the ATTEST v0 request's own BTC block_index.
@@ -103,7 +105,7 @@ function isZeroConfActive(requestBlock, network){
     let threshold = ATTEST_ZERO_CONF_ACTIVATION[network];
     if(threshold === undefined && !warnedUnknownNetworks.has(String(network))){
         warnedUnknownNetworks.add(String(network));
-        console.warn('ATTEST zero-conf: no activation entry for network ' +
+        logger.warn('ATTEST zero-conf: no activation entry for network ' +
             JSON.stringify(String(network)) + ', so the flip is OFF for every request. ' +
             'Known networks: ' + Object.keys(ATTEST_ZERO_CONF_ACTIVATION).join(', ') + '.');
     }
@@ -139,7 +141,7 @@ function assertZeroConfOrdering(network){
         '. Fix the map in both service copies and the documentation canon ' +
         '(XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1 to bypass on a venue where every hub runs the SAME maps).';
     if(process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT === '1'){
-        console.warn('XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1: skipping the zero-conf ordering assertion. ' + detail);
+        logger.warn('XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1: skipping the zero-conf ordering assertion. ' + detail);
         return;
     }
     if(net === 'mainnet' || net === 'testnet'){
@@ -147,7 +149,7 @@ function assertZeroConfOrdering(network){
         err.code = 'ZERO_CONF_ORDERING';
         throw err;
     }
-    console.warn('ATTEST zero-conf: ordering violation (non-strict on ' + (net || 'standalone') + '): ' + detail);
+    logger.warn('ATTEST zero-conf: ordering violation (non-strict on ' + (net || 'standalone') + '): ' + detail);
 }
 
 module.exports = {
