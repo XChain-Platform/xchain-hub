@@ -101,6 +101,7 @@ module.exports = {
         this.peerManager.broadcast(this.constructor.XPRICEB_FILL, {
             first_round: first,
             last_round:  last,
+            held:        mine.map(r => parseInt(r.round)),
             rounds:      mine.filter(r => !r.batchSourced).map(r => {
                 let { batchSourced, ...rest } = r;
                 return rest;

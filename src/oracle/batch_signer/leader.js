@@ -74,15 +74,15 @@ module.exports = {
         if(me === null) return empty;
         let snapCount = signingSet.length;
 
-        let bufferedProposal = this.isBufferedProposal(rounds);
-        if(bufferedProposal && !(await this.fillWindowGaps(first, last, rounds, signingSet, me))){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] still has a missing round ' +
-                         'after peer responses; window skipped');
+        let held = await this.fillWindowGaps(first, last, rounds, signingSet, me);
+        if(held === null){
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
+                         'that this proposal lacks; window skipped');
             return empty;
         }
         let canonical = this.leaderCanonical(first, last, anchor, rounds);
         if(canonical === null) return empty;
-        let missing = bufferedProposal ? this.missingProposalRounds(first, last, rounds) : [];
+        let missing = this.missingProposalRounds(held, rounds);
         if(missing.length){
             logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
                          missing.join(',') + ' immediately before signing; window skipped');
@@ -105,38 +105,51 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Fill every proposal gap in place so the caller packs the complete signed window.
+    // Add every round this hub or an answering peer finalized inside the window to a
+    // buffered proposal in place; a proposal handed in directly is signed as given. Returns the numbers the proposal must hold, or null when a round
+    // some hub finalized cannot be obtained. A round no answering hub holds is a
+    // legitimate absence and stays out.
     async fillWindowGaps(first, last, rounds, signingSet, me){
-        let have = new Set(rounds.map(r => parseInt(r.round)));
+        let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
-        for(let n = first; n <= last; n++) if(!have.has(n)) gaps.add(n);
-        if(gaps.size === 0) return true;
+        for(let n = first; n <= last; n++) if(!held.has(n)) gaps.add(n);
+        if(gaps.size === 0 || !this.isBufferedProposal(rounds)) return held;
 
         let local;
         try {
             local = await this.deriveWindow(first, last);
         } catch(e){
-            return false;
+            return null;
         }
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
             let { batchSourced, ...proposalRound } = r;
             rounds.push(proposalRound);
+            held.add(n);
             gaps.delete(n);
         }
+        if(gaps.size > 0 && !(await this.fillFromPeers(first, last, gaps, signingSet, me, rounds, held))) return null;
         rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
-        if(gaps.size === 0) return true;
+        return held;
+    },
 
+    // Ask the price-capable peers for the remaining gaps. False when a quorum did not
+    // answer or an answering peer holds a round that could not be obtained.
+    async fillFromPeers(first, last, gaps, signingSet, me, rounds, held){
         let quorum = bftQuorumOrSingle(signingSet.length, 1);
-        if(quorum <= 1) return false;
-        if(!this.peerManager) return false;
+        if(quorum <= 1) return true;
+        if(!this.peerManager) return true;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
-        let found = await this.openFillRound({ first, last, gaps, peers, quorum });
-        for(let r of found.values()) rounds.push(r);
-        rounds.sort((a, b) => parseInt(a.round) - parseInt(b.round));
-        return Array.from(gaps).every(n => found.has(n));
+        let answer = await this.openFillRound({ first, last, gaps, peers, quorum });
+        for(let [n, r] of answer.found){
+            rounds.push(r);
+            held.add(n);
+            gaps.delete(n);
+        }
+        if(gaps.size > 0 && answer.responders.size < quorum - 1) return false;
+        return Array.from(answer.held).every(n => !gaps.has(n));
     },
 
     // Ask peers for finalized rounds until the gaps are filled, a response quorum arrives,
@@ -144,14 +157,15 @@ module.exports = {
     openFillRound({ first, last, gaps, peers, quorum }){
         return new Promise((resolve) => {
             let found = new Map();
+            let heldByPeers = new Set();
             let needed = Math.max(0, quorum - 1);
             let round = { first, last, gaps, peers: new Set(peers), responders: new Set(),
-                          found, needed };
+                          found, held: heldByPeers, needed };
             let finish = () => {
                 if(this._fillRound !== round) return;
                 clearTimeout(round.timer);
                 this._fillRound = null;
-                resolve(found);
+                resolve({ found, held: heldByPeers, responders: round.responders });
             };
             round.finish = finish;
             round.timer = setTimeout(finish, this.fillTimeoutMs);
@@ -173,6 +187,7 @@ module.exports = {
         let sender = String(envelope.sig_pubkey || '').toLowerCase();
         if(!round.peers.has(sender) || round.responders.has(sender)) return;
         round.responders.add(sender);
+        for(let n of (Array.isArray(d.held) ? d.held : [])) round.held.add(parseInt(n));
         for(let r of (Array.isArray(d.rounds) ? d.rounds : [])){
             let n = parseInt(r && r.round);
             if(!round.gaps.has(n) || round.found.has(n) || !Array.isArray(r.pairs)) continue;
@@ -184,15 +199,13 @@ module.exports = {
         if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
     },
 
-    missingProposalRounds(first, last, rounds){
-        let held = new Set(rounds.map(r => parseInt(r && r.round)));
-        let missing = [];
-        for(let n = first; n <= last; n++) if(!held.has(n)) missing.push(n);
-        return missing;
-    },
-
     isBufferedProposal(rounds){
         return rounds.length > 0 && rounds.every(r => Number(r && r.bufferedAt) > 0);
+    },
+
+    missingProposalRounds(required, rounds){
+        let present = new Set(rounds.map(r => parseInt(r && r.round)));
+        return Array.from(required).filter(n => !present.has(n)).sort((a, b) => a - b);
     },
 
     // The ONE canonical builder's bytes for this window, or null when the engine that

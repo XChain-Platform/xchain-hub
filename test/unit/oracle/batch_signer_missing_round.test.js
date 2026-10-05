@@ -91,24 +91,28 @@ function registerUnfilledWindowTests() {
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 
-    it('skips an incomplete window when the peer manager is unavailable', async function () {
+    it('skips when an answering peer holds a round it cannot supply', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
-        mesh.nodes[0].signer.peerManager = null;
+        quickFill(mesh);
+        for (let node of mesh.nodes.slice(1)) {
+            node.signer.handleFillReq = async () => node.signer.peerManager.broadcast(
+                'XPRICEB_FILL', { first_round: 100, last_round: 105, held: [MISSING], rounds: [] });
+        }
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
             100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 
-    it('skips once a quorum replies without the missing round', async function () {
+    it('proposes without the round once a quorum replies and none holds it', async function () {
         mesh = buildMesh(4, { rounds: withoutMissing(baseRounds()), timeoutMs: 400 });
         mesh.nodes[0].signer.fillTimeoutMs = 1000;
         mesh.nodes[3].signer.handleFillReq = async () => {};
-        let pending = mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
-        let res = await within(pending, 150);
-        expect(res.met).to.equal(false);
-        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
+        let pending = mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
+        let res = await within(pending, 400);
+        expect(res.met).to.equal(true);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 104, 105]);
     });
 }
 
@@ -126,8 +130,9 @@ function registerLocalFillTests() {
         mesh = buildMesh(4, { timeoutMs: 400 });
         let signer = mesh.nodes[0].signer;
         signer.fillWindowGaps = async (first, last, rounds) => {
+            let held = new Set(rounds.map(r => r.round));
             rounds.splice(rounds.findIndex(r => r.round === MISSING), 1);
-            return true;
+            return held;
         };
         let res = await signer.collectBatchSignatures(100, 105, 5005, bufferedProposal(baseRounds()));
         expect(res.met).to.equal(false);
@@ -156,15 +161,15 @@ function registerPublicationTests() {
 }
 
 function registerSkippedRoundTests() {
-    it('does not treat a recorded skip as proposal content', async function () {
+    it('signs without a round that was recorded as skipped', async function () {
         let rounds = baseRounds().map(r => r.round === MISSING
             ? Object.assign({}, r, { status: 'skipped' }) : r);
         mesh = buildMesh(1, { rounds });
         mesh.nodes[0].signer.peerManager = null;
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
             100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
-        expect(res.met).to.equal(false);
-        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+        expect(res.met).to.equal(true);
+        expect(res.canonical).to.equal(buildCanonical(100, 105, 5005, withoutMissing(baseRounds())));
     });
 }
 
