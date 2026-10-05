@@ -74,14 +74,15 @@ module.exports = {
         if(me === null) return empty;
         let snapCount = signingSet.length;
 
-        if(!(await this.fillWindowGaps(first, last, rounds, signingSet, me))){
+        let bufferedProposal = this.isBufferedProposal(rounds);
+        if(bufferedProposal && !(await this.fillWindowGaps(first, last, rounds, signingSet, me))){
             logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] still has a missing round ' +
                          'after peer responses; window skipped');
             return empty;
         }
         let canonical = this.leaderCanonical(first, last, anchor, rounds);
         if(canonical === null) return empty;
-        let missing = this.missingProposalRounds(first, last, rounds);
+        let missing = bufferedProposal ? this.missingProposalRounds(first, last, rounds) : [];
         if(missing.length){
             logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
                          missing.join(',') + ' immediately before signing; window skipped');
@@ -188,6 +189,10 @@ module.exports = {
         let missing = [];
         for(let n = first; n <= last; n++) if(!held.has(n)) missing.push(n);
         return missing;
+    },
+
+    isBufferedProposal(rounds){
+        return rounds.length > 0 && rounds.every(r => Number(r && r.bufferedAt) > 0);
     },
 
     // The ONE canonical builder's bytes for this window, or null when the engine that

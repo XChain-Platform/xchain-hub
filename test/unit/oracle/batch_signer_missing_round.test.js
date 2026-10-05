@@ -24,6 +24,10 @@ function withoutMissing(rounds) {
     return rounds.filter(r => r.round !== MISSING);
 }
 
+function bufferedProposal(rounds) {
+    return rounds.map(r => Object.assign({ bufferedAt: 1 }, r));
+}
+
 function leaderLacksRound(i) {
     return i === 0 ? withoutMissing(baseRounds()) : baseRounds();
 }
@@ -59,7 +63,7 @@ function registerPeerFillTests() {
     it('reaches quorum once a peer supplies the missing round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
-        let rounds = withoutMissing(baseRounds());
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
         let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
         expect(res.met).to.equal(true);
         expect(res.sigs.length).to.be.at.least(3);
@@ -69,7 +73,7 @@ function registerPeerFillTests() {
     it('splices the fetched round into the caller\'s array in order', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
-        let rounds = withoutMissing(baseRounds());
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
         await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
         expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
         expect(rounds[3]).to.deep.equal(clone(baseRounds())[3]);
@@ -82,7 +86,7 @@ function registerUnfilledWindowTests() {
         quickFill(mesh);
         for (let node of mesh.nodes.slice(1)) node.signer.handleFillReq = async () => {};
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, withoutMissing(baseRounds()));
+            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
@@ -91,7 +95,7 @@ function registerUnfilledWindowTests() {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         mesh.nodes[0].signer.peerManager = null;
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, withoutMissing(baseRounds()));
+            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
@@ -101,7 +105,7 @@ function registerUnfilledWindowTests() {
         mesh.nodes[0].signer.fillTimeoutMs = 1000;
         mesh.nodes[3].signer.handleFillReq = async () => {};
         let pending = mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, withoutMissing(baseRounds()));
+            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
         let res = await within(pending, 150);
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
@@ -111,7 +115,7 @@ function registerUnfilledWindowTests() {
 function registerLocalFillTests() {
     it('adds a locally finalized round omitted from the initial proposal', async function () {
         mesh = buildMesh(4, { timeoutMs: 400 });
-        let rounds = withoutMissing(baseRounds());
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
         let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
         expect(res.met).to.equal(true);
         expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
@@ -125,7 +129,7 @@ function registerLocalFillTests() {
             rounds.splice(rounds.findIndex(r => r.round === MISSING), 1);
             return true;
         };
-        let res = await signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+        let res = await signer.collectBatchSignatures(100, 105, 5005, bufferedProposal(baseRounds()));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
@@ -138,7 +142,8 @@ function registerPublicationTests() {
         let leader = mesh.nodes[0];
         let publisher = makePublisher({ signer: leader.signer });
         publisher.p.windowPlan.rangeOf = () => ({ first: 100, last: 105 });
-        for (let round of withoutMissing(baseRounds())) publisher.p._buffer.set(round.round, round);
+        for (let round of bufferedProposal(withoutMissing(baseRounds())))
+            publisher.p._buffer.set(round.round, round);
         await publisher.p.assembleWindow(0);
         expect(publisher.broadcasts).to.have.length(1);
         expect(bodyOf(publisher.broadcasts[0])).to.include(
@@ -157,7 +162,7 @@ function registerSkippedRoundTests() {
         mesh = buildMesh(1, { rounds });
         mesh.nodes[0].signer.peerManager = null;
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, withoutMissing(baseRounds()));
+            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
