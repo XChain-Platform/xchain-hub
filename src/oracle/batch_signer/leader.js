@@ -105,18 +105,15 @@ module.exports = {
                                           signatures, rounds });
     },
 
-    // Add every missing peer round, plus locally finalized rounds for buffered
-    // publisher candidates, to the proposal in place. Direct signer callers retain
-    // follower refusal semantics for data they omitted despite holding it locally.
-    // Returns the numbers the proposal must hold, or null when a peer-held round
-    // cannot be obtained. A round no answering hub holds is a legitimate absence.
+    // Add every missing round finalized here or by an answering peer to the proposal
+    // in place. Returns the numbers the proposal must hold, or null when a peer-held
+    // round cannot be obtained. A round no answering hub holds is a legitimate absence.
     async fillWindowGaps(first, last, rounds, signingSet, me){
         let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
         for(let n = first; n <= last; n++) if(!held.has(n)) gaps.add(n);
         if(gaps.size === 0) return held;
 
-        let repairLocal = this.isBufferedProposal(rounds);
         let local;
         try {
             local = await this.deriveWindow(first, last);
@@ -126,11 +123,9 @@ module.exports = {
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
-            if(repairLocal){
-                let { batchSourced, ...proposalRound } = r;
-                rounds.push(proposalRound);
-                held.add(n);
-            }
+            let { batchSourced, ...proposalRound } = r;
+            rounds.push(proposalRound);
+            held.add(n);
             gaps.delete(n);
         }
         if(gaps.size > 0 && !(await this.fillFromPeers(first, last, gaps, signingSet, me, rounds, held))) return null;
@@ -201,10 +196,6 @@ module.exports = {
             round.found.set(n, kept);
         }
         if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
-    },
-
-    isBufferedProposal(rounds){
-        return rounds.length > 0 && rounds.every(r => Number(r && r.bufferedAt) > 0);
     },
 
     missingProposalRounds(required, rounds){
