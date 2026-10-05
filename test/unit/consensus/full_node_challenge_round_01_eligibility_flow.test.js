@@ -221,8 +221,7 @@ it('runEpoch abstains (no round, no verdict) when the claimant snapshot is unres
 describe('FullNodeChallengeRound', function () {
     installSuiteHooks1();
 describe('round flow', function () {
-    this.timeout(20000);
-    installSuiteHooks3();
+    installSuiteHooks3(); this.timeout(20000);
 it('computes the challenge and broadcasts its own answer digest (never plaintext, R2-FN2)', async function () {
             const hub = makeHub();                     // identity V1
             const eng = await startEpoch(hub);
