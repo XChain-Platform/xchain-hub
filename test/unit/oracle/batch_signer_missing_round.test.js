@@ -60,13 +60,14 @@ function cleanupTest() {
 }
 
 function registerPeerFillTests() {
-    it('reaches quorum once a peer supplies the missing round', async function () {
+    it('fills a direct proposal once a peer supplies the missing round', async function () {
         mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
         quickFill(mesh);
-        let rounds = bufferedProposal(withoutMissing(baseRounds()));
+        let rounds = withoutMissing(baseRounds());
         let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
         expect(res.met).to.equal(true);
         expect(res.sigs.length).to.be.at.least(3);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 103, 104, 105]);
         expect(res.canonical).to.equal(buildCanonical(100, 105, 5005, baseRounds()));
     });
 
@@ -86,7 +87,7 @@ function registerUnfilledWindowTests() {
         quickFill(mesh);
         for (let node of mesh.nodes.slice(1)) node.signer.handleFillReq = async () => {};
         let res = await mesh.nodes[0].signer.collectBatchSignatures(
-            100, 105, 5005, bufferedProposal(withoutMissing(baseRounds())));
+            100, 105, 5005, withoutMissing(baseRounds()));
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
