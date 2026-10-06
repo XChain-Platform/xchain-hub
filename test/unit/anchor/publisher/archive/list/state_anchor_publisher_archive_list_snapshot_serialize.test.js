@@ -7,11 +7,11 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const crossChainDb = require('../../../../../src/db/cross_chain.js');
-const publisherConstants = require('../../../../../src/anchor/publisher/constants.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const crossChainDb = require('../../../../../../src/db/cross_chain.js');
+const publisherConstants = require('../../../../../../src/anchor/publisher/constants.js');
 const { LIST_SNAPSHOT_KEYS, ARCHIVE_MAX_LIST_ROWS } = publisherConstants;
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 function buildPub(db = {}){
     return new StateAnchorPublisher({

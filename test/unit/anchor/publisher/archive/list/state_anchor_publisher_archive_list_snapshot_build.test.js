@@ -8,12 +8,12 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
 const { ARCHIVE_MAX_LIST_ROWS, LIST_SNAPSHOT_KEYS, XANC_FINALIZED } =
-    require('../../../../../src/anchor/publisher/constants.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
-const vectors = require('../../../../fixtures/anchor_archive_vectors.json');
+    require('../../../../../../src/anchor/publisher/constants.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
+const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
 
 function buildPub(db, sets, broadcast){
     const identity = new ValidatorIdentity('11'.repeat(32));

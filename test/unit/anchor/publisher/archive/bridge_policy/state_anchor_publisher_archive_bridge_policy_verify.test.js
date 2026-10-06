@@ -7,9 +7,9 @@
 
 const crypto = require('crypto');
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const BLOCK = 100;
 const IDENTITIES = ['11', '22', '33'].map(seed => new ValidatorIdentity(seed.repeat(32)));

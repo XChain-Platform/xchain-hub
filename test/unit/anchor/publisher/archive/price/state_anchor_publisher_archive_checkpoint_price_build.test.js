@@ -6,15 +6,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const StateCheckpointEngine = require('../../../../../src/anchor/checkpoint_engine.js');
-const OracleConsensus = require('../../../../../src/oracle/consensus.js');
-const admissionHeight = require('../../../../../src/lib/admission_height.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const StateCheckpointEngine = require('../../../../../../src/anchor/checkpoint_engine.js');
+const OracleConsensus = require('../../../../../../src/oracle/consensus.js');
+const admissionHeight = require('../../../../../../src/lib/admission_height.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
 const { CHECKPOINT_KEYS, PRICE_KEYS, ARCHIVE_MAX_PRICE_ROUNDS } =
-    require('../../../../../src/anchor/publisher/constants.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
-const vectors = require('../../../../fixtures/anchor_archive_vectors.json');
+    require('../../../../../../src/anchor/publisher/constants.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
+const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
 
 function buildPub(sets){
     const identity = new ValidatorIdentity('11'.repeat(32));

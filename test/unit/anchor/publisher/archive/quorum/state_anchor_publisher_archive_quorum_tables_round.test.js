@@ -7,10 +7,10 @@
 
 const crypto = require('crypto');
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
 const { ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES } =
-    require('../../../../../src/anchor/publisher/constants.js');
+    require('../../../../../../src/anchor/publisher/constants.js');
 
 const BLOCK = 100;
 const CP_ROW = {

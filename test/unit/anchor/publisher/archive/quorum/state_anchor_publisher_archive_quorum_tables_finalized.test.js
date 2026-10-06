@@ -2,9 +2,9 @@
 
 const crypto = require('crypto');
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { XANC_FINALIZED } = require('../../../../../src/anchor/publisher/constants.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { XANC_FINALIZED } = require('../../../../../../src/anchor/publisher/constants.js');
 
 const TXID = 'ab'.repeat(32);
 const PROOF = '[{"pubkey":"aa","sig":"bb"}]';
