@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.6] - 2026-10-06
+
+### Fixed
+- Ran hub DB peer catch-up as one walk at a time and stopped re-walking tables that are already caught up.
+- Bounded the indexer reads a catch-up walk makes so one rejoining hub cannot rate-limit the shared indexer for every hub.
+- Let hub DB peer catch-up store validator-written price rounds by proving each round from its row group.
+
 ## [0.22.5] - 2026-10-06
 
 ### Fixed
