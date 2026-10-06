@@ -34,6 +34,7 @@ const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
@@ -48,7 +49,6 @@ const HUB_PARTS    = ['hub_rows.js'];
 const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
 const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
 const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
-const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // Every converted carrier that still has a logic module, by registry stem and the
 // file it lives in since W5: the 7 gate twins under src/consensus/gates/, the
@@ -173,11 +173,7 @@ describe('src/consensus/gate_registry.js: the layout', function () {
     });
 
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
-        if (!fs.existsSync(path.join(INDEXER_PARTS, 'shared_rows_1.js'))) {
-            if (STRICT) expect.fail('xchain-indexer sibling at ' + INDEXER_PARTS + ' carries no registry part files (set XCHAIN_INDEXER_DIR at a converted checkout)');
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;
         const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
         expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });
