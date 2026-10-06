@@ -277,6 +277,7 @@ it('on quorum where this node is the new leader, broadcasts NEW_VIEW and prunes 
             pm.validatorAddr = VALIDATORS_4[2].addr; // leader for (seq 5, view 1)
             consensus.view = 0;
             consensus.pendingViewChanges.set(0, new Set(['stale'])); // lower view to prune
+            consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null }); // round context for seq 5
 
             consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
             consensus.handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
