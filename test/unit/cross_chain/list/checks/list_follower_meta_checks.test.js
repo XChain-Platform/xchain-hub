@@ -2,9 +2,9 @@
 
 const assert = require('assert');
 
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
-const { heldRowVerdict } = require('../../../../src/cross_chain/list/held_checks.js');
-const { ownReadVerdict } = require('../../../../src/cross_chain/list/read_checks.js');
+const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
+const { heldRowVerdict } = require('../../../../../src/cross_chain/list/held_checks.js');
+const { ownReadVerdict } = require('../../../../../src/cross_chain/list/read_checks.js');
 
 const members = ['a', 'b'];
 const metaHash = 'a'.repeat(64);

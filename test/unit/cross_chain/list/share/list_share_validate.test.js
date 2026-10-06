@@ -3,12 +3,12 @@
 const assert = require('assert');
 const sinon = require('sinon');
 
-const ah = require('../../../../src/lib/admission_height.js');
-const validate = require('../../../../src/cross_chain/list/validate.js');
+const ah = require('../../../../../src/lib/admission_height.js');
+const validate = require('../../../../../src/cross_chain/list/validate.js');
 const {
     deriveListSnapshotId,
     listMembersHash
-} = require('../../../../src/cross_chain/list/canonical.js');
+} = require('../../../../../src/cross_chain/list/canonical.js');
 
 const INDEX = 7;
 const SNAPSHOT_BLOCK = 500;

@@ -16,8 +16,8 @@
 
 const assert = require('assert');
 
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
-const { planListVersion } = require('../../../../src/cross_chain/list/version_plan.js');
+const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
+const { planListVersion } = require('../../../../../src/cross_chain/list/version_plan.js');
 
 function read(members, type = 2) {
     return { type, members, hash: listMembersHash(members) };

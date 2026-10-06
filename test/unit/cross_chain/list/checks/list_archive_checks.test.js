@@ -2,8 +2,8 @@
 
 const assert = require('assert');
 
-const { archivedListRowRefusal } = require('../../../../src/cross_chain/list/archive_checks.js');
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
+const { archivedListRowRefusal } = require('../../../../../src/cross_chain/list/archive_checks.js');
+const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
 
 const full = {
     seq: 1,
