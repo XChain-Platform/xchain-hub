@@ -106,7 +106,8 @@ async function converged(directKeys){
     return { bus, engs, fresh };
 }
 
-describe('RollcallRound resync on open', function(){
+function withFixtures(title, body){
+  describe(title, function(){
     before(function(){
         savedActivation = rca.ROLLCALL_ACTIVATION.regtest;
         rca.ROLLCALL_ACTIVATION.regtest = 0;
@@ -138,6 +139,11 @@ describe('RollcallRound resync on open', function(){
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch(_){}
     });
 
+    body();
+  });
+}
+
+withFixtures('RollcallRound resync on open', function(){
     it('a restarted hub regains every peer signature for the open epoch', async function(){
         const { bus, engs, fresh } = await converged(true);
         await fresh.tick();
@@ -177,6 +183,9 @@ describe('RollcallRound resync on open', function(){
         assert.ok(bus);
     });
 
+});
+
+withFixtures('RollcallRound resync request guards', function(){
     it('ignores a request with no open round, a bad epoch or no sender', async function(){
         const { engs } = await converged(true);
         const e = engs[1];
