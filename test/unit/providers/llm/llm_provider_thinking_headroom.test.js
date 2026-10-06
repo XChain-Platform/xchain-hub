@@ -62,7 +62,7 @@ describe('llm provider, always-thinking fetch headroom', function () {
     it('returns a non-empty text block for a thinking model id', async function () {
         const llm = reloadProvider();
         let sent;
-        nock('https://api.anthropic.com')
+        nock(/^https:\/\/api\.[a-z]+\.com$/)
             .post('/v1/messages', (body) => { sent = body.max_tokens; return true; })
             .reply(200, () => ({
                 content: sent > THINKING_FLOOR
