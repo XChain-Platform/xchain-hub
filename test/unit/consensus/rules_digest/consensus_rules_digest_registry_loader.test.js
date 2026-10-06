@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * test/unit/consensus/consensus_rules_digest_registry_loader.test.js
+ * test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js
  *
  * The rules digest reads every shared gate VALUE from the activation
  * registry by key and THROWS on a miss (decision D40). Pinned here: every
@@ -26,11 +26,11 @@
 
 const { expect } = require('chai');
 
-const crd      = require('../../../src/consensus_rules_digest.js');
-const registry = require('../../../src/consensus/gate_registry.js');
+const crd      = require('../../../../src/consensus_rules_digest.js');
+const registry = require('../../../../src/consensus/gate_registry.js');
 
-const CRD = require.resolve('../../../src/consensus_rules_digest.js');
-const REG = require.resolve('../../../src/consensus/gate_registry.js');
+const CRD = require.resolve('../../../../src/consensus_rules_digest.js');
+const REG = require.resolve('../../../../src/consensus/gate_registry.js');
 
 // A fresh digest module whose registry answers `key` by throwing the miss. The
 // carriers are never touched; the module-level value cache is what is cleared.
@@ -45,7 +45,7 @@ function freshDigestMissing(key) {
     require.cache[REG] = stub;
     delete require.cache[CRD];
     try {
-        return require('../../../src/consensus_rules_digest.js');
+        return require('../../../../src/consensus_rules_digest.js');
     } finally {
         require.cache[REG] = realReg;
         require.cache[CRD] = realCrd;
@@ -71,7 +71,7 @@ describe('consensus_rules_digest: values by registry key', function () {
 
     it('reads the four function-valued names from their carrier, canonicalising to no value, as before', function () {
         const { gates } = crd.computeConsensusRulesDigest();
-        const carrier = require('../../../src/consensus/gates/mirror_admission_gate.js');
+        const carrier = require('../../../../src/consensus/gates/mirror_admission_gate.js');
         for (const name of ['encodeAdmitBlocks', 'decodeAdmitBlocks', 'isAdmissionEra', 'admissionCanonicalField']) {
             const key = 'mirror_admission_activation.' + name;
             expect(registry.has(key), key + ' is not a row').to.equal(false);

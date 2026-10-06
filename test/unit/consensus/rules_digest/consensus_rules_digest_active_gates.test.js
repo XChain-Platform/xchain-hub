@@ -13,15 +13,15 @@
 const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
-const crd  = require('../../../src/consensus_rules_digest.js');
-const PeerManager = require('../../../src/peers/manager.js');
-const ValidatorIdentity = require('../../../src/validators/identity.js');
+const crd  = require('../../../../src/consensus_rules_digest.js');
+const PeerManager = require('../../../../src/peers/manager.js');
+const ValidatorIdentity = require('../../../../src/validators/identity.js');
 
 // The digest reads every gate VALUE from the registry, so a case that needs one map to
 // read differently swaps the registry's cached module for one whose get() answers that
 // key with `table`; the carriers themselves are never touched. Returns the restorer.
 function stubRegistryRow(key, table) {
-    const REG  = require.resolve('../../../src/consensus/gate_registry.js');
+    const REG  = require.resolve('../../../../src/consensus/gate_registry.js');
     const real = require.cache[REG];
     const stub = Object.create(Object.getPrototypeOf(real));
     Object.assign(stub, real);
@@ -95,15 +95,15 @@ function registerPinnedDigestTest() {
         // variable and a cached copy of it would keep a drill's heights in the digest after
         // the variable was cleared. Since W5 the logic files sit at
         // src/consensus/gates/<stem>_gate.js and the retired predicate shims have none.
-        const gatePath = (m) => path.resolve(__dirname, '../../../src/consensus/gates/' + m.replace(/_activation$/, '_gate') + '.js');
-        const paths = [require.resolve('../../../src/consensus_rules_digest.js')].concat(
+        const gatePath = (m) => path.resolve(__dirname, '../../../../src/consensus/gates/' + m.replace(/_activation$/, '_gate') + '.js');
+        const paths = [require.resolve('../../../../src/consensus_rules_digest.js')].concat(
             [...new Set(crd.SHARED_GATES.map(g => g[0]))].map(gatePath).filter(p => fs.existsSync(p)));
         const saved = paths.map(p => [p, require.cache[p]]);
         const env   = process.env.XC_MIRROR_ADMISSION_ACTIVATION;
         try {
             delete process.env.XC_MIRROR_ADMISSION_ACTIVATION;
             for (const [p] of saved) delete require.cache[p];
-            const fresh = require('../../../src/consensus_rules_digest.js');
+            const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
                 .to.equal('227f96529070d083038a3695fb863c4ab08611864b9dfcc1b619f75ec67c91d8',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
@@ -153,13 +153,13 @@ function registerSentinelGateTest() {
     // whichever map happened to be unarmed. PRICE_PAIR_WIDEN_ACTIVATION, the last live
     // example before the arm, is the map stubbed here.
     it('excludes a far-future sentinel height, however high the chain climbs', function () {
-        const CRD     = require.resolve('../../../src/consensus_rules_digest.js');
+        const CRD     = require.resolve('../../../../src/consensus_rules_digest.js');
         const realCrd = require.cache[CRD];
         const restore = stubRegistryRow('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION',
             { mainnet: crd.FAR_FUTURE_HEIGHT_SENTINEL, testnet: 0, regtest: 0 });
         try {
             delete require.cache[CRD];                       // clears the module-level value cache
-            const fresh = require('../../../src/consensus_rules_digest.js');
+            const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.activeGatesAt(fresh.FAR_FUTURE_HEIGHT_SENTINEL, 'mainnet'))
                 .to.not.include('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION');
             // The same stub is active on testnet, so the exclusion is the sentinel, not the stub.
@@ -230,7 +230,7 @@ function registerCoinKeyedGateTest() {
             expect(crd.activeGatesAt(h - 1, 'testnet', coin)).to.not.include(KEY);
             expect(crd.activeGatesAt(h, 'testnet', coin)).to.include(KEY);
         }
-        const CRD     = require.resolve('../../../src/consensus_rules_digest.js');
+        const CRD     = require.resolve('../../../../src/consensus_rules_digest.js');
         const realCrd = require.cache[CRD];
         const restore = stubRegistryRow(KEY, {
             'BTC:testnet':  100,
@@ -240,7 +240,7 @@ function registerCoinKeyedGateTest() {
         });
         try {
             delete require.cache[CRD];
-            const fresh = require('../../../src/consensus_rules_digest.js');
+            const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.activeGatesAt(150, 'testnet', 'BTC')).to.include(KEY);
             expect(fresh.activeGatesAt(150, 'testnet', 'DOGE')).to.not.include(KEY);
             expect(fresh.activeGatesAt(5000000, 'testnet', 'DOGE')).to.include(KEY);
