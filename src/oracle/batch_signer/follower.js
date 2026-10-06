@@ -78,6 +78,37 @@ module.exports = {
         this.signIfReproduced(d, first, last, mine, myAnchor, me);
     },
 
+    // Answer a leader's fill request with this hub's own finalized, locally derived
+    // rounds of the window. Rounds ingested from an already-landed batch are withheld
+    // because their anchor is no longer recoverable here.
+    async handleFillReq(envelope){
+        let d = envelope.data;
+        if(!this.identity || !this.peerManager || !this.db) return;
+        let sender = String(envelope.sig_pubkey || '').toLowerCase();
+        if(sender && sender === this.identity.getPubkeyHex().toLowerCase()) return;
+
+        let first = parseInt(d.first_round);
+        let last  = parseInt(d.last_round);
+        if(!Number.isFinite(first) || !Number.isFinite(last) || first < 0 || last < first) return;
+        if((last - first + 1) > PRICE_BATCH_MAX_ROUND_COUNT) return;
+
+        let mine;
+        try {
+            mine = await this.deriveWindow(first, last);
+        } catch(e){
+            return;
+        }
+        this.peerManager.broadcast(this.constructor.XPRICEB_FILL, {
+            first_round: first,
+            last_round:  last,
+            held:        mine.map(r => parseInt(r.round)),
+            rounds:      mine.filter(r => !r.batchSourced).map(r => {
+                let { batchSourced, ...rest } = r;
+                return rest;
+            })
+        });
+    },
+
     // The anchor this window would be signed under, or null when it is not signable
     // content at all.
     //

@@ -28,6 +28,15 @@ async function captureWarnings(fn) {
         return lines;
     }
 
+async function sendSignRequestToFollowers(mesh, rounds) {
+        let envelope = {
+            type: OracleBatchSigner.XPRICEB_SIGN_REQ,
+            sig_pubkey: mesh.pubkeys[0],
+            data: { first_round: 100, last_round: 105, btc_block_height: 5005, rounds }
+        };
+        await Promise.all(mesh.nodes.slice(1).map(node => node.signer.handleSignReq(envelope)));
+    }
+
 // The line an operator actually got for the two windows that never published
 // was "proposal does not match this hub's own finalized rounds" and nothing
 // else, and the leader's proposal is persisted nowhere, so the disagreement
@@ -83,7 +92,7 @@ const testCase4 = async function () {
             let short = clone(baseRounds()).filter(r => r.round !== 102);
 
             let warns = await captureWarnings(() =>
-                mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, short));
+                sendSignRequestToFollowers(mesh, short));
             mesh.stop();
 
             let refusals = warns.filter(l => /refusing to co-sign/.test(l));

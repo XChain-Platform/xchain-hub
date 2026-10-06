@@ -31,7 +31,7 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-const { XROLLCALL_SIGN } = require('./wire.js');
+const { XROLLCALL_SIGN, XROLLCALL_SYNC } = require('./wire.js');
 
 // How far past the accept window a finished round is kept in memory, so a late
 // gossiped signature or a status read still finds it before it is pruned.
@@ -200,6 +200,10 @@ module.exports = {
         this._earlySigs.delete(epoch);
         for(let e of this._earlySigs.keys()) if(e < epoch) this._earlySigs.delete(e);
         if(early) for(let [pk, sig] of early) this.onSign({ epoch, pubkey: pk, sig });
+
+        // Signatures peers broadcast before this hub (re)opened the round are not
+        // rebroadcast by them, so ask for the ones they hold.
+        if(this.peerManager) this.peerManager.broadcast(XROLLCALL_SYNC, { epoch });
 
         logger.info('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
                     '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity') +
