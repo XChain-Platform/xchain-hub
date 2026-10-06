@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.5] - 2026-10-06
+
+### Fixed
+- Paired signer identities with peer feed URLs on both inbound and outbound peer links.
+- Let hub DB peer catch-up reach signer-set peers that the validators table does not list.
+
 ## [0.22.4] - 2026-10-05
 
 ### Added
