@@ -24,32 +24,36 @@ const ROUND_INTERVAL_MS = 60000;
 const NOMINAL = nominalRoundSeconds(ROUND, EPOCH_START_MS, ROUND_INTERVAL_MS);
 const SKEW = 2 * 60 * 60;
 
-describe('OracleRound wire block time bound', function () {
-    let capture;
-    let gateOn;
+const state = { capture: null, gateOn: false };
+
+function useGateStub() {
     const registryActiveAt = gateRegistry.activeAt;
 
     beforeEach(function () {
-        gateOn = false;
+        state.gateOn = false;
         sinon.stub(gateRegistry, 'activeAt').callsFake((key, ...args) =>
-            key === ROUND_TIME_GATE ? gateOn : registryActiveAt.call(gateRegistry, key, ...args));
+            key === ROUND_TIME_GATE ? state.gateOn : registryActiveAt.call(gateRegistry, key, ...args));
     });
 
     afterEach(function () {
-        if (capture) capture.restore();
-        capture = null;
+        if (state.capture) state.capture.restore();
+        state.capture = null;
         sinon.restore();
     });
+}
 
-    async function wireTime(blockTime) {
-        capture = makeRoundTimeCapture({
-            network: 'mainnet', quorum: 0, height: HEIGHT, blockTime, fallbackActive: false
-        });
-        capture.round.epochStart = EPOCH_START_MS;
-        capture.round.roundInterval = ROUND_INTERVAL_MS;
-        const out = await capture.finalize(ROUND);
-        return out.args[2];
-    }
+async function wireTime(blockTime) {
+    state.capture = makeRoundTimeCapture({
+        network: 'mainnet', quorum: 0, height: HEIGHT, blockTime, fallbackActive: false
+    });
+    state.capture.round.epochStart = EPOCH_START_MS;
+    state.capture.round.roundInterval = ROUND_INTERVAL_MS;
+    const out = await state.capture.finalize(ROUND);
+    return out.args[2];
+}
+
+describe('OracleRound wire block time bound', function () {
+    useGateStub();
 
     it('passes a positive integer header time through unchanged below the gate', async function () {
         expect(await wireTime(NOMINAL - 600)).to.equal(NOMINAL - 600);
@@ -63,26 +67,28 @@ describe('OracleRound wire block time bound', function () {
     });
 
     it('uses the nominal time whatever the captured value once the gate is active', async function () {
-        gateOn = true;
+        state.gateOn = true;
         expect(await wireTime(NOMINAL - 600)).to.equal(NOMINAL);
     });
+});
 
-    describe('pushed tip anchor', function () {
-        it('falls back to the wall clock for a pushed tip with no usable block time', async function () {
-            capture = makeRoundTimeCapture({
-                network: 'mainnet', quorum: 0, height: HEIGHT, blockTime: NOMINAL, fallbackActive: false
-            });
-            const round = capture.round;
-            round.epochStart = Date.now() - 5 * ROUND_INTERVAL_MS;
-            round.roundInterval = ROUND_INTERVAL_MS;
-            round.hub.resolveBtcNetwork = async () => 'mainnet';
-            round.db = { getChainTip: async () => ({ blockHeight: HEIGHT, blockTime: 'junk' }) };
-            round.submitRoundPrices = undefined;
-            await round.executeRoundInner().catch(() => {});
-            const now = Math.floor(Date.now() / 1000);
-            expect(round.currentBtcBlockHeight).to.equal(HEIGHT);
-            expect(round.currentBtcBlockTime).to.be.within(now - 5, now + 1);
-            expect(round.anchorTipBlockTime).to.equal(null);
+describe('OracleRound pushed tip anchor', function () {
+    useGateStub();
+
+    it('falls back to the wall clock for a pushed tip with no usable block time', async function () {
+        state.capture = makeRoundTimeCapture({
+            network: 'mainnet', quorum: 0, height: HEIGHT, blockTime: NOMINAL, fallbackActive: false
         });
+        const round = state.capture.round;
+        round.epochStart = Date.now() - 5 * ROUND_INTERVAL_MS;
+        round.roundInterval = ROUND_INTERVAL_MS;
+        round.hub.resolveBtcNetwork = async () => 'mainnet';
+        round.db = { getChainTip: async () => ({ blockHeight: HEIGHT, blockTime: 'junk' }) };
+        round.submitRoundPrices = undefined;
+        await round.executeRoundInner().catch(() => {});
+        const now = Math.floor(Date.now() / 1000);
+        expect(round.currentBtcBlockHeight).to.equal(HEIGHT);
+        expect(round.currentBtcBlockTime).to.be.within(now - 5, now + 1);
+        expect(round.anchorTipBlockTime).to.equal(null);
     });
 });
