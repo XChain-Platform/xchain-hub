@@ -23,12 +23,12 @@
 const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const PriceAggregator   = require('../../../../../src/oracle/price_aggregator');
-const { createMockHub } = require('../../../../helpers/mockHub');
-const { CANONICAL_REORG_BUFFER } = require('../../../../../src/consensus/snapshot_reorg_buffer.js');
+const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
+const { createMockHub } = require('../../../../../helpers/mockHub');
+const { CANONICAL_REORG_BUFFER } = require('../../../../../../src/consensus/snapshot_reorg_buffer.js');
 // The pair-name flag day's own map. Every shipped network is genesis-on since the
 // 2026-09-09 ruling, so the D14 case below straddles a threshold it installs itself.
-const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../../../src/consensus/gates/price_pair_gate.js');
+const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../../../../../src/consensus/gates/price_pair_gate.js');
 
 // Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) -> 128-hex }
 function makeValidator() {
@@ -233,117 +233,111 @@ function registerPriceaggregatorReceivevalidatedbatch1Hooks() {
 
 function registerPriceaggregatorReceivevalidatedbatch1Tests1() {
 
-    // ---- D14: the pair-name flag day keys on the batch's block_time ----
-
-    it('keys the pair-name flag day on the batch block_time, not on the round timestamps (D14)', async function () {
-        // The subject is WHICH timestamp keys the gate, not which network is armed.
-        // Mainnet armed at genesis on 2026-09-09, so nothing shipped straddles a
-        // threshold any more; this pins one on mainnet for the duration of the case.
-        // The rounds are stamped far below it and the landing block is above it, which
-        // is exactly the ~70 minute hub/chain skew batching creates: keyed on the round
-        // timestamps the hub would refuse a whole hour the chain accepted.
-        const shipped = PRICE_PAIR_WIDEN_ACTIVATION.mainnet;
-        PRICE_PAIR_WIDEN_ACTIVATION.mainnet = 5000000000;
-        try {
-            hub.network = 'mainnet';
-            let inserts = stubDb([]);
-            let rounds  = makeRounds().map(r => ({
-                ...r,
-                btc_block_height: 799000,                 // one side of every mainnet flag day
-                pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]   // 6-character ticker, widened bound only
-            }));
-            // Every round shares anchor 799000, so the header anchor is 799000 too (§4).
-            let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
-
-            let result = await agg.receiveValidatedBatch('BTC', makeBatch({
-                rounds, sigs, btc_block_height: 799000, block_time: 10000000000
-            }));
-
-            expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-            expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
-
-            // Same batch, landing block BELOW the widening: the legacy 5-character bound
-            // applies and the pair is refused.
-            let below = await agg.receiveValidatedBatch('BTC', makeBatch({
-                rounds, sigs, btc_block_height: 799000, block_time: 1700004000
-            }));
-            expect(below.accepted).to.equal(false);
-            expect(below.reason).to.equal('invalid pairs');
-        } finally { PRICE_PAIR_WIDEN_ACTIVATION.mainnet = shipped; }
-    });
-}
-
-function registerPriceaggregatorReceivevalidatedbatch1Tests2() {
-
-    it('admits the widened pair on a genesis-armed mainnet, at any landing block (2026-09-09)', async function () {
-        // The shipped rule, with no threshold pinned: 0 PRICE actions have ever been
-        // indexed on any mainnet chain (measured 2026-09-09), so the widened bound is
-        // in force from the first mainnet block that carries a batch.
-        expect(PRICE_PAIR_WIDEN_ACTIVATION.mainnet).to.equal(0);
-        hub.network = 'mainnet';
+    it('rejects a batch whose first and last rounds straddle an armed oracle flag day (D7)', async function () {
+        hub.network = 'mainnet';                      // sig-tally 963000, stake-weighted 961000
         let inserts = stubDb([]);
-        let rounds  = makeRounds().map(r => ({
-            ...r,
-            btc_block_height: 799000,
-            pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]
-        }));
-        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
-            rounds, sigs, btc_block_height: 799000, block_time: 1700004000
-        }));
-        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
-        expect(decodeInsert(inserts[0])[0].coin_pair).to.equal('XCHAIN/USD');
-    });
+        let rounds  = makeRounds();
+        rounds[0].btc_block_height = 960999;          // below stake-weighted quorum
+        rounds[5].btc_block_height = 961001;          // above it
+        // The header anchor tracks the last round, so the straddle rule is what fires
+        // here rather than the anchor check that precedes it.
+        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 961001 });
 
-    // ---- Reorg fence ----
-
-    it('drops a batch whose push generation sits at or below a kept retraction generation', async function () {
-        let inserts = stubDb([]);
-        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 3, from_action_index: 10 });
-        sinon.stub(console, 'warn');
-
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ push_generation: 3 }));
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds, sigs, btc_block_height: 961001 }));
 
         expect(result.accepted).to.equal(false);
-        expect(result.reason).to.equal('stale (retracted generation)');
-        expect(result.rejected).to.equal(6);
+        expect(result.reason).to.match(/straddles/);
         expect(inserts.length).to.equal(0);
-        // Never silent: a rebuilt indexer trips this fence on every push.
-        expect(console.warn.calledOnce).to.equal(true);
-        expect(console.warn.firstCall.args[0]).to.match(/PRICE batch/);
     });
 
-    it('accepts the re-published batch at a higher generation and stamps it on every row', async function () {
+    it('refuses a batch whose header anchor is not the last round anchor, before either quorum gate resolves', async function () {
+        hub.network = 'mainnet';                      // stake-weighted 961000, sig-tally 963000
         let inserts = stubDb([]);
-        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 3, from_action_index: 10 });
+        let weightSnap = sinon.stub().resolves(stakeSnapshotOf(V));
+        hub.capabilitySnapshot = {
+            getSnapshot:       sinon.stub().resolves(snapshotOf(V)),
+            getWeightSnapshot: weightSnap
+        };
 
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ push_generation: 4 }));
+        let rounds = attackRounds();
+        // Otherwise perfect: the quorum really signed this header, so nothing but the
+        // anchor rule can tell the batch apart from an honest one.
+        let sigs = signBatch(rounds, V.slice(0, 2), { btc_block_height: ATTACK_HEADER });
 
-        expect(result.accepted).to.equal(true);
-        expect(decodeInsert(inserts[0])[0].push_generation).to.equal(4);
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: ATTACK_HEADER
+        }));
+
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.equal('batch anchor does not match the last round');
+        expect(result.stored).to.equal(0);
+        expect(result.rejected).to.equal(6);
+        expect(inserts.length).to.equal(0);
+        // The check has to run BEFORE the gates or it protects nothing: no snapshot was
+        // ever fetched, so neither quorum rule was selected.
+        expect(weightSnap.called, 'the stake-weighted gate must never have resolved').to.equal(false);
+        expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
     });
 }
 
-function registerPriceaggregatorReceivevalidatedbatch1Tests5() {
+function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
 
-    it('fails closed when the validator snapshot is unavailable or truncated', async function () {
-        stubDb([]);
-        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(null) };
-        let r1 = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(r1.reason).to.equal('validator snapshot unavailable');
-
-        hub.network = 'regtest';                       // stake-weighted quorum active at genesis
+    it('judges the SAME signature set under the honest count rule once the header is truthful', async function () {
+        // The control that makes the case above an attack rather than a typo: with the
+        // header pinned to the last round's own anchor, the batch resolves under the
+        // count rule its per-round anchors really sit under, and two of four signers is
+        // short of quorum. The lie was worth telling.
+        hub.network = 'mainnet';
+        let inserts = stubDb([]);
         hub.capabilitySnapshot = {
-            getWeightSnapshot: sinon.stub().resolves({ ...snapshotOf(V), truncated: true })
+            getSnapshot:       sinon.stub().resolves(snapshotOf(V)),
+            getWeightSnapshot: sinon.stub().resolves(stakeSnapshotOf(V))
         };
-        let r2 = await agg.receiveValidatedBatch('BTC', makeBatch());
-        expect(r2.reason).to.equal('validator snapshot truncated');
+
+        let rounds = attackRounds();
+        let honest = rounds[rounds.length - 1].btc_block_height;
+        let sigs   = signBatch(rounds, V.slice(0, 2), { btc_block_height: honest });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: honest
+        }));
+
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.equal('insufficient quorum (2/3)');
+        expect(inserts.length).to.equal(0);
+    });
+
+    it('accepts an honest batch whose header anchor equals the last round anchor', async function () {
+        let inserts = stubDb([]);
+        let rounds  = attackRounds();
+        let honest  = rounds[rounds.length - 1].btc_block_height;
+        let sigs    = signBatch(rounds, V.slice(0, 3), { btc_block_height: honest });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: honest
+        }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(inserts.length).to.equal(6);
+    });
+
+    it('refuses a header anchor that is off by one in either direction', async function () {
+        // No tolerance: the rule is equality, so the nearest possible lie is refused.
+        stubDb([]);
+        let rounds = attackRounds();
+        let last   = rounds[rounds.length - 1].btc_block_height;
+        for (let header of [last - 1, last + 1]) {
+            let sigs   = signBatch(rounds, V.slice(0, 3), { btc_block_height: header });
+            let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: header
+            }));
+            expect(result.reason, 'header ' + header).to.equal('batch anchor does not match the last round');
+        }
     });
 }
 
 describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
     registerPriceaggregatorReceivevalidatedbatch1Tests1();
-    registerPriceaggregatorReceivevalidatedbatch1Tests2();
-    registerPriceaggregatorReceivevalidatedbatch1Tests5();
+    registerPriceaggregatorReceivevalidatedbatch1Tests3();
 });
