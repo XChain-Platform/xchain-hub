@@ -37,6 +37,8 @@ function makeCatchup(overrides) {
         pageSize: opts.pageSize || 2,
         warnIntervalMs: 60000,
         retryIntervalMs: opts.retryIntervalMs,
+        maxRetryIntervalMs: opts.maxRetryIntervalMs,
+        indexerReadIntervalMs: opts.indexerReadIntervalMs,
         logger: opts.logger || { warn: sinon.stub(), error: sinon.stub() }
     });
 }
