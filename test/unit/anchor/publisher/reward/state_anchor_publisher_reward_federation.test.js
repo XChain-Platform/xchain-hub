@@ -99,6 +99,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
 
     registerPublisherFederationCases();
     registerReceiverProofCases();
+    registerReceiverMembershipRefusalCases();
     registerReceiverRefusalCases();
     registerReceiverPairingCases();
 });
@@ -187,8 +188,8 @@ function registerReceiverProofCases() {
     });
 }
 
-// Every quorum, membership, signature and shape refusal on the receiver.
-function registerReceiverRefusalCases() {
+// Every quorum and membership refusal on the receiver.
+function registerReceiverMembershipRefusalCases() {
     it('refuses a message whose XANCPUB quorum does not verify against the RECEIVER\'s own set', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
@@ -218,7 +219,10 @@ function registerReceiverRefusalCases() {
         });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
+}
 
+// Every signature and shape refusal on the receiver.
+function registerReceiverRefusalCases() {
     it('refuses a message whose transport signature does not verify (a tampered tuple)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
@@ -227,6 +231,21 @@ function registerReceiverRefusalCases() {
         d.round_reference = d.round_reference + 1;              // signed over the ORIGINAL tuple
         await pub.handleRewardAttestation({ data: d });
         expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    // The bundle XANCPUB canonical does not sign round_reference, so a member relayer that
+    // RE-SIGNS the transport over a moved value still carries a valid quorum.
+    it('refuses a bundle reward whose round_reference is not its snapshot_block, even re-signed', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        const signers = [relayer, pub.identity];
+        await pub.handleRewardAttestation({
+            data: payloadFrom(pub, relayer, signers, { round_reference: CP_ROW.snapshot_block + 1 })
+        });
+        expect(pub._deferredRewardAttest.size, 'a moved round_reference queues nothing').to.equal(0);
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, signers) });
+        expect(pub._deferredRewardAttest.size, 'the same quorum at round_reference = snapshot_block queues').to.equal(1);
     });
 
     it('refuses a malformed txid, an unattested ANCHOR version, and a mismatched reward_type', async function () {
