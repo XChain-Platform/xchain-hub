@@ -67,7 +67,7 @@ function connectedSignerPeers(peerManager) {
     for (const [addr, peer] of peerManager.peers) {
         if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
         const identity = peer.validatorAddr || addr;
-        const pubkey = peerManager.validatorPubkeys.get(identity);
+        const pubkey = peerManager.validatorPubkeys.get(identity) || peer.signing_pubkey;
         if (!pubkey) continue;
         const normalizedPubkey = String(pubkey).toLowerCase();
         const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
