@@ -61,14 +61,21 @@ class ChainTips {
             if(pushedTip && pushedTip.blockHeight && this.btcPushedTipFresh(pushedTip)) return pushedTip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this.resolveBtcIndexerUrl();
-        if(!url) return null;
+        if(!url){
+            logger.warn('XChainHub: no BTC indexer URL resolves; no BTC latest block');
+            return null;
+        }
         try {
             let res = await axiosFor(this).post(url, {
                 jsonrpc: '2.0', id: Date.now(),
                 method: 'getlatestblock', params: {}
             }, { timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if(!result || result.error) return null;
+            if(!result || result.error){
+                logger.warn('XChainHub: BTC indexer getlatestblock returned ' +
+                    (result ? 'an error (' + JSON.stringify(result.error) + ')' : 'no result') + '; no BTC latest block');
+                return null;
+            }
             // Guard against anchoring a snapshot on a stale tip. `lag` is how far the indexer's
             // committed tip trails the decoder's; an indexer processing far behind (repeated
             // contract watchdog timeouts, say) no longer reflects recent chain state, so past a
@@ -199,7 +206,11 @@ class ChainTips {
             logger.error(nodeUtil.format('XChainHub: failed to read the ' + c + ' admission tip from its indexer:', err.message));
             return null;
         }
-        if(!result || result.error) return null;
+        if(!result || result.error){
+            logger.warn('XChainHub: ' + c + ' indexer getlatestblock returned ' +
+                (result ? 'an error (' + JSON.stringify(result.error) + ')' : 'no result') + '; no admission tip for ' + c);
+            return null;
+        }
 
         // MAX_INDEXER_LAG_BLOCKS is DELIBERATELY not applied here, and this is the
         // single easiest mistake to make on this path. That gate refuses a tip whose
