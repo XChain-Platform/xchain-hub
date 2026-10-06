@@ -5607,6 +5607,12 @@
       "8c9cc4daa8ee5eba57e814fd4058fe5d0abb5939605e1220d4559362914e8b59",
       "a16fc5547ee230dee4199f3697e28b18df646f785f24ad2938e6c34d49ecb292"
     ],
+    "79a9117ed13b83fd": [
+      "a0c1b772b176621e1de4bc78b94f9a7df71b75dad8042e41bab2198253ba77ff",
+      "1fae94e9805aa8c63757405ccd39e657a0ea0bda1c86257671c4e33ed2491389",
+      "6fa2b096b1386d8757cdaac945f315c1b959da20f5d86b8429164a9fd8ad8ba0",
+      "275e64e16758e18ff0d6b295a2019d4974c4d5a50166844dce4661eaa07abee2"
+    ],
     "79ce93722e67f595": [
       "d345172dce7dcb6af8cbb43519b2b2e317d713e1cde086d5800283d648ff1949",
       "c9724724a1e9a30dcc1ae9d85c4b4c2e4784aeb971dfc2d0246a581554db067f",
@@ -11073,8 +11079,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 840,
-      "titleCount": 8043,
+      "fileCount": 841,
+      "titleCount": 8047,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -11299,6 +11305,7 @@
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_010_the_publisher_election.test.js": "f1c31e47d19a9777",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_014_one_broadcast_per_window.test.js": "d577f337a969f49f",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_017_chain_reconcile.test.js": "c83b90aff657ed0c",
+        "test/unit/attestation/publisher/batch/attestation_batch_publisher_018_skip_empty_window.test.js": "79a9117ed13b83fd",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_019_federated_landed_marker.test.js": "756e3e33aed6fe12",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_004_a_head_refused_before_it_was.test.js": "fea0e5ae5ae71253",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_005_a_head_refused_before_it_was.test.js": "588a88ac5743449c",
@@ -11970,8 +11977,8 @@
       }
     },
     "test": {
-      "fileCount": 840,
-      "titleCount": 8043,
+      "fileCount": 841,
+      "titleCount": 8047,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -12196,6 +12203,7 @@
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_010_the_publisher_election.test.js": "f1c31e47d19a9777",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_014_one_broadcast_per_window.test.js": "d577f337a969f49f",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_017_chain_reconcile.test.js": "c83b90aff657ed0c",
+        "test/unit/attestation/publisher/batch/attestation_batch_publisher_018_skip_empty_window.test.js": "79a9117ed13b83fd",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_019_federated_landed_marker.test.js": "756e3e33aed6fe12",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_004_a_head_refused_before_it_was.test.js": "fea0e5ae5ae71253",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_005_a_head_refused_before_it_was.test.js": "588a88ac5743449c",
@@ -12816,8 +12824,8 @@
       }
     },
     "test:all": {
-      "fileCount": 920,
-      "titleCount": 8866,
+      "fileCount": 921,
+      "titleCount": 8870,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13122,6 +13130,7 @@
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_010_the_publisher_election.test.js": "f1c31e47d19a9777",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_014_one_broadcast_per_window.test.js": "d577f337a969f49f",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_017_chain_reconcile.test.js": "c83b90aff657ed0c",
+        "test/unit/attestation/publisher/batch/attestation_batch_publisher_018_skip_empty_window.test.js": "79a9117ed13b83fd",
         "test/unit/attestation/publisher/batch/attestation_batch_publisher_019_federated_landed_marker.test.js": "756e3e33aed6fe12",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_004_a_head_refused_before_it_was.test.js": "fea0e5ae5ae71253",
         "test/unit/attestation/publisher/batch/head_refusal/attestation_batch_publisher_005_a_head_refused_before_it_was.test.js": "588a88ac5743449c",
