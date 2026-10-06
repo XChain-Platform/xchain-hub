@@ -165,6 +165,10 @@ describe('AttestationResponseMirror: signer set convergence', function(){
         expect(held(hub)).to.deep.equal([pk(B), pk(C)]);
         expect(hub.db.updates).to.have.length(0);
     });
+});
+
+describe('AttestationResponseMirror: signer set convergence refusals', function(){
+    afterEach(() => sinon.restore());
 
     it('refuses a set that names a signer outside the responsible set', async function(){
         let { hub, mirror } = makeMirror();
