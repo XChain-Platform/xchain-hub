@@ -55,30 +55,19 @@ module.exports = {
         let key = [e.rewardType, String(e.roundReference), String(e.snapshotBlock),
                    String(e.publisher), String(e.txid)].join('|');
         if(this._deferredRewardAttest.has(key)) return;
-        // Bounded: make room by dropping the OLDEST peer-relayed entry first, and only
-        // when none is queued the oldest entry overall (Map preserves insertion order).
-        // A relayed entry is work a peer chose to hand us and a peer can flood the queue
-        // with them, so they must never push out this hub's own reward. Dropping only ever
-        // forfeits a reward; it can never write one.
+        // Bounded: drop the OLDEST entry rather than the new one (Map preserves insertion
+        // order), matching the two announcement queues. Dropping only ever forfeits this
+        // hub's own reward; it can never write one.
         if(this._deferredRewardAttest.size >= this.announceQueueMax){
-            let victim = this.oldestDeferredRewardKey();
-            this._deferredRewardAttest.delete(victim);
+            let oldest = this._deferredRewardAttest.keys().next().value;
+            this._deferredRewardAttest.delete(oldest);
             logger.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
-                         '); dropped the oldest entry ' + victim);
+                         '); dropped the oldest entry ' + oldest);
         }
         this._deferredRewardAttest.set(key, Object.assign({}, e, { at: Date.now() }));
         logger.info('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
                     ' held until anchor ' + e.txid + ' is ' + this.dogeConfirmations + ' deep on DOGE (' +
                     this._deferredRewardAttest.size + ' pending)');
-    },
-
-    oldestDeferredRewardKey(){
-        let first = null;
-        for(let [key, held] of this._deferredRewardAttest){
-            if(held && held.relayed === true) return key;
-            if(first === null) first = key;
-        }
-        return first;
     },
 
     // The anchor-attest rail's QUEUE-DRAIN RULE for the height watermark.
