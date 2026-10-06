@@ -20,21 +20,11 @@ const os                   = require('os');
 const path                 = require('path');
 const StateAnchorPublisher = require('../../../../src/anchor/publisher');
 
-describe('StateAnchorPublisher payload: blocked counters and persistBroken', function () {
-    let dir;
+function newPub(cfg) {
+    return new StateAnchorPublisher({ db: {}, p2pConfig: Object.assign({ DOGE_ADDRESS: 'Dpub1' }, cfg || {}) });
+}
 
-    beforeEach(function () {
-        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-blocked-'));
-    });
-
-    afterEach(function () {
-        fs.rmSync(dir, { recursive: true, force: true });
-    });
-
-    function newPub(cfg) {
-        return new StateAnchorPublisher({ db: {}, p2pConfig: Object.assign({ DOGE_ADDRESS: 'Dpub1' }, cfg || {}) });
-    }
-
+describe('StateAnchorPublisher payload: blocked counters', function () {
     it('reports noConfirmedUtxoDeferrals as a number from a fresh publisher', function () {
         const s = newPub().getAnchorStats();
         expect(s).to.have.property('noConfirmedUtxoDeferrals', 0);
@@ -52,6 +42,27 @@ describe('StateAnchorPublisher payload: blocked counters and persistBroken', fun
         expect(g.persistBroken).to.equal(false);
         expect(g.blocked).to.deep.equal({ pause: 0, spend: 0, balance: 0, persist: 0 });
         expect(g.count.blocked).to.equal(0);
+    });
+
+    it('counts a tripped spend ceiling in the payload', function () {
+        const pub = newPub({ ANCHOR_MAX_SPEND_USD_CENTS_PER_WINDOW: 150, ANCHOR_EST_SPEND_USD_CENTS: 100 });
+        expect(pub.spendGuard.allow()).to.equal(true);
+        pub.spendGuard.record(100);
+        const verdict = pub.spendGuard.check();
+        expect(verdict.ok).to.equal(false);
+        expect(pub.getAnchorStats().spendGuard.blocked.spend).to.be.at.least(1);
+    });
+});
+
+describe('StateAnchorPublisher payload: persistBroken', function () {
+    let dir;
+
+    beforeEach(function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-blocked-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
     it('flips persistBroken and counts a persist refusal when the store cannot be written', function () {
@@ -81,14 +92,5 @@ describe('StateAnchorPublisher payload: blocked counters and persistBroken', fun
         fs.rmdirSync(statePath);
         expect(pub.spendGuard.allow()).to.equal(true);
         expect(pub.getAnchorStats().spendGuard.persistBroken).to.equal(false);
-    });
-
-    it('counts a tripped spend ceiling in the payload', function () {
-        const pub = newPub({ ANCHOR_MAX_SPEND_USD_CENTS_PER_WINDOW: 150, ANCHOR_EST_SPEND_USD_CENTS: 100 });
-        expect(pub.spendGuard.allow()).to.equal(true);
-        pub.spendGuard.record(100);
-        const verdict = pub.spendGuard.check();
-        expect(verdict.ok).to.equal(false);
-        expect(pub.getAnchorStats().spendGuard.blocked.spend).to.be.at.least(1);
     });
 });
