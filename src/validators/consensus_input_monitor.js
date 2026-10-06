@@ -47,6 +47,7 @@ const REASONS = {
     RPC_ERROR:    'rpc_error',            // 2xx but the JSON-RPC body carries no usable result
     MALFORMED:    'malformed',            // result present, `validators` is not an array
     ECHO_MISMATCH:'echo_mismatch',        // indexer answered for a different block than asked
+    RATE_LIMITED: 'rate_limited',         // 429: the indexer's per-address rate limit
     NO_INDEXER:   'no_indexer_url',       // no BTC indexer URL resolvable at all
     MIN_STAKE:    'min_stake_unconfigured'// capability has no MIN_STAKE while the registry is live
 };
@@ -61,6 +62,13 @@ const DEFAULT_THROTTLE_MS = 60 * 1000;
 // its healthy state, while three in a row means the input is actually gone.
 const DEFAULT_ALERT_AFTER_FAILURES = 3;
 
+// Rate-limit backoff. Validators that share one address hit the indexer limit
+// in the same instant after a recreate; retrying on a fixed cadence keeps them
+// in lockstep, so each hub waits an exponentially growing, randomly jittered
+// delay before its next fetch. The cap stays at the snapshot TTL.
+const DEFAULT_BACKOFF_BASE_MS = 5 * 1000;
+const DEFAULT_BACKOFF_MAX_MS  = 60 * 1000;
+
 class ConsensusInputMonitor {
 
     // opts.now / opts.log are injected by tests only; production uses the real
@@ -72,6 +80,13 @@ class ConsensusInputMonitor {
         this.alertAfterFailures   = Number.isInteger(opts.alertAfterFailures) && opts.alertAfterFailures > 0
             ? opts.alertAfterFailures : DEFAULT_ALERT_AFTER_FAILURES;
         this._now = typeof opts.now === 'function' ? opts.now : () => Date.now();
+        this.backoffBaseMs = Number.isFinite(opts.backoffBaseMs) && opts.backoffBaseMs > 0
+            ? opts.backoffBaseMs : DEFAULT_BACKOFF_BASE_MS;
+        this.backoffMaxMs  = Number.isFinite(opts.backoffMaxMs) && opts.backoffMaxMs > 0
+            ? opts.backoffMaxMs : DEFAULT_BACKOFF_MAX_MS;
+        this._random = typeof opts.random === 'function' ? opts.random : Math.random;
+        this.rateLimitStreak = 0;
+        this.backoffUntil    = 0;
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
 
         this.ok            = 0;
@@ -104,6 +119,8 @@ class ConsensusInputMonitor {
         this.consecutiveFailures = 0;
         this.streakStartedAt     = null;
         this._alertAnnounced     = false;
+        this.rateLimitStreak     = 0;
+        this.backoffUntil        = 0;
         // Throttle stamps are per-outage: clearing them means the NEXT outage
         // logs immediately instead of being swallowed by the previous window.
         this._warnAt = {};
@@ -123,6 +140,7 @@ class ConsensusInputMonitor {
         this.consecutiveFailures++;
         if (this.streakStartedAt === null) this.streakStartedAt = now;
         this.lastFailure = { at: now, reason: reason, method: method || null, detail: detail || null };
+        if (reason === REASONS.RATE_LIMITED) this._armBackoff(now);
 
         if (now - (this._warnAt[warnKey] || 0) > this.throttleMs) {
             this._warnAt[warnKey] = now;
@@ -141,6 +159,20 @@ class ConsensusInputMonitor {
                 'attestation or config-change round. /health now reports degraded; fix the BTC indexer link ' +
                 '(reachability, BTC_INDEXER_API_KEY vs the indexer INDEXER_API_KEY, or the indexer itself).');
         }
+    }
+
+    // Window is drawn from [ceiling/2, ceiling] where the ceiling doubles with each
+    // consecutive 429, so hubs that failed together spread out instead of re-colliding.
+    _armBackoff(now) {
+        let ceiling = Math.min(this.backoffMaxMs, this.backoffBaseMs * Math.pow(2, this.rateLimitStreak));
+        this.rateLimitStreak++;
+        this.backoffUntil = now + Math.round(ceiling * (0.5 + 0.5 * this._random()));
+    }
+
+    // True while a rate-limit backoff window is open; fetchers skip the indexer
+    // call (and record nothing) until it closes.
+    inBackoff() {
+        return this._now() < this.backoffUntil;
     }
 
     // True while the current failure streak has crossed the threshold. Reading
@@ -167,6 +199,7 @@ class ConsensusInputMonitor {
                 detail:  this.lastFailure.detail
             } : null,
             last_success_age_s:   this.lastSuccessAt === null ? null : Math.round((now - this.lastSuccessAt) / 1000),
+            backoff_remaining_ms: Math.max(0, this.backoffUntil - now),
             alert_after_failures: this.alertAfterFailures,
             alerting:             this.isAlerting()
         };
@@ -180,9 +213,11 @@ class ConsensusInputMonitor {
 function classifyFetchError(err) {
     let status = err && err.response && err.response.status;
     if (status === 401 || status === 403) return REASONS.AUTH;
+    if (status === 429) return REASONS.RATE_LIMITED;
     if (status) return REASONS.HTTP_ERROR;
     return REASONS.UNREACHABLE;
 }
 
 module.exports = { ConsensusInputMonitor, REASONS, classifyFetchError,
-                   DEFAULT_THROTTLE_MS, DEFAULT_ALERT_AFTER_FAILURES };
+                   DEFAULT_THROTTLE_MS, DEFAULT_ALERT_AFTER_FAILURES,
+                   DEFAULT_BACKOFF_BASE_MS, DEFAULT_BACKOFF_MAX_MS };
