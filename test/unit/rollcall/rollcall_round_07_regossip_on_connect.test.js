@@ -50,53 +50,67 @@ function openRound(eng, epoch, count) {
     eng.rounds.set(epoch, { epoch, canonical: CANONICAL, members: new Set(PKS), sigs, txids: [] });
 }
 
-describe('RollcallRound push on peer connect', function () {
-    let savedActivation, savedEnv, tmpDir, engines;
+const ctx = { engines: [], tmpDir: null, savedEnv: null, savedActivation: null };
 
-    async function started() {
-        const made = makeEngine();
-        engines.push(made.eng);
-        await made.eng.start();
-        return made;
+async function started() {
+    const made = makeEngine();
+    ctx.engines.push(made.eng);
+    await made.eng.start();
+    return made;
+}
+
+function assertFullReplay(pm, addr) {
+    assert.strictEqual(pm.sendToPeer.callCount, 3);
+    const sent = pm.sendToPeer.getCalls().map(c => {
+        assert.strictEqual(c.args[0], addr);
+        assert.strictEqual(c.args[1], XROLLCALL_SIGN);
+        return c.args[2];
+    });
+    assert.deepStrictEqual(sent.map(d => d.pubkey).sort(), PKS.slice().sort());
+    for (const d of sent) {
+        assert.strictEqual(d.epoch, EPOCH);
+        assert.strictEqual(d.sig, SIGS[PKS.indexOf(d.pubkey)]);
     }
+}
 
+function installHooks() {
     before(function () {
-        savedActivation = rca.ROLLCALL_ACTIVATION.regtest;
+        ctx.savedActivation = rca.ROLLCALL_ACTIVATION.regtest;
         rca.ROLLCALL_ACTIVATION.regtest = 0;
     });
-    after(function () { rca.ROLLCALL_ACTIVATION.regtest = savedActivation; });
+    after(function () { rca.ROLLCALL_ACTIVATION.regtest = ctx.savedActivation; });
 
     beforeEach(function () {
-        engines = [];
-        savedEnv = {};
-        for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rollcall-regossip-'));
-        process.env.ROLLCALL_SIGN_LOG_PATH   = path.join(tmpDir, 'sign.jsonl');
-        process.env.ROLLCALL_SPEND_LOG_PATH  = path.join(tmpDir, 'spend.jsonl');
-        process.env.ROLLCALL_SPEND_STATE_PATH = path.join(tmpDir, 'guard.json');
+        ctx.engines = [];
+        ctx.savedEnv = {};
+        for (const k of ENV_KEYS) { ctx.savedEnv[k] = process.env[k]; delete process.env[k]; }
+        ctx.tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rollcall-regossip-'));
+        process.env.ROLLCALL_SIGN_LOG_PATH    = path.join(ctx.tmpDir, 'sign.jsonl');
+        process.env.ROLLCALL_SPEND_LOG_PATH   = path.join(ctx.tmpDir, 'spend.jsonl');
+        process.env.ROLLCALL_SPEND_STATE_PATH = path.join(ctx.tmpDir, 'guard.json');
     });
 
     afterEach(async function () {
-        for (const e of engines) await e.stop();
+        for (const e of ctx.engines) await e.stop();
         sinon.restore();
         for (const k of ENV_KEYS) {
-            if (savedEnv[k] === undefined) delete process.env[k];
-            else process.env[k] = savedEnv[k];
+            if (ctx.savedEnv[k] === undefined) delete process.env[k];
+            else process.env[k] = ctx.savedEnv[k];
         }
-        fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(ctx.tmpDir, { recursive: true, force: true });
     });
+}
+
+describe('RollcallRound push on peer connect', function () {
+    installHooks();
 
     it('sends every held pair of an in-window round to the connecting address', async function () {
         const { eng, pm } = await started();
         openRound(eng, EPOCH, 3);
         eng.lastTip = EPOCH + 6;
         pm.emit('peer:connect', 'peer-a');
-        assert.strictEqual(pm.sendToPeer.callCount, 3);
-        const sent = pm.sendToPeer.getCalls().map(c => {
-            assert.strictEqual(c.args[0], 'peer-a');
-            assert.strictEqual(c.args[1], XROLLCALL_SIGN);
-            return c.args[2];
-        });
+        assertFullReplay(pm, 'peer-a');
+    });
         assert.deepStrictEqual(sent.map(d => d.pubkey).sort(), PKS.slice().sort());
         for (const d of sent) {
             assert.strictEqual(d.epoch, EPOCH);
