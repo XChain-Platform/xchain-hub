@@ -155,6 +155,7 @@ module.exports = {
     // backlog is draining.
     batchRailStats() {
         let windowRounds = this.windowRoundsInForce();
+        this.refreshInForceMaxPriceAge();
         return {
             // PRICE batch rail (spec section 7). batchUnpublishableCount is the
             // machine-checkable half of the loud ceiling: a non-zero value means a
@@ -218,10 +219,26 @@ module.exports = {
             })(),
             oracleMaxPriceAgeSeconds: this.oracleMaxPriceAgeMs === null
                 ? null : Math.round(this.oracleMaxPriceAgeMs / 1000),
+            // The bound getprice enforces right now (tip-aware), where
+            // oracleMaxPriceAgeSeconds above is the pinned pre-hourly one. Refreshed
+            // in the background by each snapshot, so it trails a poll by one call and
+            // reads null until the first refresh lands or when the hub cannot answer.
+            oracleInForceMaxPriceAgeSeconds: Number.isFinite(this._inForceMaxPriceAgeSeconds)
+                ? this._inForceMaxPriceAgeSeconds : null,
             oracleHourlyMaxPriceAgeSeconds: this.oracleHourlyMaxPriceAgeMs === null
                 ? null : Math.round(this.oracleHourlyMaxPriceAgeMs / 1000),
             spendGuard:          this.spendGuard.stats()
         };
+    },
+
+    refreshInForceMaxPriceAge() {
+        let hub = this.hub;
+        if (!hub || typeof hub.oracleMaxAgeSecondsInForce !== 'function' || this._inForceRefreshing) return;
+        this._inForceRefreshing = true;
+        Promise.resolve().then(() => hub.oracleMaxAgeSecondsInForce())
+            .then((seconds) => { this._inForceMaxPriceAgeSeconds = Number(seconds); })
+            .catch(() => { this._inForceMaxPriceAgeSeconds = null; })
+            .then(() => { this._inForceRefreshing = false; });
     },
 
     windowRoundsInForce() {
