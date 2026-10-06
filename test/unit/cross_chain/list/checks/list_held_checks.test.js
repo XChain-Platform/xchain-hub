@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 
-const { heldRowVerdict } = require('../../../../src/cross_chain/list/held_checks.js');
+const { heldRowVerdict } = require('../../../../../src/cross_chain/list/held_checks.js');
 
 function row(changes = {}) {
     return Object.assign({

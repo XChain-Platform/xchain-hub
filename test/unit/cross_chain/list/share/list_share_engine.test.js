@@ -19,14 +19,14 @@ const fs = require('fs');
 const path = require('path');
 const sinon = require('sinon');
 
-const ListShareEngine = require('../../../../src/cross_chain/list_share_engine.js');
-const registry = require('../../../../src/consensus/gate_registry.js');
-const ah = require('../../../../src/lib/admission_height.js');
+const ListShareEngine = require('../../../../../src/cross_chain/list_share_engine.js');
+const registry = require('../../../../../src/consensus/gate_registry.js');
+const ah = require('../../../../../src/lib/admission_height.js');
 
 const docsDirs = [
     process.env.XCHAIN_DOCS_DIR,
-    path.resolve(__dirname, '..', '..', '..', '..', '..', 'xchain-documentation'),
-    path.resolve(__dirname, '..', '..', '..', '..', '..', '..', '..', '..', 'xchain-documentation')
+    path.resolve(__dirname, '..', '..', '..', '..', '..', '..', 'xchain-documentation'),
+    path.resolve(__dirname, '..', '..', '..', '..', '..', '..', '..', '..', '..', 'xchain-documentation')
 ].filter(Boolean);
 const vectorPath = docsDirs
     .map(dir => path.resolve(dir, 'protocol', 'test-vectors', 'list_share.json'))

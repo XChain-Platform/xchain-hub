@@ -17,7 +17,7 @@
 const assert = require('assert');
 const EventEmitter = require('events');
 
-const persist = require('../../../../src/cross_chain/list/persist.js');
+const persist = require('../../../../../src/cross_chain/list/persist.js');
 
 function row(snapshotId){
     return { snapshot_id: snapshotId, snapshot_block: 50, network: 'regtest' };

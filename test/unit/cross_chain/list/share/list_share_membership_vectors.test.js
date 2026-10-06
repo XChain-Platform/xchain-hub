@@ -22,12 +22,12 @@ const {
     listMembersHash,
     listDelta,
     applyListDelta
-} = require('../../../../src/cross_chain/list/canonical.js');
+} = require('../../../../../src/cross_chain/list/canonical.js');
 const {
     LIST_SHARE_MAX_MEMBERS
-} = require('../../../../src/cross_chain/list/constants.js');
+} = require('../../../../../src/cross_chain/list/constants.js');
 
-const siblingDocsDir = path.join(__dirname, '..', '..', '..', '..', '..', 'xchain-documentation');
+const siblingDocsDir = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'xchain-documentation');
 const docsDirs = process.env.XCHAIN_DOCS_DIR
     ? [process.env.XCHAIN_DOCS_DIR, siblingDocsDir]
     : [siblingDocsDir];
