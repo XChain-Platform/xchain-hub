@@ -300,3 +300,56 @@ describe('bin/consensus-identity.js', function () {
         });
     });
 });
+
+// Under --root the recorded arming list is the MEASURED tree's, the one that armed
+// its digest, never the list of the checkout this script lives in. Driven on scratch
+// trees whose REGTEST_ARMING differs from this one, the case --root exists for.
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    const fs = require('fs');
+    const os = require('os');
+    const { spawnSync } = require('child_process');
+    const REPO_ROOT = path.resolve(__dirname, '../..');
+    const { REGTEST_ARMING } = require('../../src/consensus/gate_registry/shared_rows.js');
+    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort();
+
+    // A scratch hub whose shared_rows.js ends with `tail`, a statement that edits its REGTEST_ARMING.
+    function scratchHubWith(tail) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'consensus-identity-arming-'));
+        for (const rel of ['src', 'bin']) fs.cpSync(path.join(REPO_ROOT, rel), path.join(dir, rel), { recursive: true });
+        fs.copyFileSync(path.join(REPO_ROOT, 'package.json'), path.join(dir, 'package.json'));
+        fs.symlinkSync(path.join(REPO_ROOT, 'node_modules'), path.join(dir, 'node_modules'));
+        fs.appendFileSync(path.join(dir, 'src/consensus/gate_registry/shared_rows.js'), `\n${tail}\n`);
+        return dir;
+    }
+
+    // Run this checkout's script against `root` with every arming variable unset.
+    function runRoot(root) {
+        const env = Object.assign({}, process.env);
+        for (const name of NAMES.concat('XC_SCRATCH_ONLY_REGTEST_ACTIVATION')) delete env[name];
+        return spawnSync(process.execPath, [path.join(REPO_ROOT, 'bin/consensus-identity.js'), '--root', root, '--json'],
+            { encoding: 'utf8', env });
+    }
+
+    describe('--root and the arming list', () => {
+        it('refuses by name a variable only the measured tree arms from', () => {
+            const root = scratchHubWith("REGTEST_ARMING['scratch_only_activation.SCRATCH_ONLY_ACTIVATION'] = "
+                + "{ env: 'XC_SCRATCH_ONLY_REGTEST_ACTIVATION', label: 'SCRATCH', armedHeight: 0, keys: ['regtest'] };");
+            const r = runRoot(root);
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.strictEqual(r.stdout, '');
+            assert.match(r.stderr, /XC_SCRATCH_ONLY_REGTEST_ACTIVATION, which armingEnv has no reader for/);
+        });
+
+        it('records only the variables the measured tree still arms from', () => {
+            const dropped = 'XC_LISTS_MARKET_REGTEST_TIME';
+            assert.ok(NAMES.includes(dropped), `fixture assumes this checkout still arms from ${dropped}`);
+            const root = scratchHubWith('for (const key of Object.keys(REGTEST_ARMING)) '
+                + `if (REGTEST_ARMING[key].env === '${dropped}') delete REGTEST_ARMING[key];`);
+            const r = runRoot(root);
+            assert.strictEqual(r.status, 0, r.stderr);
+            assert.deepStrictEqual(Object.keys(JSON.parse(r.stdout).env), NAMES.filter((name) => name !== dropped));
+        });
+    });
+});
