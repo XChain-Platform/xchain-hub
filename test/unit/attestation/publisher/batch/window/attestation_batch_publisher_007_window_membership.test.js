@@ -36,11 +36,12 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isAdmissionEra } = require('../../../../../../src/consensus/gates/mirror_admission_gate.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -243,124 +244,88 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-function markerAt(windowStart, status){
-            return { network: 'regtest', window_start: windowStart, window_end: windowStart + WINDOW_S,
-                     batch_key: 'k' + windowStart, row_count: 0, status: status || 'landed' };
-        }
+// ------------------------------------------------------------ membership
 
-// ------------------------------------------------------------ the resume floor
+    // Which rows a window holds is decided by the SIGNED effective time, never by the
+    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
+    // cases below are the two a reading cannot settle: that two hubs stamping one row
+    // hours apart still agree on its window, and that the bounds are half-open.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('puts one row in the same window on two hubs whose finalized_at disagree', async function () {
+            let ids  = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
 
-    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
-    // existed. It is not a completion watermark, and deriving it from the newest marker
-    // made it one: sweep() walks past a window it could not publish, so a newer window
-    // can carry a marker while an older one carries none, and a floor above that older
-    // window drops it forever.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still starts a hub with no markers at the window in progress', async function () {
-            let hub = makeHub({ dir: dir });
-            let p   = new AttestationBatchPublisher(hub);
-            let now = 200 * WINDOW_S;
-            p.nowSeconds = () => now;
+            // One logical row, a second before the boundary, stamped by two hubs on
+            // opposite sides of it: hub A finalized it inside the window, hub B's clock
+            // put its copy in the NEXT one. Its signed effective time is identical.
+            let base = makeRow({ effective_time: now - 1 });
+            let hubA = makeHub({ dir: dir, identities: ids });
+            let hubB = makeHub({ dir: dir, identities: [ids[1], ids[0], ids[2]] });
+            hubA.db.responses.push(Object.assign({}, base, { finalized_at: start + 2 }));
+            hubB.db.responses.push(Object.assign({}, base, { finalized_at: now + 3 }));
 
-            expect(await p.resolveFloorWindow()).to.equal(p.windowStartFor(now));
-            p._floorWindow = await p.resolveFloorWindow();
-            expect(await p.pendingWindows(now),
-                'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
+            let proposals = [];
+            hubA.peerManager = { on(){}, removeListener(){},
+                broadcast(type, data){ if(type === AttestationBatchPublisher.XATTESTB_SIGN_REQ) proposals.push(data); } };
+            let sentByB = [];
+            hubB.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sentByB.push({ type, data }); } };
+
+            let pA = makePublisher(hubA), pB = makePublisher(hubB);
+            let rowsA = await pA.selectWindowRows(start, now);
+            let rowsB = await pB.selectWindowRows(start, now);
+            expect(rowsA.length, 'hub A must hold the boundary row for this window').to.equal(1);
+            expect(rowsB.length, 'hub B must hold the SAME row for the SAME window').to.equal(1);
+            expect(rowsA).to.deep.equal(rowsB);
+
+            // The same rows means the same batch key, which is what two hubs have to
+            // agree on before either can co-sign the other's proposal.
+            let windowOf = (rows) => ({ network: 'regtest', window_start: start, window_end: now,
+                                        row_count: rows.length, btc_block_height: ANCHOR, rows: rows });
+            expect(abw.computeBatchKey(windowOf(rowsA))).to.equal(abw.computeBatchKey(windowOf(rowsB)));
+
+            // And the agreement is real, not arithmetic: B co-signs A's actual proposal.
+            pA._floorWindow = start;
+            await pA.publishWindow(start, 4);
+            expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
+            await pB.handleSignReq({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: hubA._identity.getPubkeyHex().toLowerCase(),
+                data: proposals[0]
+            });
+            expect(pB.stats.signRefusals, 'hub B must not refuse a window it holds the same rows for').to.equal(0);
+            expect(sentByB.length).to.equal(1);
+            expect(sentByB[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
         }); }); });
 
-// ------------------------------------------------------------ the resume floor
+// ------------------------------------------------------------ membership
 
-    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
-    // existed. It is not a completion watermark, and deriving it from the newest marker
-    // made it one: sweep() walks past a window it could not publish, so a newer window
-    // can carry a marker while an older one carries none, and a floor above that older
-    // window drops it forever.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('retries a window the sweep walked past, below a newer marker', async function () {
+    // Which rows a window holds is decided by the SIGNED effective time, never by the
+    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
+    // cases below are the two a reading cannot settle: that two hubs stamping one row
+    // hours apart still agree on its window, and that the bounds are half-open.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('takes a row at window_start and leaves one at exactly window_end to the next window', async function () {
             let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            // Birth two windows back, the window after it left behind, the newest one done.
-            hub.db.markers.push(markerAt(now - 3 * WINDOW_S), markerAt(now - WINDOW_S));
-            let p = new AttestationBatchPublisher(hub);
-            p.nowSeconds = () => now;
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            let first = makeRow({ effective_time: start });          // the inclusive lower bound
+            let edge  = makeRow({ effective_time: now });            // the EXCLUSIVE upper bound
+            hub.db.responses.push(first, edge);
 
-            p._floorWindow = await p.resolveFloorWindow();
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+            await p.sweep(now);
 
-            expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
-                .to.equal(now - 3 * WINDOW_S);
-            let pending = await p.pendingWindows(now);
-            expect(pending.map(w => w.windowStart),
-                'the skipped window is inside the catch-up horizon and must come back')
-                .to.deep.equal([now - 2 * WINDOW_S]);
-            // A marker gap is actionable only when the window contains coverage.
-            hub.db.responses.push(makeRow({ effective_time: now - 2 * WINDOW_S + 1 }));
-            p.resolveAnchor = async () => null;
-            await p.publishWindow(pending[0].windowStart, pending[0].age);
-            expect(p.stats.coverageGapsDetected).to.equal(1);
-            expect(p.getStats().coverageGapWindows).to.equal(1);
-        }); }); });
+            let head = decodeHead(p.wires[0]);
+            expect(head.windowEnd).to.equal(now);
+            expect(head.rowCount, 'window_end is exclusive').to.equal(1);
+            let body = abw.reassembleAttestBatch(head, [], isAdmissionEra);
+            expect(body.batch.rows[0].request_id).to.equal(first.request_id);
 
-// ------------------------------------------------------------ the resume floor
-
-    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
-    // existed. It is not a completion watermark, and deriving it from the newest marker
-    // made it one: sweep() walks past a window it could not publish, so a newer window
-    // can carry a marker while an older one carries none, and a floor above that older
-    // window drops it forever.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('never re-exposes a window older than the hub\'s first marker', async function () {
-            let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            // First marker one window back: the three horizon windows below it predate
-            // this hub, and publishing them would be three empty coverage heads at fee cost.
-            hub.db.markers.push(markerAt(now - WINDOW_S));
-            let p = new AttestationBatchPublisher(hub);
-            p.nowSeconds = () => now;
-
-            p._floorWindow = await p.resolveFloorWindow();
-
-            expect(p._floorWindow).to.equal(now - WINDOW_S);
-            expect(await p.pendingWindows(now)).to.deep.equal([]);
-            expect(p.stats.coverageGapsDetected).to.equal(0);
-        }); }); });
-
-// ------------------------------------------------------------ the resume floor
-
-    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
-    // existed. It is not a completion watermark, and deriving it from the newest marker
-    // made it one: sweep() walks past a window it could not publish, so a newer window
-    // can carry a marker while an older one carries none, and a floor above that older
-    // window drops it forever.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('reports no gap when every horizon window already carries a marker', async function () {
-            let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            for(let i = 4; i >= 1; i--) hub.db.markers.push(markerAt(now - i * WINDOW_S));
-            let p = new AttestationBatchPublisher(hub);
-            p.nowSeconds = () => now;
-
-            p._floorWindow = await p.resolveFloorWindow();
-
-            expect(await p.pendingWindows(now)).to.deep.equal([]);
-            expect(p.stats.coverageGapsDetected).to.equal(0);
-        }); }); });
-
-// ------------------------------------------------------------ the resume floor
-
-    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
-    // existed. It is not a completion watermark, and deriving it from the newest marker
-    // made it one: sweep() walks past a window it could not publish, so a newer window
-    // can carry a marker while an older one carries none, and a floor above that older
-    // window drops it forever.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still quarantines an intent-only marker sitting below the lowered floor', async function () {
-            let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            hub.db.markers.push(markerAt(now - 3 * WINDOW_S),
-                                markerAt(now - 2 * WINDOW_S, 'intent'),
-                                markerAt(now - WINDOW_S));
-            let p = new AttestationBatchPublisher(hub);
-            p.nowSeconds = () => now;
-
-            p._floorWindow = await p.resolveFloorWindow();
-
-            expect(await p.pendingWindows(now),
-                'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);
-            expect(p.stats.windowsQuarantined).to.equal(1);
+            // The boundary row is not dropped: it rides the NEXT window, exactly once.
+            await p.sweep(now + WINDOW_S);
+            let next = decodeHead(p.wires[1]);
+            expect(next.windowStart).to.equal(now);
+            expect(next.rowCount).to.equal(1);
+            expect(abw.reassembleAttestBatch(next, [], isAdmissionEra).batch.rows[0].request_id).to.equal(edge.request_id);
         }); }); });
 }

@@ -36,11 +36,11 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;

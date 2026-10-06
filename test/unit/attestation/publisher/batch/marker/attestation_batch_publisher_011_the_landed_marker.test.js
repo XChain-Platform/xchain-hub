@@ -36,12 +36,11 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { MAX_CATCHUP_WINDOWS } = require('../../../../../src/attestation/batch_publisher/constants.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -112,15 +111,6 @@ function updateMarker(markers, args){
 function doDbQuery(responses, markers, sql, args){
             if(/FROM attestation_responses/i.test(sql)) return selectResponses(responses, sql, args);
             if(/^DELETE FROM attest_published_batches/i.test(sql)) return deleteMarker(markers, args);
-            if(/SELECT MIN\(window_start\).*window_start < \?/i.test(sql)){
-                let [network, status, before] = args;
-                let starts = markers.filter(m => m.network === network && m.status === status &&
-                                                   Number(m.window_start) < Number(before))
-                                    .map(m => Number(m.window_start));
-                return [{ oldest: starts.length ? Math.min.apply(null, starts) : null,
-                          newest: starts.length ? Math.max.apply(null, starts) : null,
-                          count: starts.length }];
-            }
             // The floor read. BOTH aggregates are answered from the same row set, so a
             // publisher that went back to flooring on the newest marker reads a real
             // value here rather than an undefined the test would silently coerce.
@@ -129,14 +119,8 @@ function doDbQuery(responses, markers, sql, args){
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
                 return [{ oldest: Number.isFinite(oldest) ? oldest : null, newest: newest || null }];
             }
-            if(/SELECT window_start FROM attest_published_batches.*window_start >= \?/i.test(sql)){
-                return markers.filter(m => m.network === args[0] && m.status === args[1] &&
-                                           Number(m.window_start) >= Number(args[2]))
-                              .map(m => ({ window_start: m.window_start }));
-            }
             if(/SELECT window_start FROM attest_published_batches/i.test(sql)){
-                return markers.filter(m => m.network === args[0] && m.status === args[1])
-                              .map(m => ({ window_start: m.window_start }));
+                return markers.filter(m => m.status === args[1]).map(m => ({ window_start: m.window_start }));
             }
             if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
@@ -259,121 +243,63 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-// ------------------------------------------------------------ publishing
-
-
-
-        // A hub whose Bitcoin indexer never called pushchaintip publishes nothing, ever.
-        // That is a one-line configuration gap presenting as total silence, so the defer
-        // has to name the missing thing; and it has to name it ONCE, because the sweep
-        // runs every window and a regtest window is seconds long.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names the missing BTC chain tip when it defers, once per cause', async function () {
+// ------------------------------------------------------------ landing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('records the window from which an otherwise empty marker history is tracking coverage', async function () {
             let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            let p = makePublisher(hub);
+            let p   = makePublisher(hub);
             let now = 200 * WINDOW_S;
-            for(let i = 0; i <= 4; i++)
-                hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + i * WINDOW_S + 1 }));
-            p._floorWindow = now - WINDOW_S;
 
-            let warned = [];
-            let realWarn = console.warn;
-            console.warn = (msg) => warned.push(String(msg));
-            try {
-                await p.sweep(now);
-                await p.sweep(now + WINDOW_S);
-            } finally {
-                console.warn = realWarn;
-            }
+            await p.hydrateMarkers(now);
 
-            let anchorWarnings = warned.filter(w => /no BTC anchor/.test(w));
-            expect(anchorWarnings.length, 'one line per cause, not one per window').to.equal(1);
-            expect(anchorWarnings[0]).to.match(/chain_tips/);
-            expect(anchorWarnings[0], 'the operator has to be told which call is missing')
-                .to.match(/pushchaintip/);
-            expect(p.getStats().anchorFailure).to.match(/chain_tips/);
-
-            // A DIFFERENT cause speaks again: the latch is on the reason, not on the fact
-            // that something once failed.
-            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
-            warned.length = 0;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now + 2 * WINDOW_S); } finally { console.warn = realWarn; }
-            expect(warned.filter(w => /connection lost/.test(w)).length).to.equal(1);
-
-            // And it clears once the tip resolves, so a LATER outage of the same cause is
-            // a new episode rather than a swallowed one.
-            hub.db.getChainTip = async () => ({ blockHeight: ANCHOR, blockTime: 1 });
-            await p.sweep(now + 3 * WINDOW_S);
-            expect(p.getStats().anchorFailure).to.equal(null);
-
-            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
-            warned.length = 0;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
-            expect(warned.filter(w => /connection lost/.test(w)).length,
-                'a recovered rail that fails again must warn again').to.equal(1);
+            expect(hub.db.markers).to.deep.equal([{
+                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
+                batch_key: null, row_count: 0, status: 'tracking'
+            }]);
+            expect(await p.getMarker(now),
+                'tracking is evidence of participation, not a completed window').to.equal(null);
         }); }); });
 
-// ------------------------------------------------------------ publishing
-
-        // so a hub with no pushed row anchors on the tip its own round observed.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('anchors on the tip the attestation poll observed when no chain tip was pushed', async function () {
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a landed outcome', async function () {
             let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            hub.getAttestationRound = () => ({
-                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
-            });
-            let p = makePublisher(hub);
+            let p   = makePublisher(hub);
             let now = 200 * WINDOW_S;
-            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
-            p._floorWindow = now - WINDOW_S;
 
-            let result = await p.sweep(now);
+            await p.hydrateMarkers(now);
+            await p.recordLandedWindow(now, now + WINDOW_S, 'dogetxid', 0);
 
-            expect(result.published).to.equal(1);
-            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR - 3);
-            expect(p.getStats().anchorSource).to.equal('observed');
-            expect(p.getStats().anchorFailure).to.equal(null);
+            expect(hub.db.markers).to.have.length(1);
+            expect(hub.db.marker(now)).to.include({
+                window_start: now, window_end: now + WINDOW_S,
+                row_count: 0, status: 'landed'
+            });
         }); }); });
 
-// ------------------------------------------------------------ publishing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('prefers the pushed chain tip over the observed one where both exist', async function () {
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a publish intent before sending', async function () {
             let hub = makeHub({ dir: dir });
-            hub.getAttestationRound = () => ({
-                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
-            });
-            let p = makePublisher(hub);
+            let p   = makePublisher(hub);
             let now = 200 * WINDOW_S;
-            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
-            p._floorWindow = now - WINDOW_S;
+            let window = { window_start: now, window_end: now + WINDOW_S, row_count: 2 };
 
+            await p.hydrateMarkers(now);
+            await p.recordIntent(window, 'batchkey');
+
+            expect(hub.db.markers).to.deep.equal([{
+                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
+                batch_key: 'batchkey', row_count: 2, status: 'intent'
+            }]);
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('stops a window the federation has already landed from being published', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+
+            await p.recordLandedWindow(start, now, 'dogetxid', 3);
+            p._floorWindow = start;
             await p.sweep(now);
 
-            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR);
-            expect(p.getStats().anchorSource).to.equal('pushed');
-        }); }); });
-
-// ------------------------------------------------------------ publishing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names both missing sources when neither the pushed nor the observed tip resolves', async function () {
-            let hub = makeHub({ dir: dir });
-            hub.db.setTip(null);
-            hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
-            let p = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
-            p._floorWindow = now - WINDOW_S;
-
-            let warned = [];
-            let realWarn = console.warn;
-            console.warn = (msg) => warned.push(String(msg));
-            try { await p.sweep(now); } finally { console.warn = realWarn; }
-
             expect(p.wires.length).to.equal(0);
-            let line = warned.find(w => /no BTC anchor/.test(w));
-            expect(line).to.match(/chain_tips/);
-            expect(line).to.match(/pushchaintip/);
-            expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
-            expect(p.getStats().anchorSource).to.equal(null);
+            expect(hub.db.marker(start).status).to.equal('landed');
         }); }); });
 }

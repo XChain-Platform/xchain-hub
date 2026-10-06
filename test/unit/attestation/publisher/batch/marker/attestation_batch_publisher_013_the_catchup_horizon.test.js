@@ -12,10 +12,19 @@
  *
  **********************************************************************
  *
- * XChain Hub - AttestationBatchPublisher unit tests: a head the encoder refused at
- * create_tx. The encoder answers that refusal as an HTTP 200 JSON-RPC error, so no
- * status or transport code proves it unsent; the default pipeline's own neverSent tag
- * on a build-stage failure is what lets the window withdraw its marker and rebuild.
+ * XChain Hub - AttestationBatchPublisher unit tests (the ATTEST response-mirror
+ * design, §6.2).
+ *
+ * The cases here are the ones a reading of the diff cannot settle: that the window
+ * is on the unix hour and not on process start; that by the operator ruling of
+ * 2026-10-02 an empty window records a local skipped marker and publishes nothing,
+ * giving up chain-only proof that a quiet hour was quiet; that an over-cap
+ * window dead-letters loudly rather than truncating itself; that a restart cannot pay
+ * for a window twice; and that a window whose quorum was unavailable is retried with
+ * the SAME bytes rather than a new proposal. The DB is a small in-memory pair of
+ * tables rather than call-counting
+ * stubs, because "the second publisher saw the first one's marker" is exactly the
+ * assertion a canned stub cannot fail.
  *
  ********************************************************************/
 
@@ -27,11 +36,12 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { MAX_CATCHUP_WINDOWS } = require('../../../../../../src/attestation/batch_publisher/constants.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -102,6 +112,15 @@ function updateMarker(markers, args){
 function doDbQuery(responses, markers, sql, args){
             if(/FROM attestation_responses/i.test(sql)) return selectResponses(responses, sql, args);
             if(/^DELETE FROM attest_published_batches/i.test(sql)) return deleteMarker(markers, args);
+            if(/SELECT MIN\(window_start\).*window_start < \?/i.test(sql)){
+                let [network, status, before] = args;
+                let starts = markers.filter(m => m.network === network && m.status === status &&
+                                                   Number(m.window_start) < Number(before))
+                                    .map(m => Number(m.window_start));
+                return [{ oldest: starts.length ? Math.min.apply(null, starts) : null,
+                          newest: starts.length ? Math.max.apply(null, starts) : null,
+                          count: starts.length }];
+            }
             // The floor read. BOTH aggregates are answered from the same row set, so a
             // publisher that went back to flooring on the newest marker reads a real
             // value here rather than an undefined the test would silently coerce.
@@ -110,8 +129,14 @@ function doDbQuery(responses, markers, sql, args){
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
                 return [{ oldest: Number.isFinite(oldest) ? oldest : null, newest: newest || null }];
             }
+            if(/SELECT window_start FROM attest_published_batches.*window_start >= \?/i.test(sql)){
+                return markers.filter(m => m.network === args[0] && m.status === args[1] &&
+                                           Number(m.window_start) >= Number(args[2]))
+                              .map(m => ({ window_start: m.window_start }));
+            }
             if(/SELECT window_start FROM attest_published_batches/i.test(sql)){
-                return markers.filter(m => m.status === args[1]).map(m => ({ window_start: m.window_start }));
+                return markers.filter(m => m.network === args[0] && m.status === args[1])
+                              .map(m => ({ window_start: m.window_start }));
             }
             if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
@@ -203,6 +228,19 @@ function makeHub(opts){
     };
 }
 
+// A publisher wired to a capturing broadcaster. Returns both so a test can read the
+// wires that actually went out.
+function makePublisher(hub){
+    let p = new AttestationBatchPublisher(hub);
+    let sent = [];
+    p.setBroadcastHook(async (payload) => {
+        sent.push(payload);
+        return { txid: 'tx' + sent.length };
+    });
+    p.wires = sent;
+    return p;
+}
+
 function decodeHead(wire){
     let params = wire.split('|').slice(1);
     let head   = abw.parseAttestBatchHead(params);
@@ -210,130 +248,56 @@ function decodeHead(wire){
     return head;
 }
 
-// The encoder refusing create_tx the way it really does: HTTP 200, a JSON-RPC error
-// body, code -32010 and a machine-readable reason, rethrown by EncoderClient with no
-// `.response` and no `.code`.
-function createTxRefusal(reason){
-    return Object.assign(new Error('Encoder RPC error: Insufficient funds'),
-                         { rpcCode: -32010, rpcData: { reason: reason || 'INSUFFICIENT_FUNDS' } });
-}
-
-// An encoder stub whose create_tx answers from `script` in order, then builds; every
-// broadcast_tx succeeds and is recorded.
-function makeEncoder(script){
-    let enc = { createCalls: 0, sent: [] };
-    enc.getUtxos = async () => [{ txid: 'aa'.repeat(32), vout: 0, value: 100000000, confirmations: 6 }];
-    enc.createTx = async (params) => {
-        let e = script[enc.createCalls++];
-        if(e) throw e;
-        return { psbt: 'psbt:' + params.data };
-    };
-    enc.broadcastTx = async (txHex) => { enc.sent.push(txHex); return { txid: 'tx' + enc.sent.length }; };
-    return enc;
-}
-
-// A publisher on its real default pipeline, with the encoder and wallet hook stubbed.
-function makeDefaultPipelinePublisher(hub, encoder){
-    let p = new AttestationBatchPublisher(hub);
-    p.encoder = encoder;
-    p.dogeAddress = 'DTestAddressXXXXXXXXXXXXXXXXXXXXXX';
-    p.setWalletSignHook(async (psbt) => 'signed:' + psbt);
-    return p;
-}
-
+{
 let dir;
 
-function registerClassifierTests() {
-    it('reads a neverSent tag as never sent and not ambiguous', function () {
-        let e = Object.assign(createTxRefusal(), { neverSent: true });
-        expect(isNeverSentError(e)).to.equal(true);
-        expect(isAmbiguousSendError(e)).to.equal(false);
-        let timeout = Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED', neverSent: true });
-        expect(isNeverSentError(timeout)).to.equal(true);
-        expect(isAmbiguousSendError(timeout)).to.equal(false);
-    });
+const hookAt10719 = function () {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-batch-'));
+    };
 
-    it('lets fundsCommitted outrank a neverSent tag in both predicates', function () {
-        let e = Object.assign(createTxRefusal(), { neverSent: true, fundsCommitted: true });
-        expect(isNeverSentError(e)).to.equal(false);
-        expect(isAmbiguousSendError(e)).to.equal(true);
-    });
-
-    it('does not read an untagged create_tx refusal as never sent', function () {
-        expect(isNeverSentError(createTxRefusal())).to.equal(false);
-        expect(isNeverSentError(Object.assign(createTxRefusal(), { neverSent: 'true' }))).to.equal(false);
-    });
-}
-
-function registerPipelineTaggingTests() {
-    it('tags a create_tx refusal, a get_utxos timeout and a missing PSBT, but never a broadcast failure', async function () {
-        let hub = makeHub({ dir: dir });
-        let p = makeDefaultPipelinePublisher(hub, makeEncoder([createTxRefusal()]));
-        let err = await p.defaultBroadcast('P').then(() => null, (e) => e);
-        expect(err.neverSent).to.equal(true);
-        expect(err.rpcCode).to.equal(-32010);
-
-        p.encoder.getUtxos = async () => { throw Object.assign(new Error('timeout'), { code: 'ECONNABORTED' }); };
-        expect((await p.defaultBroadcast('P').then(() => null, (e) => e)).neverSent).to.equal(true);
-
-        p = makeDefaultPipelinePublisher(hub, makeEncoder([]));
-        p.encoder.createTx = async () => ({});
-        expect((await p.defaultBroadcast('P').then(() => null, (e) => e)).neverSent).to.equal(true);
-
-        p = makeDefaultPipelinePublisher(hub, makeEncoder([]));
-        p.encoder.broadcastTx = async () => { throw new Error('socket hang up'); };
-        let sendErr = await p.defaultBroadcast('P').then(() => null, (e) => e);
-        expect(sendErr.neverSent).to.equal(undefined);
-        expect(isAmbiguousSendError(sendErr)).to.equal(true);
-    });
-}
-
-function registerWindowTests() {
-    it('withdraws the intent marker on a create_tx head refusal and lands the window next cycle', async function () {
-        let hub = makeHub({ dir: dir });
-        let now = 200 * WINDOW_S;
-        let start = now - WINDOW_S;
-        hub.db.responses.push(makeRow({ effective_time: start + 1 }));
-        let enc = makeEncoder([createTxRefusal()]);
-        let p = makeDefaultPipelinePublisher(hub, enc);
-        p._floorWindow = start;
-
-        await p.sweep(now);
-        expect(enc.sent.length, 'the refused head never went out').to.equal(0);
-        expect(hub.db.marker(start), 'no intent marker may strand an unsent window').to.equal(null);
-        expect(p.stats.windowsRefusalRetried).to.equal(1);
-        expect(p.spendGuard.spentInWindow()).to.equal(0);
-
-        let result = await p.sweep(now);
-        expect(result.published, 'the rebuilt window must publish').to.equal(1);
-        expect(enc.sent.length).to.equal(1);
-        expect(decodeHead(enc.sent[0].replace(/^signed:psbt:/, '')).windowStart).to.equal(start);
-        expect(hub.db.marker(start).status).to.equal('sent');
-    });
-
-    it('still quarantines once create_tx refusals reach the attempt bound', async function () {
-        let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_MAX_REFUSAL_ATTEMPTS: '2' } });
-        let now = 200 * WINDOW_S;
-        let start = now - WINDOW_S;
-        hub.db.responses.push(makeRow({ effective_time: start + 1 }));
-        let enc = makeEncoder([createTxRefusal(), createTxRefusal(), createTxRefusal(), createTxRefusal()]);
-        let p = makeDefaultPipelinePublisher(hub, enc);
-        p._floorWindow = start;
-
-        for (let i = 0; i < 4; i++) await p.sweep(now);
-        expect(enc.sent.length).to.equal(0);
-        expect(p.stats.windowsRefusalRetried).to.equal(1);
-        expect(p.stats.windowsQuarantined).to.equal(1);
-    });
-}
-
-describe('AttestationBatchPublisher: a head refused at create_tx', function () {
-    beforeEach(function () { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-batch-')); });
-    afterEach(function () {
+const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
-    });
+    };
 
-    describe('the classifier', registerClassifierTests);
-    describe('the default pipeline', registerPipelineTaggingTests);
-    describe('the window', registerWindowTests);
-});
+
+        // The set is deliberately report-once process memory, so entries remain after
+        // their windows age out. The public statistic is narrower: it counts only the
+        // quarantines a bounded sweep can still reach.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('drops quarantines from the statistic when they leave the catch-up horizon', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let oldestReachable = now - MAX_CATCHUP_WINDOWS * WINDOW_S;
+            let newestReachable = now - WINDOW_S;
+            hub.db.markers.push(
+                { network: 'regtest', window_start: oldestReachable, status: 'intent' },
+                { network: 'regtest', window_start: newestReachable, status: 'intent' }
+            );
+            let p = makePublisher(hub);
+            p.nowSeconds = () => now;
+
+            let realError = console.error;
+            try {
+                console.error = () => {};
+                await p.hydrateMarkers();
+            } finally {
+                console.error = realError;
+            }
+
+            expect(p._quarantined.size, 'both reachable markers stay in report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the boundary window is still inside the horizon').to.equal(2);
+
+            p.nowSeconds = () => now + WINDOW_S;
+            expect(p._quarantined.size, 'aging does not erase report-once memory').to.equal(2);
+            expect(p.getStats().quarantinedWindows,
+                'the marker below the moving horizon is not actionable').to.equal(1);
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+
+
+
+        // A federation that shares one Bitcoin indexer has one hub with a chain_tips
+        // row and N-1 without (testnet 2026-09-07: four of five validators). Every
+        // one of them polls that indexer for requests, and the poll reports the tip,
+}

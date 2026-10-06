@@ -36,12 +36,11 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -244,88 +243,111 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-// ------------------------------------------------------------ membership
-
-    // Which rows a window holds is decided by the SIGNED effective time, never by the
-    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
-    // cases below are the two a reading cannot settle: that two hubs stamping one row
-    // hours apart still agree on its window, and that the bounds are half-open.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('puts one row in the same window on two hubs whose finalized_at disagree', async function () {
-            let ids  = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
-            let now   = 200 * WINDOW_S;
-            let start = now - WINDOW_S;
-
-            // One logical row, a second before the boundary, stamped by two hubs on
-            // opposite sides of it: hub A finalized it inside the window, hub B's clock
-            // put its copy in the NEXT one. Its signed effective time is identical.
-            let base = makeRow({ effective_time: now - 1 });
-            let hubA = makeHub({ dir: dir, identities: ids });
-            let hubB = makeHub({ dir: dir, identities: [ids[1], ids[0], ids[2]] });
-            hubA.db.responses.push(Object.assign({}, base, { finalized_at: start + 2 }));
-            hubB.db.responses.push(Object.assign({}, base, { finalized_at: now + 3 }));
-
-            let proposals = [];
-            hubA.peerManager = { on(){}, removeListener(){},
-                broadcast(type, data){ if(type === AttestationBatchPublisher.XATTESTB_SIGN_REQ) proposals.push(data); } };
-            let sentByB = [];
-            hubB.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sentByB.push({ type, data }); } };
-
-            let pA = makePublisher(hubA), pB = makePublisher(hubB);
-            let rowsA = await pA.selectWindowRows(start, now);
-            let rowsB = await pB.selectWindowRows(start, now);
-            expect(rowsA.length, 'hub A must hold the boundary row for this window').to.equal(1);
-            expect(rowsB.length, 'hub B must hold the SAME row for the SAME window').to.equal(1);
-            expect(rowsA).to.deep.equal(rowsB);
-
-            // The same rows means the same batch key, which is what two hubs have to
-            // agree on before either can co-sign the other's proposal.
-            let windowOf = (rows) => ({ network: 'regtest', window_start: start, window_end: now,
-                                        row_count: rows.length, btc_block_height: ANCHOR, rows: rows });
-            expect(abw.computeBatchKey(windowOf(rowsA))).to.equal(abw.computeBatchKey(windowOf(rowsB)));
-
-            // And the agreement is real, not arithmetic: B co-signs A's actual proposal.
-            pA._floorWindow = start;
-            await pA.publishWindow(start, 4);
-            expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
-            await pB.handleSignReq({
-                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
-                sig_pubkey: hubA._identity.getPubkeyHex().toLowerCase(),
-                data: proposals[0]
+// A broadcaster that throws the scripted error for call N, and succeeds once the
+        // script runs out. `calls` counts every attempt, thrown or not.
+        function makeScriptedPublisher(hub, script){
+            let p = new AttestationBatchPublisher(hub);
+            let sent = [];
+            p.calls = 0;
+            p.setBroadcastHook(async (payload) => {
+                let e = script[p.calls++];
+                if(e) throw e;
+                sent.push(payload);
+                return { txid: 'tx' + sent.length };
             });
-            expect(pB.stats.signRefusals, 'hub B must not refuse a window it holds the same rows for').to.equal(0);
-            expect(sentByB.length).to.equal(1);
-            expect(sentByB[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
+            p.wires = sent;
+            return p;
+        }
+
+function neverConnected(){
+            return Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        }
+
+// Rows whose payloads are random hex, so the deflated body cannot fit one wire
+        // and the window is genuinely a head plus continuations.
+        function chunkedRows(start){
+            let out = [];
+            for (let i = 0; i < 6; i++)
+                out.push(makeRow({ effective_time: start + 1, request_action_index: i,
+                                   response_payload: crypto.randomBytes(3000).toString('hex') }));
+            return out;
+        }
+
+function captureErrors(){
+            let lines = [];
+            let real = console.error;
+            console.error = (msg) => lines.push(String(msg));
+            return { lines, restore(){ console.error = real; } };
+        }
+
+// ------------------------------------------------------------ refused before sending
+
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // The whole point of the marker. An ambiguous head may be in a mempool this hub
+        // cannot see, so the window stays latched and an operator reconciles it.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still latches and quarantines an AMBIGUOUS head failure', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [new Error('socket hang up')]);
+            p._floorWindow = start;
+
+            let cap = captureErrors();
+            try { await p.sweep(now); } finally { cap.restore(); }
+
+            expect(p.wires.length).to.equal(0);
+            expect(hub.db.marker(start).status,
+                'an ambiguous send must keep its intent marker').to.equal('intent');
+            expect(p.stats.windowsRefusalRetried).to.equal(0);
+            expect(cap.lines.filter(l => /AMBIGUOUSLY/.test(l)).length).to.equal(1);
+
+            // And the next sweep refuses it rather than paying a second time.
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(0);
+            expect(p.stats.windowsQuarantined).to.equal(1);
         }); }); });
 
-// ------------------------------------------------------------ membership
+// ------------------------------------------------------------ refused before sending
 
-    // Which rows a window holds is decided by the SIGNED effective time, never by the
-    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
-    // cases below are the two a reading cannot settle: that two hubs stamping one row
-    // hours apart still agree on its window, and that the bounds are half-open.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('window membership', function () { it('takes a row at window_start and leaves one at exactly window_end to the next window', async function () {
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // A continuation failing proves nothing about the head, which is already on
+        // chain and already paid for. Provably-unsent or not, the window latches.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still latches when a wire AFTER the head fails, even provably unsent', async function () {
             let hub = makeHub({ dir: dir });
-            let now   = 200 * WINDOW_S;
+            let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
-            let first = makeRow({ effective_time: start });          // the inclusive lower bound
-            let edge  = makeRow({ effective_time: now });            // the EXCLUSIVE upper bound
-            hub.db.responses.push(first, edge);
-
-            let p = makePublisher(hub);
+            for (let r of chunkedRows(start)) hub.db.responses.push(r);
+            let p = makeScriptedPublisher(hub, [null, neverConnected()]);
             p._floorWindow = start;
+
+            let cap = captureErrors();
+            try { await p.sweep(now); } finally { cap.restore(); }
+
+            expect(p.calls, 'this window must be more than one wire for the case to mean anything')
+                .to.be.at.least(2);
+            expect(p.wires.length, 'the head went out').to.equal(1);
+            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(p.stats.windowsRefusalRetried).to.equal(0);
+            expect(cap.lines.filter(l => /CRITICAL - wire 2\//.test(l)).length).to.equal(1);
+
             await p.sweep(now);
-
-            let head = decodeHead(p.wires[0]);
-            expect(head.windowEnd).to.equal(now);
-            expect(head.rowCount, 'window_end is exclusive').to.equal(1);
-            let body = abw.reassembleAttestBatch(head, [], isAdmissionEra);
-            expect(body.batch.rows[0].request_id).to.equal(first.request_id);
-
-            // The boundary row is not dropped: it rides the NEXT window, exactly once.
-            await p.sweep(now + WINDOW_S);
-            let next = decodeHead(p.wires[1]);
-            expect(next.windowStart).to.equal(now);
-            expect(next.rowCount).to.equal(1);
-            expect(abw.reassembleAttestBatch(next, [], isAdmissionEra).batch.rows[0].request_id).to.equal(edge.request_id);
+            expect(p.stats.windowsQuarantined).to.equal(1);
         }); }); });
 }

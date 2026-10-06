@@ -36,11 +36,11 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -243,134 +243,124 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-// A broadcaster that throws the scripted error for call N, and succeeds once the
-        // script runs out. `calls` counts every attempt, thrown or not.
-        function makeScriptedPublisher(hub, script){
+function markerAt(windowStart, status){
+            return { network: 'regtest', window_start: windowStart, window_end: windowStart + WINDOW_S,
+                     batch_key: 'k' + windowStart, row_count: 0, status: status || 'landed' };
+        }
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still starts a hub with no markers at the window in progress', async function () {
+            let hub = makeHub({ dir: dir });
+            let p   = new AttestationBatchPublisher(hub);
+            let now = 200 * WINDOW_S;
+            p.nowSeconds = () => now;
+
+            expect(await p.resolveFloorWindow()).to.equal(p.windowStartFor(now));
+            p._floorWindow = await p.resolveFloorWindow();
+            expect(await p.pendingWindows(now),
+                'a new hub must not backfill windows that closed before it existed').to.deep.equal([]);
+        }); }); });
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('retries a window the sweep walked past, below a newer marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            // Birth two windows back, the window after it left behind, the newest one done.
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S), markerAt(now - WINDOW_S));
             let p = new AttestationBatchPublisher(hub);
-            let sent = [];
-            p.calls = 0;
-            p.setBroadcastHook(async (payload) => {
-                let e = script[p.calls++];
-                if(e) throw e;
-                sent.push(payload);
-                return { txid: 'tx' + sent.length };
-            });
-            p.wires = sent;
-            return p;
-        }
+            p.nowSeconds = () => now;
 
-// The encoder refusing the call before it builds anything: insufficient funds, or
-        // change from the previous window still unconfirmed. HTTP 4xx, nothing sent.
-        function httpRefusal(){
-            return Object.assign(new Error('Encoder RPC error: insufficient funds'),
-                                 { response: { status: 400 } });
-        }
+            p._floorWindow = await p.resolveFloorWindow();
 
-function captureErrors(){
-            let lines = [];
-            let real = console.error;
-            console.error = (msg) => lines.push(String(msg));
-            return { lines, restore(){ console.error = real; } };
-        }
+            expect(p._floorWindow, 'the floor is the hub\'s OLDEST marker, not its newest')
+                .to.equal(now - 3 * WINDOW_S);
+            let pending = await p.pendingWindows(now);
+            expect(pending.map(w => w.windowStart),
+                'the skipped window is inside the catch-up horizon and must come back')
+                .to.deep.equal([now - 2 * WINDOW_S]);
+            // A marker gap is actionable only when the window contains coverage.
+            hub.db.responses.push(makeRow({ effective_time: now - 2 * WINDOW_S + 1 }));
+            p.resolveAnchor = async () => null;
+            await p.publishWindow(pending[0].windowStart, pending[0].age);
+            expect(p.stats.coverageGapsDetected).to.equal(1);
+            expect(p.getStats().coverageGapWindows).to.equal(1);
+        }); }); });
 
-// ------------------------------------------------------------ refused before sending
+// ------------------------------------------------------------ the resume floor
 
-    // The intent marker exists to stop a SECOND fee for a window that may
-    // already carry a transaction. A head that was refused BEFORE it could be sent
-    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
-    // marker there quarantined the window forever, so one transient refusal on an hourly
-    // window dropped that hour out of the chain-only reconstruction permanently (AT5
-    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
-    // importantly, which ones still must not.
-
-
-        // A refusal that never clears must not re-propose forever: the federation's
-        // signing capacity is the scarce thing. At the bound it latches like any other
-        // failure, once, and quarantines from then on.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('latches exactly once when the attempt bound is reached', async function () {
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('never re-exposes a window older than the hub\'s first marker', async function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;
-            let start = now - WINDOW_S;
-            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
-            let p = makeScriptedPublisher(hub, [httpRefusal(), httpRefusal(), httpRefusal(), httpRefusal()]);
-            p._floorWindow = start;
-            expect(p.maxRefusalAttempts).to.equal(3);
+            // First marker one window back: the three horizon windows below it predate
+            // this hub, and publishing them would be three empty coverage heads at fee cost.
+            hub.db.markers.push(markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p.nowSeconds = () => now;
 
-            let cap = captureErrors();
-            try {
-                await p.sweep(now);          // attempt 1: withdrawn, retried
-                await p.sweep(now);          // attempt 2: withdrawn, retried
-                await p.sweep(now);          // attempt 3: the bound, latch
-                await p.sweep(now);          // quarantined, no fourth broadcast attempt
-            } finally { cap.restore(); }
+            p._floorWindow = await p.resolveFloorWindow();
 
-            expect(p.stats.windowsRefusalRetried).to.equal(2);
-            expect(p.calls, 'the latched window must not be broadcast again').to.equal(3);
-            expect(hub.db.marker(start).status).to.equal('intent');
-            expect(cap.lines.filter(l => /CRITICAL - wire 1\//.test(l)).length,
-                'a permanently refused window latches once, not once per sweep').to.equal(1);
+            expect(p._floorWindow).to.equal(now - WINDOW_S);
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        }); }); });
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('reports no gap when every horizon window already carries a marker', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            for(let i = 4; i >= 1; i--) hub.db.markers.push(markerAt(now - i * WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p.nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(await p.pendingWindows(now)).to.deep.equal([]);
+            expect(p.stats.coverageGapsDetected).to.equal(0);
+        }); }); });
+
+// ------------------------------------------------------------ the resume floor
+
+    // The floor exists to stop a BRAND-NEW hub backfilling windows that closed before it
+    // existed. It is not a completion watermark, and deriving it from the newest marker
+    // made it one: sweep() walks past a window it could not publish, so a newer window
+    // can carry a marker while an older one carries none, and a floor above that older
+    // window drops it forever.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('resolveFloorWindow', function () { it('still quarantines an intent-only marker sitting below the lowered floor', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            hub.db.markers.push(markerAt(now - 3 * WINDOW_S),
+                                markerAt(now - 2 * WINDOW_S, 'intent'),
+                                markerAt(now - WINDOW_S));
+            let p = new AttestationBatchPublisher(hub);
+            p.nowSeconds = () => now;
+
+            p._floorWindow = await p.resolveFloorWindow();
+
+            expect(await p.pendingWindows(now),
+                'a crashed-mid-send window is never re-published automatically').to.deep.equal([]);
             expect(p.stats.windowsQuarantined).to.equal(1);
-        }); }); });
-
-// ------------------------------------------------------------ refused before sending
-
-    // The intent marker exists to stop a SECOND fee for a window that may
-    // already carry a transaction. A head that was refused BEFORE it could be sent
-    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
-    // marker there quarantined the window forever, so one transient refusal on an hourly
-    // window dropped that hour out of the chain-only reconstruction permanently (AT5
-    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
-    // importantly, which ones still must not.
-
-
-        // The withdraw is guarded on status = 'intent'. A batch the federation landed
-        // between the send and the failure leaves a `landed` row, and that row is the
-        // authoritative coverage record: the retry path must not be able to remove it.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('cannot withdraw a marker that is no longer intent-only', async function () {
-            let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            let start = now - WINDOW_S;
-            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
-                                  row_count: 3, status: 'landed', txid: 'dogetxid' });
-            let p = makeScriptedPublisher(hub, []);
-
-            await p.clearIntent(start);
-
-            expect(hub.db.marker(start).status).to.equal('landed');
-            expect(hub.db.marker(start).txid).to.equal('dogetxid');
-        }); }); });
-
-// ------------------------------------------------------------ refused before sending
-
-    // The intent marker exists to stop a SECOND fee for a window that may
-    // already carry a transaction. A head that was refused BEFORE it could be sent
-    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
-    // marker there quarantined the window forever, so one transient refusal on an hourly
-    // window dropped that hour out of the chain-only reconstruction permanently (AT5
-    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
-    // importantly, which ones still must not.
-
-
-        // A crash marker is a genuinely unknown outcome and stays quarantined across a
-        // restart: the retry path must not have widened what hydrateMarkers admits.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still quarantines a genuine intent-only crash marker after a restart', async function () {
-            let hub = makeHub({ dir: dir });
-            let now = 200 * WINDOW_S;
-            let start = now - WINDOW_S;
-            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
-                                  row_count: 1, status: 'intent', txid: null });
-
-            let p = makeScriptedPublisher(hub, []);
-            let cap = captureErrors();
-            // The suite's own clock, because the hydrate is bounded to the catch-up
-            // horizon and this window is one below `now` rather than one below wall clock.
-            try { await p.hydrateMarkers(now); } finally { cap.restore(); }
-
-            expect(p._quarantined.has(start)).to.equal(true);
-            expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);
-
-            p._floorWindow = start;
-            await p.sweep(now);
-            expect(p.wires.length).to.equal(0);
         }); }); });
 }

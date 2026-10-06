@@ -36,11 +36,11 @@ const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -259,18 +259,11 @@ const hookAt10827 = function () {
             return p;
         }
 
-function neverConnected(){
-            return Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
-        }
-
-// Rows whose payloads are random hex, so the deflated body cannot fit one wire
-        // and the window is genuinely a head plus continuations.
-        function chunkedRows(start){
-            let out = [];
-            for (let i = 0; i < 6; i++)
-                out.push(makeRow({ effective_time: start + 1, request_action_index: i,
-                                   response_payload: crypto.randomBytes(3000).toString('hex') }));
-            return out;
+// The encoder refusing the call before it builds anything: insufficient funds, or
+        // change from the previous window still unconfirmed. HTTP 4xx, nothing sent.
+        function httpRefusal(){
+            return Object.assign(new Error('Encoder RPC error: insufficient funds'),
+                                 { response: { status: 400 } });
         }
 
 function captureErrors(){
@@ -291,28 +284,31 @@ function captureErrors(){
     // importantly, which ones still must not.
 
 
-        // The whole point of the marker. An ambiguous head may be in a mempool this hub
-        // cannot see, so the window stays latched and an operator reconciles it.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still latches and quarantines an AMBIGUOUS head failure', async function () {
+        // A refusal that never clears must not re-propose forever: the federation's
+        // signing capacity is the scarce thing. At the bound it latches like any other
+        // failure, once, and quarantines from then on.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('latches exactly once when the attempt bound is reached', async function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
             hub.db.responses.push(makeRow({ effective_time: start + 1 }));
-            let p = makeScriptedPublisher(hub, [new Error('socket hang up')]);
+            let p = makeScriptedPublisher(hub, [httpRefusal(), httpRefusal(), httpRefusal(), httpRefusal()]);
             p._floorWindow = start;
+            expect(p.maxRefusalAttempts).to.equal(3);
 
             let cap = captureErrors();
-            try { await p.sweep(now); } finally { cap.restore(); }
+            try {
+                await p.sweep(now);          // attempt 1: withdrawn, retried
+                await p.sweep(now);          // attempt 2: withdrawn, retried
+                await p.sweep(now);          // attempt 3: the bound, latch
+                await p.sweep(now);          // quarantined, no fourth broadcast attempt
+            } finally { cap.restore(); }
 
-            expect(p.wires.length).to.equal(0);
-            expect(hub.db.marker(start).status,
-                'an ambiguous send must keep its intent marker').to.equal('intent');
-            expect(p.stats.windowsRefusalRetried).to.equal(0);
-            expect(cap.lines.filter(l => /AMBIGUOUSLY/.test(l)).length).to.equal(1);
-
-            // And the next sweep refuses it rather than paying a second time.
-            await p.sweep(now);
-            expect(p.wires.length).to.equal(0);
+            expect(p.stats.windowsRefusalRetried).to.equal(2);
+            expect(p.calls, 'the latched window must not be broadcast again').to.equal(3);
+            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(cap.lines.filter(l => /CRITICAL - wire 1\//.test(l)).length,
+                'a permanently refused window latches once, not once per sweep').to.equal(1);
             expect(p.stats.windowsQuarantined).to.equal(1);
         }); }); });
 
@@ -327,27 +323,54 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
     // importantly, which ones still must not.
 
 
-        // A continuation failing proves nothing about the head, which is already on
-        // chain and already paid for. Provably-unsent or not, the window latches.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still latches when a wire AFTER the head fails, even provably unsent', async function () {
+        // The withdraw is guarded on status = 'intent'. A batch the federation landed
+        // between the send and the failure leaves a `landed` row, and that row is the
+        // authoritative coverage record: the retry path must not be able to remove it.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('cannot withdraw a marker that is no longer intent-only', async function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
-            for (let r of chunkedRows(start)) hub.db.responses.push(r);
-            let p = makeScriptedPublisher(hub, [null, neverConnected()]);
-            p._floorWindow = start;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 3, status: 'landed', txid: 'dogetxid' });
+            let p = makeScriptedPublisher(hub, []);
 
+            await p.clearIntent(start);
+
+            expect(hub.db.marker(start).status).to.equal('landed');
+            expect(hub.db.marker(start).txid).to.equal('dogetxid');
+        }); }); });
+
+// ------------------------------------------------------------ refused before sending
+
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+
+
+        // A crash marker is a genuinely unknown outcome and stays quarantined across a
+        // restart: the retry path must not have widened what hydrateMarkers admits.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('still quarantines a genuine intent-only crash marker after a restart', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 1, status: 'intent', txid: null });
+
+            let p = makeScriptedPublisher(hub, []);
             let cap = captureErrors();
-            try { await p.sweep(now); } finally { cap.restore(); }
+            // The suite's own clock, because the hydrate is bounded to the catch-up
+            // horizon and this window is one below `now` rather than one below wall clock.
+            try { await p.hydrateMarkers(now); } finally { cap.restore(); }
 
-            expect(p.calls, 'this window must be more than one wire for the case to mean anything')
-                .to.be.at.least(2);
-            expect(p.wires.length, 'the head went out').to.equal(1);
-            expect(hub.db.marker(start).status).to.equal('intent');
-            expect(p.stats.windowsRefusalRetried).to.equal(0);
-            expect(cap.lines.filter(l => /CRITICAL - wire 2\//.test(l)).length).to.equal(1);
+            expect(p._quarantined.has(start)).to.equal(true);
+            expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);
 
+            p._floorWindow = start;
             await p.sweep(now);
-            expect(p.stats.windowsQuarantined).to.equal(1);
+            expect(p.wires.length).to.equal(0);
         }); }); });
 }
