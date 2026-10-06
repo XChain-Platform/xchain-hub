@@ -24,8 +24,8 @@
 const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const PriceAggregator   = require('../../../../../src/oracle/price_aggregator');
-const { createMockHub } = require('../../../../helpers/mockHub');
+const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
+const { createMockHub } = require('../../../../../helpers/mockHub');
 
 function makeValidator() {
     let { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
