@@ -153,13 +153,23 @@ module.exports = {
             if(!pending.done){
                 this._roundTimeouts++;
                 logger.warn('StateCheckpointEngine: round ' + id + ' timed out at ' +
-                    pending.signatures.size + '/' + quorum + ' sigs, retrying next cadence');
+                    pending.signatures.size + '/' + quorum + ' sigs, retrying next cadence; missing: ' +
+                    this.missingSigners(pending));
             }
         }, this.roundTimeoutMs);
         if(pending.timer.unref) pending.timer.unref();
 
         this.peerManager.broadcast(XCHK_SIGN_REQ, { checkpoint: cp, sig_pubkey: myPubkey, sig: mySig });
         this.checkQuorum(id);
+    },
+
+    // The validators that did not sign a timed-out round, sorted and deduped (a weighted
+    // snapshot can list one pubkey under several sources), capped so the warn line stays short.
+    missingSigners(pending){
+        let missing = [...new Set(pending.validators.map(v => v.pubkey))]
+            .filter(pk => !pending.signatures.has(pk)).sort();
+        let shown = missing.slice(0, 16).join(',') || 'none';
+        return missing.length > 16 ? shown + ' (+' + (missing.length - 16) + ' more)' : shown;
     },
 
     // Leader: collect follower signatures.
