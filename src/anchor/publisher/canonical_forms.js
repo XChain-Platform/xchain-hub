@@ -32,7 +32,7 @@ const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { canonicalBatchCrc } = require('./fold/wrapper_canonical.js');
-const { listIdsOf } = require('./archive/list_rows_select.js');
+const { listIdsOf } = require('./archive/list/list_rows_select.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 
