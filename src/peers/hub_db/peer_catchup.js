@@ -7,9 +7,12 @@ const { getLogger } = require('../../observability');
 const registry = require('./catchup_verifiers.js');
 const { createIndexerReadMemo } = require('../../oracle/price_aggregator/capability_catchup_verifier.js');
 const { createCatchupState } = require('./catchup_state.js');
-const { advanceCursor, storePriceSnapshot, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
+const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
+const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
+const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
 
-const DEFAULT_PAGE_SIZE = 1000;
+// The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
+const DEFAULT_PAGE_SIZE = 10000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000;
 const DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
@@ -37,6 +40,15 @@ function peerFeedUrl(peerAddr, table, cursor, limit) {
     return url;
 }
 
+// Keeps the status and Retry-After so the caller can back off a refusing peer.
+function refusedRequestError(res) {
+    const err = new Error('Snapshot request returned HTTP ' + res.statusCode);
+    const retryAfterSeconds = Number(res.headers && res.headers['retry-after']);
+    err.statusCode = res.statusCode;
+    err.retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0 ? retryAfterSeconds * 1000 : null;
+    return err;
+}
+
 function requestJson(url, feedKey, timeoutMs) {
     return new Promise((resolve, reject) => {
         const transport = url.protocol === 'https:' ? https : http;
@@ -55,7 +67,7 @@ function requestJson(url, feedKey, timeoutMs) {
             res.on('end', () => {
                 const body = Buffer.concat(chunks).toString('utf8');
                 if (res.statusCode < 200 || res.statusCode >= 300) {
-                    reject(new Error('Snapshot request returned HTTP ' + res.statusCode));
+                    reject(refusedRequestError(res));
                     return;
                 }
                 try { resolve(JSON.parse(body)); }
@@ -101,65 +113,6 @@ function refusalReason(verdict) {
     return 'verifier refused row';
 }
 
-function withoutWireId(row) {
-    return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
-}
-
-async function hasRows(promise) {
-    const rows = await promise;
-    return Array.isArray(rows) ? rows.length > 0 : Boolean(rows);
-}
-
-const CONTENT_KEY_READERS = Object.freeze({
-    price_snapshots: async (db, row) => {
-        const rows = await db.findPriceSnapshotsForRound(row.round_number);
-        return Array.isArray(rows) && rows.some(held => held && held.coin_pair === row.coin_pair);
-    },
-    oracle_prices: (db, r) => hasRows(db.getOraclePrice(r.source_address, r.source_chain, r.action_index)),
-    cross_chain_matches: (db, r) => hasRows(db.getCrossChainMatchByMatchId(r.match_id)),
-    capability_snapshots: (db, r) => hasRows(db.getCapabilitySnapshot(
-        r.snapshot_block, r.capability, r.signing_pubkey, r.source)),
-    cross_chain_calls: (db, r) => hasRows(db.getCrossChainCallByCallIdAndPhase(r.call_id, r.phase)),
-    state_checkpoints: (db, r) => hasRows(db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(
-        r.chain, r.network, r.checkpoint_seq)),
-    anchor_reward_attestations: (db, r) => hasRows(db.getAnchorRewardAttestation(
-        r.chain, r.network, r.reward_type, r.round_reference, r.snapshot_block, r.publisher)),
-    attestation_responses: (db, r) => hasRows(db.getAttestationResponse(r.network, r.request_id, r.effective_time)),
-    bridge_transfers: (db, r) => hasRows(db.getBridgeTransferByTransferId(r.transfer_id)),
-    policy_snapshots: (db, r) => hasRows(db.getPolicySnapshotAtSeq(r.network, r.origin_chain, r.tick, r.policy_seq)),
-    list_snapshots: (db, r) => hasRows(db.getListSnapshotAtSeq(r.network, r.home_chain, r.home_list_index, r.seq))
-});
-
-async function rowAlreadyHeld(db, table, row) {
-    const reader = CONTENT_KEY_READERS[table];
-    if (!reader) throw new Error('No hub DB catch-up content reader for table: ' + table);
-    return reader(db, row);
-}
-
-const ROW_WRITERS = Object.freeze({
-    price_snapshots: storePriceSnapshot,
-    oracle_prices: (db, row) => db.setOraclePriceByGeneration(row),
-    cross_chain_matches: (db, row) => db.createCrossChainMatch(row, row.btc_chain_id),
-    capability_snapshots: (db, row) => db.createCapabilitySnapshots([row], row.btc_chain_id),
-    cross_chain_calls: (db, row) => db.setCrossChainCallFinalized(row, row.btc_chain_id),
-    state_checkpoints: (db, r) => db.createStateCheckpoint(r.chain, r.network, r.block_index, r.block_hash,
-        r.ledger_hash, r.actions_hash, r.contract_hash, r.checkpoint_seq, r.snapshot_block, r.state_root,
-        r.state_root_version, r.block_merkle_root, r.block_merkle_version, r.validator_signatures),
-    anchor_reward_attestations: (db, r) => db.createAnchorRewardAttestation(r.chain, r.network,
-        r.reward_type, r.round_reference, r.snapshot_block, r.publisher, r.reward_amount,
-        r.publisher_attestations, r.doge_anchor_txid),
-    attestation_responses: (db, row) => db.createAttestationResponseMirrorRow(row),
-    bridge_transfers: (db, row) => db.insertBridgeTransfer(row),
-    policy_snapshots: (db, row) => db.insertPolicySnapshot(row),
-    list_snapshots: (db, row) => db.insertListSnapshot(row)
-});
-
-function storeVerifiedRow(db, table, row) {
-    const writer = ROW_WRITERS[table];
-    if (!writer) throw new Error('No hub DB catch-up writer for table: ' + table);
-    return writer(db, withoutWireId(row));
-}
-
 class HubDbPeerCatchup {
     constructor(options) {
         const opts = options || {};
@@ -173,6 +126,8 @@ class HubDbPeerCatchup {
         this.indexerReadIntervalMs = opts.indexerReadIntervalMs === 0
             ? 0 : positiveOr(opts.indexerReadIntervalMs, DEFAULT_INDEXER_READ_INTERVAL_MS);
         this.currentRetryIntervalMs = this.retryIntervalMs;
+        this.feedBackoff = createPeerFeedBackoff({ retryIntervalMs: this.retryIntervalMs,
+            maxRetryIntervalMs: this.maxRetryIntervalMs, now: () => Date.now() });
         this.nextRetryAt = 0;
         this.requestTimeoutMs = positiveOr(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
         this.logger = opts.logger || getLogger();
@@ -223,9 +178,14 @@ class HubDbPeerCatchup {
     onRetryTick() {
         if (this.runningPromise) return;
         if (this.allCaughtUp()) this.currentRetryIntervalMs = this.retryIntervalMs;
-        else if (Date.now() >= this.nextRetryAt && connectedSignerPeers(this.peerManager).length > 0) {
-            this.schedule({ onlyBehind: true }).then(() => this.backOffRetry());
-        }
+        else if (this.retryDue()) this.schedule({ onlyBehind: true }).then(() => this.backOffRetry());
+    }
+
+    retryDue() {
+        const peers = connectedSignerPeers(this.peerManager);
+        const feedUrls = peers.map(peer => peer.feedUrl).filter(Boolean);
+        const now = Date.now();
+        return peers.length > 0 && now >= this.nextRetryAt && now >= this.feedBackoff.earliestRetryAt(feedUrls);
     }
 
     backOffRetry() {
@@ -295,12 +255,15 @@ class HubDbPeerCatchup {
     async walkTable(peers, table, verifier, reads) {
         this.state.markBehind(table);
         for (const peer of peers) {
+            if (this.feedBackoff.isBackedOff(peer.feedUrl)) continue;
             try {
                 const left = await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity, reads);
+                this.feedBackoff.noteSuccess(peer.feedUrl);
                 if (left === true) this.state.markBehind(table);
                 else this.state.markCaughtUp(table);
                 return;
             } catch (e) {
+                this.feedBackoff.noteFailure(peer.feedUrl, e);
                 this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +
                     ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
             }
@@ -379,5 +342,5 @@ class HubDbPeerCatchup {
 }
 
 module.exports = Object.assign(HubDbPeerCatchup, {
-    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow
+    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow, DEFAULT_PAGE_SIZE
 });
