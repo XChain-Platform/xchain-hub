@@ -5,6 +5,9 @@ const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifier
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
 const { DERIVED_CAPABILITIES } = require('./derived_capabilities.js');
 
+const MAX_CONSECUTIVE_READ_FAILURES = 3;
+const READS_FAILING_REASON = 'catch-up indexer reads failing; table left behind';
+
 const capabilitySet = new Set(DERIVED_CAPABILITIES);
 
 function refusal(reason) {
@@ -41,6 +44,40 @@ function matchingSnapshotRow(validators, identity, weighted) {
     });
 }
 
+// One memo per walk: each snapshot block is read from the indexer at most once, failed
+// results included, new reads are spaced apart, and a run of failures ends reads for the walk.
+function createIndexerReadMemo(db, intervalMs) {
+    const results = new Map();
+    let lastReadAt = null;
+    let consecutiveFailures = 0;
+    const memo = { failedServes: 0 };
+    async function fetchFresh(method, capability, block) {
+        if (consecutiveFailures >= MAX_CONSECUTIVE_READ_FAILURES) {
+            memo.failedServes += 1;
+            throw new Error(READS_FAILING_REASON);
+        }
+        if (intervalMs > 0 && lastReadAt !== null) {
+            const wait = lastReadAt + intervalMs - Date.now();
+            if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+        }
+        lastReadAt = Date.now();
+        let snapshot = null;
+        try { snapshot = await catchupHub({ db }).capabilitySnapshot[method](capability, block); }
+        catch (e) { snapshot = null; }
+        if (!snapshot || !Array.isArray(snapshot.validators)) snapshot = null;
+        consecutiveFailures = snapshot ? 0 : consecutiveFailures + 1;
+        return snapshot;
+    }
+    memo.read = async (method, capability, block) => {
+        const key = method + ':' + capability + ':' + block;
+        if (!results.has(key)) results.set(key, await fetchFresh(method, capability, block));
+        const snapshot = results.get(key);
+        if (snapshot === null) memo.failedServes += 1;
+        return snapshot;
+    };
+    return memo;
+}
+
 async function verifyCapabilitySnapshotRow(row, context) {
     const identity = rowIdentity(row);
     if (!identity) return refusal('malformed capability snapshot row');
@@ -53,7 +90,9 @@ async function verifyCapabilitySnapshotRow(row, context) {
     const method = weighted ? 'getWeightSnapshot' : 'getSnapshot';
     if (typeof snapshots[method] !== 'function') return refusal('local capability snapshot resolver is unavailable');
 
-    const snapshot = await snapshots[method](identity.capability, identity.block);
+    const snapshot = context && typeof context.readCapabilitySnapshot === 'function'
+        ? await context.readCapabilitySnapshot(method, identity.capability, identity.block)
+        : await snapshots[method](identity.capability, identity.block);
     if (!snapshot || !Array.isArray(snapshot.validators)) return refusal('local capability snapshot is unresolved');
     if (snapshot.truncated === true) return refusal('local capability snapshot is truncated');
     if (!matchingSnapshotRow(snapshot.validators, identity, weighted)) {
@@ -66,6 +105,8 @@ registerCatchupVerifier('capability_snapshots', verifyCapabilitySnapshotRow);
 
 module.exports = {
     verifyCapabilitySnapshotRow,
+    createIndexerReadMemo,
+    READS_FAILING_REASON,
     rowIdentity,
     matchingSnapshotRow
 };
