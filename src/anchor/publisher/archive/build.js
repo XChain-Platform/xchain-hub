@@ -169,6 +169,9 @@ module.exports = {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes; archived
     // sets are a convenience, the chain remains the root of trust.
+    // Coverage selector: the capability sets archived are exactly the (block, capability)
+    // pairs the quorum-agreed inputs reference; hub-mirror rows outside quorumRows are
+    // never consulted.
     async buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards, quorumRows){
         calls   = calls   || [];
         rewards = rewards || [];
@@ -178,9 +181,6 @@ module.exports = {
         const checkpoints = this.sortedStateCheckpoints((quorumRows || {}).checkpoints);
         const prices = this.sortedPriceSnapshots((quorumRows || {}).prices);
         const tombstones = this.sortedPriceTombstones((quorumRows || {}).tombstones);
-        // Coverage selector: the capability sets archived for recovery are exactly the
-        // (block, capability) pairs these quorum-agreed inputs reference. It proves coverage
-        // over the quorum only; hub-mirror rows outside quorumRows are never consulted.
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
             .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
             .concat(bridges.concat(policies).map(r => ({ block: Number(r.snapshot_block), capability: 'cross_chain' })))
