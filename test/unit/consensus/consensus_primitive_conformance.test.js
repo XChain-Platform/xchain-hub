@@ -32,6 +32,7 @@ const path   = require('path');
 
 const swq   = require('../../../src/consensus/stake_weighted_quorum.js');
 const equiv = require('../../../src/consensus/equivocation_header.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const LOCAL_DIR = path.join(__dirname, '..', '..', '..', 'src');
 // Resolve the canonical xchain-documentation repo. Prefer an explicit path: GitHub CI
@@ -151,11 +152,7 @@ describe('consensus-primitive conformance: byte-identity to canonical source @re
     ['stake_weighted_quorum.js', 'equivocation_header.js', 'snapshot_reorg_buffer.js'].forEach(function(f){
         it(f + ' is byte-identical to xchain-documentation/protocol/reference-impl/consensus', function(){
             const canonPath = path.join(CANON_DIR, 'consensus', f);
-            if(!fs.existsSync(canonPath)){
-                if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical copy is not at its W5 path ' + canonPath);
-                this.skip();
-                return;
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, canonPath), 'the sibling parity guard')) return;
             const local = fs.readFileSync(path.join(LOCAL_DIR, 'consensus', f), 'utf8');
             const canon = fs.readFileSync(canonPath, 'utf8');
             assert.strictEqual(local, canon,
