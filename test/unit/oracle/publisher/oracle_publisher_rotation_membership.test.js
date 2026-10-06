@@ -28,6 +28,7 @@ function loadModule() {
     let fsMock = {
         mkdirSync: sinon.stub(), existsSync: sinon.stub().returns(true), writeFileSync: sinon.stub(),
         openSync: sinon.stub().returns(99), writeSync: sinon.stub(), fsyncSync: sinon.stub(),
+        renameSync: sinon.stub(), unlinkSync: sinon.stub(),
         closeSync: sinon.stub(), readFileSync: sinon.stub().returns(''),
     };
     OraclePublisher = proxyquire('../../../../src/oracle/publisher', {

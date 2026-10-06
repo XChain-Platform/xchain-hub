@@ -227,4 +227,28 @@ describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388
         expect(errStub.called).to.equal(true);
         errStub.restore();
     }); });
+
+// A rewrite that fails part-way must leave the old queue whole, never an emptied file.
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('a failed rewrite keeps every queued entry on disk', function () {
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
+        sinon.stub(console, 'error');
+        sinon.stub(fs, 'writeSync').throws(Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }));
+        expect(pub.rewriteQueue([])).to.equal(false);
+        fs.writeSync.restore();
+        expect(pub.readQueue().map(e => e.requestId)).to.deep.equal(['aa'.repeat(32), 'bb'.repeat(32)]);
+        expect(fs.existsSync(pub.queuePath + '.tmp'), 'no temp file is left behind').to.equal(false);
+    }); });
+
+describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388); afterEach(hookAt19647); it('a failed rename on dequeue keeps the published entry and its siblings, then a retry drops it', function () {
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
+        sinon.stub(console, 'error');
+        sinon.stub(fs, 'renameSync').throws(Object.assign(new Error('EIO'), { code: 'EIO' }));
+        expect(pub.removeFromQueue(new Set(['aa'.repeat(32)]))).to.equal(false);
+        fs.renameSync.restore();
+        expect(pub.readQueue()).to.have.length(2);
+        expect(pub.removeFromQueue(new Set(['aa'.repeat(32)]))).to.equal(true);
+        expect(pub.readQueue().map(e => e.requestId)).to.deep.equal(['bb'.repeat(32)]);
+    }); });
 }
