@@ -3,7 +3,7 @@
   "entries": {
     "anchor_reward_activation": {
       "path": "src/consensus/gates/anchor_reward_gate.js",
-      "hash": "86edade703c3228672bf43770ec9c2e79d0f933654a0ce6d851b04e970bb7462",
+      "hash": "04153d6e51df71d608a2e5f48777daacd07ed957b499784b813a499ea9a699f6",
       "twins": [
         "xchain-indexer"
       ]
@@ -735,6 +735,13 @@
       "to": "16ff3e1e17a412003dbc83bf27e1a7e88a526f7704fa43a8a4afce51441af675",
       "reason": "route the three warnings through the hub logger, text unchanged",
       "date": "2026-10-05"
+    },
+    {
+      "id": "anchor_reward_activation",
+      "from": "86edade703c3228672bf43770ec9c2e79d0f933654a0ce6d851b04e970bb7462",
+      "to": "04153d6e51df71d608a2e5f48777daacd07ed957b499784b813a499ea9a699f6",
+      "reason": "null reward threshold guard",
+      "date": "2026-10-06"
     },
     {
       "id": "stake_weighted_quorum",
