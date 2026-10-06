@@ -29,6 +29,9 @@ const { buildRollcallCanonical } = require('../rollcall_canonical.js');
 // The one gossip type this engine adds. PeerManager.broadcast has no type
 // registry, so a new type is this constant plus one `case` in handleMessage.
 const XROLLCALL_SIGN = 'XROLLCALL_SIGN';
+// A hub that opens a round asks its peers to resend the signatures they hold for
+// that epoch; each answer is a plain XROLLCALL_SIGN per pair.
+const XROLLCALL_SYNC = 'XROLLCALL_SYNC';
 // How many not-yet-opened epochs' gossip a hub holds. One is the normal case
 // (peers a poll ahead); a few more covers a hub catching up after a stall.
 const EARLY_SIG_EPOCHS = 4;
@@ -139,5 +142,6 @@ module.exports = {
     MAX_PAIRS_PER_ACTION,
     ACTION_DATA_CEILING,
     BYTES_PER_PAIR,
-    XROLLCALL_SIGN
+    XROLLCALL_SIGN,
+    XROLLCALL_SYNC
 };
