@@ -24,6 +24,7 @@
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { ATTEST_COMMIT } = require('./constants.js');
+const { selectFinalizedSigners } = require('./finalized_signers.js');
 
 const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
@@ -118,11 +119,9 @@ module.exports = {
         pending.finalized = true;
         this.settleFinalizedRound(rid, pending);
 
-        // We need at least max(REDUNDANCY, quorum) sigs on the on-chain response.
-        let sigsArray = [];
-        for(let [pk, sg] of pending.signatures){
-            sigsArray.push({ pubkey: pk, sig: sg });
-        }
+        // Exactly max(REDUNDANCY, quorum) sigs, chosen by pubkey order rather than
+        // arrival order, so hubs holding different extras emit the same set.
+        let sigsArray = selectFinalizedSigners(pending.signatures, needed);
 
         logger.info('AttestationConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' +
