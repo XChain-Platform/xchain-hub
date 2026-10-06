@@ -67,14 +67,16 @@ function connectedSignerPeers(peerManager) {
     for (const [addr, peer] of peerManager.peers) {
         if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
         const identity = peer.validatorAddr || addr;
-        const pubkey = peerManager.validatorPubkeys.get(identity);
+        const pubkey = peerManager.validatorPubkeys.get(identity) || peer.signing_pubkey;
         if (!pubkey) continue;
         const normalizedPubkey = String(pubkey).toLowerCase();
         const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
         const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
             peerManager.registryHasPubkey(normalizedPubkey);
         if (!inSignerSet && !inRegistry) continue;
-        const feedUrl = peer.feedUrl || (peer.inbound ? null : addr);
+        const feedUrl = peer.feedUrl ||
+            (peerManager.validatorFeedUrls && peerManager.validatorFeedUrls.get(identity)) ||
+            (peer.inbound ? null : addr);
         peers.push({ addr, identity, feedUrl });
     }
     return peers;

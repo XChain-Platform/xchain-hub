@@ -126,16 +126,22 @@ function emitInboundEvents(pm, ws, envelope) {
     }
 }
 
+// What a peer proves about itself on its own verified envelopes: the signing key
+// it carried (kept for any envelope type, because catch-up peer selection reads
+// it where no validators row holds the key) and, on a heartbeat, the API address
+// it advertises. getHubAdvertisements still needs both before it lists a hub.
 function recordDirectHubAdvertisement(peer, peerAddr, envelope) {
-    if (!peer || envelope.type !== 'HEARTBEAT' || envelope.sender !== peerAddr) return;
-    const apiUrl = normalizeApiUrl(envelope.data && envelope.data.api_url);
-    if (!apiUrl || typeof envelope.sig_pubkey !== 'string' || !envelope.sig_pubkey) {
+    if (!peer || envelope.sender !== peerAddr) return;
+    if (typeof envelope.sig_pubkey !== 'string' || !envelope.sig_pubkey) {
         delete peer.api_url;
         delete peer.signing_pubkey;
         return;
     }
-    peer.api_url = apiUrl;
     peer.signing_pubkey = envelope.sig_pubkey.toLowerCase();
+    if (envelope.type !== 'HEARTBEAT') return;
+    const apiUrl = normalizeApiUrl(envelope.data && envelope.data.api_url);
+    if (apiUrl) peer.api_url = apiUrl;
+    else delete peer.api_url;
 }
 
 class PeerInbound {
@@ -176,14 +182,20 @@ class PeerInbound {
 
         let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
         let peer = this.peers.get(peerAddr);
+        let inheritedFeedUrl = false;
         if (peer) {
-            if (knownAddr !== null && !peer.inbound && !peer.validatorAddr) {
+            if (!peer.inbound) {
+                inheritedFeedUrl = this.recordValidatorFeedUrl(
+                    envelope.sender, peer.feedUrl || knownAddr);
+            }
+            if (!peer.inbound && !peer.validatorAddr) {
                 peer.validatorAddr = envelope.sender;
                 this.emit('peer:connect', peerAddr);
             }
             peer.lastSeen = Date.now();
             recordDirectHubAdvertisement(peer, peer.validatorAddr || peerAddr, envelope);
         }
+        if (inheritedFeedUrl) this.emit('peer:connect', envelope.sender);
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
@@ -227,7 +239,7 @@ class PeerInbound {
             reconnectDelay: this.config.P2P_RECONNECT_BASE || 2000,
             reconnectTimer: null,
             inbound:        true,
-            feedUrl:        null,
+            feedUrl:        this.validatorFeedUrls.get(addr) || null,
             validatorAddr:  addr
         });
 
