@@ -49,6 +49,7 @@ module.exports = {
     notePollFailure(e, url){
             let status = e && e.response && e.response.status;
             if(status === 401 || status === 403){
+                this.pollAuthErrorCount++;
                 // Auth failure is distinct from the indexer being down: the operator
                 // has a key mismatch between the indexer and this hub. Log clearly so
                 // they can identify the misconfiguration instead of seeing a generic
@@ -56,6 +57,7 @@ module.exports = {
                 logger.warn('AttestationRound: HTTP ' + status + ' from BTC indexer at ' + url +
                     ': auth mismatch - check that BTC_INDEXER_API_KEY on this hub matches INDEXER_API_KEY on the indexer');
             } else {
+                this.pollTransportErrorCount++;
                 logger.warn(nodeUtil.format('AttestationRound: poll failed:', e && e.message ? e.message : e));
             }
     },

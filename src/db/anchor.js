@@ -27,11 +27,12 @@
 // The anchor_reward_attestations columns a hub-DB mirror receives, shared by the REST
 // bootstrap page (findAnchorRewardAttestations) and the live stream's read-back
 // (getAnchorRewardAttestation) so a reconnecting mirror and a streaming mirror hold the
-// same row. admit_block_btc is the row's BTC admission height (NULL is the legacy row);
-// a bootstrap list without it would bind a height-stamped row by the legacy rule.
+// same row. admit_block_btc stays off it: the column is hub-only with no writer, and the
+// indexer has no such column (it admits this row on snapshot_block plus the mirror
+// maturity). Mirroring it needs the indexer DDL and a HUB_SCHEMA_VERSION bump first.
 const ANCHOR_REWARD_MIRROR_COLUMNS = [
     'id', 'chain', 'network', 'reward_type', 'round_reference', 'snapshot_block', 'publisher',
-    'reward_amount', 'publisher_attestations', 'doge_anchor_txid', 'admit_block_btc', 'created_at'
+    'reward_amount', 'publisher_attestations', 'doge_anchor_txid', 'created_at'
 ];
 
 module.exports = {
