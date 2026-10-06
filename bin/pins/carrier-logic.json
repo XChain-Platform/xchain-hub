@@ -99,7 +99,7 @@
     },
     "stake_weighted_quorum": {
       "path": "src/consensus/stake_weighted_quorum.js",
-      "hash": "afaee5777e8d909eace7a7106b294797014f74929fc4302c50a2ec31ac77a847",
+      "hash": "667f90202114618e33f1a29788fd51a21e508f207a3143b8c285aef4c079a25d",
       "twins": [
         "xchain-indexer",
         "xchain-sync"
@@ -741,6 +741,13 @@
       "from": "86edade703c3228672bf43770ec9c2e79d0f933654a0ce6d851b04e970bb7462",
       "to": "04153d6e51df71d608a2e5f48777daacd07ed957b499784b813a499ea9a699f6",
       "reason": "null reward threshold guard",
+      "date": "2026-10-06"
+    },
+    {
+      "id": "stake_weighted_quorum",
+      "from": "afaee5777e8d909eace7a7106b294797014f74929fc4302c50a2ec31ac77a847",
+      "to": "667f90202114618e33f1a29788fd51a21e508f207a3143b8c285aef4c079a25d",
+      "reason": "copy the split quorum helpers from their indexer canonical",
       "date": "2026-10-06"
     }
   ]
