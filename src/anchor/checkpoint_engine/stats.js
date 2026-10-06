@@ -29,7 +29,11 @@ module.exports = {
     async getStats(){
         // A read fault propagates so the RPC layer reports an error; swallowing it
         // would return an empty last_finalized_by_chain, which reads as no finalized heights.
-        const rows = await this.db.findStateCheckpointsByNetwork(this.network);
+        // A db handle with no reader at all (a bare engine wired before the table
+        // layer) has no heights to report; only a reader that throws is a fault.
+        const rows = typeof this.db.findStateCheckpointsByNetwork === 'function'
+            ? await this.db.findStateCheckpointsByNetwork(this.network)
+            : [];
         let last_finalized_by_chain = {};
         for(let r of rows){
             last_finalized_by_chain[r.chain] = {
