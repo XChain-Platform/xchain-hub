@@ -58,6 +58,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 const crd    = require('../../../src/consensus_rules_digest.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 // Sibling checkout, resolved the way every other twin test in this repo
 // resolves it: an explicit env path for CI, falling back to the dev sibling
@@ -66,7 +67,6 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
 const INDEXER_COPY = path.join(INDEXER_DIR, 'src', 'consensus_rules_digest.js');
 const MY_COPY      = path.join(__dirname, '..', '..', '..', 'src', 'consensus_rules_digest.js');
-const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // The ONLY line that may differ, enumerated as the full text of both sides
 // rather than as a pattern. Each copy names the other repo here; a copy that
@@ -111,13 +111,7 @@ function normalise(text, expectedHeader, label) {
 // present, unless XCHAIN_REQUIRE_SIBLINGS=1 turns a missing sibling into a
 // failure instead of a silent pass.
 function skipIfNoIndexer() {
-    if (!fs.existsSync(INDEXER_COPY)) {
-        if (STRICT) {
-            assert.fail('xchain-indexer sibling checkout missing: ' + INDEXER_COPY
-                + ' (set XCHAIN_INDEXER_DIR at a checkout to prove this guard ran)');
-        }
-        this.skip();
-    }
+    skipOrFail(this, siblingCheckout(__dirname, INDEXER_COPY), 'the indexer consensus_rules_digest twin guard');
 }
 
 describe('consensus_rules_digest: indexer twin bytes', function () {
