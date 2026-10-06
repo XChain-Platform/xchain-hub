@@ -20,15 +20,20 @@ const INDEXER_ROOT = [
     path.resolve(__dirname, '../../../../xchain-indexer'),
     path.resolve(__dirname, '../../../../../../../xchain-indexer')
 ].find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
-if(!INDEXER_ROOT)
-    throw new Error('required xchain-indexer sibling checkout is missing');
-process.env.INDEXER_COIN = 'DOGE';
-process.env.INDEXER_NETWORK = 'regtest';
-const AnchorRecovery = require(path.join(INDEXER_ROOT, 'bin/recovery.js'));
-const indexerFixture = require(path.join(INDEXER_ROOT, 'test/fixtures/anchor-archive.js'));
-const recoveryStubs = require(path.join(INDEXER_ROOT, 'test/helpers/recovery_stubs.js'));
-const indexerBridge = require(path.join(INDEXER_ROOT, 'src/consensus/bridge_settle.js'));
-const indexerEd25519 = require(path.join(INDEXER_ROOT, 'src/consensus/ed25519.js'));
+// A missing sibling must not stop the file loading: the suite titles are collected by a
+// load-only dry run in a checkout with no siblings, so the tests register and skip at run time.
+const required = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+function indexerModule(rel){
+    if(!INDEXER_ROOT) return {};
+    return require(path.join(INDEXER_ROOT, rel));
+}
+if(INDEXER_ROOT) process.env.INDEXER_COIN = 'DOGE';
+if(INDEXER_ROOT) process.env.INDEXER_NETWORK = 'regtest';
+const AnchorRecovery = indexerModule('bin/recovery.js');
+const indexerFixture = indexerModule('test/fixtures/anchor-archive.js');
+const recoveryStubs = indexerModule('test/helpers/recovery_stubs.js');
+const indexerBridge = indexerModule('src/consensus/bridge_settle.js');
+const indexerEd25519 = indexerModule('src/consensus/ed25519.js');
 const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK;
 const TXID = 'ab'.repeat(32), PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
 function copy(value){ return JSON.parse(JSON.stringify(value)); }
@@ -388,6 +393,11 @@ function registerFixtureBytesTest(){
 }
 describe('archive quorum table recovery round trip', function(){
     const state = {};
+    before(function(){
+        if(INDEXER_ROOT) return;
+        if(required) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling checkout is missing');
+        this.skip();
+    });
     beforeEach(function(){
         state.oracleKeys = Array.from({ length: 4 }, () => indexerFixture.makeKeypair());
         state.crossKeys = Array.from({ length: 4 }, () => indexerFixture.makeKeypair());
