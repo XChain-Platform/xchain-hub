@@ -372,7 +372,7 @@ module.exports = {
             chain: chain, network: network, blockIndex: blockIndex, checkpointSeq: cpSeq,
             txid: txid, anchorVersion: version,
             rewardType: rewardType, roundReference: roundRef, snapshotBlock: snapshotBlock,
-            publisher: publisher, attestSigs: sigs
+            publisher: publisher, attestSigs: sigs, relayed: true
         });
     }
 

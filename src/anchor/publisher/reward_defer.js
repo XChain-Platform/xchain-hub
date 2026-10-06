@@ -54,19 +54,30 @@ module.exports = {
         let key = [e.rewardType, String(e.roundReference), String(e.snapshotBlock),
                    String(e.publisher), String(e.txid)].join('|');
         if(this._deferredRewardAttest.has(key)) return;
-        // Bounded: drop the OLDEST entry rather than the new one (Map preserves insertion
-        // order), matching the two announcement queues. Dropping only ever forfeits this
-        // hub's own reward; it can never write one.
+        // Bounded: make room by dropping the OLDEST peer-relayed entry first, and only
+        // when none is queued the oldest entry overall (Map preserves insertion order).
+        // A relayed entry is work a peer chose to hand us and a peer can flood the queue
+        // with them, so they must never push out this hub's own reward. Dropping only ever
+        // forfeits a reward; it can never write one.
         if(this._deferredRewardAttest.size >= this.announceQueueMax){
-            let oldest = this._deferredRewardAttest.keys().next().value;
-            this._deferredRewardAttest.delete(oldest);
+            let victim = this.oldestDeferredRewardKey();
+            this._deferredRewardAttest.delete(victim);
             logger.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
-                         '); dropped the oldest entry ' + oldest);
+                         '); dropped the oldest entry ' + victim);
         }
         this._deferredRewardAttest.set(key, Object.assign({}, e, { at: Date.now() }));
         logger.info('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
                     ' held until anchor ' + e.txid + ' is ' + this.dogeConfirmations + ' deep on DOGE (' +
                     this._deferredRewardAttest.size + ' pending)');
+    },
+
+    oldestDeferredRewardKey(){
+        let first = null;
+        for(let [key, held] of this._deferredRewardAttest){
+            if(held && held.relayed === true) return key;
+            if(first === null) first = key;
+        }
+        return first;
     },
 
     // The anchor-attest rail's QUEUE-DRAIN RULE for the height watermark.
@@ -137,6 +148,47 @@ module.exports = {
         return serialPass(this, '_rewardAttestDrain', () => this.runRewardAttestDrain());
     },
 
+    // Does the mined txid bind to this entry's (network, snapshot_block, publisher)? The
+    // checkpoint byte-match above proves the txid carries OUR checkpoint, not that it is
+    // the anchor the reward tuple names: a relayed tuple can pair a real txid with another
+    // publisher or round. The rule is the indexer's judgeAnchors, read from the vendored
+    // twin of anchor_proof_client/binding.js and never re-derived here; until the
+    // twin is vendored the check is skipped and says so once, so the drain behaves as it did.
+    // Returns 'verified' | 'rejected' | 'unknown'.
+    async drainBindingVerdict(e){
+        let binding;
+        try { binding = require('../anchor_proof_binding.js'); }
+        catch(err){
+            if(!err || err.code !== 'MODULE_NOT_FOUND') throw err;
+            if(!this._rewardBindingMissingLogged){
+                this._rewardBindingMissingLogged = true;
+                logger.error('StateAnchorPublisher: anchor_proof_binding twin is not present; the reward txid ' +
+                              'binding check is NOT running');
+            }
+            return 'verified';
+        }
+        let anchors = [];
+        let after = null;
+        for(let page = 0; page < 25; page++){
+            let params = { txid: String(e.txid).toLowerCase() };
+            if(after !== null) params.after_action_index = after;
+            let r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
+            if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
+            anchors = anchors.concat(r.anchors);
+            if(r.truncated !== true){
+                return binding.judgeAnchors(anchors, {
+                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                    minConfirmations: this.dogeConfirmations
+                });
+            }
+            let next = Number(r.next_after_action_index);
+            if(!Number.isInteger(next) || (after !== null && next <= after)) return 'unknown';
+            after = next;
+        }
+        return 'unknown';
+    },
+
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
     async runRewardAttestDrain(){
         if(this._deferredRewardAttest.size === 0) return;
@@ -155,6 +207,14 @@ module.exports = {
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
                 let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
                 if(v === 'verified'){
+                    let bound = await this.drainBindingVerdict(e);
+                    if(bound === 'rejected'){
+                        this._deferredRewardAttest.delete(key);
+                        logger.warn('StateAnchorPublisher: reward attestation ' + key + ' txid does not bind to ' +
+                                     '(network, snapshot_block, publisher); dropped, no reward');
+                        continue;
+                    }
+                    if(bound !== 'verified') continue;   // undecided: retained until the TTL
                     // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
                     // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's
                     // getanchorconfirmations check) binds the reward to. `e` also carries the
