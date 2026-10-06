@@ -17,8 +17,6 @@ const crd  = require('../../../src/consensus_rules_digest.js');
 const PeerManager = require('../../../src/peers/manager.js');
 const ValidatorIdentity = require('../../../src/validators/identity.js');
 
-const INDEXER_COPY = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus_rules_digest.js');
-
 // The digest reads every gate VALUE from the registry, so a case that needs one map to
 // read differently swaps the registry's cached module for one whose get() answers that
 // key with `table`; the carriers themselves are never touched. Returns the restorer.

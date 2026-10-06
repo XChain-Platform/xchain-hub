@@ -35,6 +35,7 @@ const PriceAggregator   = require('../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../helpers/mockHub');
 const priceScale        = require('../../../src/consensus/gates/price_scale_gate.js');
 const { PRICE_MAX }     = require('../../../src/constants.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 // Sibling checkout, same resolution convention as price_pair_activation.test.js.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', '..', 'xchain-indexer');
@@ -81,11 +82,7 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
         }
         function byteIdentityWithTheXchainIndexerSuite3() {
             before(function () {
-                if (!fs.existsSync(TWIN_PATH)) {
-                    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
-                    this.skip();
-                }
+                skipOrFail(this, siblingCheckout(__dirname, TWIN_PATH), 'the indexer twin guard');
             });
             it('is byte-identical to the indexer copy of price_scale_gate.js', isByteIdenticalToTheIndexerTest4);
         }
