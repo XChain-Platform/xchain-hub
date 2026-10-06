@@ -34,6 +34,9 @@ const logger = getLogger();
 // this.cosignToleranceBlocks in initCosignTolerance for why this is deliberately NOT electionToleranceBlocks.
 const CHECKPOINT_COSIGN_TOLERANCE_BLOCKS = 144;
 
+const LIVE_NETWORKS = ['mainnet', 'testnet'];
+const MIN_LIVE_CONFIRMATIONS = 6;
+
 module.exports = {
 
     initCadenceKnobs(cfg){
@@ -52,6 +55,12 @@ module.exports = {
         // the regtest venue setting), so it takes a non-negative guard rather than positiveIntConfig.
         this.confirmations  = parseInt(hubConfig.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
         if(!(this.confirmations >= 0)) this.confirmations = 6;
+        // A shallow checkpoint on a live network signs a block a reorg can still undo, so
+        // the floor is enforced there and only regtest may go below it.
+        if(LIVE_NETWORKS.includes(this.network) && this.confirmations < MIN_LIVE_CONFIRMATIONS){
+            throw new Error('CHECKPOINT_CONFIRMATIONS=' + this.confirmations + ' is below the minimum of ' +
+                            MIN_LIVE_CONFIRMATIONS + ' on ' + this.network);
+        }
     },
 
     initCosignTolerance(cfg){
