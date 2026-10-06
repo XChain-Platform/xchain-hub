@@ -133,6 +133,41 @@ module.exports = {
         return (p && p.admitBlocks !== undefined) ? p.admitBlocks : null;
     },
 
+    // The outbound wire field carrying the round's admission map. Empty when the round
+    // pinned none, so a legacy-era envelope stays byte-identical to what peers received
+    // before the field existed. The map is the proposer's own tip reading, so a follower
+    // whose tip differs can only verify the proposer's signature by rebuilding the
+    // canonical from THIS value, never from its own pinned map.
+    admitWireFields(pending){
+        let map = pending && pending.admitBlocks;
+        if(map === null || map === undefined) return {};
+        return { admit_blocks: ah.encodeAdmitBlocks(map) };
+    },
+
+    // The admission map a peer's envelope carries, judged for this round. Resolves
+    // { ok: true, admitBlocks } where admitBlocks is the decoded map (admission era) or
+    // null (legacy era), and { ok: false, reason } for every refusal:
+    //   - the era and the field disagree (an admission-era request with no map, or a
+    //     legacy request carrying one), since the two eras never share a signature;
+    //   - the field is not the unique canonical spelling of a map;
+    //   - the map fails this hub's own follower bound against its own tips. The bound is
+    //     what lets a follower adopt the proposer's heights without trusting them.
+    async readWireAdmitBlocks(pending, d){
+        let network = this.hub && this.hub.network;
+        let era     = ah.isAdmissionEra(network, Number(pending.request.block_index));
+        let raw     = d ? d.admit_blocks : undefined;
+        let has     = raw !== undefined && raw !== null;
+        if(era !== has)
+            return { ok: false, reason: era ? 'admission-era request carries no admission map'
+                                           : 'legacy-era request carries an admission map' };
+        if(!era) return { ok: true, admitBlocks: null };
+        let map = ah.decodeAdmitBlocks(raw);
+        if(map === null) return { ok: false, reason: 'admission map is not canonically spelled' };
+        let bound = await ah.checkAdmitBlocksAgainstHub(this.hub, ah.admissionReadSet('attestation_responses'), map);
+        if(!bound.ok) return { ok: false, reason: bound.reason };
+        return { ok: true, admitBlocks: map };
+    },
+
     // This hub's admission map for an attest-response round: BTC alone, because the
     // indexer's call-site guard reads attestation_responses on BTC only. Null when the
     // hub cannot produce a fresh BTC admission tip, which the caller turns into a refusal
