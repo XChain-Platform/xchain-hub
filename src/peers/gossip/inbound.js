@@ -144,6 +144,12 @@ function recordDirectHubAdvertisement(peer, peerAddr, envelope) {
     else delete peer.api_url;
 }
 
+// A relayed envelope names its original publisher as the sender, so only the
+// outbound peer's own messages say anything about that sender's feed URL.
+function isDirectFromOutboundPeer(peer, envelope) {
+    return !peer.inbound && !!peer.validatorAddr && peer.validatorAddr === envelope.sender;
+}
+
 class PeerInbound {
 
     handleInbound(ws, rawData, knownAddr) {
@@ -184,13 +190,13 @@ class PeerInbound {
         let peer = this.peers.get(peerAddr);
         let inheritedFeedUrl = false;
         if (peer) {
-            if (!peer.inbound) {
-                inheritedFeedUrl = this.recordValidatorFeedUrl(
-                    envelope.sender, peer.feedUrl || knownAddr);
-            }
             if (!peer.inbound && !peer.validatorAddr) {
                 peer.validatorAddr = envelope.sender;
                 this.emit('peer:connect', peerAddr);
+            }
+            if (isDirectFromOutboundPeer(peer, envelope)) {
+                inheritedFeedUrl = this.recordValidatorFeedUrl(
+                    envelope.sender, peer.feedUrl || knownAddr);
             }
             peer.lastSeen = Date.now();
             recordDirectHubAdvertisement(peer, peer.validatorAddr || peerAddr, envelope);
