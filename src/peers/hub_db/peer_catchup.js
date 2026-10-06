@@ -8,6 +8,7 @@ const registry = require('./catchup_verifiers.js');
 const { createIndexerReadMemo } = require('../../oracle/price_aggregator/capability_catchup_verifier.js');
 const { createCatchupState } = require('./catchup_state.js');
 const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
+const { createRefusalMemo } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
 
@@ -23,6 +24,7 @@ const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 const WALK_COMPLETE = 'complete';
 const WALK_LEFT_BEHIND = 'left_behind';
 const WALK_UNSERVED = 'unserved';
+const KNOWN_REFUSAL = Object.freeze({ ok: false, reason: 'refused on an earlier walk' });
 
 function positiveOr(value, fallback) {
     return Number(value) > 0 ? Number(value) : fallback;
@@ -106,6 +108,11 @@ function connectedSignerPeers(peerManager) {
     return peers;
 }
 
+function countRefusal(walk, verdict) {
+    walk.refused += 1;
+    if (verdict === KNOWN_REFUSAL) walk.knownRefused += 1;
+}
+
 function verifierAccepted(verdict) {
     if (verdict === false || verdict === null) return false;
     if (verdict && typeof verdict === 'object' && verdict.ok === false) return false;
@@ -132,6 +139,7 @@ class HubDbPeerCatchup {
         this.currentRetryIntervalMs = this.retryIntervalMs;
         this.feedBackoff = createPeerFeedBackoff({ retryIntervalMs: this.retryIntervalMs,
             maxRetryIntervalMs: this.maxRetryIntervalMs, now: () => Date.now() });
+        this.refusals = createRefusalMemo({ maxEntries: opts.refusalMemoEntries });
         this.nextRetryAt = 0;
         this.requestTimeoutMs = positiveOr(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
         this.logger = opts.logger || getLogger();
@@ -309,7 +317,8 @@ class HubDbPeerCatchup {
     }
 
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
-        const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [] };
+        const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [],
+            refused: 0, knownRefused: 0 };
         for (;;) {
             const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
             if (!page || page.table !== table || !Array.isArray(page.rows)) {
@@ -320,8 +329,16 @@ class HubDbPeerCatchup {
             const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
             walk.carry = batch.held;
             await this.processBatch(walk, batch.ready);
-            if (!full) return walk.leftBehind;
+            if (!full) return this.endWalk(walk);
         }
+    }
+
+    endWalk(walk) {
+        if (walk.refused > 0) {
+            this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table + ' row(s) from ' +
+                walk.peer + ' refused (' + walk.knownRefused + ' already known)');
+        }
+        return walk.leftBehind;
     }
 
     async processBatch(walk, rows) {
@@ -332,12 +349,18 @@ class HubDbPeerCatchup {
             if (await this.hasRow(walk.table, localRow)) continue;
             const key = groupKey(row) || 'row:' + row.id;
             if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
-            if (verifierAccepted(verdicts.get(key))) await this.storeRow(walk.table, localRow);
+            const verdict = verdicts.get(key);
+            if (verifierAccepted(verdict)) await this.storeRow(walk.table, localRow);
+            else countRefusal(walk, verdict);
         }
     }
 
+    // A remembered refusal skips the verifier and its log line; a refusal that followed a
+    // failed indexer read is never remembered, since the next walk may well accept it.
     async verifyWalkRow(walk, row, priceRoundRows) {
         const { peer, table, reads } = walk;
+        const memoKey = this.refusals.keyFor(walk.peerIdentity || peer, table, row);
+        if (this.refusals.has(memoKey)) return KNOWN_REFUSAL;
         const failedBefore = reads ? reads.failedServes : 0;
         const verdict = await this.verifyRow(walk.verifier, row, {
             table, peer, peerIdentity: walk.peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
@@ -347,6 +370,7 @@ class HubDbPeerCatchup {
         this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
             ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
         if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
+        else this.refusals.remember(memoKey);
         return verdict;
     }
 }
