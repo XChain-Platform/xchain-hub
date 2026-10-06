@@ -140,6 +140,7 @@ class AttestationRound {
         try {
         let url = await this.resolveBtcIndexerUrl();
         if(!url) return;
+        if(this.firstPollAttemptAt === null) this.firstPollAttemptAt = Date.now();
 
         // Drop `seen` entries older than the retry window so transiently-skipped
         // requests can be re-evaluated once their blocking condition clears.
