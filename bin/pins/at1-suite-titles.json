@@ -2167,14 +2167,6 @@
       "7ec5efc156012fe8b2689e36748018d5da37b21ab1daec25f97b09a1747d56ce",
       "225a88c353b9214c59e985304eed446cdff5e2940f9659ee2a5f45432b0094d0"
     ],
-    "300bd7ed7dca8ee4": [
-      "0ed7aa1387613df848df0a0d88ead2cfad9a677c99ad1f31f19e3a86eec28510",
-      "e68f7ea2ad74df04a7c14bd48fa0884494b1628bfb974294f2ca7bdcd769ebf3",
-      "b94d40111d4d9a8ebf44fc6f8136d01327a0193b8e90f9f4b9ae8e8d608b7d5e",
-      "4c99a1d61407d67c6235cd1caec54c7def6501f089e12b6907d0d0399b198ec0",
-      "952e78a1fec02bd4a8e0b531ddb42e12ede280e56cc4691a157393f355d0eb0f",
-      "c74cfb1ca79944f7ebbfe155719427d1c6f5cc7cbb5967b37b02e57f5977de1b"
-    ],
     "30403fa8c1785d5b": [
       "31e9ce5f5c3912632b6d6caaeb04b34c987abb0c8f117436bfa7d135b4caac61",
       "4b8111640d94810edaba87dd19cb0fe2b59940776d5e2350e7cc2bbf4eb86f0e",
@@ -2382,6 +2374,18 @@
       "3e412e15aec88335c35b9cf4240d48305cf819a0d6f39488e4ff5be7f2ed0df3",
       "dbdb87800be27ef71b2434df654fc7d31870ab1eb1e46aa683e8750a285708f9",
       "36b72dfe2290154238213f692f6950c06e0b1cbc9e12ac11b2fae572c743b700"
+    ],
+    "33f689fbf51caded": [
+      "59c69a5241c9d6fbbe0b30f601f7f5a381f4a4e07f91c9bed5850848f902a0b4",
+      "3f4cc36b4924d0e22e24609e6084cf29a36ece48f50ed732bf58be4c44c0e415",
+      "96fa44c4122b6f3d7c92f3939eae2d66e0442c09dbc84b5fb31ae8dff47ed4c9",
+      "4063188a1c8601d6ec0f0b8eda22ce7d8d3304c7f4d934d1484a236eb886c97b",
+      "e71dd9621e35eb92e898fd45a0e0cda63ba674a3b1000084f8227e0ff2054550",
+      "91bb7ff31695c88120d2bbcfaae2f1a0edf0e8f4d03719a2ecd4a8f5b1fa751b",
+      "816206c14143f035eba6e9fec4f73a4c600f112900860a6af6484a00d4832ce6",
+      "69cf526158279860d417e7c0c405a58e3be1ca9632e444038972abad223ae9ff",
+      "9b5fb739d680cd275017b4cf540f64c887f206ddf4e61512d6c67cdba67a6df1",
+      "ef1f462fe77b963b35b3b55ce8b0b4f25fab61e4f0f8704ec00922cf40b0a521"
     ],
     "341036533a8483e8": [
       "f4636d5db3c786455530f6552bf60dd39d1c4e0ccbfb7cca9bfc0ebf20be5a98",
@@ -9170,6 +9174,12 @@
       "bd09648a30b1c72665674eb73a98cef1ba789f3996bb5133b05c2cf0fe7fcbc4",
       "7ca0d4e60b033f8f6b1970878ad82bb2949951c71def39ff907a42ecdf178261"
     ],
+    "ce1c6cea15b3763e": [
+      "a0f7b78c11e900259d7803a1d45dfa8fe107da6d1f179e5b0fb11baadfcfd059",
+      "470a2cfe2e676c9b382fd550ae7c3899c155a6b9c73e628f1bd9ab78e94198db",
+      "73547fa2752fa03b0017696feff80e54ed83aa1cb3a2a704925bb402709fa3de",
+      "1d43094ec2e87287f8a143dce99bc9882f71a336a438f34a4d4a836a8f20f1ff"
+    ],
     "ce50227bfa8b3f63": [
       "193f950737073e24a9338e5cbc75e53dd8c0163f2b687e332e23e8dbaf4bee61",
       "86198613b5b44de471b700259301010505408722fd5e8456ea4344b84015a765",
@@ -10313,6 +10323,17 @@
       "e4f0cbb3df8c46eb7f3ce8654e2f19628bedf446c8bb427273978248a1678984",
       "8861fc218bda0d1f8d628dd4033d19922bec4f67def52646fed354eb641c4c77"
     ],
+    "ee78e8c1457675f1": [
+      "fe4ce33a48a6a1b7f70cd232fec1ff0ca79128e9a4965b71a4a528b747cfc2cf",
+      "b7d2b5b6d4f30ee0d4e068be110dede07a1492aa170f06759dba500abba9a17f",
+      "784113abc4f5dc785802fb9c1a50a205f6129c5974aa46b86a076197d647e1b3",
+      "0ed7aa1387613df848df0a0d88ead2cfad9a677c99ad1f31f19e3a86eec28510",
+      "e68f7ea2ad74df04a7c14bd48fa0884494b1628bfb974294f2ca7bdcd769ebf3",
+      "b94d40111d4d9a8ebf44fc6f8136d01327a0193b8e90f9f4b9ae8e8d608b7d5e",
+      "4c99a1d61407d67c6235cd1caec54c7def6501f089e12b6907d0d0399b198ec0",
+      "952e78a1fec02bd4a8e0b531ddb42e12ede280e56cc4691a157393f355d0eb0f",
+      "c74cfb1ca79944f7ebbfe155719427d1c6f5cc7cbb5967b37b02e57f5977de1b"
+    ],
     "ee9a02543df41e8d": [
       "bbf006a3ffd284128e08dfab36b234c11fe4d35bfe69711edb997a68dceb7e1a",
       "6b5645f9608fed953e69f27203ba5ac14015da204794d144453d76c64193ef9b",
@@ -11052,8 +11073,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 838,
-      "titleCount": 8026,
+      "fileCount": 840,
+      "titleCount": 8043,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -11138,7 +11159,7 @@
         "test/unit/anchor/publisher/fold/archive_subdeadline.test.js": "5302281e865f6bde",
         "test/unit/anchor/publisher/fold/federated_reward_v3.test.js": "a584eb2ab5494f0e",
         "test/unit/anchor/publisher/fold/fold_groups.test.js": "0c54126b2451640d",
-        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "300bd7ed7dca8ee4",
+        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "ee78e8c1457675f1",
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "6eeca5d1ac42a787",
@@ -11734,6 +11755,7 @@
         "test/unit/oracle/round/oracle_round.test.js": "72b454c688bcb440",
         "test/unit/oracle/round/oracle_round_anchor_skip.test.js": "1d41bc3bd6f79740",
         "test/unit/oracle/round/oracle_round_band.test.js": "60b2a94af343488d",
+        "test/unit/oracle/round/oracle_round_block_timestamp_bound.test.js": "ce1c6cea15b3763e",
         "test/unit/oracle/round/oracle_round_extra.test.js": "666d86cf6df5fb37",
         "test/unit/oracle/round/oracle_round_extra_message_handling.test.js": "8b30fd6794a0e64c",
         "test/unit/oracle/round/oracle_round_extra_retention.test.js": "f6f55daa534d9f8a",
@@ -11885,6 +11907,7 @@
         "test/unit/validators/slash_detector.test.js": "36d1c7feea30b920",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
@@ -11947,8 +11970,8 @@
       }
     },
     "test": {
-      "fileCount": 838,
-      "titleCount": 8026,
+      "fileCount": 840,
+      "titleCount": 8043,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -12033,7 +12056,7 @@
         "test/unit/anchor/publisher/fold/archive_subdeadline.test.js": "5302281e865f6bde",
         "test/unit/anchor/publisher/fold/federated_reward_v3.test.js": "a584eb2ab5494f0e",
         "test/unit/anchor/publisher/fold/fold_groups.test.js": "0c54126b2451640d",
-        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "300bd7ed7dca8ee4",
+        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "ee78e8c1457675f1",
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "6eeca5d1ac42a787",
@@ -12629,6 +12652,7 @@
         "test/unit/oracle/round/oracle_round.test.js": "72b454c688bcb440",
         "test/unit/oracle/round/oracle_round_anchor_skip.test.js": "1d41bc3bd6f79740",
         "test/unit/oracle/round/oracle_round_band.test.js": "60b2a94af343488d",
+        "test/unit/oracle/round/oracle_round_block_timestamp_bound.test.js": "ce1c6cea15b3763e",
         "test/unit/oracle/round/oracle_round_extra.test.js": "666d86cf6df5fb37",
         "test/unit/oracle/round/oracle_round_extra_message_handling.test.js": "8b30fd6794a0e64c",
         "test/unit/oracle/round/oracle_round_extra_retention.test.js": "f6f55daa534d9f8a",
@@ -12780,6 +12804,7 @@
         "test/unit/validators/slash_detector.test.js": "36d1c7feea30b920",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
@@ -12791,8 +12816,8 @@
       }
     },
     "test:all": {
-      "fileCount": 918,
-      "titleCount": 8849,
+      "fileCount": 920,
+      "titleCount": 8866,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -12957,7 +12982,7 @@
         "test/unit/anchor/publisher/fold/archive_subdeadline.test.js": "5302281e865f6bde",
         "test/unit/anchor/publisher/fold/federated_reward_v3.test.js": "a584eb2ab5494f0e",
         "test/unit/anchor/publisher/fold/fold_groups.test.js": "0c54126b2451640d",
-        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "300bd7ed7dca8ee4",
+        "test/unit/anchor/publisher/fold/fold_signing_canonical_vector.test.js": "ee78e8c1457675f1",
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "6eeca5d1ac42a787",
@@ -13553,6 +13578,7 @@
         "test/unit/oracle/round/oracle_round.test.js": "72b454c688bcb440",
         "test/unit/oracle/round/oracle_round_anchor_skip.test.js": "1d41bc3bd6f79740",
         "test/unit/oracle/round/oracle_round_band.test.js": "60b2a94af343488d",
+        "test/unit/oracle/round/oracle_round_block_timestamp_bound.test.js": "ce1c6cea15b3763e",
         "test/unit/oracle/round/oracle_round_extra.test.js": "666d86cf6df5fb37",
         "test/unit/oracle/round/oracle_round_extra_message_handling.test.js": "8b30fd6794a0e64c",
         "test/unit/oracle/round/oracle_round_extra_retention.test.js": "f6f55daa534d9f8a",
@@ -13704,6 +13730,7 @@
         "test/unit/validators/slash_detector.test.js": "36d1c7feea30b920",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
