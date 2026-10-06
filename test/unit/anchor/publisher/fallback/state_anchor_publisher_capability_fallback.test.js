@@ -11,8 +11,8 @@
 // contact legal@dankest.llc.
 
 const { expect }            = require('chai');
-const StateAnchorPublisher  = require('../../../../src/anchor/publisher');
-const { DB_METHODS } = require('../../../helpers/mockHub.js');
+const StateAnchorPublisher  = require('../../../../../src/anchor/publisher');
+const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 // #1224: resolveCapabilitySet's local capability_snapshots-table fallback must be
 // gated to seeded/regtest stacks. On mainnet/testnet a null snapshot means THIS
