@@ -111,12 +111,6 @@ describe('RollcallRound push on peer connect', function () {
         pm.emit('peer:connect', 'peer-a');
         assertFullReplay(pm, 'peer-a');
     });
-        assert.deepStrictEqual(sent.map(d => d.pubkey).sort(), PKS.slice().sort());
-        for (const d of sent) {
-            assert.strictEqual(d.epoch, EPOCH);
-            assert.strictEqual(d.sig, SIGS[PKS.indexOf(d.pubkey)]);
-        }
-    });
 
     it('sends nothing for a round past the accept window', async function () {
         const { eng, pm } = await started();
