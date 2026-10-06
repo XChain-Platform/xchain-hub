@@ -31,8 +31,14 @@ const docsDirs = process.env.XCHAIN_DOCS_DIR
 const vectorPath = docsDirs
     .map(dir => path.resolve(dir, 'protocol', 'test-vectors', 'list_share.json'))
     .find(candidate => fs.existsSync(candidate));
-assert.ok(vectorPath, 'list_share.json was not found in ' + docsDirs.join(' or '));
-const vectors = require(vectorPath);
+// Without the sibling the vectors are empty and the data-driven cases do not register, so the
+// file still loads for a collection run; XCHAIN_REQUIRE_SIBLINGS=1 keeps the missing vectors fatal.
+if (!vectorPath && process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+    assert.fail('XCHAIN_REQUIRE_SIBLINGS=1 but list_share.json was not found in ' + docsDirs.join(' or '));
+}
+const vectors = vectorPath ? require(vectorPath)
+    : { snapshotIds: [], canonicals: [], metaCanonicals: [], metaHashes: [] };
+function needVectors(ctx) { if (!vectorPath) ctx.skip(); }
 
 function rowFromVector(entry) {
     return {
@@ -65,6 +71,7 @@ describe('list share metadata signed canonical vectors', function () {
     });
 
     it('appends an empty field when gated metadata is absent', function () {
+        needVectors(this);
         const entry = vectors.metaCanonicals.find(vector => vector.meta_hash === '');
         assert.ok(entry, 'missing canonical vector without metadata');
         assert.ok(listSnapshotCanonical(rowFromVector(entry), entry.view, () => true).endsWith('|'));
@@ -88,6 +95,7 @@ describe('list share legacy signed canonical vectors', function () {
 
 describe('list share metadata gate reader', function () {
     it('receives snapshot block and network', function () {
+        needVectors(this);
         const entry = vectors.metaCanonicals[0];
         const calls = [];
         const reader = function (...args) {
