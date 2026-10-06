@@ -99,7 +99,7 @@
     },
     "stake_weighted_quorum": {
       "path": "src/consensus/stake_weighted_quorum.js",
-      "hash": "afaee5777e8d909eace7a7106b294797014f74929fc4302c50a2ec31ac77a847",
+      "hash": "667f90202114618e33f1a29788fd51a21e508f207a3143b8c285aef4c079a25d",
       "twins": [
         "xchain-indexer",
         "xchain-sync"
@@ -735,6 +735,13 @@
       "to": "16ff3e1e17a412003dbc83bf27e1a7e88a526f7704fa43a8a4afce51441af675",
       "reason": "route the three warnings through the hub logger, text unchanged",
       "date": "2026-10-05"
+    },
+    {
+      "id": "stake_weighted_quorum",
+      "from": "afaee5777e8d909eace7a7106b294797014f74929fc4302c50a2ec31ac77a847",
+      "to": "667f90202114618e33f1a29788fd51a21e508f207a3143b8c285aef4c079a25d",
+      "reason": "copy the split quorum helpers from their indexer canonical",
+      "date": "2026-10-06"
     }
   ]
 }
