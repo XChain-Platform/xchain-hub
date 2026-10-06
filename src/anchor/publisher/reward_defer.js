@@ -152,8 +152,9 @@ module.exports = {
     // checkpoint byte-match above proves the txid carries OUR checkpoint, not that it is
     // the anchor the reward tuple names: a relayed tuple can pair a real txid with another
     // publisher or round. The rule is the indexer's judgeAnchors, read from the vendored
-    // twin of anchor_proof_client/binding.js and never re-derived here; until the
-    // twin is vendored the check is skipped and says so once, so the drain behaves as it did.
+    // twin of anchor_proof_client/binding.js and never re-derived here. While the twin is
+    // not vendored the check cannot run, so it answers 'unknown' and the entry is retained
+    // until the TTL: the drain never accepts a txid it could not bind.
     // Returns 'verified' | 'rejected' | 'unknown'.
     async drainBindingVerdict(e){
         let binding;
@@ -163,9 +164,9 @@ module.exports = {
             if(!this._rewardBindingMissingLogged){
                 this._rewardBindingMissingLogged = true;
                 logger.error('StateAnchorPublisher: anchor_proof_binding twin is not present; the reward txid ' +
-                              'binding check is NOT running');
+                              'binding check cannot run; deferred rewards are retained and none is written');
             }
-            return 'verified';
+            return 'unknown';
         }
         let anchors = [];
         let after = null;
