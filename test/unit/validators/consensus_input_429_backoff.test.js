@@ -36,7 +36,7 @@ function err(status) {
     return e;
 }
 
-describe('consensus input 429 backoff', function () {
+function registerMonitorTests() {
     describe('monitor', function () {
         it('classifies 429 as rate_limited, not http_error', function () {
             expect(classifyFetchError(err(429))).to.equal(REASONS.RATE_LIMITED);
@@ -95,7 +95,9 @@ describe('consensus input 429 backoff', function () {
             expect(monitor.snapshot().backoff_remaining_ms).to.equal(1000);
         });
     });
+}
 
+function registerSnapshotTests() {
     describe('CapabilitySnapshot', function () {
         let axiosStub, snap;
         const hub = {
@@ -141,4 +143,9 @@ describe('consensus input 429 backoff', function () {
             expect(axiosStub.post.callCount).to.equal(2);
         });
     });
+}
+
+describe('consensus input 429 backoff', function () {
+    registerMonitorTests();
+    registerSnapshotTests();
 });
