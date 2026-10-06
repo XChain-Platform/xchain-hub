@@ -19,14 +19,14 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const OracleConsensus = require('../../../../src/oracle/consensus');
+const OracleConsensus = require('../../../../../src/oracle/consensus');
 const {
   createMockHub
-} = require('../../../helpers/mockHub');
+} = require('../../../../helpers/mockHub');
 const {
   VALIDATORS_3,
   buildSubmissions
-} = require('../../../helpers/fixtures');
+} = require('../../../../helpers/fixtures');
 function registryFor(validators) {
   let m = new Map();
   for (let v of validators) m.set(v.addr, v.pubkey);
