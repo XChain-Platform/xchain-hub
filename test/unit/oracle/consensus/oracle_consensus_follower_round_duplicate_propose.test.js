@@ -77,12 +77,13 @@ describe('OracleConsensus: duplicate follower PROPOSE', function () {
         await oc.handlePropose(proposeEnvelope(harness));
         let firstPending = oc.pendingRounds.get(ROUND);
         expect(firstPending, 'first follower round must exist').to.exist;
+        expect(firstPending.timer, 'first round must hold a timer').to.exist;
 
         oc.handlePrepare(prepareEnvelope(harness));
         await clock.tickAsync(0);
         expect(firstPending.prepares.has(thirdParty.pubkey)).to.be.true;
         let broadcastsBeforeDuplicate = pm.broadcast.callCount;
-        let timersBeforeDuplicate = clock.countTimers();
+        let timerBeforeDuplicate = firstPending.timer;
 
         await oc.handlePropose(proposeEnvelope(harness));
         await clock.tickAsync(0);
@@ -91,14 +92,14 @@ describe('OracleConsensus: duplicate follower PROPOSE', function () {
         expect(oc.pendingRounds.get(ROUND)).to.equal(firstPending);
         expect(firstPending.prepares.has(thirdParty.pubkey)).to.be.true;
         expect(pm.broadcast.callCount).to.equal(broadcastsBeforeDuplicate);
-        expect(clock.countTimers()).to.equal(timersBeforeDuplicate);
+        expect(oc.pendingRounds.get(ROUND).timer).to.equal(timerBeforeDuplicate);
     });
 
     it('does not replace the first round for a conflicting proposal', async function () {
-        let { oc, clock, digest } = harness;
+        let { oc, digest } = harness;
         await oc.handlePropose(proposeEnvelope(harness));
         let firstPending = oc.pendingRounds.get(ROUND);
-        let timersBeforeConflict = clock.countTimers();
+        let timerBeforeConflict = firstPending.timer;
         let conflicting = proposeEnvelope(harness);
         conflicting.data.prices = [{ coinPair: 'BTC/USD', price: '999.00000000' }];
         conflicting.data.digest = oc.digest(ROUND, conflicting.data.prices);
@@ -108,6 +109,6 @@ describe('OracleConsensus: duplicate follower PROPOSE', function () {
         expect(oc.pendingRounds.size).to.equal(1);
         expect(oc.pendingRounds.get(ROUND)).to.equal(firstPending);
         expect(firstPending.digest).to.equal(digest);
-        expect(clock.countTimers()).to.equal(timersBeforeConflict);
+        expect(oc.pendingRounds.get(ROUND).timer).to.equal(timerBeforeConflict);
     });
 });
