@@ -97,7 +97,9 @@ describe('hub DB peer catch-up with membership only in the effective signer set'
         expect(catchup.isCaughtUp()).to.equal(catchup.state.isCaughtUp());
         expect(catchup.isCaughtUp()).to.equal(true);
     });
+});
 
+describe('hub DB peer catch-up signer-set failure paths', function () {
     it('reports not caught up from table state when the peer feed fails', async function () {
         const f = federation(true);
         const catchup = catchupFor(f.local.manager, async () => { throw new Error('feed down'); });
