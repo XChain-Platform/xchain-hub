@@ -203,6 +203,7 @@ module.exports = {
     // The cadence contract with the fee gate, in one place, plus the spend guard.
     cadenceStats() {
         let windowRounds = this.windowRoundsInForce();
+        this.refreshInForceMaxPriceAge();
         let inForce = Number.isFinite(this._inForceMaxPriceAgeSeconds) ? this._inForceMaxPriceAgeSeconds : null;
         return {
             // The cadence contract with the fee gate, in one place.
