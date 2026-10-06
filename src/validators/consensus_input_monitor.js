@@ -140,7 +140,7 @@ class ConsensusInputMonitor {
         this.consecutiveFailures++;
         if (this.streakStartedAt === null) this.streakStartedAt = now;
         this.lastFailure = { at: now, reason: reason, method: method || null, detail: detail || null };
-        if (reason === REASONS.RATE_LIMITED) this._armBackoff(now);
+        if (reason === REASONS.RATE_LIMITED) this.armBackoff(now);
 
         if (now - (this._warnAt[warnKey] || 0) > this.throttleMs) {
             this._warnAt[warnKey] = now;
@@ -163,7 +163,7 @@ class ConsensusInputMonitor {
 
     // Window is drawn from [ceiling/2, ceiling] where the ceiling doubles with each
     // consecutive 429, so hubs that failed together spread out instead of re-colliding.
-    _armBackoff(now) {
+    armBackoff(now) {
         let ceiling = Math.min(this.backoffMaxMs, this.backoffBaseMs * Math.pow(2, this.rateLimitStreak));
         this.rateLimitStreak++;
         this.backoffUntil = now + Math.round(ceiling * (0.5 + 0.5 * this._random()));
