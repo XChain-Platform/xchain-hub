@@ -22,9 +22,9 @@
 
 'use strict';
 
-const { ORACLE_PROPOSE } = require('./constants.js');
+const { ORACLE_PROPOSE } = require('../constants.js');
 const nodeUtil = require('node:util');
-const { getLogger } = require('../../observability');
+const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
 // Open the leader's pending round: the locked snapshot and quorum, this hub's own seeded

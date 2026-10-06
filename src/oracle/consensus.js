@@ -53,11 +53,11 @@ const aggregateMethods      = require('./consensus/aggregate.js');
 const clampReferenceMethods = require('./consensus/clamp_reference.js');
 const commitMethods         = require('./consensus/commit.js');
 const finalizeRoundMethods  = require('./consensus/finalize_round.js');
-const handleProposeMethods  = require('./consensus/handle_propose.js');
+const handleProposeMethods  = require('./consensus/propose/handle_propose.js');
 const lifecycleMethods      = require('./consensus/lifecycle.js');
 const membershipMethods     = require('./consensus/membership.js');
 const messageMethods        = require('./consensus/messages.js');
-const proposeMethods        = require('./consensus/propose.js');
+const proposeMethods        = require('./consensus/propose/propose.js');
 const snapshotStoreMethods  = require('./consensus/snapshot_store.js');
 const watchdogMethods       = require('./consensus/watchdog.js');
 
