@@ -69,9 +69,11 @@ class RewardTracker {
         if (!Number.isFinite(totalReward) || totalReward <= 0)
             throw new Error('Invalid reward amount: ' + this.rewardPerRound);
 
-        let validParticipants = participants.filter(pk =>
-            typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
-        );
+        // Canonical set: lowercase, deduplicated, sorted. A case-variant or repeated
+        // key would otherwise inflate the divisor and make equal rounds split unequally.
+        let validParticipants = [...new Set(participants
+            .filter(pk => typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk))
+            .map(pk => pk.toLowerCase()))].sort();
         if (validParticipants.length === 0) return;
 
         // Split the budget the way the indexer derives the consensus rows
