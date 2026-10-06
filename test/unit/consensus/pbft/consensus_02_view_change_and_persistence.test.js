@@ -181,7 +181,37 @@ it('initiateViewChange stashes the locked quorum and prunes already-applied roun
             expect(consensus.viewChangeQuorums.has(3)).to.be.false; // pruned
             expect(consensus.viewChangeQuorums.get(12).quorum).to.equal(7);
         });
+
+// A federated hub with no round context for the seq (it refused or never saw the
+// PRE_PREPARE) must not tally VIEW_CHANGE votes over its own live validator count.
+function voteViewChange(senders, view, seq) {
+    for (let v of senders) consensus.handleViewChange({ sender: v.addr, sig_pubkey: v.pubkey, data: { view: view, seq: seq } });
+}
+it('a federated hub with no round context declines to tally, keeping the votes', function () {
+            consensus.view = 0;
+            voteViewChange(VALIDATORS_4.slice(1), 1, 5);
+            expect(consensus.view, 'the live count of 4 would have met quorum 3').to.equal(0);
+            expect(pm.broadcast.getCalls().some(c => c.args[0] === 'PBFT_NEW_VIEW')).to.be.false;
+            expect(consensus.pendingViewChanges.get(1).size, 'the votes are still recorded').to.equal(3);
+        });
+it('the same votes advance the view once the hub holds round context for the seq', function () {
+            consensus.view = 0;
+            consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
+            voteViewChange(VALIDATORS_4.slice(1), 1, 5);
+            expect(consensus.view).to.equal(1);
+        });
+it('a pending proposal for the seq is round context too', function () {
+            consensus.view = 0;
+            consensus.pendingProposals.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
+            voteViewChange(VALIDATORS_4.slice(1), 1, 5);
+            consensus.pendingProposals.delete(5);
+            expect(consensus.view).to.equal(1);
+        });
 });
+});
+
+describe('Consensus (PBFT)', function () {
+    installSuiteHooks1();
 // Sequence persistence
 describe('sequence persistence', function () {
 it('loadSeq reads from DB', async function () {
