@@ -25,6 +25,7 @@
 const fs       = require('fs');
 const nodeUtil = require('node:util');
 const { isAmbiguousSendError } = require('../../lib/idempotent_broadcast.js');
+const { rewriteFileAtomically } = require('../../lib/fs/durable_file.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -87,16 +88,14 @@ module.exports = {
         }
     },
 
-    // Truncate-and-rewrite the durable queue. Returns true on a confirmed fsync'd
-    // write, false on failure, so the dequeue path can tell whether a just-published
-    // entry is still on disk (mirrors OraclePublisher.rewriteQueue).
+    // Atomically rewrite the durable queue (temp file, fsync, rename). Returns true on
+    // a confirmed fsync'd write, false on failure, which leaves the old queue whole, so
+    // the dequeue path can tell whether a just-published entry is still on disk
+    // (mirrors OraclePublisher.rewriteQueue).
     rewriteQueue(entries){
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
-            let fd = fs.openSync(this.queuePath, 'w');
-            fs.writeSync(fd, lines);
-            fs.fsyncSync(fd);
-            fs.closeSync(fd);
+            rewriteFileAtomically(fs, this.queuePath, lines);
             return true;
         } catch (e) {
             logger.error(nodeUtil.format('AttestationPublisher: failed to rewrite queue:', e));
