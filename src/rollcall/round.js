@@ -98,6 +98,7 @@ const logger = getLogger();
 const wirePart     = require('./round/wire.js');
 const epochPart    = require('./round/epoch.js');
 const gossipPart   = require('./round/gossip.js');
+const regossipPart = require('./round/regossip.js');
 const electionPart = require('./round/election.js');
 const publishPart  = require('./round/publish.js');
 const railPart     = require('./round/doge_rail.js');
@@ -220,7 +221,10 @@ class RollcallRound {
                         ' (no activation height set); the engine stays idle');
             return;
         }
-        if(this.peerManager) this.peerManager.on('message', this._handler);
+        if(this.peerManager){
+            this.peerManager.on('message', this._handler);
+            this.peerManager.on('peer:connect', this._onConnect);
+        }
         // Both logs must be consumed BEFORE the first tick: the recovered epochs
         // gate the very round that tick reconstructs.
         this.loadSignLog();
@@ -242,7 +246,10 @@ class RollcallRound {
     async stop(){
         if(this._timer) clearInterval(this._timer);
         this._timer = null;
-        if(this.peerManager) this.peerManager.removeListener('message', this._handler);
+        if(this.peerManager){
+            this.peerManager.removeListener('message', this._handler);
+            this.peerManager.removeListener('peer:connect', this._onConnect);
+        }
     }
 
     // ── canonical + wire ─────────────────────────────────────────────────────
@@ -342,6 +349,7 @@ function initRoundState(self){
     self._ticking       = false;
     self._loggedNoBroadcast = false;
     self._handler       = (env) => self.handleMessage(env);
+    self._onConnect     = (addr) => self.onPeerConnect(addr);
 }
 
 
@@ -365,7 +373,7 @@ function installParts(target, parts) {
 }
 
 wirePart.bindRoundClass(RollcallRound);
-installParts(RollcallRound.prototype, [wirePart.methods, epochPart, gossipPart, electionPart,
+installParts(RollcallRound.prototype, [wirePart.methods, epochPart, gossipPart, regossipPart, electionPart,
                                        publishPart, railPart, recordsPart]);
 installParts(RollcallRound, [wirePart.statics]);
 
