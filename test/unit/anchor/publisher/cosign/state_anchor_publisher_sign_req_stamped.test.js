@@ -16,8 +16,8 @@
 // The mesh harness lives in test/helpers/anchor_mesh.js.
 
 const { expect }            = require('chai');
-const arMod                 = require('../../../../src/consensus/gates/anchor_reward_gate.js');
-const { buildMesh, v0Order, registerMeshHooks } = require('../../../helpers/anchor_mesh.js');
+const arMod                 = require('../../../../../src/consensus/gates/anchor_reward_gate.js');
+const { buildMesh, v0Order, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
 
 describe('StateAnchorPublisher', function () {
     registerMeshHooks();
