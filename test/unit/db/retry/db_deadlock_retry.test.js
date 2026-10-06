@@ -31,7 +31,7 @@ function registerDatabaseHooks() {
             createPool:       sinon.stub().returns(mockPool),
             createConnection: sinon.stub().resolves(mockConn)
         };
-        Database = proxyquire('../../../src/db', {
+        Database = proxyquire('../../../../src/db', {
             mariadb: mockMariadb,
             fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') },
             path:    require('path')

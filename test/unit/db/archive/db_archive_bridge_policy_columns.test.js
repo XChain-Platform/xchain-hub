@@ -22,7 +22,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const SQL_DIR = path.join(__dirname, '..', '..', '..', 'src', 'sql');
+const SQL_DIR = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql');
 
 // Column names of one table's CREATE TABLE, in DDL order. A column line starts with a
 // lower-case identifier followed by an upper-case type; KEY/UNIQUE/PRIMARY lines do not.
@@ -51,7 +51,7 @@ function makeDb() {
         createPool:       sinon.stub().returns(mockPool),
         createConnection: sinon.stub().resolves(mockConn)
     };
-    const Database = proxyquire('../../../src/db', {
+    const Database = proxyquire('../../../../src/db', {
         mariadb: mockMariadb,
         fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') },
         path:    require('path')
@@ -214,7 +214,7 @@ function registerSnapshotRouteCommentTest() {
     describe('src/api/rest/hub_db_snapshot.js: bridge_transfers route comment', function () {
         it('documents the new hub-side-only archive columns rather than claiming every column is mirror-consumed', function () {
             let text = fs.readFileSync(
-                path.join(__dirname, '..', '..', '..', 'src', 'api', 'rest', 'hub_db_snapshot.js'), 'utf8');
+                path.join(__dirname, '..', '..', '..', '..', 'src', 'api', 'rest', 'hub_db_snapshot.js'), 'utf8');
             let start = text.indexOf('GET /hub-db/snapshot/bridge_transfers');
             expect(start).to.be.greaterThan(-1);
             let section = text.slice(start, start + 1200);
