@@ -89,7 +89,12 @@ class ChainTips {
                 return null;
             }
             let directHeight = Number(result.block_index) || null;
-            if(directHeight && !this.btcDirectTipAcceptable(directHeight, pushedTip)) return null;
+            if(!directHeight){
+                logger.warn('XChainHub: BTC indexer getlatestblock returned no usable block_index (' +
+                    JSON.stringify(result.block_index) + '); no BTC latest block');
+                return null;
+            }
+            if(!this.btcDirectTipAcceptable(directHeight, pushedTip)) return null;
             return directHeight;
         } catch (err) {
             logger.error(nodeUtil.format('XChainHub: failed to resolve BTC latest block from indexer:', err));

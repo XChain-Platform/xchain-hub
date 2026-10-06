@@ -30,8 +30,7 @@ function warned(fragment) {
     return warnLog.getCalls().some((c) => c.args.join(' ').includes(fragment));
 }
 
-describe('chain tips null reasons', function () {
-
+function installFixtures() {
     before(function () {
         this.timeout(30000);
         axiosStub = { post: sinon.stub() };
@@ -53,6 +52,10 @@ describe('chain tips null reasons', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+}
+
+describe('chain tips null reasons: BTC latest block', function () {
+    installFixtures();
 
     it('logs when no BTC indexer URL resolves', async function () {
         const hub = hubWith(null, { data: { result: { block_index: 1 } } });
@@ -72,6 +75,23 @@ describe('chain tips null reasons', function () {
         expect(await hub.resolveBtcLatestBlock()).to.equal(null);
         expect(warned('returned an error ("boom")')).to.equal(true);
     });
+
+    it('logs when the BTC indexer returns no usable block_index', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: null } } });
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        expect(warned('no usable block_index')).to.equal(true);
+    });
+
+    it('logs when the BTC indexer lag exceeds the bound', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: 5, lag: 100000 } } });
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        expect(warned('exceeds MAX_INDEXER_LAG_BLOCKS')).to.equal(true);
+    });
+
+});
+
+describe('chain tips null reasons: admission tip', function () {
+    installFixtures();
 
     it('logs when an admission tip read returns no result', async function () {
         const hub = hubWith('http://indexer.invalid/api', { data: {} });
