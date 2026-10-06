@@ -30,9 +30,9 @@ const { expect } = require('chai');
 const sinon      = require('sinon');
 const crypto     = require('crypto');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const Database               = require('../../../../src/db');
-const eq                     = require('../../../../src/consensus/equivocation_header.js');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const Database               = require('../../../../../src/db');
+const eq                     = require('../../../../../src/consensus/equivocation_header.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
@@ -125,66 +125,70 @@ function pendingLeg(over){
     }, over);
 }
 
-function feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage(legs) {
-  return {
+function feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, over) {
+  const now = Math.floor(Date.now() / 1000);
+  const row = Object.assign({
+    snapshot_block: 150,
+    network: 'regtest',
+    src_chain: 'BTC',
+    src_action_index: 41,
+    src_address: 'mSrcAddress',
+    dest_chain: 'DOGE',
+    dest_address: 'nDestAddress',
+    tick: 'XCHAIN',
+    decimals: 8,
+    amount: '5.00000000',
+    effective_time: now + 240,
+    push_generation: 0
+  }, over);
+  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine.deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
+  return row;
+}
+function feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, leg) {
+  engine.indexerCall = sinon.stub().resolves({
     latest_block_index: 200,
     network: 'regtest',
-    transfers: legs
-  };
-}
-
-// Row 42, the hub half: the indexer's pending read can list a leg this hub has
-// already finalized (its mirror of bridge_transfers lags the hub's own write, and an
-// unfiltered read lists every valid leg the chain ever carried). Counting it into
-// the poll's in-flight view double counts it on top of the finalized rows the DB
-// half already sums, and the invariant then reads a deficit on a healthy bridge.
-function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHoldsPart1() {
-  // Row 42, the hub half: the indexer's pending read can list a leg this hub has
-  // already finalized (its mirror of bridge_transfers lags the hub's own write, and an
-  // unfiltered read lists every valid leg the chain ever carried). Counting it into
-  // the poll's in-flight view double counts it on top of the finalized rows the DB
-  // half already sums, and the invariant then reads a deficit on a healthy bridge.
-  it('drops a leg it already holds from both the in-flight view and the round attempt', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    db.state.persistedIndexes = [41];
-    engine.indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
-      src_action_index: 41,
-      amount: '5.00000000'
-    }), pendingLeg({
-      src_action_index: 42,
-      amount: '7.00000000'
-    })]));
-    const pending = new Map();
-    await engine.pollPendingTransfers('BTC', 150, pending);
-    expect(pending.get('XCHAIN|DOGE')).to.deep.equal(['7.00000000']);
-    expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
-    expect(engine.transferConsensus.propose.firstCall.args[1].row.src_action_index).to.equal(42);
-  });
-  it('reads the persisted set ONCE per chain per poll, keyed on the page it was handed', async function () {
-    const {
-      engine,
-      db
-    } = makeEngine();
-    engine.indexerCall = sinon.stub().resolves(feature5thePendingPollAgainstLegsThisHubAlreadyHoldsPendingPage([pendingLeg({
-      src_action_index: 41
-    }), pendingLeg({
-      src_action_index: 42
-    }), pendingLeg({
-      src_action_index: 43
-    })]));
-    await engine.pollPendingTransfers('BTC', 150, new Map());
-    const reads = db.calls.filter(c => c.sql.startsWith('SELECT src_action_index FROM bridge_transfers'));
-    expect(reads).to.have.length(1);
-    expect(reads[0].params).to.deep.equal(['regtest', 'BTC', 41, 42, 43]);
-    expect(reads[0].sql).to.contain("status <> 'retracted'");
+    transfers: [leg === null ? pendingLeg({
+      src_action_index: 999
+    }) : pendingLeg(leg)]
   });
 }
-function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHolds() {
-  describe('the pending poll against legs this hub already holds', function () {
-    registerFeature5thePendingPollAgainstLegsThisHubAlreadyHoldsPart1();
+function registerFeature6followerVerificationOfAProposedTransferFragment2Part1() {
+  it('refuses a transfer_id that does not re-derive, and a leg it cannot see', async function () {
+    const {
+      engine
+    } = makeEngine();
+    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, {});
+    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, {
+      transfer_id: 'f'.repeat(64)
+    }))).to.equal(false);
+    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, null);
+    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine))).to.equal(false);
+  });
+  it('refuses a record anchored far from its own BTC tip view', async function () {
+    const {
+      engine
+    } = makeEngine();
+    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, {});
+    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, {
+      snapshot_block: 9000
+    }))).to.equal(false);
+  });
+  it('refuses a leg its own indexer does not yet hold at the effective depth', async function () {
+    const {
+      engine
+    } = makeEngine();
+    engine.indexerCall = sinon.stub().resolves({
+      latest_block_index: 103,
+      network: 'regtest',
+      transfers: [pendingLeg()]
+    });
+    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine))).to.equal(false);
+  });
+}
+function registerFeature6followerVerificationOfAProposedTransferFragment2() {
+  describe('follower verification of a proposed transfer', function () {
+    registerFeature6followerVerificationOfAProposedTransferFragment2Part1();
   });
 }
 describe('CrossChainBridgeEngine', function () {
@@ -193,5 +197,5 @@ describe('CrossChainBridgeEngine', function () {
   });
 
   // ---------------------------------------------------------------------
-  registerFeature5thePendingPollAgainstLegsThisHubAlreadyHolds();
+  registerFeature6followerVerificationOfAProposedTransferFragment2();
 });
