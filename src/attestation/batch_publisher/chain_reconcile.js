@@ -99,8 +99,15 @@ module.exports = {
             let start = finiteInteger(batch.window_start);
             let end = finiteInteger(batch.window_end);
             if(start === null || end === null) continue;
-            batches.push(Object.assign({}, batch, { window_start: start, window_end: end }));
+            let rowCount = finiteInteger(batch.row_count);
+            batches.push(Object.assign({}, batch, {
+                window_start: start,
+                window_end:   end,
+                row_count:    rowCount !== null && rowCount >= 0 ? rowCount : 0,
+                tx_hash:      typeof batch.tx_hash === 'string' && batch.tx_hash ? batch.tx_hash : null
+            }));
         }
+        this._chainReconcileWarned = null;
         return { batches: batches, truncated: !!result.truncated };
     },
 

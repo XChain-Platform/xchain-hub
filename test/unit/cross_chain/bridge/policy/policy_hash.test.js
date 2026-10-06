@@ -27,6 +27,7 @@ const {
     policyHashText
 } = require('../../../../../src/cross_chain/bridge/policy_hash.js');
 const policyPoll = require('../../../../../src/cross_chain/bridge/policy_poll.js');
+const { siblingCheckout, skipOrFail } = require('../../../../helpers/sibling_checkout.js');
 
 describe('bridge policy hash', function(){
     it('matches the current hash when neither side uses a reference', function(){
@@ -63,13 +64,7 @@ describe('bridge policy hash', function(){
         const src = path.resolve(__dirname, '../../../../../src');
         const indexerDir = process.env.XCHAIN_INDEXER_DIR || path.join(src, '..', '..', 'xchain-indexer');
         const membershipPath = path.join(indexerDir, 'src', 'consensus', 'bridge_settle', 'policy_membership.js');
-        if(!fs.existsSync(membershipPath)){
-            if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1'){
-                expect.fail('xchain-indexer sibling is absent at ' + membershipPath);
-            }
-            this.skip();
-            return;
-        }
+        if(!skipOrFail(this, siblingCheckout(__dirname, membershipPath), 'the indexer policy membership parity check')) return;
 
         const membership = require(membershipPath);
         const cases = [
