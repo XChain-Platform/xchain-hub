@@ -5,13 +5,21 @@ const https = require('https');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const registry = require('./catchup_verifiers.js');
+const { createIndexerReadMemo } = require('../../oracle/price_aggregator/capability_catchup_verifier.js');
 const { createCatchupState } = require('./catchup_state.js');
+const { advanceCursor, storePriceSnapshot, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 
 const DEFAULT_PAGE_SIZE = 1000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000;
+const DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
+const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+
+function positiveOr(value, fallback) {
+    return Number(value) > 0 ? Number(value) : fallback;
+}
 
 function peerFeedUrl(peerAddr, table, cursor, limit) {
     let value = String(peerAddr || '');
@@ -93,14 +101,6 @@ function refusalReason(verdict) {
     return 'verifier refused row';
 }
 
-function admissionBlocks(row) {
-    return {
-        admit_block_btc: row.admit_block_btc,
-        admit_block_ltc: row.admit_block_ltc,
-        admit_block_doge: row.admit_block_doge
-    };
-}
-
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
 }
@@ -115,26 +115,19 @@ const CONTENT_KEY_READERS = Object.freeze({
         const rows = await db.findPriceSnapshotsForRound(row.round_number);
         return Array.isArray(rows) && rows.some(held => held && held.coin_pair === row.coin_pair);
     },
-    oracle_prices: (db, row) => hasRows(
-        db.getOraclePrice(row.source_address, row.source_chain, row.action_index)),
-    cross_chain_matches: (db, row) => hasRows(db.getCrossChainMatchByMatchId(row.match_id)),
-    capability_snapshots: (db, row) => hasRows(db.getCapabilitySnapshot(
-        row.snapshot_block, row.capability, row.signing_pubkey, row.source)),
-    cross_chain_calls: (db, row) => hasRows(
-        db.getCrossChainCallByCallIdAndPhase(row.call_id, row.phase)),
-    state_checkpoints: (db, row) => hasRows(
-        db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(
-            row.chain, row.network, row.checkpoint_seq)),
-    anchor_reward_attestations: (db, row) => hasRows(db.getAnchorRewardAttestation(
-        row.chain, row.network, row.reward_type, row.round_reference, row.snapshot_block,
-        row.publisher)),
-    attestation_responses: (db, row) => hasRows(
-        db.getAttestationResponse(row.network, row.request_id, row.effective_time)),
-    bridge_transfers: (db, row) => hasRows(db.getBridgeTransferByTransferId(row.transfer_id)),
-    policy_snapshots: (db, row) => hasRows(db.getPolicySnapshotAtSeq(
-        row.network, row.origin_chain, row.tick, row.policy_seq)),
-    list_snapshots: (db, row) => hasRows(db.getListSnapshotAtSeq(
-        row.network, row.home_chain, row.home_list_index, row.seq))
+    oracle_prices: (db, r) => hasRows(db.getOraclePrice(r.source_address, r.source_chain, r.action_index)),
+    cross_chain_matches: (db, r) => hasRows(db.getCrossChainMatchByMatchId(r.match_id)),
+    capability_snapshots: (db, r) => hasRows(db.getCapabilitySnapshot(
+        r.snapshot_block, r.capability, r.signing_pubkey, r.source)),
+    cross_chain_calls: (db, r) => hasRows(db.getCrossChainCallByCallIdAndPhase(r.call_id, r.phase)),
+    state_checkpoints: (db, r) => hasRows(db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(
+        r.chain, r.network, r.checkpoint_seq)),
+    anchor_reward_attestations: (db, r) => hasRows(db.getAnchorRewardAttestation(
+        r.chain, r.network, r.reward_type, r.round_reference, r.snapshot_block, r.publisher)),
+    attestation_responses: (db, r) => hasRows(db.getAttestationResponse(r.network, r.request_id, r.effective_time)),
+    bridge_transfers: (db, r) => hasRows(db.getBridgeTransferByTransferId(r.transfer_id)),
+    policy_snapshots: (db, r) => hasRows(db.getPolicySnapshotAtSeq(r.network, r.origin_chain, r.tick, r.policy_seq)),
+    list_snapshots: (db, r) => hasRows(db.getListSnapshotAtSeq(r.network, r.home_chain, r.home_list_index, r.seq))
 });
 
 async function rowAlreadyHeld(db, table, row) {
@@ -143,41 +136,18 @@ async function rowAlreadyHeld(db, table, row) {
     return reader(db, row);
 }
 
-function storePriceSnapshot(db, row) {
-    const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
-    if (row.status === 'skipped') {
-        return db.setSkippedPriceSnapshotRound(
-            row.round_number, [row.coin_pair], row.reference_block, row.block_timestamp);
-    }
-    const common = [row.round_number, pairs, row.reference_block, row.reference_chain,
-        row.block_timestamp, row.validator_count, row.consensus_proof, row.source_action_index,
-        row.push_generation, row.created_at];
-    if (row.batch_block_time !== null && row.batch_block_time !== undefined) {
-        common.splice(9, 0, row.batch_block_time);
-        return db.setBatchPriceSnapshotRound(...common, admissionBlocks(row));
-    }
-    if (row.source_chain !== null && row.source_chain !== undefined) {
-        return db.setPushedPriceSnapshotRound(...common, admissionBlocks(row));
-    }
-    return db.setFinalizedPriceSnapshotRound(row.round_number,
-        [{ coinPair: row.coin_pair, price: row.price }], row.reference_block,
-        row.block_timestamp, row.validator_count, row.consensus_proof, admissionBlocks(row));
-}
-
 const ROW_WRITERS = Object.freeze({
     price_snapshots: storePriceSnapshot,
     oracle_prices: (db, row) => db.setOraclePriceByGeneration(row),
     cross_chain_matches: (db, row) => db.createCrossChainMatch(row, row.btc_chain_id),
     capability_snapshots: (db, row) => db.createCapabilitySnapshots([row], row.btc_chain_id),
     cross_chain_calls: (db, row) => db.setCrossChainCallFinalized(row, row.btc_chain_id),
-    state_checkpoints: (db, row) => db.createStateCheckpoint(
-        row.chain, row.network, row.block_index, row.block_hash, row.ledger_hash, row.actions_hash,
-        row.contract_hash, row.checkpoint_seq, row.snapshot_block, row.state_root,
-        row.state_root_version, row.block_merkle_root, row.block_merkle_version,
-        row.validator_signatures),
-    anchor_reward_attestations: (db, row) => db.createAnchorRewardAttestation(
-        row.chain, row.network, row.reward_type, row.round_reference, row.snapshot_block,
-        row.publisher, row.reward_amount, row.publisher_attestations, row.doge_anchor_txid),
+    state_checkpoints: (db, r) => db.createStateCheckpoint(r.chain, r.network, r.block_index, r.block_hash,
+        r.ledger_hash, r.actions_hash, r.contract_hash, r.checkpoint_seq, r.snapshot_block, r.state_root,
+        r.state_root_version, r.block_merkle_root, r.block_merkle_version, r.validator_signatures),
+    anchor_reward_attestations: (db, r) => db.createAnchorRewardAttestation(r.chain, r.network,
+        r.reward_type, r.round_reference, r.snapshot_block, r.publisher, r.reward_amount,
+        r.publisher_attestations, r.doge_anchor_txid),
     attestation_responses: (db, row) => db.createAttestationResponseMirrorRow(row),
     bridge_transfers: (db, row) => db.insertBridgeTransfer(row),
     policy_snapshots: (db, row) => db.insertPolicySnapshot(row),
@@ -196,13 +166,15 @@ class HubDbPeerCatchup {
         this.db = opts.db;
         this.peerManager = opts.peerManager;
         this.feedKey = opts.feedKey || '';
-        this.pageSize = Number(opts.pageSize) > 0 ? Number(opts.pageSize) : DEFAULT_PAGE_SIZE;
-        this.warnIntervalMs = Number(opts.warnIntervalMs) > 0
-            ? Number(opts.warnIntervalMs) : DEFAULT_WARN_INTERVAL_MS;
-        this.retryIntervalMs = Number(opts.retryIntervalMs) > 0
-            ? Number(opts.retryIntervalMs) : DEFAULT_RETRY_INTERVAL_MS;
-        this.requestTimeoutMs = Number(opts.requestTimeoutMs) > 0
-            ? Number(opts.requestTimeoutMs) : DEFAULT_REQUEST_TIMEOUT_MS;
+        this.pageSize = positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE);
+        this.warnIntervalMs = positiveOr(opts.warnIntervalMs, DEFAULT_WARN_INTERVAL_MS);
+        this.retryIntervalMs = positiveOr(opts.retryIntervalMs, DEFAULT_RETRY_INTERVAL_MS);
+        this.maxRetryIntervalMs = positiveOr(opts.maxRetryIntervalMs, DEFAULT_MAX_RETRY_INTERVAL_MS);
+        this.indexerReadIntervalMs = opts.indexerReadIntervalMs === 0
+            ? 0 : positiveOr(opts.indexerReadIntervalMs, DEFAULT_INDEXER_READ_INTERVAL_MS);
+        this.currentRetryIntervalMs = this.retryIntervalMs;
+        this.nextRetryAt = 0;
+        this.requestTimeoutMs = positiveOr(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
         this.logger = opts.logger || getLogger();
         this.fetchPage = opts.fetchPage || ((peer, table, cursor, limit) =>
             requestJson(peerFeedUrl(peer, table, cursor, limit), this.feedKey, this.requestTimeoutMs));
@@ -218,48 +190,59 @@ class HubDbPeerCatchup {
         this.lastUngatedWarnAt = null;
         this.runningPromise = null;
         this.rerunRequested = false;
-        this.warnTimer = null;
-        this.retryTimer = null;
-        this.lastNoPeerWarnAt = null;
+        this.warnTimer = this.retryTimer = this.lastNoPeerWarnAt = null;
         this.lastNoFeedUrlWarnAt = new Map();
         this.started = false;
-        this.onPeerConnect = () => this.schedule();
+        this.onPeerConnect = peerAddr => this.isListedSignerPeer(peerAddr) && this.schedule();
     }
 
     start() {
         if (this.started) return this.runningPromise || Promise.resolve();
         this.started = true;
-        if (this.peerManager && typeof this.peerManager.on === 'function') {
-            this.peerManager.on('peer:connect', this.onPeerConnect);
-        }
-        this.warnTimer = setInterval(() => this.warnIfNoPeer(), this.warnIntervalMs);
-        if (this.warnTimer.unref) this.warnTimer.unref();
-        this.retryTimer = setInterval(() => {
-            if (!this.allCaughtUp() && connectedSignerPeers(this.peerManager).length > 0) {
-                this.schedule();
-            }
-        }, this.retryIntervalMs);
-        if (this.retryTimer.unref) this.retryTimer.unref();
+        if (this.peerManager && typeof this.peerManager.on === 'function') this.peerManager.on('peer:connect', this.onPeerConnect);
+        this.warnTimer = setInterval(() => this.warnIfNoPeer(), this.warnIntervalMs).unref();
+        this.retryTimer = setInterval(() => this.onRetryTick(), this.retryIntervalMs).unref();
         return this.schedule();
     }
 
     stop() {
-        if (this.warnTimer) clearInterval(this.warnTimer);
-        this.warnTimer = null;
-        if (this.retryTimer) clearInterval(this.retryTimer);
-        this.retryTimer = null;
+        clearInterval(this.warnTimer);
+        clearInterval(this.retryTimer);
+        this.warnTimer = this.retryTimer = null;
         if (this.peerManager && typeof this.peerManager.removeListener === 'function') {
             this.peerManager.removeListener('peer:connect', this.onPeerConnect);
         }
         this.started = false;
     }
 
-    schedule() {
+    isListedSignerPeer(peerAddr) {
+        const peers = connectedSignerPeers(this.peerManager);
+        return peers.some(peer => peerAddr == null || peer.addr === peerAddr || peer.identity === peerAddr);
+    }
+
+    onRetryTick() {
+        if (this.runningPromise) return;
+        if (this.allCaughtUp()) this.currentRetryIntervalMs = this.retryIntervalMs;
+        else if (Date.now() >= this.nextRetryAt && connectedSignerPeers(this.peerManager).length > 0) {
+            this.schedule({ onlyBehind: true }).then(() => this.backOffRetry());
+        }
+    }
+
+    backOffRetry() {
+        if (this.allCaughtUp()) {
+            this.currentRetryIntervalMs = this.retryIntervalMs;
+            return;
+        }
+        this.nextRetryAt = Date.now() + this.currentRetryIntervalMs;
+        this.currentRetryIntervalMs = Math.min(this.currentRetryIntervalMs * 2, this.maxRetryIntervalMs);
+    }
+
+    schedule(options) {
         if (this.runningPromise) {
             this.rerunRequested = true;
             return this.runningPromise;
         }
-        this.runningPromise = this.run().finally(() => {
+        this.runningPromise = this.run(options).finally(() => {
             this.runningPromise = null;
             if (this.rerunRequested) {
                 this.rerunRequested = false;
@@ -269,17 +252,9 @@ class HubDbPeerCatchup {
         return this.runningPromise;
     }
 
-    tableCaughtUp(table) {
-        return this.state.isTableCaughtUp(table);
-    }
-
-    caughtUpState() {
-        return this.state.status();
-    }
-
-    allCaughtUp() {
-        return this.state.isCaughtUp();
-    }
+    tableCaughtUp(table) { return this.state.isTableCaughtUp(table); }
+    caughtUpState() { return this.state.status(); }
+    allCaughtUp() { return this.state.isCaughtUp(); }
 
     isCaughtUp() {
         if (this.lastUsablePeerCount === 0) {
@@ -297,35 +272,39 @@ class HubDbPeerCatchup {
         return true;
     }
 
-    async run() {
-        this.state.resetAll();
+    async run(options) {
+        const onlyBehind = Boolean(options && options.onlyBehind);
         const peers = connectedSignerPeers(this.peerManager);
         if (peers.length === 0) {
             this.lastUsablePeerCount = 0;
             this.warnIfNoPeer();
             return this.caughtUpState();
         }
-        const fetchablePeers = peers.filter((peer) => {
-            if (peer.feedUrl) return true;
-            this.warnIfNoFeedUrl(peer);
-            return false;
-        });
+        const fetchablePeers = peers.filter(peer => peer.feedUrl || (this.warnIfNoFeedUrl(peer) && false));
         this.lastUsablePeerCount = fetchablePeers.length;
+        const reads = createIndexerReadMemo(this.db, this.indexerReadIntervalMs);
         for (const table of this.tables) {
+            if (onlyBehind && this.state.isTableCaughtUp(table)) continue;
             const verifier = this.getVerifier(table);
             if (!verifier) continue;
-            for (const peer of fetchablePeers) {
-                try {
-                    await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity);
-                    this.state.markCaughtUp(table);
-                    break;
-                } catch (e) {
-                    this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +
-                        ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
-                }
-            }
+            await this.walkTable(fetchablePeers, table, verifier, reads);
         }
         return this.caughtUpState();
+    }
+
+    async walkTable(peers, table, verifier, reads) {
+        this.state.markBehind(table);
+        for (const peer of peers) {
+            try {
+                const left = await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity, reads);
+                if (left === true) this.state.markBehind(table);
+                else this.state.markCaughtUp(table);
+                return;
+            } catch (e) {
+                this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +
+                    ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
+            }
+        }
     }
 
     warnIfNoPeer() {
@@ -348,46 +327,57 @@ class HubDbPeerCatchup {
         return true;
     }
 
-    async catchUpTable(peer, table, verifier, peerIdentity) {
-        let cursor = 0;
+    async verifyRow(verifier, row, context) {
+        try {
+            return await verifier(row, context);
+        } catch (e) {
+            return { ok: false, reason: e && e.message ? e.message : String(e) };
+        }
+    }
+
+    async catchUpTable(peer, table, verifier, peerIdentity, reads) {
+        const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [] };
         for (;;) {
-            const page = await this.fetchPage(peer, table, cursor, this.pageSize);
+            const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
             if (!page || page.table !== table || !Array.isArray(page.rows)) {
                 throw new Error('Invalid snapshot page for ' + table);
             }
-            for (const row of page.rows) {
-                const wireId = Number(row && row.id);
-                if (!Number.isSafeInteger(wireId) || wireId <= cursor) {
-                    throw new Error('Snapshot row has a non-advancing wire id');
-                }
-                cursor = wireId;
-                let verdict;
-                try {
-                    verdict = await verifier(row, {
-                        table, peer, peerIdentity, db: this.db,
-                        authenticated: true, signerSetPeer: true
-                    });
-                } catch (e) {
-                    verdict = { ok: false, reason: e && e.message ? e.message : String(e) };
-                }
-                if (!verifierAccepted(verdict)) {
-                    this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
-                        ' row ' + wireId + ' from ' + peer + ': ' + refusalReason(verdict));
-                    continue;
-                }
-                const localRow = withoutWireId(row);
-                if (await this.hasRow(table, localRow)) continue;
-                await this.storeRow(table, localRow);
-            }
-            if (page.rows.length < this.pageSize) return;
+            walk.cursor = advanceCursor(walk.cursor, page.rows);
+            const full = page.rows.length >= this.pageSize;
+            const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
+            walk.carry = batch.held;
+            await this.processBatch(walk, batch.ready);
+            if (!full) return walk.leftBehind;
         }
+    }
+
+    async processBatch(walk, rows) {
+        const groups = indexGroups(rows);
+        const verdicts = new Map();
+        for (const row of rows) {
+            const localRow = withoutWireId(row);
+            if (await this.hasRow(walk.table, localRow)) continue;
+            const key = groupKey(row) || 'row:' + row.id;
+            if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
+            if (verifierAccepted(verdicts.get(key))) await this.storeRow(walk.table, localRow);
+        }
+    }
+
+    async verifyWalkRow(walk, row, priceRoundRows) {
+        const { peer, table, reads } = walk;
+        const failedBefore = reads ? reads.failedServes : 0;
+        const verdict = await this.verifyRow(walk.verifier, row, {
+            table, peer, peerIdentity: walk.peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
+            readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
+        });
+        if (verifierAccepted(verdict)) return verdict;
+        this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
+            ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
+        if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
+        return verdict;
     }
 }
 
 module.exports = Object.assign(HubDbPeerCatchup, {
-    connectedSignerPeers,
-    peerFeedUrl,
-    requestJson,
-    rowAlreadyHeld,
-    storeVerifiedRow
+    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow
 });
