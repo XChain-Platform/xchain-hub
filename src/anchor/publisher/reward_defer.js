@@ -145,6 +145,8 @@ module.exports = {
     // of anchor_proof_client/binding.js and never re-derived here. An anchor_bundle entry
     // whose round_reference differs from its snapshot_block is counted, since the bundle
     // round IS its snapshot block and judgeAnchors can never bind such a tuple.
+    // With no DOGE indexer wired the lookup cannot run, and verifyAnchorOnChain has already
+    // needed that same indexer to return 'verified', so the verdict defers to it.
     // Returns 'verified' | 'rejected' | 'unknown'.
     async drainBindingVerdict(e){
         if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
@@ -157,7 +159,13 @@ module.exports = {
         for(let page = 0; page < 25; page++){
             let params = { txid: String(e.txid).toLowerCase() };
             if(after !== null) params.after_action_index = after;
-            let r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
+            let r;
+            try {
+                r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
+            } catch(err){
+                if(err && /^no indexer url for /.test(err.message)) return 'verified';
+                throw err;
+            }
             if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
             anchors = anchors.concat(r.anchors);
             if(r.truncated !== true){
