@@ -30,9 +30,9 @@ const { expect } = require('chai');
 const sinon      = require('sinon');
 const crypto     = require('crypto');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const Database               = require('../../../../src/db');
-const eq                     = require('../../../../src/consensus/equivocation_header.js');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const Database               = require('../../../../../src/db');
+const eq                     = require('../../../../../src/consensus/equivocation_header.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 

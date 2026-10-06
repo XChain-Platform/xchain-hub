@@ -32,8 +32,8 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const { relayMarginFloorS, RELAY_MIN_FUTURE_S } = require('../../../../src/lib/relay_margin.js');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const { relayMarginFloorS, RELAY_MIN_FUTURE_S } = require('../../../../../src/lib/relay_margin.js');
 
 // The engine with nothing wired: policyMarginS is pure, and the constructor is the only
 // thing it needs. p2pConfig carries the indexer URLs so the constructor takes the same
