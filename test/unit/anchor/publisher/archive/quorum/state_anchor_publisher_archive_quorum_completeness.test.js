@@ -39,9 +39,9 @@
 //         defer-and-re-verify queue.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../../../../src/validators/identity');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../../../../../src/validators/identity');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const BLOCK = 100;
 const CP_ROW = {

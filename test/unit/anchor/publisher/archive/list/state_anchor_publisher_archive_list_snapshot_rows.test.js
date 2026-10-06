@@ -6,10 +6,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
-const { listMetaHash } = require('../../../../../src/cross_chain/list/canonical.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
+const { listMetaHash } = require('../../../../../../src/cross_chain/list/canonical.js');
 
 const BLOCK = 160000;
 const MEMBERS = ['bc1qmemberalpha', 'ltc1qmemberbeta'];

@@ -16,12 +16,12 @@
 // both lists.
 
 const { expect }           = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity    = require('../../../../../src/validators/identity');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity    = require('../../../../../../src/validators/identity');
 const { BRIDGE_KEYS, POLICY_KEYS, ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_JSON_BYTES } =
-    require('../../../../../src/anchor/publisher/constants.js');
-const { DB_METHODS }       = require('../../../../helpers/mockHub.js');
-const vectors              = require('../../../../fixtures/anchor_archive_vectors.json');
+    require('../../../../../../src/anchor/publisher/constants.js');
+const { DB_METHODS }       = require('../../../../../helpers/mockHub.js');
+const vectors              = require('../../../../../fixtures/anchor_archive_vectors.json');
 
 function buildPub(sets) {
     let identity = new ValidatorIdentity('11'.repeat(32));

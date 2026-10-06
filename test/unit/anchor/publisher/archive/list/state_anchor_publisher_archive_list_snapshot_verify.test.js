@@ -8,10 +8,10 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { listMetaHash } = require('../../../../../src/cross_chain/list/canonical.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { listMetaHash } = require('../../../../../../src/cross_chain/list/canonical.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const BLOCK = 160000;
 const TXID = 'ab'.repeat(32);
