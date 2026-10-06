@@ -7,6 +7,7 @@ const { getLogger } = require('../../observability');
 const registry = require('./catchup_verifiers.js');
 const { createIndexerReadMemo } = require('../../oracle/price_aggregator/capability_catchup_verifier.js');
 const { createCatchupState } = require('./catchup_state.js');
+const { advanceCursor, storePriceSnapshot, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 
 const DEFAULT_PAGE_SIZE = 1000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
@@ -100,11 +101,6 @@ function refusalReason(verdict) {
     return 'verifier refused row';
 }
 
-function admissionBlocks(row) {
-    return { admit_block_btc: row.admit_block_btc, admit_block_ltc: row.admit_block_ltc,
-        admit_block_doge: row.admit_block_doge };
-}
-
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
 }
@@ -138,26 +134,6 @@ async function rowAlreadyHeld(db, table, row) {
     const reader = CONTENT_KEY_READERS[table];
     if (!reader) throw new Error('No hub DB catch-up content reader for table: ' + table);
     return reader(db, row);
-}
-
-function storePriceSnapshot(db, row) {
-    const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
-    if (row.status === 'skipped') {
-        return db.setSkippedPriceSnapshotRound(
-            row.round_number, [row.coin_pair], row.reference_block, row.block_timestamp);
-    }
-    const common = [row.round_number, pairs, row.reference_block, row.reference_chain, row.block_timestamp,
-        row.validator_count, row.consensus_proof, row.source_action_index, row.push_generation, row.created_at];
-    if (row.batch_block_time !== null && row.batch_block_time !== undefined) {
-        common.splice(9, 0, row.batch_block_time);
-        return db.setBatchPriceSnapshotRound(...common, admissionBlocks(row));
-    }
-    if (row.source_chain !== null && row.source_chain !== undefined) {
-        return db.setPushedPriceSnapshotRound(...common, admissionBlocks(row));
-    }
-    return db.setFinalizedPriceSnapshotRound(row.round_number,
-        [{ coinPair: row.coin_pair, price: row.price }], row.reference_block,
-        row.block_timestamp, row.validator_count, row.consensus_proof, admissionBlocks(row));
 }
 
 const ROW_WRITERS = Object.freeze({
@@ -360,36 +336,45 @@ class HubDbPeerCatchup {
     }
 
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
-        let cursor = 0;
-        let leftBehind = false;
+        const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [] };
         for (;;) {
-            const page = await this.fetchPage(peer, table, cursor, this.pageSize);
+            const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
             if (!page || page.table !== table || !Array.isArray(page.rows)) {
                 throw new Error('Invalid snapshot page for ' + table);
             }
-            for (const row of page.rows) {
-                const wireId = Number(row && row.id);
-                if (!Number.isSafeInteger(wireId) || wireId <= cursor) {
-                    throw new Error('Snapshot row has a non-advancing wire id');
-                }
-                cursor = wireId;
-                const localRow = withoutWireId(row);
-                if (await this.hasRow(table, localRow)) continue;
-                const failedBefore = reads ? reads.failedServes : 0;
-                const verdict = await this.verifyRow(verifier, row, {
-                    table, peer, peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
-                    readCapabilitySnapshot: reads ? reads.read : undefined
-                });
-                if (!verifierAccepted(verdict)) {
-                    this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
-                        ' row ' + wireId + ' from ' + peer + ': ' + refusalReason(verdict));
-                    if (reads && reads.failedServes > failedBefore) leftBehind = true;
-                    continue;
-                }
-                await this.storeRow(table, localRow);
-            }
-            if (page.rows.length < this.pageSize) return leftBehind;
+            walk.cursor = advanceCursor(walk.cursor, page.rows);
+            const full = page.rows.length >= this.pageSize;
+            const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
+            walk.carry = batch.held;
+            await this.processBatch(walk, batch.ready);
+            if (!full) return walk.leftBehind;
         }
+    }
+
+    async processBatch(walk, rows) {
+        const groups = indexGroups(rows);
+        const verdicts = new Map();
+        for (const row of rows) {
+            const localRow = withoutWireId(row);
+            if (await this.hasRow(walk.table, localRow)) continue;
+            const key = groupKey(row) || 'row:' + row.id;
+            if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
+            if (verifierAccepted(verdicts.get(key))) await this.storeRow(walk.table, localRow);
+        }
+    }
+
+    async verifyWalkRow(walk, row, priceRoundRows) {
+        const { peer, table, reads } = walk;
+        const failedBefore = reads ? reads.failedServes : 0;
+        const verdict = await this.verifyRow(walk.verifier, row, {
+            table, peer, peerIdentity: walk.peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
+            readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
+        });
+        if (verifierAccepted(verdict)) return verdict;
+        this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
+            ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
+        if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
+        return verdict;
     }
 }
 
