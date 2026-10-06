@@ -28,8 +28,8 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const Database               = require('../../../../src/db');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const Database               = require('../../../../../src/db');
 
 // The recording driver the sibling bridge suites use, cut to the reads the poll, the
 // proposer and the follower make, so the real bridge DB methods run as written.
