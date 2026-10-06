@@ -21,21 +21,15 @@
 
 'use strict';
 
-const { getLogger } = require('../../observability');
-const logger = getLogger();
-
 module.exports = {
 
     // Return operator-visible checkpoint health: last finalized height per chain
     // and a process-lifetime count of rounds that timed out below quorum.
     // Mirrors getcrosschaincallstats / getattestationstats.
     async getStats(){
-        let rows = [];
-        try {
-            rows = await this.db.findStateCheckpointsByNetwork(this.network);
-        } catch(e){
-            logger.warn('StateCheckpointEngine: getStats query failed: ' + (e && e.message));
-        }
+        // A read fault propagates so the RPC layer reports an error; swallowing it
+        // would return an empty last_finalized_by_chain, which reads as no finalized heights.
+        const rows = await this.db.findStateCheckpointsByNetwork(this.network);
         let last_finalized_by_chain = {};
         for(let r of rows){
             last_finalized_by_chain[r.chain] = {
