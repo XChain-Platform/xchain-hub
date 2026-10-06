@@ -5599,6 +5599,11 @@
       "885ddca054357451cd709ea0ecbe6fa302a19e788e15ceaf925aeac5ae0e7fdf",
       "503293ef20efde2c4838667579e63e85ecc826092e9ea9659f43d1b689bdc3aa"
     ],
+    "790dca78158bc4c2": [
+      "bbfeeb767375e84e4a140df52cf74b21a363c26abe7f8c9c96cf065d3e475609",
+      "4646184410e4a3824d533d054ed95289e002d0178b8235ad452555876f82c71d",
+      "56b92f72bd3012c682eb73fc9d190a9474f6e2fb73f750e2fad344da787c5917"
+    ],
     "79a2fc1b16f94804": [
       "8c9cc4daa8ee5eba57e814fd4058fe5d0abb5939605e1220d4559362914e8b59",
       "a16fc5547ee230dee4199f3697e28b18df646f785f24ad2938e6c34d49ecb292"
@@ -6919,6 +6924,10 @@
     "9b94adfd1325f788": [
       "8d8011990263df9886b0561da1e52ff82852b27b27d782caa42cd4d7857fe7fa",
       "712ef9be8430c5627dc3526d1a6c544d331f3f258826315662b245ab74e65fcf"
+    ],
+    "9bd1979f173d2d20": [
+      "75c32319b0a69dd31f0be1ec363ea76a83225c6f346b6e36be54400c325861d4",
+      "ab2e2e47522936c6352823afa077e418122b069cff77835fdf836e42a9609af5"
     ],
     "9c10cf897070477c": [
       "ca4298147b6fd1f86f0a6d30bdc531687c6df471a8590d028c010fbc69ecdd3f",
@@ -10994,8 +11003,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 844,
-      "titleCount": 7956,
+      "fileCount": 846,
+      "titleCount": 7961,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -11019,6 +11028,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_stall.test.js": "b6354db48a55c8ee",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cosign_decline_meter.test.js": "36b18cf6205816d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_freshness.test.js": "f2bc15ac2b9ea179",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_getstats_fault.test.js": "9bd1979f173d2d20",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "931793aedd341a61",
@@ -11707,6 +11717,7 @@
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
+        "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "016ee42753f30171",
         "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "a5a4fd6867e5633a",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
@@ -11895,8 +11906,8 @@
       }
     },
     "test": {
-      "fileCount": 844,
-      "titleCount": 7956,
+      "fileCount": 846,
+      "titleCount": 7961,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -11920,6 +11931,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_stall.test.js": "b6354db48a55c8ee",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cosign_decline_meter.test.js": "36b18cf6205816d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_freshness.test.js": "f2bc15ac2b9ea179",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_getstats_fault.test.js": "9bd1979f173d2d20",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "931793aedd341a61",
@@ -12608,6 +12620,7 @@
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
+        "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "016ee42753f30171",
         "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "a5a4fd6867e5633a",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
@@ -12745,8 +12758,8 @@
       }
     },
     "test:all": {
-      "fileCount": 924,
-      "titleCount": 8779,
+      "fileCount": 926,
+      "titleCount": 8784,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -12850,6 +12863,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_stall.test.js": "b6354db48a55c8ee",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cosign_decline_meter.test.js": "36b18cf6205816d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_freshness.test.js": "f2bc15ac2b9ea179",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_getstats_fault.test.js": "9bd1979f173d2d20",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "931793aedd341a61",
@@ -13538,6 +13552,7 @@
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
+        "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "016ee42753f30171",
         "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "a5a4fd6867e5633a",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
