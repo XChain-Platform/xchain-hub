@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Paired signer identities with peer feed URLs on both inbound and outbound peer links.
 - Let hub DB peer catch-up reach signer-set peers that the validators table does not list.
 
+### Security
+- Moved proxy-addr to 2.0.8 for the IPv4-mapped IPv6 trust subnet advisory GHSA-jqcg-44mw-7w3h.
+
 ## [0.22.4] - 2026-10-05
 
 ### Added
