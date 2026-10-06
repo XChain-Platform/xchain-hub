@@ -27,6 +27,8 @@ function loadModule() {
         existsSync:    sinon.stub().returns(true),
         writeFileSync: sinon.stub(),
         openSync:      sinon.stub().returns(99),
+        renameSync:    sinon.stub(),
+        unlinkSync:    sinon.stub(),
         writeSync:     sinon.stub(),
         fsyncSync:     sinon.stub(),
         closeSync:     sinon.stub(),
@@ -191,6 +193,26 @@ oraclePublisherTests('rewriteQueue()', function () {
         let hub = makeHub();
         let pub = new OraclePublisher(hub);
         pub.rewriteQueue([{ round: 1 }]); // must not throw
+    });
+
+    // Never open the live queue with 'w': write a sibling temp file and rename it over.
+    it('writes a temp file and renames it over the queue, never truncating the queue itself', function () {
+        let hub = makeHub();
+        let pub = new OraclePublisher(hub);
+        expect(pub.rewriteQueue([{ round: 1 }])).to.equal(true);
+        let opened = fsMock.openSync.getCalls().filter(c => c.args[1] === 'w').map(c => c.args[0]);
+        expect(opened).to.deep.equal([pub.queuePath + '.tmp'], 'only the temp file is opened for writing');
+        expect(fsMock.renameSync.calledOnceWithExactly(pub.queuePath + '.tmp', pub.queuePath)).to.equal(true);
+        expect(fsMock.renameSync.calledAfter(fsMock.fsyncSync), 'the rename follows the fsync').to.equal(true);
+    });
+
+    it('never renames over the queue when the write fails, and reports the failure', function () {
+        fsMock.writeSync.throws(new Error('ENOSPC: no space left on device'));
+        let hub = makeHub();
+        let pub = new OraclePublisher(hub);
+        expect(pub.rewriteQueue([{ round: 1 }])).to.equal(false);
+        expect(fsMock.renameSync.called, 'a failed write leaves the old queue in place').to.equal(false);
+        expect(fsMock.unlinkSync.calledWith(pub.queuePath + '.tmp'), 'the temp file is cleaned up').to.equal(true);
     });
 
 });

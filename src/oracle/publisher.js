@@ -89,6 +89,7 @@ const ah            = require('../lib/admission_height.js');
 const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
 const { abandonBuild }           = require('../lib/encoder_reservation.js');
+const { rewriteFileAtomically }  = require('../lib/durable_file.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -205,12 +206,10 @@ class OraclePublisher {
         fs.closeSync(fd);
     }
 
-    // Truncating rewrite of a durable file, same fsync discipline.
+    // Atomic rewrite of a durable file (temp file, fsync, rename), so a crash or a
+    // failed write leaves the old file whole. Throws to the caller, like the append.
     rewriteDurableFile(filePath, text) {
-        let fd = fs.openSync(filePath, 'w');
-        fs.writeSync(fd, text);
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
+        rewriteFileAtomically(fs, filePath, text);
     }
 
     // Read a durable file whole, or null when it cannot be read. The callers all
