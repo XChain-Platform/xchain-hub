@@ -349,6 +349,13 @@ it('VIEW_CHANGE quorum updates view', function () {
             // quorum = 3, 3 votes → accepted
             expect(consensus.view).to.equal(1);
         });
+});
+});
+
+describe('Consensus (PBFT)', function () {
+    installSuiteHooks1();
+describe('view change', function () {
+    installSuiteHooks3();
 // NEW_VIEW authenticity guards. handleNewView must not advance the view on any peer's say-so: it only
 // accepts a NEW_VIEW from the rotation-designated leader for the claimed (seq, view), and only when it
 // moves the view forward. Without this a single Byzantine validator can steer leader election by

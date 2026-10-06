@@ -208,6 +208,10 @@ it('a pending proposal for the seq is round context too', function () {
             expect(consensus.view).to.equal(1);
         });
 });
+});
+
+describe('Consensus (PBFT)', function () {
+    installSuiteHooks1();
 // Sequence persistence
 describe('sequence persistence', function () {
 it('loadSeq reads from DB', async function () {

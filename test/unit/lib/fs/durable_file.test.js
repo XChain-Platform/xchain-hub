@@ -14,7 +14,7 @@ const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 const { expect } = require('chai');
-const { rewriteFileAtomically } = require('../../../src/lib/durable_file');
+const { rewriteFileAtomically } = require('../../../../src/lib/fs/durable_file');
 
 // A real-filesystem fs whose named operation throws, every other call passing through.
 function fsFailingAt(name, code) {

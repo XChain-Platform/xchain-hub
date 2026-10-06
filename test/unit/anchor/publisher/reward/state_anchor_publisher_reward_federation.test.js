@@ -99,6 +99,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
 
     registerPublisherFederationCases();
     registerReceiverProofCases();
+    registerReceiverMembershipRefusalCases();
     registerReceiverRefusalCases();
     registerReceiverPairingCases();
 });
@@ -187,8 +188,8 @@ function registerReceiverProofCases() {
     });
 }
 
-// Every quorum, membership, signature and shape refusal on the receiver.
-function registerReceiverRefusalCases() {
+// Every quorum and membership refusal on the receiver.
+function registerReceiverMembershipRefusalCases() {
     it('refuses a message whose XANCPUB quorum does not verify against the RECEIVER\'s own set', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
@@ -218,7 +219,10 @@ function registerReceiverRefusalCases() {
         });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
+}
 
+// Every signature and shape refusal on the receiver.
+function registerReceiverRefusalCases() {
     it('refuses a message whose transport signature does not verify (a tampered tuple)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);

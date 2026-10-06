@@ -25,7 +25,7 @@
 const fs       = require('fs');
 const nodeUtil = require('node:util');
 const { isAmbiguousSendError } = require('../../lib/idempotent_broadcast.js');
-const { rewriteFileAtomically } = require('../../lib/durable_file.js');
+const { rewriteFileAtomically } = require('../../lib/fs/durable_file.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
