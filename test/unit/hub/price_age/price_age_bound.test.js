@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 
-const { pickAdvisoryAgeSeconds } = require('../../../src/hub/price_age_bound.js');
+const { pickAdvisoryAgeSeconds } = require('../../../../src/hub/price_age_bound.js');
 
 describe('advisory age pick', function () {
     it('keeps the legacy bound while the hourly gate is off', function () {
