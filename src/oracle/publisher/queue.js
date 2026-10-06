@@ -77,7 +77,7 @@ module.exports = {
     },
 
     // Rewrite the queue with the given entries (used after successful publishes).
-    // Returns true on a durable rewrite, false if the truncating write failed. The
+    // Returns true on a durable rewrite, false if the atomic rewrite failed. The
     // dequeue side must NOT swallow a failure: on false the just-published rounds are
     // still on the durable queue, so the caller keeps its in-process dedup guard armed
     // (preventing re-broadcast) and surfaces the failure loudly for operator repair.
