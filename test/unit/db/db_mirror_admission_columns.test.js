@@ -65,6 +65,25 @@ function admissionColumns(table) {
     return ddlColumns(table).filter(c => /^admit_block(_[a-z]+)?$/.test(c));
 }
 
+// Admission columns the hub DDL declares but never puts on the wire, matching the indexer
+// test manifest of the same name: no writer, and no indexer table carries them. Moving one
+// out of this list means indexer and explorer DDL, a migration and a HUB_SCHEMA_VERSION bump.
+const HUB_ONLY_ADMISSION_COLUMNS = {
+    anchor_reward_attestations: ['admit_block_btc'],
+};
+
+// The admission columns a mirror must receive: the DDL set minus the declared hub-only set.
+function mirroredAdmissionColumns(table) {
+    let hubOnly = HUB_ONLY_ADMISSION_COLUMNS[table] || [];
+    return admissionColumns(table).filter(c => !hubOnly.includes(c));
+}
+
+// The tables whose per-query and equivalence cases have at least one column to compare,
+// so no case passes by comparing two empty projections.
+function tablesWithMirroredColumns(paths) {
+    return Object.keys(paths).filter(table => mirroredAdmissionColumns(table).length > 0);
+}
+
 // Every hub DDL table that defines an admission column: the mirrored set this file
 // must cover. Measured from src/sql rather than listed, so the coverage guard below
 // fails when a table gains a column and no bootstrap case follows it.
@@ -211,17 +230,35 @@ describe('hub-DB mirror: admission columns on the bootstrap page and the live st
             tables.filter(table => table !== 'oracle_prices'));
     });
 
+    it('splits every DDL admission column exactly into mirrored and declared hub-only', function () {
+        for (let table of Object.keys(HUB_ONLY_ADMISSION_COLUMNS)) {
+            // A stale hub-only entry (a column the DDL no longer has) is an error, not a no-op.
+            for (let c of HUB_ONLY_ADMISSION_COLUMNS[table])
+                expect(admissionColumns(table), table + '.' + c).to.include(c);
+        }
+        let mirrored = 0;
+        for (let table of tablesWithAdmissionColumns()) {
+            let split = mirroredAdmissionColumns(table).concat(HUB_ONLY_ADMISSION_COLUMNS[table] || []);
+            expect(split.sort(), table).to.deep.equal(admissionColumns(table).sort());
+            mirrored += mirroredAdmissionColumns(table).length;
+        }
+        // Non-vacuity: eight tables still mirror at least one admission column.
+        expect(tablesWithMirroredColumns(BOOTSTRAP_READS)).to.have.lengthOf(8);
+        expect(mirrored).to.be.above(8);
+    });
+
     registerPerQueryCases();
     registerEquivalenceCases();
+    registerHubOnlyCases();
 });
 
 // One case per bootstrap read and per live read-back: the query itself selects the columns.
 function registerPerQueryCases() {
     describe('each bootstrap read selects every admission column', function () {
-        for (let table of Object.keys(BOOTSTRAP_READS)) {
+        for (let table of tablesWithMirroredColumns(BOOTSTRAP_READS)) {
             it(table, async function () {
                 let seeded = seedRow(table);
-                let cols = admissionColumns(table);
+                let cols = mirroredAdmissionColumns(table);
                 let rows = await BOOTSTRAP_READS[table](projectingDb({ [table]: [seeded] }));
                 expect(rows).to.have.lengthOf(1);
                 expect(pick(rows[0], cols)).to.deep.equal(pick(seeded, cols));
@@ -230,10 +267,10 @@ function registerPerQueryCases() {
     });
 
     describe('each live read-back streams every admission column', function () {
-        for (let table of Object.keys(LIVE_PATHS)) {
+        for (let table of tablesWithMirroredColumns(LIVE_PATHS)) {
             it(table, async function () {
                 let seeded = seedRow(table);
-                let cols = admissionColumns(table);
+                let cols = mirroredAdmissionColumns(table);
                 let b = capturingBroadcaster();
                 await LIVE_PATHS[table](projectingDb({ [table]: [seeded] }), b, seeded);
                 expect(b.events).to.have.lengthOf(1);
@@ -272,10 +309,10 @@ function registerEquivalenceCases() {
 
         after(function () { if (server) server.close(); });
 
-        for (let table of Object.keys(LIVE_PATHS)) {
+        for (let table of tablesWithMirroredColumns(LIVE_PATHS)) {
             it(table + ': GET /hub-db/snapshot page equals the live row:inserted frame', async function () {
                 let seeded = seedRow(table);
-                let cols = admissionColumns(table);
+                let cols = mirroredAdmissionColumns(table);
 
                 let page = await get(port, '/hub-db/snapshot/' + table + '?since_id=0&limit=10');
                 expect(page.status).to.equal(200);
@@ -292,5 +329,59 @@ function registerEquivalenceCases() {
                 expect(bootstrapped).to.deep.equal(streamed);
             });
         }
+    });
+}
+
+// Every SQL string literal in one source file whose statement writes to `table`.
+function writerLiterals(text, table) {
+    let code = text.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    let literals = code.match(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\[\s\S]|[^`\\])*`/g) || [];
+    return literals.filter(s => /\b(INSERT|REPLACE|UPDATE)\b/i.test(s) && new RegExp('\\b' + table + '\\b').test(s));
+}
+
+function sourceFiles(dir) {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory()
+        ? sourceFiles(path.join(dir, e.name)) : (e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
+}
+
+// A hub-only column stays off every read path a mirror fills from, and nothing writes it.
+function registerHubOnlyCases() {
+    describe('hub-only admission columns never reach a mirror', function () {
+        for (let table of Object.keys(HUB_ONLY_ADMISSION_COLUMNS)) {
+            it(table + ': absent from the bootstrap read, the live frame and the REST page', async function () {
+                let seeded = seedRow(table);
+                let db = projectingDb({ [table]: [seeded] });
+                let reads = { bootstrap: (await BOOTSTRAP_READS[table](db))[0] };
+                let b = capturingBroadcaster();
+                await LIVE_PATHS[table](db, b, seeded);
+                reads.live = b.events[0].row;
+                let server = await bootSnapshotApp(db);
+                try { reads.page = (await get(server.address().port, '/hub-db/snapshot/' + table + '?since_id=0&limit=10')).json.rows[0]; }
+                finally { server.close(); }
+                for (let [where, row] of Object.entries(reads)) {
+                    // Non-vacuity: the row arrived, so an absent column is absent from a real row.
+                    expect(row, where).to.have.property('id', 7);
+                    for (let c of HUB_ONLY_ADMISSION_COLUMNS[table]) expect(row, where + ' ' + c).to.not.have.property(c);
+                }
+            });
+        }
+
+        it('no hub source writes a hub-only admission column', function () {
+            let writers = 0;
+            for (let file of sourceFiles(path.join(SQL_DIR, '..'))) {
+                let text = fs.readFileSync(file, 'utf8');
+                for (let table of Object.keys(HUB_ONLY_ADMISSION_COLUMNS)) {
+                    for (let literal of writerLiterals(text, table)) {
+                        writers++;
+                        for (let c of HUB_ONLY_ADMISSION_COLUMNS[table])
+                            expect(literal, path.relative(path.dirname(SQL_DIR), file) + ' writes ' + table + '.' + c +
+                                ': mirror it first (indexer and explorer DDL, a migration, a HUB_SCHEMA_VERSION bump in ' +
+                                'src/hub_schema_version.js), then move it out of HUB_ONLY_ADMISSION_COLUMNS').to.not.match(new RegExp('\\b' + c + '\\b'));
+                    }
+                }
+            }
+            // Non-vacuity: the scan reached the real INSERT in src/db/anchor.js.
+            expect(writers).to.be.at.least(1);
+        });
     });
 }
