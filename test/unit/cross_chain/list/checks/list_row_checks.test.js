@@ -2,8 +2,8 @@
 
 const assert = require('assert');
 
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
-const { listRowShapeOk, listTransportOk } = require('../../../../src/cross_chain/list/row_checks.js');
+const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
+const { listRowShapeOk, listTransportOk } = require('../../../../../src/cross_chain/list/row_checks.js');
 
 const full = {
     snapshot_block: 500,

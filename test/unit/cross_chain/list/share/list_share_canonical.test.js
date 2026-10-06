@@ -21,9 +21,9 @@ const path = require('path');
 const {
     deriveListSnapshotId,
     listSnapshotCanonical
-} = require('../../../../src/cross_chain/list/canonical.js');
+} = require('../../../../../src/cross_chain/list/canonical.js');
 
-const siblingDocsDir = path.join(__dirname, '..', '..', '..', '..', '..', 'xchain-documentation');
+const siblingDocsDir = path.join(__dirname, '..', '..', '..', '..', '..', '..', 'xchain-documentation');
 const docsDirs = process.env.XCHAIN_DOCS_DIR
     ? [process.env.XCHAIN_DOCS_DIR, siblingDocsDir]
     : [siblingDocsDir];

@@ -17,9 +17,9 @@
 const assert = require('assert');
 const sinon = require('sinon');
 
-const ListShareEngine = require('../../../../src/cross_chain/list_share_engine.js');
-const { listMembersHash } = require('../../../../src/cross_chain/list/canonical.js');
-const { deriveListSnapshotId } = require('../../../../src/cross_chain/list/chain.js');
+const ListShareEngine = require('../../../../../src/cross_chain/list_share_engine.js');
+const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
+const { deriveListSnapshotId } = require('../../../../../src/cross_chain/list/chain.js');
 
 const ROOT_INDEX = 7;
 const SNAPSHOT_BLOCK = 500;
