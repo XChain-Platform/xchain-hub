@@ -329,7 +329,8 @@ it('initiateViewChange increments view and broadcasts', function () {
         });
 it('VIEW_CHANGE quorum updates view', function () {
             consensus.view = 0;
-            // N=4, quorum=3. Need 3 VIEW_CHANGE votes
+            // N=4, quorum=3 from the round context this federated hub holds for seq 5.
+            consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
             consensus.handleViewChange({
                 sender: VALIDATORS_4[1].addr,
                 sig_pubkey: VALIDATORS_4[1].pubkey,
@@ -348,6 +349,13 @@ it('VIEW_CHANGE quorum updates view', function () {
             // quorum = 3, 3 votes → accepted
             expect(consensus.view).to.equal(1);
         });
+});
+});
+
+describe('Consensus (PBFT)', function () {
+    installSuiteHooks1();
+describe('view change', function () {
+    installSuiteHooks3();
 // NEW_VIEW authenticity guards. handleNewView must not advance the view on any peer's say-so: it only
 // accepts a NEW_VIEW from the rotation-designated leader for the claimed (seq, view), and only when it
 // moves the view forward. Without this a single Byzantine validator can steer leader election by
