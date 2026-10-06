@@ -34,8 +34,8 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const Database               = require('../../../../src/db');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const Database               = require('../../../../../src/db');
 
 // A Database over a recording driver: every statement the engine issues is kept, so a test
 // can assert that a refusal wrote NOTHING rather than that a stub was not called.
