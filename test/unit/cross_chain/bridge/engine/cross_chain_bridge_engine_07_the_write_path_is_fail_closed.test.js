@@ -30,9 +30,9 @@ const { expect } = require('chai');
 const sinon      = require('sinon');
 const crypto     = require('crypto');
 
-const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engine.js');
-const Database               = require('../../../../src/db');
-const eq                     = require('../../../../src/consensus/equivocation_header.js');
+const CrossChainBridgeEngine = require('../../../../../src/cross_chain/bridge_engine.js');
+const Database               = require('../../../../../src/db');
+const eq                     = require('../../../../../src/consensus/equivocation_header.js');
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
 
@@ -125,70 +125,207 @@ function pendingLeg(over){
     }, over);
 }
 
-function feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, over) {
-  const now = Math.floor(Date.now() / 1000);
-  const row = Object.assign({
+function feature8theWritePathIsFailClosedFinalized(engine, over) {
+  return Object.assign({
+    transfer_id: 'b'.repeat(64),
     snapshot_block: 150,
     network: 'regtest',
     src_chain: 'BTC',
     src_action_index: 41,
-    src_address: 'mSrcAddress',
+    src_address: 'mSrc',
     dest_chain: 'DOGE',
-    dest_address: 'nDestAddress',
+    dest_address: 'nDest',
     tick: 'XCHAIN',
     decimals: 8,
     amount: '5.00000000',
-    effective_time: now + 240,
+    effective_time: 1757000000,
     push_generation: 0
   }, over);
-  row.transfer_id = over && over.transfer_id ? over.transfer_id : engine.deriveTransferId(row.network, row.src_chain, row.src_action_index, row.dest_chain, row.dest_address);
-  return row;
 }
-function feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, leg) {
-  engine.indexerCall = sinon.stub().resolves({
-    latest_block_index: 200,
-    network: 'regtest',
-    transfers: [leg === null ? pendingLeg({
-      src_action_index: 999
-    }) : pendingLeg(leg)]
-  });
-}
-function registerFeature6followerVerificationOfAProposedTransferFragment2Part1() {
-  it('refuses a transfer_id that does not re-derive, and a leg it cannot see', async function () {
+function registerFeature8theWritePathIsFailClosedPart1() {
+  it('writes and mirrors a finalized transfer once the capability snapshot is persisted', async function () {
     const {
-      engine
+      engine,
+      db,
+      broadcaster
     } = makeEngine();
-    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, {});
-    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, {
-      transfer_id: 'f'.repeat(64)
-    }))).to.equal(false);
-    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, null);
-    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine))).to.equal(false);
-  });
-  it('refuses a record anchored far from its own BTC tip view', async function () {
-    const {
-      engine
-    } = makeEngine();
-    feature6followerVerificationOfAProposedTransferFragment2WithLeg(engine, {});
-    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine, {
-      snapshot_block: 9000
-    }))).to.equal(false);
-  });
-  it('refuses a leg its own indexer does not yet hold at the effective depth', async function () {
-    const {
-      engine
-    } = makeEngine();
-    engine.indexerCall = sinon.stub().resolves({
-      latest_block_index: 103,
-      network: 'regtest',
-      transfers: [pendingLeg()]
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
+    const row = feature8theWritePathIsFailClosedFinalized(engine);
+    engine._inflight.add(row.transfer_id);
+    await engine.writeFinalizedTransfer({
+      row,
+      signatures: [{
+        pubkey: 'a',
+        sig: 'b'
+      }],
+      view: 2
     });
-    expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment2ProposedRow(engine))).to.equal(false);
+    const insert = db.calls.find(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'));
+    expect(insert, 'the record must be written').to.not.equal(undefined);
+    // The signed content plus the two fences and the transport chain id.
+    expect(insert.sql).to.contain('tick, decimals, amount');
+    expect(insert.params[insert.params.length - 1]).to.equal('f'.repeat(64)); // btc_chain_id
+    expect(row.finalizing_view).to.equal(2);
+    expect(broadcaster.broadcastRow.calledWithMatch({
+      table: 'bridge_transfers'
+    })).to.equal(true);
+    expect(engine._inflight.has(row.transfer_id)).to.equal(false);
+  });
+  it('writes NOTHING when the capability snapshot degrades to zero rows', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(0);
+    const row = feature8theWritePathIsFailClosedFinalized(engine);
+    engine._inflight.add(row.transfer_id);
+    await engine.writeFinalizedTransfer({
+      row,
+      signatures: [],
+      view: 0
+    });
+    expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'))).to.equal(false);
+    expect(broadcaster.broadcastRow.called).to.equal(false);
+    // Deferred, not retired: the next poll must be able to re-propose it.
+    expect(engine._inflight.has(row.transfer_id)).to.equal(false);
+    expect(engine.transferConsensus.forgetFinalized.calledWith(row.transfer_id)).to.equal(true);
   });
 }
-function registerFeature6followerVerificationOfAProposedTransferFragment2() {
-  describe('follower verification of a proposed transfer', function () {
-    registerFeature6followerVerificationOfAProposedTransferFragment2Part1();
+function registerFeature8theWritePathIsFailClosedPart2() {
+  it('revives a retracted record rather than stranding a re-formed transfer', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
+    db.state.insertAffected = 0; // INSERT IGNORE no-ops against the retracted row
+    db.state.reviveAffected = 1;
+    await engine.writeFinalizedTransfer({
+      row: feature8theWritePathIsFailClosedFinalized(engine),
+      signatures: [],
+      view: 0
+    });
+    const revive = db.calls.find(c => c.sql.startsWith("UPDATE bridge_transfers SET status = 'finalized'"));
+    expect(revive, 'a retracted row must be revived').to.not.equal(undefined);
+    expect(revive.sql).to.contain("status = 'retracted'");
+    expect(broadcaster.broadcastRow.calledWithMatch({
+      table: 'bridge_transfers'
+    })).to.equal(true);
+  });
+  it('mirrors nothing on a duplicate finalize', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
+    db.state.insertAffected = 0;
+    db.state.reviveAffected = 0; // the row is already 'finalized'
+    await engine.writeFinalizedTransfer({
+      row: feature8theWritePathIsFailClosedFinalized(engine),
+      signatures: [],
+      view: 0
+    });
+    expect(broadcaster.broadcastRow.called).to.equal(false);
+  });
+}
+function registerFeature8theWritePathIsFailClosedPart3() {
+  it('writes a finalized policy snapshot append-only, with no revive path', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
+    const row = {
+      snapshot_id: 'c'.repeat(64),
+      snapshot_block: 150,
+      origin_chain: 'BTC',
+      tick: 'FUFU',
+      policy_seq: 1,
+      origin_block: 900,
+      policy_hash: 'e'.repeat(64),
+      allow_list: null,
+      block_list: '["nA"]',
+      sleeping: 0,
+      effective_time: 1757000000,
+      network: 'regtest',
+      push_generation: 0
+    };
+    await engine.writeFinalizedPolicy({
+      row,
+      signatures: [],
+      view: 0
+    });
+    expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO policy_snapshots'))).to.equal(true);
+    expect(db.calls.some(c => c.sql.startsWith("UPDATE policy_snapshots"))).to.equal(false);
+    expect(broadcaster.broadcastRow.calledWithMatch({
+      table: 'policy_snapshots'
+    })).to.equal(true);
+  });
+}
+function registerFeature8theWritePathIsFailClosed() {
+  describe('the write path is fail-closed', function () {
+    registerFeature8theWritePathIsFailClosedPart1();
+    registerFeature8theWritePathIsFailClosedPart2();
+    registerFeature8theWritePathIsFailClosedPart3();
+  });
+}
+function registerFeature9fencedRetractionPart1() {
+  it('retracts only the fenced, bounded source range and broadcasts the deletion', async function () {
+    const {
+      engine,
+      db,
+      broadcaster
+    } = makeEngine();
+    db.state.rows = [{
+      transfer_id: 'b'.repeat(64)
+    }];
+    const n = await engine.retractTransfersForReorg('BTC', 40, 50, 3);
+    expect(n).to.equal(1);
+    const select = db.calls.find(c => c.sql.startsWith('SELECT transfer_id FROM bridge_transfers WHERE'));
+    expect(select.sql).to.contain('src_action_index >= ?');
+    expect(select.sql).to.contain('src_action_index <= ?');
+    expect(select.sql).to.contain('push_generation <= ?');
+    expect(select.params).to.deep.equal(['BTC', 40, 50, 3]);
+    expect(broadcaster.broadcastDeletion.calledWithMatch({
+      table: 'bridge_transfers',
+      source_chain: 'BTC',
+      from_action_index: 40,
+      to_action_index: 50,
+      retraction_generation: 3
+    })).to.equal(true);
+    expect(engine.transferConsensus.forgetFinalized.calledWith('b'.repeat(64))).to.equal(true);
+  });
+  it('omits the bound and the fence when the indexer sent neither', async function () {
+    const {
+      engine,
+      db
+    } = makeEngine();
+    db.state.rows = [];
+    await engine.retractTransfersForReorg('DOGE', 7);
+    const select = db.calls.find(c => c.sql.startsWith('SELECT transfer_id FROM bridge_transfers WHERE'));
+    expect(select.sql).to.not.contain('<=');
+    expect(select.params).to.deep.equal(['DOGE', 7]);
+  });
+  it('fails closed on a supplied-but-invalid bound instead of widening the range', async function () {
+    const {
+      engine
+    } = makeEngine();
+    let threw = false;
+    try {
+      await engine.retractTransfersForReorg('BTC', 40, 10);
+    } catch (e) {
+      threw = true;
+    }
+    expect(threw).to.equal(true);
+  });
+}
+function registerFeature9fencedRetraction() {
+  describe('fenced retraction', function () {
+    registerFeature9fencedRetractionPart1();
   });
 }
 describe('CrossChainBridgeEngine', function () {
@@ -197,5 +334,6 @@ describe('CrossChainBridgeEngine', function () {
   });
 
   // ---------------------------------------------------------------------
-  registerFeature6followerVerificationOfAProposedTransferFragment2();
+  registerFeature8theWritePathIsFailClosed();
+  registerFeature9fencedRetraction();
 });
