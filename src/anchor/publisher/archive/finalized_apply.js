@@ -23,6 +23,7 @@
 
 const crypto = require('crypto');
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
+const { serialPass } = require('../drain_serial.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -153,8 +154,14 @@ module.exports = {
     // flush, alongside the BUNDLE_DONE drain. Authenticity (membership, signature over the
     // txid-bearing canonical, observed-leader) was settled at receipt and cannot change;
     // what is re-checked is the head's on-chain depth, plus the announced CONTENT, which
-    // can move (a row may have advanced status while the entry sat in the queue).
-    async drainDeferredFinalized(){
+    // can move (a row may have advanced status while the entry sat in the queue). Passes
+    // never overlap, for the reason given at drainDeferredBundleDone.
+    drainDeferredFinalized(){
+        return serialPass(this, '_finalizedDrain', () => this.runFinalizedDrain());
+    },
+
+    // One pass of the drain above, over a copy of the queue taken when the pass starts.
+    async runFinalizedDrain(){
         if(this._deferredFinalized.size === 0) return;
         for(let [key, entry] of [...this._deferredFinalized]){
             let d = entry.d;
