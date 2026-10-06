@@ -203,6 +203,7 @@ module.exports = {
     // The cadence contract with the fee gate, in one place, plus the spend guard.
     cadenceStats() {
         let windowRounds = this.windowRoundsInForce();
+        let inForce = Number.isFinite(this._inForceMaxPriceAgeSeconds) ? this._inForceMaxPriceAgeSeconds : null;
         return {
             // The cadence contract with the fee gate, in one place.
             // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
@@ -217,14 +218,15 @@ module.exports = {
                     landingReserveMs: this.batchLandingReserveMs });
                 return ms === null ? null : Math.round(ms / 1000);
             })(),
-            oracleMaxPriceAgeSeconds: this.oracleMaxPriceAgeMs === null
-                ? null : Math.round(this.oracleMaxPriceAgeMs / 1000),
-            // The bound getprice enforces right now (tip-aware), where
-            // oracleMaxPriceAgeSeconds above is the pinned pre-hourly one. Refreshed
-            // in the background by each snapshot, so it trails a poll by one call and
-            // reads null until the first refresh lands or when the hub cannot answer.
-            oracleInForceMaxPriceAgeSeconds: Number.isFinite(this._inForceMaxPriceAgeSeconds)
-                ? this._inForceMaxPriceAgeSeconds : null,
+            // The bound getprice enforces right now (tip-aware). Refreshed in the
+            // background by each snapshot, so it reads null until the first refresh
+            // lands or when the hub cannot answer.
+            oracleInForceMaxPriceAgeSeconds: inForce,
+            // Follows the in-force bound once it is known and falls back to the pinned
+            // pre-hourly bound only until then, so the first poll after a restart is the
+            // one reading that can still show the legacy figure.
+            oracleMaxPriceAgeSeconds: inForce !== null ? inForce
+                : (this.oracleMaxPriceAgeMs === null ? null : Math.round(this.oracleMaxPriceAgeMs / 1000)),
             oracleHourlyMaxPriceAgeSeconds: this.oracleHourlyMaxPriceAgeMs === null
                 ? null : Math.round(this.oracleHourlyMaxPriceAgeMs / 1000),
             spendGuard:          this.spendGuard.stats()
@@ -236,7 +238,9 @@ module.exports = {
         if (!hub || typeof hub.oracleMaxAgeSecondsInForce !== 'function' || this._inForceRefreshing) return;
         this._inForceRefreshing = true;
         Promise.resolve().then(() => hub.oracleMaxAgeSecondsInForce())
-            .then((seconds) => { this._inForceMaxPriceAgeSeconds = Number(seconds); })
+            .then((seconds) => {
+                this._inForceMaxPriceAgeSeconds = seconds != null && Number(seconds) > 0 ? Number(seconds) : null;
+            })
             .catch(() => { this._inForceMaxPriceAgeSeconds = null; })
             .then(() => { this._inForceRefreshing = false; });
     },
