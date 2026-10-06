@@ -1433,6 +1433,14 @@
       "9f453f2bced482599cb52e44eb1c9964fc6390c086232690efe8bacab86bf38e",
       "845c5b727c9ba0417f7a9c1c32a932b53bf1146df88f4703ce8be8a852bfd0b7"
     ],
+    "21a4b7a60108fb79": [
+      "e47c44745fef30c3661f684f054abbf40d2e25433eb0867bef56d30d182d2eaf",
+      "43aa2485dd16947507607da7a59603e99fceddcf21e44a2696d86c52c9db1d2f",
+      "7e082b273eb7ed3f6871c7aa7bc236e868484f5d33f98af618f9d935f9ee1f7a",
+      "f35b92ac3c438c470ac53dbd3668d8d8cd2c737ee9d9fd900128cb2fb3d8734f",
+      "67245f571e3a9258034bd2d5dd170036318aeda9f7cdb0fc4fba32fc0b840ba2",
+      "1130b21bb4590b20a393abc69e8e5d57713d506d7f19053f7c63bf84ac489724"
+    ],
     "21b122e758b48759": [
       "2e50d81cc794c991a386e8ba4ffd73bd1fa5d7d687b0986b59c9afd9828f5a5e",
       "a9a62ea3f3a7a3f0b416e14560905abaacb5c311c15d3a1add5691ad82744810",
@@ -3235,6 +3243,11 @@
       "9f61a366043e42bf8dc453fe5be5e53b0e3a836c02ea069c0eaf3464857eae27",
       "3f36248c6f0fd095acb1ce66bc99a86ae1c5ac51f3952ed4a6e5b2a430c1aa22",
       "9814f29cfa945deffd6934684128100433700423c30740c4fb5ca1752c00c90c"
+    ],
+    "49189ce1a3cef5d5": [
+      "621a49823eea87ee22abbf3161dd26d778e2aab62b552cd969408df705adc9c5",
+      "b280cf1fea09e415a7c6ecc8bd33e5d51d7fb5002d69f291b039c56be98ee48f",
+      "6f2043e54ea0dd58a938a7206749c771cab4a939755a33d383f53c7a15b60910"
     ],
     "49446a1672debfde": [
       "4040524f7ce0e2821173c34a72040b1287b1cb76774084c100b76dcf22b0dd57",
@@ -11079,8 +11092,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 841,
-      "titleCount": 8047,
+      "fileCount": 843,
+      "titleCount": 8056,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -11184,6 +11197,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_federation.test.js": "2d980c095352a643",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
@@ -11821,6 +11835,7 @@
         "test/unit/peers/manager/peer_manager_listener_ceiling.test.js": "27d0e62c46e0ff0c",
         "test/unit/peers/manager/peer_manager_listener_ceiling_live_boot.test.js": "1c82cfafcd8d64c8",
         "test/unit/peers/manager/peer_manager_rate_key.test.js": "07d0051cec4d5835",
+        "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
         "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
@@ -11977,8 +11992,8 @@
       }
     },
     "test": {
-      "fileCount": 841,
-      "titleCount": 8047,
+      "fileCount": 843,
+      "titleCount": 8056,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
@@ -12082,6 +12097,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_federation.test.js": "2d980c095352a643",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
@@ -12719,6 +12735,7 @@
         "test/unit/peers/manager/peer_manager_listener_ceiling.test.js": "27d0e62c46e0ff0c",
         "test/unit/peers/manager/peer_manager_listener_ceiling_live_boot.test.js": "1c82cfafcd8d64c8",
         "test/unit/peers/manager/peer_manager_rate_key.test.js": "07d0051cec4d5835",
+        "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
         "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
@@ -12824,8 +12841,8 @@
       }
     },
     "test:all": {
-      "fileCount": 921,
-      "titleCount": 8870,
+      "fileCount": 923,
+      "titleCount": 8879,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13009,6 +13026,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_federation.test.js": "2d980c095352a643",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
@@ -13646,6 +13664,7 @@
         "test/unit/peers/manager/peer_manager_listener_ceiling.test.js": "27d0e62c46e0ff0c",
         "test/unit/peers/manager/peer_manager_listener_ceiling_live_boot.test.js": "1c82cfafcd8d64c8",
         "test/unit/peers/manager/peer_manager_rate_key.test.js": "07d0051cec4d5835",
+        "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
         "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
