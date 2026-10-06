@@ -244,6 +244,7 @@ module.exports = {
         for(let sec of d.sections){
             let local = await this.db.getStateCheckpointByChain(String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq));
             if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
+            if(local[0].anchor_txid != null) return;                       // already anchored: a second publisher must not earn the reward
             mine.push(local[0]);
         }
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;

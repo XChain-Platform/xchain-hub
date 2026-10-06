@@ -137,6 +137,7 @@ class CapabilitySnapshot {
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
+        if (this.monitor.inBackoff()) return null;
         let url = await this.hub.resolveBtcIndexerUrl();
         if (!url) return this.fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
@@ -195,6 +196,7 @@ class CapabilitySnapshot {
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
+        if (this.monitor.inBackoff()) return null;
         let url = await this.hub.resolveBtcIndexerUrl();
         if (!url) return this.fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
@@ -245,6 +247,7 @@ class CapabilitySnapshot {
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
+        if (this.monitor.inBackoff()) return null;
         let url = await this.hub.resolveBtcIndexerUrl();
         if (!url) return this.fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
@@ -290,6 +293,7 @@ class CapabilitySnapshot {
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
 
+        if (this.monitor.inBackoff()) return null;
         let url = await this.hub.resolveBtcIndexerUrl();
         if (!url) return this.fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
