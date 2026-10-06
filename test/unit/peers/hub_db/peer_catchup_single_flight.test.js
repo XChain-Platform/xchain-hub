@@ -29,13 +29,17 @@ function capabilityHarness(rows, snapshot, held) {
     return { catchup, read };
 }
 
+function slowPage() {
+    return sinon.stub().callsFake(() => new Promise(resolve => setTimeout(
+        () => resolve({ table: 'price_snapshots', rows: [] }), 60)));
+}
+
 describe('hub DB peer catch-up single flight', function () {
     afterEach(function () { sinon.restore(); });
 
     it('starts no second walk when the retry timer fires during a walk', async function () {
         const clock = sinon.useFakeTimers();
-        const fetchPage = sinon.stub().callsFake(() => new Promise(resolve => setTimeout(
-            () => resolve({ table: 'price_snapshots', rows: [] }), 60)));
+        const fetchPage = slowPage();
         const catchup = makeCatchup({ fetchPage, retryIntervalMs: 25 });
         catchup.state.markBehind('price_snapshots');
         const first = catchup.start();
@@ -48,8 +52,7 @@ describe('hub DB peer catch-up single flight', function () {
 
     it('does not re-walk a caught-up hub on the retry timer', async function () {
         const clock = sinon.useFakeTimers();
-        const fetchPage = sinon.stub().callsFake(() => new Promise(resolve => setTimeout(
-            () => resolve({ table: 'price_snapshots', rows: [] }), 60)));
+        const fetchPage = slowPage();
         const catchup = makeCatchup({ fetchPage, retryIntervalMs: 25 });
         catchup.start();
         await clock.tickAsync(2000);
