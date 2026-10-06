@@ -35,12 +35,15 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
+const sinon  = require('sinon');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const gateRegistry = require('../../../../../../src/consensus/gate_registry');
+const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -243,63 +246,94 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-// ------------------------------------------------------------ landing
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('records the window from which an otherwise empty marker history is tracking coverage', async function () {
-            let hub = makeHub({ dir: dir });
-            let p   = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-
-            await p.hydrateMarkers(now);
-
-            expect(hub.db.markers).to.deep.equal([{
-                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
-                batch_key: null, row_count: 0, status: 'tracking'
-            }]);
-            expect(await p.getMarker(now),
-                'tracking is evidence of participation, not a completed window').to.equal(null);
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('aligns to the unix hour at the protocol value, not to process start', function () {
+            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
+            let p   = new AttestationBatchPublisher(hub);
+            expect(p.windowS).to.equal(3600);
+            for (let t of [1780000123, 1779998400, 0, 1780003599]) {
+                let start = p.windowStartFor(t);
+                expect(start % 3600, 'window start for ' + t).to.equal(0);
+                expect(t - start).to.be.at.least(0).and.below(3600);
+                expect(p.windowEndFor(start)).to.equal(start + 3600);
+            }
         }); }); });
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a landed outcome', async function () {
-            let hub = makeHub({ dir: dir });
-            let p   = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-
-            await p.hydrateMarkers(now);
-            await p.recordLandedWindow(now, now + WINDOW_S, 'dogetxid', 0);
-
-            expect(hub.db.markers).to.have.length(1);
-            expect(hub.db.marker(now)).to.include({
-                window_start: now, window_end: now + WINDOW_S,
-                row_count: 0, status: 'landed'
-            });
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('never schedules the boundary in the past, and lands exactly on it', function () {
+            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
+            let p   = new AttestationBatchPublisher(hub);
+            // A millisecond after a boundary asks for very nearly a whole window; a
+            // millisecond before asks for one millisecond, never zero or negative.
+            expect(p.msToNextBoundary(1780002000 * 1000 + 1)).to.equal(3600 * 1000 - 1);
+            expect(p.msToNextBoundary(1780002000 * 1000)).to.equal(3600 * 1000);
+            expect(p.msToNextBoundary(1780005599 * 1000 + 999)).to.be.at.least(1);
         }); }); });
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('turns the coverage-tracking row into a publish intent before sending', async function () {
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('honours the regtest override, so an acceptance run closes windows in seconds', function () {
             let hub = makeHub({ dir: dir });
-            let p   = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            let window = { window_start: now, window_end: now + WINDOW_S, row_count: 2 };
-
-            await p.hydrateMarkers(now);
-            await p.recordIntent(window, 'batchkey');
-
-            expect(hub.db.markers).to.deep.equal([{
-                network: 'regtest', window_start: now, window_end: now + WINDOW_S,
-                batch_key: 'batchkey', row_count: 2, status: 'intent'
-            }]);
+            expect(new AttestationBatchPublisher(hub).windowS).to.equal(WINDOW_S);
         }); }); });
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the landed marker', function () { it('stops a window the federation has already landed from being published', async function () {
-            let hub = makeHub({ dir: dir });
-            let p   = makePublisher(hub);
-            let now = 200 * WINDOW_S;
-            let start = now - WINDOW_S;
-
-            await p.recordLandedWindow(start, now, 'dogetxid', 3);
-            p._floorWindow = start;
-            await p.sweep(now);
-
-            expect(p.wires.length).to.equal(0);
-            expect(hub.db.marker(start).status).to.equal('landed');
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('IGNORES the override off regtest, where a private cadence would break co-signing', function () {
+            let hub = makeHub({ dir: dir, network: 'testnet' });
+            expect(new AttestationBatchPublisher(hub).windowS).to.equal(3600);
         }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('throws on a malformed regtest override rather than aligning to NaN', function () {
+            for (let bad of ['0', 'ten', '', ' ', '-5', '1.5']) {
+                let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: bad } });
+                if (String(bad).trim() === '') {
+                    expect(new AttestationBatchPublisher(hub).windowS,
+                        'an unset override is the protocol value, not an error').to.equal(3600);
+                    continue;
+                }
+                expect(() => new AttestationBatchPublisher(hub), 'override "' + bad + '"').to.throw(/positive integer/);
+            }
+        }); }); });
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('schedules nothing on a network whose mirror activation entry is null', async function () {
+            let hub = makeHub({ dir: dir, network: 'mainnet' });
+            let p   = new AttestationBatchPublisher(hub);
+            expect(p.isArmedNetwork()).to.equal(false);
+            await p.start();
+            expect(p._windowTimer, 'an unarmed network must arm no window timer').to.equal(null);
+            p.stop();
+        }); }); });
+
+// Stage the hub's network at `value` on the mirror row for one call, through the registry
+// module object the publisher reads at call time.
+function withMirrorEntry(network, value){
+    let realGet = gateRegistry.get;
+    return sinon.stub(gateRegistry, 'get').callsFake(key =>
+        key === MIRROR_KEY ? Object.assign({}, realGet(key), { [network]: value }) : realGet(key));
+}
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () {
+    it('schedules nothing on a network whose mirror entry is the UNARMED sentinel', async function () {
+        let hub  = makeHub({ dir: dir, network: 'testnet' });
+        let stub = withMirrorEntry('testnet', gateRegistry.UNARMED);
+        let p    = new AttestationBatchPublisher(hub);
+        try {
+            expect(p.isArmedNetwork(), 'UNARMED means named but never fires').to.equal(false);
+            await p.start();
+            expect(p._windowTimer, 'an UNARMED network must arm no window timer').to.equal(null);
+            expect(p.getStats().armed).to.equal(false);
+            expect(stub.calledWith(MIRROR_KEY)).to.equal(true);
+        } finally {
+            p.stop();
+            stub.restore();
+        }
+    });
+
+    it('reads a finite height below UNARMED as armed', function () {
+        let hub  = makeHub({ dir: dir, network: 'testnet' });
+        let stub = withMirrorEntry('testnet', 151324);
+        try {
+            let p = new AttestationBatchPublisher(hub);
+            expect(p.isArmedNetwork()).to.equal(true);
+            expect(p.getStats().armed).to.equal(true);
+        } finally {
+            stub.restore();
+        }
+    });
+}); });
 }

@@ -35,15 +35,13 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
-const sinon  = require('sinon');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const gateRegistry = require('../../../../../src/consensus/gate_registry');
-const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const abw = require('../../../../../src/lib/attest_batch_wire.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const abw = require('../../../../../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../../src/lib/idempotent_broadcast.js');
+const { MAX_CATCHUP_WINDOWS } = require('../../../../../../src/attestation/batch_publisher/constants.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -114,6 +112,15 @@ function updateMarker(markers, args){
 function doDbQuery(responses, markers, sql, args){
             if(/FROM attestation_responses/i.test(sql)) return selectResponses(responses, sql, args);
             if(/^DELETE FROM attest_published_batches/i.test(sql)) return deleteMarker(markers, args);
+            if(/SELECT MIN\(window_start\).*window_start < \?/i.test(sql)){
+                let [network, status, before] = args;
+                let starts = markers.filter(m => m.network === network && m.status === status &&
+                                                   Number(m.window_start) < Number(before))
+                                    .map(m => Number(m.window_start));
+                return [{ oldest: starts.length ? Math.min.apply(null, starts) : null,
+                          newest: starts.length ? Math.max.apply(null, starts) : null,
+                          count: starts.length }];
+            }
             // The floor read. BOTH aggregates are answered from the same row set, so a
             // publisher that went back to flooring on the newest marker reads a real
             // value here rather than an undefined the test would silently coerce.
@@ -122,8 +129,14 @@ function doDbQuery(responses, markers, sql, args){
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
                 return [{ oldest: Number.isFinite(oldest) ? oldest : null, newest: newest || null }];
             }
+            if(/SELECT window_start FROM attest_published_batches.*window_start >= \?/i.test(sql)){
+                return markers.filter(m => m.network === args[0] && m.status === args[1] &&
+                                           Number(m.window_start) >= Number(args[2]))
+                              .map(m => ({ window_start: m.window_start }));
+            }
             if(/SELECT window_start FROM attest_published_batches/i.test(sql)){
-                return markers.filter(m => m.status === args[1]).map(m => ({ window_start: m.window_start }));
+                return markers.filter(m => m.network === args[0] && m.status === args[1])
+                              .map(m => ({ window_start: m.window_start }));
             }
             if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
                 let found = markers.find(m => m.network === args[0] && Number(m.window_start) === Number(args[1]));
@@ -246,94 +259,121 @@ const hookAt10827 = function () {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     };
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('aligns to the unix hour at the protocol value, not to process start', function () {
-            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
-            let p   = new AttestationBatchPublisher(hub);
-            expect(p.windowS).to.equal(3600);
-            for (let t of [1780000123, 1779998400, 0, 1780003599]) {
-                let start = p.windowStartFor(t);
-                expect(start % 3600, 'window start for ' + t).to.equal(0);
-                expect(t - start).to.be.at.least(0).and.below(3600);
-                expect(p.windowEndFor(start)).to.equal(start + 3600);
-            }
-        }); }); });
+// ------------------------------------------------------------ publishing
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('never schedules the boundary in the past, and lands exactly on it', function () {
-            let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: '' } });
-            let p   = new AttestationBatchPublisher(hub);
-            // A millisecond after a boundary asks for very nearly a whole window; a
-            // millisecond before asks for one millisecond, never zero or negative.
-            expect(p.msToNextBoundary(1780002000 * 1000 + 1)).to.equal(3600 * 1000 - 1);
-            expect(p.msToNextBoundary(1780002000 * 1000)).to.equal(3600 * 1000);
-            expect(p.msToNextBoundary(1780005599 * 1000 + 999)).to.be.at.least(1);
-        }); }); });
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('honours the regtest override, so an acceptance run closes windows in seconds', function () {
+
+        // A hub whose Bitcoin indexer never called pushchaintip publishes nothing, ever.
+        // That is a one-line configuration gap presenting as total silence, so the defer
+        // has to name the missing thing; and it has to name it ONCE, because the sweep
+        // runs every window and a regtest window is seconds long.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names the missing BTC chain tip when it defers, once per cause', async function () {
             let hub = makeHub({ dir: dir });
-            expect(new AttestationBatchPublisher(hub).windowS).to.equal(WINDOW_S);
-        }); }); });
+            hub.db.setTip(null);
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            for(let i = 0; i <= 4; i++)
+                hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + i * WINDOW_S + 1 }));
+            p._floorWindow = now - WINDOW_S;
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('IGNORES the override off regtest, where a private cadence would break co-signing', function () {
-            let hub = makeHub({ dir: dir, network: 'testnet' });
-            expect(new AttestationBatchPublisher(hub).windowS).to.equal(3600);
-        }); }); });
-
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('throws on a malformed regtest override rather than aligning to NaN', function () {
-            for (let bad of ['0', 'ten', '', ' ', '-5', '1.5']) {
-                let hub = makeHub({ dir: dir, cfg: { ATTEST_BATCH_WINDOW_S_OVERRIDE: bad } });
-                if (String(bad).trim() === '') {
-                    expect(new AttestationBatchPublisher(hub).windowS,
-                        'an unset override is the protocol value, not an error').to.equal(3600);
-                    continue;
-                }
-                expect(() => new AttestationBatchPublisher(hub), 'override "' + bad + '"').to.throw(/positive integer/);
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try {
+                await p.sweep(now);
+                await p.sweep(now + WINDOW_S);
+            } finally {
+                console.warn = realWarn;
             }
+
+            let anchorWarnings = warned.filter(w => /no BTC anchor/.test(w));
+            expect(anchorWarnings.length, 'one line per cause, not one per window').to.equal(1);
+            expect(anchorWarnings[0]).to.match(/chain_tips/);
+            expect(anchorWarnings[0], 'the operator has to be told which call is missing')
+                .to.match(/pushchaintip/);
+            expect(p.getStats().anchorFailure).to.match(/chain_tips/);
+
+            // A DIFFERENT cause speaks again: the latch is on the reason, not on the fact
+            // that something once failed.
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 2 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length).to.equal(1);
+
+            // And it clears once the tip resolves, so a LATER outage of the same cause is
+            // a new episode rather than a swallowed one.
+            hub.db.getChainTip = async () => ({ blockHeight: ANCHOR, blockTime: 1 });
+            await p.sweep(now + 3 * WINDOW_S);
+            expect(p.getStats().anchorFailure).to.equal(null);
+
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length,
+                'a recovered rail that fails again must warn again').to.equal(1);
         }); }); });
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () { it('schedules nothing on a network whose mirror activation entry is null', async function () {
-            let hub = makeHub({ dir: dir, network: 'mainnet' });
-            let p   = new AttestationBatchPublisher(hub);
-            expect(p.isArmedNetwork()).to.equal(false);
-            await p.start();
-            expect(p._windowTimer, 'an unarmed network must arm no window timer').to.equal(null);
-            p.stop();
+// ------------------------------------------------------------ publishing
+
+        // so a hub with no pushed row anchors on the tip its own round observed.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('anchors on the tip the attestation poll observed when no chain tip was pushed', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
+            p._floorWindow = now - WINDOW_S;
+
+            let result = await p.sweep(now);
+
+            expect(result.published).to.equal(1);
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR - 3);
+            expect(p.getStats().anchorSource).to.equal('observed');
+            expect(p.getStats().anchorFailure).to.equal(null);
         }); }); });
 
-// Stage the hub's network at `value` on the mirror row for one call, through the registry
-// module object the publisher reads at call time.
-function withMirrorEntry(network, value){
-    let realGet = gateRegistry.get;
-    return sinon.stub(gateRegistry, 'get').callsFake(key =>
-        key === MIRROR_KEY ? Object.assign({}, realGet(key), { [network]: value }) : realGet(key));
-}
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('prefers the pushed chain tip over the observed one where both exist', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
+            p._floorWindow = now - WINDOW_S;
 
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () {
-    it('schedules nothing on a network whose mirror entry is the UNARMED sentinel', async function () {
-        let hub  = makeHub({ dir: dir, network: 'testnet' });
-        let stub = withMirrorEntry('testnet', gateRegistry.UNARMED);
-        let p    = new AttestationBatchPublisher(hub);
-        try {
-            expect(p.isArmedNetwork(), 'UNARMED means named but never fires').to.equal(false);
-            await p.start();
-            expect(p._windowTimer, 'an UNARMED network must arm no window timer').to.equal(null);
-            expect(p.getStats().armed).to.equal(false);
-            expect(stub.calledWith(MIRROR_KEY)).to.equal(true);
-        } finally {
-            p.stop();
-            stub.restore();
-        }
-    });
+            await p.sweep(now);
 
-    it('reads a finite height below UNARMED as armed', function () {
-        let hub  = makeHub({ dir: dir, network: 'testnet' });
-        let stub = withMirrorEntry('testnet', 151324);
-        try {
-            let p = new AttestationBatchPublisher(hub);
-            expect(p.isArmedNetwork()).to.equal(true);
-            expect(p.getStats().armed).to.equal(true);
-        } finally {
-            stub.restore();
-        }
-    });
-}); });
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR);
+            expect(p.getStats().anchorSource).to.equal('pushed');
+        }); }); });
+
+// ------------------------------------------------------------ publishing
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('publishing a window', function () { it('names both missing sources when neither the pushed nor the observed tip resolves', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
+            p._floorWindow = now - WINDOW_S;
+
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now); } finally { console.warn = realWarn; }
+
+            expect(p.wires.length).to.equal(0);
+            let line = warned.find(w => /no BTC anchor/.test(w));
+            expect(line).to.match(/chain_tips/);
+            expect(line).to.match(/pushchaintip/);
+            expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
+            expect(p.getStats().anchorSource).to.equal(null);
+        }); }); });
 }

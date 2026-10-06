@@ -29,10 +29,10 @@ const fs   = require('fs');
 const path = require('path');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
-const { MAX_CATCHUP_WINDOWS } = require('../../../../../src/attestation/batch_publisher/constants.js');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
+const { MAX_CATCHUP_WINDOWS } = require('../../../../../../src/attestation/batch_publisher/constants.js');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; these cases close windows in seconds
 const HOUR_S   = 3600;                     // the protocol window, exercised off regtest

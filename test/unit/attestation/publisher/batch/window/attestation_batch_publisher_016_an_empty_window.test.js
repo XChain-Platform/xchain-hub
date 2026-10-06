@@ -28,8 +28,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
 
-const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
-const ValidatorIdentity = require('../../../../../src/validators/identity.js');
+const AttestationBatchPublisher = require('../../../../../../src/attestation/batch_publisher.js');
+const ValidatorIdentity = require('../../../../../../src/validators/identity.js');
 
 const WINDOW_S = 10;
 const ANCHOR = 941234;
