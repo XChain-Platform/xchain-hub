@@ -206,7 +206,8 @@ const ARMING_READERS = {
  * @returns {Object<string, string|null>}
  */
 function armingEnv(env) {
-    const { REGTEST_ARMING } = require('../src/consensus/gate_registry/shared_rows.js');
+    // The measured checkout's list, so under --root env names the variables that armed that tree's digest.
+    const { REGTEST_ARMING } = loadFromRepo('src/consensus/gate_registry/shared_rows.js');
     const out = {};
     for (const name of Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort()) {
         // A variable with no reader would arm the digest unrecorded, so it is a refusal.
