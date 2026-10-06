@@ -35,8 +35,11 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const { expect } = require('chai');
+const sinon  = require('sinon');
 
 const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
+const gateRegistry = require('../../../../../src/consensus/gate_registry');
+const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
 const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
@@ -295,4 +298,42 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             expect(p._windowTimer, 'an unarmed network must arm no window timer').to.equal(null);
             p.stop();
         }); }); });
+
+// Stage the hub's network at `value` on the mirror row for one call, through the registry
+// module object the publisher reads at call time.
+function withMirrorEntry(network, value){
+    let realGet = gateRegistry.get;
+    return sinon.stub(gateRegistry, 'get').callsFake(key =>
+        key === MIRROR_KEY ? Object.assign({}, realGet(key), { [network]: value }) : realGet(key));
+}
+
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('the window', function () {
+    it('schedules nothing on a network whose mirror entry is the UNARMED sentinel', async function () {
+        let hub  = makeHub({ dir: dir, network: 'testnet' });
+        let stub = withMirrorEntry('testnet', gateRegistry.UNARMED);
+        let p    = new AttestationBatchPublisher(hub);
+        try {
+            expect(p.isArmedNetwork(), 'UNARMED means named but never fires').to.equal(false);
+            await p.start();
+            expect(p._windowTimer, 'an UNARMED network must arm no window timer').to.equal(null);
+            expect(p.getStats().armed).to.equal(false);
+            expect(stub.calledWith(MIRROR_KEY)).to.equal(true);
+        } finally {
+            p.stop();
+            stub.restore();
+        }
+    });
+
+    it('reads a finite height below UNARMED as armed', function () {
+        let hub  = makeHub({ dir: dir, network: 'testnet' });
+        let stub = withMirrorEntry('testnet', 151324);
+        try {
+            let p = new AttestationBatchPublisher(hub);
+            expect(p.isArmedNetwork()).to.equal(true);
+            expect(p.getStats().armed).to.equal(true);
+        } finally {
+            stub.restore();
+        }
+    });
+}); });
 }

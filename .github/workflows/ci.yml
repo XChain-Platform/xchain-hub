@@ -268,3 +268,26 @@ jobs:
 
       - name: Coverage thresholds (c8 --check-coverage)
         run: npm run coverage:check
+
+  # Suite-title pin: every collected test title, per npm script, must still be
+  # collected. mocha --dry-run loads the spec files without running a body, so no
+  # database or sibling checkout is needed. Declared standalone (no needs: ci) so
+  # a stale pin reads as its own red job and never hides the gate's result; the
+  # rename map carries the moves a restructure declares.
+  suite-title-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.3"
+          cache: npm
+
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Collected suite titles vs the committed pin
+        run: node bin/suite-title-map.js --compare bin/pins/at1-suite-titles.json --rename-map bin/pins/suite-title-renames.json
