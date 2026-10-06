@@ -60,7 +60,7 @@ const SpendGuard = require('../lib/spend_guard.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();
-const { FETCH_REASONING_TOKEN_HEADROOM, isReasoningModel, anthropicRejectsSampling, modelCarriesSystemRole } = require('./llm/models');
+const { FETCH_REASONING_TOKEN_HEADROOM, isReasoningModel, needsFetchReasoningHeadroom, anthropicRejectsSampling, modelCarriesSystemRole } = require('./llm/models');
 const LlmSettings = require('./llm/settings');
 const SpendAudit = require('./llm/spend');
 const MetaGates = require('./llm/meta_gates');
@@ -150,14 +150,15 @@ exports.fetch = async (payload, options) => {
     let model = resolveFetchModel(settings, options);
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || settings.MAX_TOKENS_DEFAULT, settings.MAX_TOKENS_DEFAULT);
-    // Reasoning-family fetch models (o-series / gpt-5, not gpt-5-chat) bill reasoning
+    // Reasoning-family fetch models (o-series / gpt-5 not gpt-5-chat, and the
+    // always-thinking Claude ids) bill reasoning
     // tokens against the completion budget, so the governance-tuned content bound
     // is consumed by reasoning before any attestation content is emitted
     // (finish_reason='length', empty body -> provider_error every round). Mirror
     // agree()'s judge headroom on the fetch path so an approved OpenAI reasoning
     // fallback can actually finalize; add headroom rather than replace so the
     // governance content budget is preserved. Chat-family models are unchanged.
-    if (isReasoningModel(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
+    if (needsFetchReasoningHeadroom(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : settings.DEFAULT_TEMPERATURE;
     // Bound against the vendor that will actually receive the request: Anthropic caps
     // temperature at 1 where OpenAI chat allows 2, and the model is already pinned here,

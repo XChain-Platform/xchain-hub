@@ -78,6 +78,15 @@ function anthropicRejectsSampling(model) {
     return ANTHROPIC_NO_SAMPLING_MODELS.some(id => m === id || m.startsWith(id + '-'));
 }
 
+// True when a fetch against this model needs FETCH_REASONING_TOKEN_HEADROOM: the
+// OpenAI reasoning family, plus the always-thinking Claude ids, whose thinking
+// tokens count against max_tokens and can leave the response with no text block
+// when the governance content bound is the whole budget. Kept apart from
+// isReasoningModel because that predicate also gates OpenAI-only request shaping.
+function needsFetchReasoningHeadroom(model) {
+    return isReasoningModel(model) || anthropicRejectsSampling(model);
+}
+
 // Single source of truth for "can this OpenAI-vendor model carry the trusted
 // judge framing in a real system/developer turn". Early o-series ids
 // (o1-mini/o1-preview) reject a system-role message outright, so runLlm
@@ -93,6 +102,7 @@ module.exports = {
     JUDGE_MAX_TOKENS_REASONING,
     FETCH_REASONING_TOKEN_HEADROOM,
     isReasoningModel,
+    needsFetchReasoningHeadroom,
     anthropicRejectsSampling,
     modelCarriesSystemRole
 };
