@@ -29,6 +29,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const HUB_COPY     = path.join(__dirname, '../../../src/anchor/anchor_reward_key.js');
 const INDEXER_COPY = path.join(__dirname, '../../../../xchain-indexer/src/actions/anchor/anchor_reward_key.js');
@@ -45,12 +46,7 @@ describe('anchor_reward_key twin parity (hub <-> indexer) @regression', function
     const ark = require('../../../src/anchor/anchor_reward_key.js');
 
     it('the executable region is byte-identical to the indexer copy', function () {
-        if(!fs.existsSync(INDEXER_COPY)){
-            if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin is absent at ' + INDEXER_COPY);
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, INDEXER_COPY), 'the sibling parity guard')) return;
         assert.strictEqual(
             codeOnly(fs.readFileSync(HUB_COPY, 'utf8')),
             codeOnly(fs.readFileSync(INDEXER_COPY, 'utf8')),
