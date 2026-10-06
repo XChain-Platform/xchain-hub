@@ -1,17 +1,18 @@
 -- Hub-side authority table for the XCHAIN/token bridge (the base bridge spec
 -- section 6). CrossChainBridgeEngine writes a finalized row here after the cross_chain
 -- quorum signs the wrapped XBRIDGE canonical; db.verifyTables() picks this file up by
--- directory scan at boot (src/db.js verifyTables), so no table list needs the name.
+-- directory scan at boot (src/db/schema/bootstrap.js verifyTables), so no table list
+-- needs the name.
 --
 -- Mirrored to every indexer over the hub-DB stream beside cross_chain_matches. A
 -- mirrored table is upsert-only and is NEVER delete-and-reinserted: a delete leaves both
 -- generations on every replica.
 --
--- TODO(L6): the hub-side read surface is NOT registered here. L6 owns xchain-hub/src/api.js
--- and must add a GET /hub-db/snapshot/bridge_transfers route (the
--- /hub-db/snapshot/cross_chain_matches handler at api.js:1960 is the shape) plus the
--- getbridgeinvariant read; each is a ~20-line express handler, not a one-line registration,
--- so it is left to the owning lane rather than half-written here.
+-- Read surfaces, kept out of this file because each is a full handler: the
+-- GET /hub-db/snapshot/bridge_transfers bootstrap page a reconnecting mirror fills from
+-- lives in src/api/rest/hub_db_snapshot.js beside the cross_chain_matches page it is
+-- shaped on, and stamps HUB_SCHEMA_VERSION like every snapshot page there. The
+-- getbridgeinvariant read is the RPC method of that name in src/api/rpc/cross_chain.js.
 DROP TABLE IF EXISTS bridge_transfers;
 CREATE TABLE bridge_transfers (
     id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (since_id)
