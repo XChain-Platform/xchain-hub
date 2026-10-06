@@ -19,6 +19,10 @@ const DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+// How a table walk ended: every row served, served with a failed indexer read, or no peer served it.
+const WALK_COMPLETE = 'complete';
+const WALK_LEFT_BEHIND = 'left_behind';
+const WALK_UNSERVED = 'unserved';
 
 function positiveOr(value, fallback) {
     return Number(value) > 0 ? Number(value) : fallback;
@@ -253,14 +257,12 @@ class HubDbPeerCatchup {
     }
 
     async walkTable(peers, table, verifier, reads) {
-        this.state.markBehind(table);
         for (const peer of peers) {
             if (this.feedBackoff.isBackedOff(peer.feedUrl)) continue;
             try {
                 const left = await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity, reads);
                 this.feedBackoff.noteSuccess(peer.feedUrl);
-                if (left === true) this.state.markBehind(table);
-                else this.state.markCaughtUp(table);
+                this.finishTableWalk(table, left === true ? WALK_LEFT_BEHIND : WALK_COMPLETE);
                 return;
             } catch (e) {
                 this.feedBackoff.noteFailure(peer.feedUrl, e);
@@ -268,6 +270,14 @@ class HubDbPeerCatchup {
                     ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
             }
         }
+        this.finishTableWalk(table, WALK_UNSERVED);
+    }
+
+    // A table changes state only when its walk ends, so readers never see it flip mid-walk.
+    // A walk no peer served is no evidence of a missing row: the table keeps the state it had.
+    finishTableWalk(table, outcome) {
+        if (outcome === WALK_COMPLETE) this.state.markCaughtUp(table);
+        else if (outcome === WALK_LEFT_BEHIND) this.state.markBehind(table);
     }
 
     warnIfNoPeer() {
