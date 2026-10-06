@@ -69,7 +69,7 @@
     "mainnet"
   ],
   "hub_schema_version": 9,
-  "carrier_logic_digest": "5691d2c0a30d9ceb317e5a044c72a9fc189cab5f1747831196e23bf35d9a13c4",
+  "carrier_logic_digest": "b4938c4a9413a6f4e8d7619364a51cd9ca41f9b9d68c15a8d6fc775160ad9e3c",
   "env": {
     "XC_AMOUNTS_PRICE_REGTEST_ACTIVATION": null,
     "XC_AMOUNTS_PRICE_REGTEST_TIME": null,
