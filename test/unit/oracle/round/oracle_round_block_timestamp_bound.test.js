@@ -13,8 +13,8 @@
 const sinon = require('sinon');
 const { expect } = require('chai');
 const gateRegistry = require('../../../../src/consensus/gate_registry');
-const { nominalRoundSeconds } = require('../../../../src/oracle/consensus/round_time');
-const { ROUND_TIME_GATE } = require('../../../../src/oracle/consensus/round_time_gate');
+const { nominalRoundSeconds } = require('../../../../src/oracle/consensus/round_time/round_time');
+const { ROUND_TIME_GATE } = require('../../../../src/oracle/consensus/round_time/round_time_gate');
 const { makeRoundTimeCapture } = require('./helpers/round_time_capture');
 
 const ROUND = 81;
