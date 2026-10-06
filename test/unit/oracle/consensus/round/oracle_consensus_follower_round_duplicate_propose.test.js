@@ -12,9 +12,9 @@
 
 const sinon             = require('sinon');
 const { expect }        = require('chai');
-const OracleConsensus   = require('../../../../src/oracle/consensus');
-const { createMockHub } = require('../../../helpers/mockHub');
-const { VALIDATORS_3, makeCapabilitySnapshotStub } = require('../../../helpers/fixtures');
+const OracleConsensus   = require('../../../../../src/oracle/consensus');
+const { createMockHub } = require('../../../../helpers/mockHub');
+const { VALIDATORS_3, makeCapabilitySnapshotStub } = require('../../../../helpers/fixtures');
 
 const ROUND        = 300;
 const BLOCK_HEIGHT = 1000;

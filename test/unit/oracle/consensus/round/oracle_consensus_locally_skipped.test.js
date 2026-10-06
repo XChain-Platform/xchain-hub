@@ -19,17 +19,17 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const OracleConsensus = require('../../../../src/oracle/consensus');
+const OracleConsensus = require('../../../../../src/oracle/consensus');
 const {
   createMockHub
-} = require('../../../helpers/mockHub');
+} = require('../../../../helpers/mockHub');
 const {
   pubkeyForTestSender,
   VALIDATORS_3,
   buildSubmissions
-} = require('../../../helpers/fixtures');
-const { getLogger } = require('../../../../src/observability');
-const { bftQuorumOrSingle } = require('../../../../src/lib/bft_quorum.js');
+} = require('../../../../helpers/fixtures');
+const { getLogger } = require('../../../../../src/observability');
+const { bftQuorumOrSingle } = require('../../../../../src/lib/bft_quorum.js');
 let oracleConsensusLocallySkippedRoundsStayRepSuite1Hub, oracleConsensusLocallySkippedRoundsStayRepSuite1Oc, oracleConsensusLocallySkippedRoundsStayRepSuite1OracleRound;
 const oracleConsensusLocallySkippedRoundsStayRepSuite1ROUND = 7;
 function registerOracleConsensusLocallySkippedRoundsStayRepSuite1Part1() {

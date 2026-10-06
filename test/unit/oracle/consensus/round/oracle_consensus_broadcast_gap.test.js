@@ -20,10 +20,10 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const OracleConsensus = require('../../../../src/oracle/consensus');
+const OracleConsensus = require('../../../../../src/oracle/consensus');
 const {
   createMockHub
-} = require('../../../helpers/mockHub');
+} = require('../../../../helpers/mockHub');
 const oracleConsensusPostCommitPriceBroadcastGapSuite1ROUND = 41;
 const oracleConsensusPostCommitPriceBroadcastGapSuite1PRICES = [{
   coinPair: 'BTC/USD',
