@@ -42,7 +42,7 @@
     },
     "lib/fullnode_activation": {
       "path": "src/lib/fullnode_activation.js",
-      "hash": "713da1ac88500740796115a10d177ae44262cf3620ef0dca62cccae78bde2b3f",
+      "hash": "1f2bf3e0a46dd1309c2a6a62027f9a01f269c2d326d7326212b1e3174cee3d25",
       "twins": []
     },
     "mirror_admission_activation": {
@@ -735,6 +735,13 @@
       "to": "16ff3e1e17a412003dbc83bf27e1a7e88a526f7704fa43a8a4afce51441af675",
       "reason": "route the three warnings through the hub logger, text unchanged",
       "date": "2026-10-05"
+    },
+    {
+      "id": "lib/fullnode_activation",
+      "from": "713da1ac88500740796115a10d177ae44262cf3620ef0dca62cccae78bde2b3f",
+      "to": "1f2bf3e0a46dd1309c2a6a62027f9a01f269c2d326d7326212b1e3174cee3d25",
+      "reason": "split validateActivation into field-group helpers, logic unchanged",
+      "date": "2026-10-06"
     }
   ]
 }
