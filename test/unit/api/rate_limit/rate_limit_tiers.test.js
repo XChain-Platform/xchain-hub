@@ -28,9 +28,9 @@ const express   = require('express');
 const rateLimit = require('express-rate-limit');
 const http      = require('http');
 const sinon     = require('sinon');
-const { installRateLimits } = require('../../../src/api/middleware.js');
-const { DEFAULT_AUTH_RPM, authenticatedCaller, batchCost, parseAuthRpm } = require('../../../src/api/rate_limit_tiers.js');
-const FixedWindowStore = require('../../../src/api/rate_limit_store.js');
+const { installRateLimits } = require('../../../../src/api/middleware.js');
+const { DEFAULT_AUTH_RPM, authenticatedCaller, batchCost, parseAuthRpm } = require('../../../../src/api/rate_limit_tiers.js');
+const FixedWindowStore = require('../../../../src/api/rate_limit_store.js');
 
 const PUBLIC_IP = '203.0.113.7';
 const HUB_KEY   = 'hub-key-for-tests';
