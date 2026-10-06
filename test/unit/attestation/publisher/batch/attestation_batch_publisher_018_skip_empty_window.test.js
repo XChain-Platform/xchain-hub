@@ -147,28 +147,18 @@ function makePublisher(dir, db){
     return publisher;
 }
 
-describe('AttestationBatchPublisher skip empty windows', function () {
-    let dir;
-
-    beforeEach(function () {
-        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-skip-empty-'));
-    });
-
-    afterEach(function () {
-        fs.rmSync(dir, { recursive: true, force: true });
-    });
-
-    function guard(publisher){
-        let touched = [];
-        for(let name of ['resolveAnchor', 'electionRank', 'persistAttestationSnapshot', 'collectBatchSignatures']){
-            publisher[name] = async () => { touched.push(name); return null; };
-        }
-        return touched;
+function guard(publisher){
+    let touched = [];
+    for(let name of ['resolveAnchor', 'electionRank', 'persistAttestationSnapshot', 'collectBatchSignatures']){
+        publisher[name] = async () => { touched.push(name); return null; };
     }
+    return touched;
+}
 
+function registerSeveralEmptyWindows(ctx){
     it('spends nothing across several empty windows in one sweep', async function () {
         let db = makeDb();
-        let publisher = makePublisher(dir, db);
+        let publisher = makePublisher(ctx.dir, db);
         let touched = guard(publisher);
         let now = 200 * WINDOW_S;
         publisher._floorWindow = now - 3 * WINDOW_S;
@@ -183,10 +173,12 @@ describe('AttestationBatchPublisher skip empty windows', function () {
         for(let i = 1; i <= 3; i++)
             expect(db.marker(now - i * WINDOW_S)).to.include({ status: 'skipped', row_count: 0 });
     });
+}
 
+function registerMixedWindows(ctx){
     it('publishes only the window that holds a response among empty ones', async function () {
         let db = makeDb();
-        let publisher = makePublisher(dir, db);
+        let publisher = makePublisher(ctx.dir, db);
         let now = 200 * WINDOW_S;
         let busy = now - 2 * WINDOW_S;
         publisher._floorWindow = now - 3 * WINDOW_S;
@@ -202,10 +194,12 @@ describe('AttestationBatchPublisher skip empty windows', function () {
         expect(publisher.stats.windowsEmpty).to.equal(2);
         expect(publisher.stats.windowsPublished).to.equal(1);
     });
+}
 
+function registerFollowingSweep(ctx){
     it('does not re-offer skipped windows to a sweep that follows', async function () {
         let db = makeDb();
-        let publisher = makePublisher(dir, db);
+        let publisher = makePublisher(ctx.dir, db);
         let now = 200 * WINDOW_S;
         publisher._floorWindow = now - 2 * WINDOW_S;
 
@@ -217,10 +211,12 @@ describe('AttestationBatchPublisher skip empty windows', function () {
         expect(again).to.deep.equal({ attempted: 0, published: 0 });
         expect(publisher.stats.windowsEmpty).to.equal(2);
     });
+}
 
+function registerFailedRead(ctx){
     it('records nothing and spends nothing when the window read fails', async function () {
         let db = makeDb();
-        let publisher = makePublisher(dir, db);
+        let publisher = makePublisher(ctx.dir, db);
         let now = 200 * WINDOW_S;
         let start = now - WINDOW_S;
         publisher._floorWindow = start;
@@ -233,4 +229,21 @@ describe('AttestationBatchPublisher skip empty windows', function () {
         expect(publisher.stats.windowsEmpty).to.equal(0);
         expect(publisher.stats.windowsDeferred).to.equal(1);
     });
+}
+
+describe('AttestationBatchPublisher skip empty windows', function () {
+    let ctx = {};
+
+    beforeEach(function () {
+        ctx.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-skip-empty-'));
+    });
+
+    afterEach(function () {
+        fs.rmSync(ctx.dir, { recursive: true, force: true });
+    });
+
+    registerSeveralEmptyWindows(ctx);
+    registerMixedWindows(ctx);
+    registerFollowingSweep(ctx);
+    registerFailedRead(ctx);
 });
