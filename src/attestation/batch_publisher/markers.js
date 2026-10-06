@@ -197,9 +197,11 @@ module.exports = {
     async recordLandedWindow(windowStart, windowEnd, txidOrNull, rowCount){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
+        let rows = Number(rowCount);
         this.stats.landedRecorded++;
         this._quarantined.delete(Number(windowStart));
-        await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd, rowCount, txidOrNull, 'landed');
+        await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd,
+            Number.isFinite(rows) && rows >= 0 ? rows : 0, txidOrNull === undefined ? null : txidOrNull, 'landed');
     },
 
     // A validated DOGE retraction makes the window unresolved again. Delete is the
