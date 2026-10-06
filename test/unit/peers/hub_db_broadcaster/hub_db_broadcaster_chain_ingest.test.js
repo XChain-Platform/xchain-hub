@@ -19,10 +19,11 @@ const path              = require('node:path');
 const ws                = require('ws');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
 
+const { siblingCheckout } = require('../../../helpers/sibling_checkout.js');
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
     path.resolve(__dirname, '../../../../../xchain-indexer');
 const INDEXER_SYNC_PATH = path.join(INDEXER_ROOT, 'src', 'hub', 'hub_db_sync.js');
-const HubDbSync = fs.existsSync(INDEXER_SYNC_PATH) ? require(INDEXER_SYNC_PATH) : null;
+const HubDbSync = siblingCheckout(__dirname, INDEXER_SYNC_PATH).usable ? require(INDEXER_SYNC_PATH) : null;
 const WebSocketServer = ws.WebSocketServer || ws.Server;
 
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', {
