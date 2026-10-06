@@ -126,16 +126,22 @@ function emitInboundEvents(pm, ws, envelope) {
     }
 }
 
+// What a peer proves about itself on its own verified envelopes: the signing key
+// it carried (kept for any envelope type, because catch-up peer selection reads
+// it where no validators row holds the key) and, on a heartbeat, the API address
+// it advertises. getHubAdvertisements still needs both before it lists a hub.
 function recordDirectHubAdvertisement(peer, peerAddr, envelope) {
-    if (!peer || envelope.type !== 'HEARTBEAT' || envelope.sender !== peerAddr) return;
-    const apiUrl = normalizeApiUrl(envelope.data && envelope.data.api_url);
-    if (!apiUrl || typeof envelope.sig_pubkey !== 'string' || !envelope.sig_pubkey) {
+    if (!peer || envelope.sender !== peerAddr) return;
+    if (typeof envelope.sig_pubkey !== 'string' || !envelope.sig_pubkey) {
         delete peer.api_url;
         delete peer.signing_pubkey;
         return;
     }
-    peer.api_url = apiUrl;
     peer.signing_pubkey = envelope.sig_pubkey.toLowerCase();
+    if (envelope.type !== 'HEARTBEAT') return;
+    const apiUrl = normalizeApiUrl(envelope.data && envelope.data.api_url);
+    if (apiUrl) peer.api_url = apiUrl;
+    else delete peer.api_url;
 }
 
 class PeerInbound {
