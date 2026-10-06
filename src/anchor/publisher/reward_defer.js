@@ -166,6 +166,7 @@ module.exports = {
                 if(err && /^no indexer url for /.test(err.message)) return 'verified';
                 throw err;
             }
+            if(r && r.exists && r.anchors === undefined) return 'verified';   // not the confirmations shape: verifyAnchorOnChain already bound this txid
             if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
             anchors = anchors.concat(r.anchors);
             if(r.truncated !== true){
