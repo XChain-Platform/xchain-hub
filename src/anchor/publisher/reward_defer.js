@@ -23,6 +23,7 @@
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { serialPass } = require('./drain_serial.js');
+const { judgeAnchors } = require('../anchor_proof_binding.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -151,22 +152,16 @@ module.exports = {
     // Does the mined txid bind to this entry's (network, snapshot_block, publisher)? The
     // checkpoint byte-match above proves the txid carries OUR checkpoint, not that it is
     // the anchor the reward tuple names: a relayed tuple can pair a real txid with another
-    // publisher or round. The rule is the indexer's judgeAnchors, read from the vendored
-    // twin of anchor_proof_client/binding.js and never re-derived here. While the twin is
-    // not vendored the check cannot run, so it answers 'unknown' and the entry is retained
-    // until the TTL: the drain never accepts a txid it could not bind.
+    // publisher or round. The rule is the indexer's judgeAnchors, read from the byte twin
+    // of anchor_proof_client/binding.js and never re-derived here. An anchor_bundle entry
+    // whose round_reference differs from its snapshot_block is counted, since the bundle
+    // round IS its snapshot block and judgeAnchors can never bind such a tuple.
     // Returns 'verified' | 'rejected' | 'unknown'.
     async drainBindingVerdict(e){
-        let binding;
-        try { binding = require('../anchor_proof_binding.js'); }
-        catch(err){
-            if(!err || err.code !== 'MODULE_NOT_FOUND') throw err;
-            if(!this._rewardBindingMissingLogged){
-                this._rewardBindingMissingLogged = true;
-                logger.error('StateAnchorPublisher: anchor_proof_binding twin is not present; the reward txid ' +
-                              'binding check cannot run; deferred rewards are retained and none is written');
-            }
-            return 'unknown';
+        if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
+            this._rewardBundleRoundMismatch = (this._rewardBundleRoundMismatch || 0) + 1;
+            logger.warn('StateAnchorPublisher: anchor_bundle reward entry with round_reference ' + e.roundReference +
+                         ' <> snapshot_block ' + e.snapshotBlock + ' (' + this._rewardBundleRoundMismatch + ' seen)');
         }
         let anchors = [];
         let after = null;
@@ -177,7 +172,7 @@ module.exports = {
             if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
             anchors = anchors.concat(r.anchors);
             if(r.truncated !== true){
-                return binding.judgeAnchors(anchors, {
+                return judgeAnchors(anchors, {
                     rewardType: e.rewardType, network: e.network, publisher: e.publisher,
                     roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
                     minConfirmations: this.dogeConfirmations
