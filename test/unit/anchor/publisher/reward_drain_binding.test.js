@@ -86,6 +86,9 @@ describe('reward drain: txid binding', function () {
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
+});
+
+describe('reward drain: undecided and malformed entries', function () {
     it('retains the entry, writing nothing, while the anchor is too shallow', async function () {
         let pub = makePub([anchorRow({ confirmations: 2 })]);
         queue(pub);
