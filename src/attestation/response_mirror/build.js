@@ -25,6 +25,9 @@
 
 const crypto = require('crypto');
 const { TERMINAL_STATUSES } = require('./constants.js');
+const swq = require('../../consensus/stake_weighted_quorum.js');
+const wid = require('../../consensus/gates/attest_responsible_widening_gate.js');
+const { isRankBetterSignerSet } = require('./signer_rank.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -261,6 +264,98 @@ module.exports = {
                 b.broadcastRow({ table: 'attestation_responses', row: stored });
         }
         return inserted;
+    },
+
+    // A row already held is a duplicate unless it carries a different signer set.
+    async absorbHeldRow(row, held){
+        if(!this.sameSignerList(held.signer_pubkeys, row.signer_pubkeys)){
+            return await this.convergeSignerSet(row, held);
+        }
+        this.stats.duplicates++;
+        return false;
+    },
+
+    sameSignerList(a, b){
+        let norm = (raw) => {
+            try {
+                let list = JSON.parse(String(raw == null ? '' : raw));
+                return Array.isArray(list) ? list.map(k => String(k).toLowerCase()).sort().join(',') : null;
+            } catch(_){ return null; }
+        };
+        let na = norm(a), nb = norm(b);
+        return na !== null && na === nb;
+    },
+
+    // Two hubs can hold one logical row under different valid signer subsets of the
+    // responsible set, and INSERT IGNORE alone would keep each hub's first arrival
+    // forever. A fully verified row whose signer set outranks the held one replaces
+    // the held set, so every hub settles on the same set whatever order it hears them.
+    // Returns false: nothing was newly inserted.
+    async convergeSignerSet(row, held){
+        let short = row.request_id.substring(0, 16) + '...';
+        let local = await this.resolveLocalRequest(row);
+        if(!local || !this.isMirrorEra(Number(local.request.block_index))){
+            this.stats.duplicates++;
+            return false;
+        }
+        let request = local.request;
+        let verdict = await this.verifyGossipedRow(row, request, local.latestBlock);
+        if(!verdict.ok){
+            this.stats.rejected++;
+            logger.warn('AttestationResponseMirror: dropping gossiped signer set for ' + short + '; ' + verdict.error);
+            return false;
+        }
+        let incoming = this.pairedSignerList(row);
+        let responsible = await this.responsibleRankOrder(row, request, local.latestBlock);
+        let redundancy = Math.max(1, Number(request.redundancy) || 1);
+        let stored;
+        try { stored = JSON.parse(String(held.signer_pubkeys)); } catch(_){ stored = null; }
+        if(!incoming || !responsible || !isRankBetterSignerSet(incoming, stored, responsible, redundancy)){
+            this.stats.duplicates++;
+            return false;
+        }
+        let db = this.hubDb();
+        let res = await db.updateAttestationResponseSignerSet(row.network, row.request_id, row.effective_time,
+                                                              held.signatures, row.signer_pubkeys, row.signatures);
+        if(!res || Number(res.affectedRows) < 1){
+            this.stats.duplicates++;
+            return false;
+        }
+        this.stats.converged = (this.stats.converged || 0) + 1;
+        logger.info('AttestationResponseMirror: replaced the signer set of ' + short + ' with a lower-ranked one');
+        await this.rebroadcastRow(row);
+        return false;
+    },
+
+    // The signer_pubkeys list, only when it names exactly the pubkeys of the signature list, in order.
+    pairedSignerList(row){
+        let sigs = this.parseSigList(row.signatures);
+        let listed;
+        try { listed = JSON.parse(String(row.signer_pubkeys)); } catch(_){ return null; }
+        if(!sigs || !Array.isArray(listed) || listed.length !== sigs.length) return null;
+        if(!listed.every((k, i) => String(k).toLowerCase() === sigs[i].pubkey)) return null;
+        return sigs.map(x => x.pubkey);
+    },
+
+    // The responsible set in rank order, derived the way verifyGossipedRow derives it.
+    async responsibleRankOrder(row, request, latestBlock){
+        let declaredBlock = Number(request.block_index);
+        let redundancy = Math.max(1, Number(request.redundancy) || 1);
+        let weighted = swq.isStakeWeightedQuorumActive(declaredBlock, this.hub && this.hub.network);
+        let cs = this.hub && this.hub.capabilitySnapshot;
+        let round = this.hub && this.hub.attestationRound;
+        if(!cs || !round || typeof round.computeResponsibleSet !== 'function') return null;
+        let snapshot = weighted ? await cs.getWeightSnapshot('attestation', declaredBlock)
+                                : await cs.getSnapshot('attestation', declaredBlock);
+        if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
+        let reg = this.hub.providerRegistry;
+        let floor = (reg && typeof reg.getMinStake === 'function')
+            ? reg.getMinStake(String(request.provider_id), declaredBlock) : null;
+        if(weighted && floor === null) return null;
+        let widen = (Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0)
+            ? wid.widenSlots(Number(latestBlock), declaredBlock, Number(request.deadline_block), this.hub.network) : 0;
+        return round.computeResponsibleSet(snapshot.validators, row.request_id, redundancy, weighted, floor, widen)
+                    .map(v => String(v.pubkey).toLowerCase());
     },
 
     // Select the row back for its id. A fresh insert's failed read returns its reason rather

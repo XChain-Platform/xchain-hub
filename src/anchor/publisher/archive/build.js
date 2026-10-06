@@ -169,6 +169,9 @@ module.exports = {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes; archived
     // sets are a convenience, the chain remains the root of trust.
+    // Coverage selector: the capability sets archived are exactly the (block, capability)
+    // pairs the quorum-agreed inputs reference; hub-mirror rows outside quorumRows are
+    // never consulted.
     async buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards, quorumRows){
         calls   = calls   || [];
         rewards = rewards || [];
