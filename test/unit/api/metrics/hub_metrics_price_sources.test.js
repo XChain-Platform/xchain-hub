@@ -15,11 +15,11 @@
 'use strict';
 
 const { expect } = require('chai');
-const { installHubOracleMetrics } = require('../../../src/api/hub_metrics');
+const { installHubOracleMetrics } = require('../../../../src/api/hub_metrics');
 const {
   installObservability,
   _resetObservability: resetObservability
-} = require('../../../src/observability');
+} = require('../../../../src/observability');
 
 function realObservability() {
   return installObservability(null, {
