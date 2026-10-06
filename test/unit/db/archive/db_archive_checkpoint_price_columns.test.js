@@ -23,7 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const SRC_DIR = path.join(__dirname, '..', '..', '..', 'src');
+const SRC_DIR = path.join(__dirname, '..', '..', '..', '..', 'src');
 
 function ddlColumns(table) {
     let text = fs.readFileSync(path.join(SRC_DIR, 'sql', table + '.sql'), 'utf8');
@@ -50,7 +50,7 @@ function makeDb() {
         createPool:       sinon.stub().returns(mockPool),
         createConnection: sinon.stub().resolves(mockConn)
     };
-    const Database = proxyquire('../../../src/db', {
+    const Database = proxyquire('../../../../src/db', {
         mariadb: mockMariadb,
         fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') },
         path:    require('path')
@@ -224,7 +224,7 @@ describe('archive_price_tombstones', function () {
 
 describe('retraction records tombstones before deleting', function () {
     it('retractFromActionIndex inserts the tombstones, then deletes the rows', async function () {
-        const { retractFromActionIndex } = require('../../../src/oracle/price_aggregator/retract.js');
+        const { retractFromActionIndex } = require('../../../../src/oracle/price_aggregator/retract.js');
         const order = [];
         const self = {
             hub: null,
