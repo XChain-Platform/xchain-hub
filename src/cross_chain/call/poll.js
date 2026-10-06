@@ -205,8 +205,9 @@ module.exports = {
             let callId = String(d.call_id).toLowerCase();
             try {
                 // maybeRelayResult returns false when the result is not yet available
-                // (missing / below depth): park it so it leaves the hot window. Any
-                // other outcome (round proposed, or already in flight) clears backoff.
+                // (missing / below depth) or its admission stamp is refused: park it
+                // so it leaves the hot window. Any other outcome (round proposed, or
+                // already in flight) clears backoff.
                 let relayed = await this.maybeRelayResult(coin, d);
                 if(relayed === false) this.parkResult(callId);
                 else this._resultBackoff.delete(callId);
@@ -236,7 +237,8 @@ module.exports = {
 
     // Returns true when the result exists and a relay round was proposed (or is
     // already in flight); false when the result is not yet available (missing on the
-    // target indexer, or not yet at confirmation depth) so the caller can park it (M-14).
+    // target indexer, or not yet at confirmation depth) or this hub refuses to stamp
+    // its admission (no fresh admission tip), so the caller can park it (M-14).
     async maybeRelayResult(coin, dispatch){
         let callId = String(dispatch.call_id).toLowerCase();
         let roundId = this.roundId('result', callId);
@@ -282,7 +284,8 @@ module.exports = {
             push_generation:       Number(dispatch.push_generation) || 0
         };
 
-        if(!await this.stampAdmission(row)) return;
+        // Park on a refused admission stamp: the caller clears backoff on anything but false.
+        if(!await this.stampAdmission(row)) return false;
 
         let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);

@@ -51,6 +51,11 @@ module.exports = {
             // this is the fence holding rather than damage; it still reports a proposer
             // that put two payloads on the wire at one sequence.
             seq_double_sign_refusals: this._seqDoubleSignRefusals,
+            // Requests this hub declined to co-sign, by reason. A rising indexer_read_failed or
+            // indexer_no_block means its own indexer cannot confirm checkpoints, so it is not
+            // co-signing and the quorum margin is smaller than the validator count suggests.
+            cosign_declines:          Object.assign({}, this._cosignDeclines),
+            last_cosign_decline_reason: this._lastCosignDeclineReason,
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.

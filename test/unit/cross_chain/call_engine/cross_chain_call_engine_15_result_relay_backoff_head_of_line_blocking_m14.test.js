@@ -25,6 +25,7 @@ const path       = require('path');
 
 const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine');
 const eq         = require('../../../../src/consensus/equivocation_header.js');
+const admissionHeight = require('../../../../src/lib/admission_height.js');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
 
 const CALL_ID = 'c'.repeat(64);
@@ -313,10 +314,53 @@ function registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part2() {
     expect(engine._resultBackoff.get(id).nextAt - Date.now()).to.be.at.most(60 * 60 * 1000 + 5);
   });
 }
+// A result-phase dispatch whose result exists at depth, so maybeRelayResult reaches
+// the admission stamp; the era is forced on so the REAL stampAdmission decides.
+function admissionEraEngine(admitMap) {
+  const { engine, db } = makeEngine();
+  db.rows.push({
+    id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized',
+    target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 1, network: 'regtest',
+    source_contract_index: 5, target_contract_index: 99, method: 'onArrival',
+    params_json: '["x"]', gas_limit: 50000, cross_hops: 1
+  });
+  sinon.stub(admissionHeight, 'isAdmissionEra').returns(true);
+  engine.hub.resolveAdmitBlocks = sinon.stub().resolves(admitMap);
+  sinon.stub(engine, 'indexerCall').resolves({
+    exists: true, status: 'ok', executed_block_index: 10,
+    latest_block_index: 10 + Number(engine.confirmations.DOGE), return_payload_b64: ''
+  });
+  return engine;
+}
+function registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part3() {
+  it('parks a result call whose admission stamp is refused (no fresh admission tip)', async function () {
+    const engine = admissionEraEngine(null);
+    await engine.pollTargetResults('DOGE');
+    expect(engine.hub.resolveAdmitBlocks.called, 'the real stampAdmission ran').to.equal(true);
+    expect(engine.consensus.propose.called, 'a refused stamp opens no round').to.equal(false);
+    expect(engine._resultBackoff.has('a'.repeat(64)), 'a refused stamp parks the call').to.equal(true);
+    expect(engine._resultBackoff.get('a'.repeat(64)).attempts).to.equal(1);
+  });
+  it('a refused admission stamp grows an existing backoff instead of clearing it', async function () {
+    const engine = admissionEraEngine(null);
+    engine._resultBackoff.set('a'.repeat(64), { attempts: 3, nextAt: Date.now() - 1 });
+    await engine.pollTargetResults('DOGE');
+    expect(engine._resultBackoff.has('a'.repeat(64)), 'the backoff entry survives').to.equal(true);
+    expect(engine._resultBackoff.get('a'.repeat(64)).attempts).to.equal(4);
+  });
+  it('an admitted stamp proposes the round and clears backoff, which the refusal is measured against', async function () {
+    const engine = admissionEraEngine({ BTC: 150, DOGE: 10 });
+    engine._resultBackoff.set('a'.repeat(64), { attempts: 3, nextAt: Date.now() - 1 });
+    await engine.pollTargetResults('DOGE');
+    expect(engine.consensus.propose.calledOnce, 'an admitted stamp opens the round').to.equal(true);
+    expect(engine._resultBackoff.has('a'.repeat(64)), 'a proposed round clears backoff').to.equal(false);
+  });
+}
 function registerFeature6resultRelayBackoffHeadOfLineBlockingM14() {
   describe('result-relay backoff (head-of-line blocking, M-14)', function () {
     registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part1();
     registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part2();
+    registerFeature6resultRelayBackoffHeadOfLineBlockingM14Part3();
   });
 }
 describe('CrossChainCallEngine', function () {
