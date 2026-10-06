@@ -28,8 +28,8 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../../../helpers/waitUntil');
-const { DB_METHODS } = require('../../../helpers/mockHub');
+const { waitUntil } = require('../../../../helpers/waitUntil');
+const { DB_METHODS } = require('../../../../helpers/mockHub');
 
 function makeApiDoubles(hubOverrides) {
     const captured = { methods: null, routes: new Map(), middlewares: [] };
@@ -87,7 +87,7 @@ function restoreApiEnvironment(saved) {
 }
 
 function loadApi(captured, mockExpress, mockServer, mockHub) {
-    proxyquire('../../../../src/api', {
+    proxyquire('../../../../../src/api', {
         'dotenv': { config: sinon.stub() },
         'express': mockExpress,
         'helmet': sinon.stub().returns(function helmetMw(){}),
