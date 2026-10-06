@@ -36,7 +36,7 @@ const axios = require('axios');
 //
 // Equality is what made this load-bearing rather than cosmetic: an axios abort carries no
 // HTTP response and none of the never-sent error codes, so isAmbiguousSendError
-// (lib/idempotent_broadcast.js) correctly reads it as a POSSIBLY-LANDED broadcast, and the
+// (lib/guards/idempotent_broadcast.js) correctly reads it as a POSSIBLY-LANDED broadcast, and the
 // publishers then commit the spend reservation and dead-letter the round for manual
 // on-chain verification. A client that cannot outlast the server it calls converts a
 // healthy broadcast into operator work.
@@ -64,7 +64,7 @@ const DEFAULT_ENCODER_TIMEOUT_MS = 120000;
 //
 // Two constraints, both load-bearing:
 //   - RETHROW THE SAME OBJECT, never a fresh Error. isAmbiguousSendError
-//     (lib/idempotent_broadcast.js) reads e.response.status, and so do the
+//     (lib/guards/idempotent_broadcast.js) reads e.response.status, and so do the
 //     dead-letter records; a wrapper drops both.
 //   - Rewrite the message ONLY below status 500. That classifier reads an
 //     'Encoder RPC error' message as a definitive rejection that is safe to
@@ -173,7 +173,7 @@ class EncoderClient {
     // it holds a funded address hostage from every other publisher for that window.
     // Ownership is stamped into the ticket, so this can never free another caller's claims,
     // and the encoder answers rather than errors for an unknown, expired or
-    // already-released id. Callers go through lib/encoder_reservation.abandonBuild.
+    // already-released id. Callers go through lib/encoder/encoder_reservation.abandonBuild.
     async releaseInputs(reservationId) {
         return this.call('release_inputs', { reservationId: reservationId });
     }
