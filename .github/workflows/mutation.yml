@@ -1,0 +1,59 @@
+# Scheduled mutation-testing run.
+#
+# The shared CI gate runs the pass/fail unit suite, not Stryker: a mutation run
+# is too slow to sit on every push, so it needs its own cadence rather than
+# riding on push or pull_request. thresholds.break in the Stryker
+# config fails the job on a low score; the artifact is what a human
+# reads to judge whether coverage of src/** moved.
+name: mutation
+
+# Least privilege for the default GITHUB_TOKEN: every job here only reads the
+# repo; uploading the report artifact needs no elevated scope.
+permissions:
+  contents: read
+
+on:
+  schedule:
+    # Sundays 09:00 UTC. Mutation runs are heavy; weekly keeps the cadence
+    # cheap while still catching drift within a week of it landing.
+    - cron: "0 9 * * 0"
+  # Re-run on demand, e.g. right after a change to src/**.
+  workflow_dispatch:
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run stryker mutation testing
+        run: npm run test:mutate
+
+      # The html reporter always writes reports/mutation/index.html on a
+      # completed run; fail loudly here rather than let upload-artifact
+      # silently skip an empty directory, which would look green forever.
+      - name: Verify the report is nonempty
+        run: |
+          set -euo pipefail
+          if [ ! -s reports/mutation/index.html ]; then
+            echo "::error::reports/mutation/index.html is missing or empty"
+            exit 1
+          fi
+
+      - name: Archive mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: reports/mutation/
+          retention-days: 30
