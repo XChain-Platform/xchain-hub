@@ -27,6 +27,16 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// The wire block time for a round. Gate active: the nominal round time. Gate
+// off: the captured value when it is a positive safe integer, else the nominal
+// time, so a malformed value never reaches the wire.
+function wireBlockTime(round, btcBlockHeight, captured, network, epochStart, roundInterval) {
+    let nominal = nominalRoundSeconds(round, epochStart, roundInterval);
+    if (roundTimeGateActive({ network, btcHeight: btcBlockHeight })) return nominal;
+    if (nominal === null) return captured;
+    return Number.isSafeInteger(captured) && captured > 0 ? captured : nominal;
+}
+
 // True when the consensus engine reports a peer quorum, the same federation test
 // the follower uses before refusing a PROPOSE with no real BTC height.
 function isFederated(consensus) {
@@ -49,9 +59,8 @@ module.exports = {
     scheduleFinalization(round) {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
-        let btcBlockTime   = this.currentBtcBlockTime;
-        if (roundTimeGateActive({ network: this.hub.network, btcHeight: btcBlockHeight }))
-            btcBlockTime = nominalRoundSeconds(round, this.epochStart, this.roundInterval);
+        let btcBlockTime   = wireBlockTime(round, btcBlockHeight, this.currentBtcBlockTime,
+            this.hub.network, this.epochStart, this.roundInterval);
         // Remember whether that height is the round-number stand-in rather than a
         // real BTC tip; the flag and the stand-in height are always set together.
         let anchorIsRoundNumber = !!this.chainTipFallbackActive;

@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 const hub = require('../../../../src/cross_chain/list/meta_text.js');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_PATH
     || path.join(__dirname, '..', '..', '..', '..', '..', 'xchain-indexer');
@@ -69,13 +70,7 @@ describe('list meta text grammar parity with xchain-indexer', function () {
     let indexer;
 
     before(function () {
-        if (!fs.existsSync(INDEXER_COPY)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
-                throw new Error(
-                    'XCHAIN_REQUIRE_SIBLINGS=1 but the indexer meta text twin is absent at ' + INDEXER_COPY
-                );
-            }
-            this.skip();
+        if (!skipOrFail(this, siblingCheckout(__dirname, INDEXER_COPY), 'the indexer meta text twin guard')) {
             return;
         }
         indexer = require(INDEXER_COPY);
