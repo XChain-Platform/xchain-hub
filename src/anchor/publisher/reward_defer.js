@@ -22,6 +22,7 @@
 'use strict';
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const { serialPass } = require('./drain_serial.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -129,7 +130,15 @@ module.exports = {
     // until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
     // Every non-verified outcome writes nothing either way, so the safety property does not
     // depend on this choice.
-    async drainDeferredRewardAttest(){
+    //
+    // Passes never overlap, for the reason given at drainDeferredBundleDone; this drain
+    // drops an entry only after its write, so an overlap here would also re-send XANCREWARD.
+    drainDeferredRewardAttest(){
+        return serialPass(this, '_rewardAttestDrain', () => this.runRewardAttestDrain());
+    },
+
+    // One pass of the drain above, over a copy of the queue taken when the pass starts.
+    async runRewardAttestDrain(){
         if(this._deferredRewardAttest.size === 0) return;
         for(let [key, e] of [...this._deferredRewardAttest]){
             if(Date.now() - e.at > this.announceRetryTtlMs){

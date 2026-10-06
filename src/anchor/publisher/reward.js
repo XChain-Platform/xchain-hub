@@ -266,6 +266,10 @@ module.exports = {
         // pollution and a permanently stranded credit. Reject at ingress instead.
         if((rewardType === 'anchor_archive') !== (version === 1)) return null;
         if(rewardType === 'anchor_bundle' && version !== 0 && version !== 3) return null;
+        // Verify a bundle's round_reference IS its snapshot_block (the catch-up verifier's
+        // rewardShape rule): the bundle XANCPUB canonical does not sign it, so any other value
+        // is a relayer's choice, each one a new append-only row the derive path never pays.
+        if(rewardType === 'anchor_bundle' && roundRef !== snapshotBlock) return null;
         if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return null;
         if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return null;   // our own broadcast echoing back
             return { network, snapshotBlock, rewardType, chain, publisher, txid, sender, roundRef, version, blockIndex, cpSeq };

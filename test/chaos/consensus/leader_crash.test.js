@@ -120,6 +120,10 @@ function registerViewChangeQuorumAchievedNewLeaderTest() {
 
         await con.start();
 
+        // This hub holds round context for seq 1 (quorum 3, live-set rotation); a
+        // federated hub without one declines to tally and catches up by NEW_VIEW.
+        con.viewChangeQuorums.set(1, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
+
         // Receive VIEW_CHANGE votes for view=1, seq=1
         hub._peerManager.emit('message', signedEnvelope('PBFT_VIEW_CHANGE', {
             view: 1, seq: 1
