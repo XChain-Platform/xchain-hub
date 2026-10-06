@@ -14,10 +14,10 @@
 
 const sinon            = require('sinon');
 const { expect }       = require('chai');
-const OracleConsensus  = require('../../../../src/oracle/consensus');
-const PriceFetcher     = require('../../../../src/oracle/price_fetcher');
-const { createMockHub }       = require('../../../helpers/mockHub');
-const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../../../helpers/fixtures');
+const OracleConsensus  = require('../../../../../src/oracle/consensus');
+const PriceFetcher     = require('../../../../../src/oracle/price_fetcher');
+const { createMockHub }       = require('../../../../helpers/mockHub');
+const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../../../../helpers/fixtures');
 
 
     let hub, pm, oc, oracleRound, leader;
@@ -96,7 +96,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests1() {
         // Regression guard for the silent-drop bug: BTC/KRW at ~$100k BTC and ~1,350 KRW/USD
         // is ~1.35e8 KRW and scales with the BTC price. The bound must clear that with headroom,
         // so a future lowering of PRICE_MAX cannot silently start dropping the pair again.
-        const { PRICE_MAX } = require('../../../../src/constants');
+        const { PRICE_MAX } = require('../../../../../src/constants');
         expect(PRICE_MAX).to.be.greaterThan(1.35e8);
         oracleRound.getSubmissions.returns(new Map()); // bound-only (no local aggregate to deviate against)
         oc.allowUnverifiedPairs = true; // isolate the PRICE_MAX bound from the unverifiable-pair gate
@@ -138,7 +138,7 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests8() {
     // ORACLE_MAX_CHANGE_PER_ROUND, the SAME constant the aggregation clamp emits, so a
     // maximally-clamped aggregate always passes. Boundary is exactly that constant.
     it('#2401 historical band boundary equals ORACLE_MAX_CHANGE_PER_ROUND', async function () {
-        const { ORACLE_MAX_CHANGE_PER_ROUND } = require('../../../../src/constants.js');
+        const { ORACLE_MAX_CHANGE_PER_ROUND } = require('../../../../../src/constants.js');
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate: historical band applies
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]);
         // Exactly at the band (bcgt is strict >) -> co-signs.

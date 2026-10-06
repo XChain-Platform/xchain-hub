@@ -21,14 +21,14 @@ const sinon = require('sinon');
 const {
   expect
 } = require('chai');
-const OracleConsensus = require('../../../../src/oracle/consensus');
+const OracleConsensus = require('../../../../../src/oracle/consensus');
 const {
   createMockHub
-} = require('../../../helpers/mockHub');
+} = require('../../../../helpers/mockHub');
 const {
   pubkeyForTestSender,
   makeCapabilitySnapshotStub
-} = require('../../../helpers/fixtures');
+} = require('../../../../helpers/fixtures');
 let oracleConsensusEarlyMessageBufferForF7Suite1Hub, oracleConsensusEarlyMessageBufferForF7Suite1Pm, oracleConsensusEarlyMessageBufferForF7Suite1Oc, oracleConsensusEarlyMessageBufferForF7Suite1OracleRound;
 // Each entry needs its signing key: votes are tallied by key, so a validator
 // with no key casts nothing.
