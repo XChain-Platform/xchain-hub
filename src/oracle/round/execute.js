@@ -188,15 +188,17 @@ function advanceRoundNumber() {
 // Anchor the round on a chain tip the indexer pushed into the hub DB.
 function applyPushedChainTip(btcTip) {
     this.currentBtcBlockHeight         = btcTip.blockHeight;
-    this.currentBtcBlockTime           = btcTip.blockTime;
+    // A pushed row without a usable header time anchors on the wall clock, the
+    // same as the direct-height path, rather than carrying a junk value forward.
+    let tipTimeUsable                  = Number.isSafeInteger(btcTip.blockTime) && btcTip.blockTime > 0;
+    this.currentBtcBlockTime           = tipTimeUsable ? btcTip.blockTime : Math.floor(Date.now() / 1000);
     this.lastSuccessfulChainTipFetchAt = Date.now();
     this.chainTipFetchFailures         = 0;
     this.chainTipFallbackActive        = false;
     // Record the pushed tip's own block time so diagnostics can age it. A
     // present-but-frozen row (indexer catch-up suppressing pushes) clears
     // every fetch counter above but leaves this block time stale.
-    this.anchorTipBlockTime = (typeof btcTip.blockTime === 'number' && btcTip.blockTime > 0)
-        ? btcTip.blockTime : null;
+    this.anchorTipBlockTime = tipTimeUsable ? btcTip.blockTime : null;
 }
 
 // Anchor the round on the hub's own direct indexer read.

@@ -31,6 +31,7 @@ const localWidening  = require('../../../src/consensus/gates/attest_responsible_
 const localRegistry  = require('../../../src/consensus/gate_registry');
 const localGates     = require('../../../src/consensus/gates/rollcall_gates_gate.js');
 const logger         = require('../../../src/observability').getLogger();
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const ZC_KEY     = 'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION';
@@ -250,16 +251,10 @@ function registerZeroConfParitySuite() {
 describe('value-identity with the xchain-indexer twins and the documentation canon', function () {
 
         before(function () {
-            const indexerReady = fs.existsSync(INDEXER_REGISTRY) && fs.existsSync(INDEXER_WIDENING) &&
-                fs.existsSync(INDEXER_GATES);
-            const canonReady = fs.existsSync(CONSTANTS_PATH);
-            if (!indexerReady || !canonReady) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but a required sibling was not found ' +
-                        '(indexer twins under ' + INDEXER_DIR + ', canon at ' + CONSTANTS_PATH + ')');
-                this.skip();
-                return;
-            }
+            const refused = [INDEXER_REGISTRY, INDEXER_WIDENING, INDEXER_GATES, CONSTANTS_PATH]
+                .map((p) => siblingCheckout(__dirname, p))
+                .find((verdict) => !verdict.usable);
+            if (refused && !skipOrFail(this, refused, 'the zero-conf indexer twins and documentation canon parity')) return;
             idx = {
                 registry: require(INDEXER_REGISTRY),
                 widening: require(INDEXER_WIDENING),
