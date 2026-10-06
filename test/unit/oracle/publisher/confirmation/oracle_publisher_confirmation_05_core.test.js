@@ -1,8 +1,8 @@
 'use strict';
 
-const { expect } = require('./oracle_publisher_confirmation.test.js');
+const { expect } = require('../oracle_publisher_confirmation.test.js');
 
-const OraclePublisher = require('../../../../src/oracle/publisher.js');
+const OraclePublisher = require('../../../../../src/oracle/publisher.js');
 
 // One underpaid batch can strand every batch published after it because the
 // publisher spends its own unconfirmed change and miners score a transaction by

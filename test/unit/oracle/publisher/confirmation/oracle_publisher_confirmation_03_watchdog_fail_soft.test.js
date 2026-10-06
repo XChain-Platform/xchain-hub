@@ -17,7 +17,7 @@ const {
     seedQueue,
     readJsonl,
     cleanupPublisherConfirmation
-} = require('./oracle_publisher_confirmation.test.js');
+} = require('../oracle_publisher_confirmation.test.js');
 
 let logs;
 
