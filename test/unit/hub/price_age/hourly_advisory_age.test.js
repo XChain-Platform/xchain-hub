@@ -17,8 +17,8 @@
 const assert = require('assert');
 const sinon = require('sinon');
 
-const gateRegistry = require('../../../src/consensus/gate_registry');
-const Prices = require('../../../src/hub/prices.js');
+const gateRegistry = require('../../../../src/consensus/gate_registry');
+const Prices = require('../../../../src/hub/prices.js');
 
 describe('hourly advisory age', function () {
     afterEach(function () {
@@ -75,7 +75,7 @@ describe('hourly advisory age', function () {
 // (9586). Tip 1e9 is past every testnet arming height and tip 1 below it, so no
 // activation height is restated here.
 describe('hourly advisory age on getprice and the advertised scalar', function () {
-    const coins = require('../../../src/coins');
+    const coins = require('../../../../src/coins');
     const LEGACY = Number(coins.getCoinConfig('BTC', 'testnet').ORACLE_MAX_PRICE_AGE_SECONDS);
     const HOURLY = Number(coins.getCoinConfig('BTC', 'testnet').ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS);
     const ALL = { BTC: 1e9, LTC: 1e9, DOGE: 1e9 };

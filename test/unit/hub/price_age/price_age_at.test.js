@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 
-const { advisoryAgeSecondsAt } = require('../../../src/hub/price_age_at.js');
+const { advisoryAgeSecondsAt } = require('../../../../src/hub/price_age_at.js');
 
 const LEGACY_SECONDS = 1800;
 const HOURLY_SECONDS = 4500;
