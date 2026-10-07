@@ -1,9 +1,14 @@
 'use strict';
 
 const { expect } = require('chai');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const Governance = require('../../../../src/validators/governance');
 const rules = require('../../../../src/validators/governance/rules.js');
 const { createMockHub } = require('../../../helpers/mockHub');
+
+const PINS = path.resolve(__dirname, '../../../../bin/pins');
 
 describe('governance tally failover gate', function () {
     let hub, gov;
@@ -24,6 +29,23 @@ describe('governance tally failover gate', function () {
         expect(t.regtest).to.equal(0);
         expect(t.testnet).to.equal(null);
         expect(t.mainnet).to.equal(null);
+    });
+
+    it('pins the hub-only governance rows outside the shared carrier digest', function () {
+        const identity = JSON.parse(fs.readFileSync(path.join(PINS, 'at1-consensus-identity.json'), 'utf8'));
+        const carrier = JSON.parse(fs.readFileSync(path.join(PINS, 'carrier-logic.json'), 'utf8'));
+        const gates = identity.hub_only_rules_gates;
+        const expected = {
+            'validators/governance/rules.GOV_SNAPSHOT_ACTIVATION': '{"mainnet":963000,"regtest":0,"testnet":0}',
+            'validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION': '{"mainnet":null,"regtest":0,"testnet":null}',
+        };
+        const preimage = Object.keys(expected).map((key) => `${key}=${expected[key]}`).join('\n');
+
+        expect(gates).to.deep.equal(expected);
+        expect(identity.hub_only_gate_key_count).to.equal(2);
+        expect(identity.hub_only_rules_digest).to.equal(crypto.createHash('sha256').update(preimage).digest('hex'));
+        expect(carrier.entries.consensus_rules_digest.note)
+            .to.equal('Hub-only registry values are pinned separately by at1-consensus-identity.json.');
     });
 
     it('isTallyFailoverActive is on for regtest with an observed tip', function () {
