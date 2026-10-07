@@ -159,14 +159,7 @@ function isActive(fn){
     return Number.isFinite(share) && share > 0;
 }
 
-// Internal coherence of an EFFECTIVE (merged) block. Returns one string per
-// problem; empty means the block is safe to run. Shape problems are reported on
-// any block; the cross-knob deadlock checks only apply once the tier is active,
-// because an inert tier never reads those windows.
-function validateActivation(fn){
-    let problems = [];
-    if(!isPlainObject(fn)) return problems;
-
+function validateRewardShare(fn, problems){
     if('REWARD_SHARE' in fn){
         let raw   = fn.REWARD_SHARE;
         let share = Number(raw);
@@ -178,7 +171,9 @@ function validateActivation(fn){
                           'of the oracle-round budget routed to verified full nodes, so >1 pays out more ' +
                           'than the round budget and <0 is meaningless');
     }
+}
 
+function validateIntegerBounds(fn, problems){
     for(let [key, bound] of Object.entries(INT_BOUNDS)){
         if(!(key in fn)) continue;
         let n = Number(fn[key]);
@@ -188,7 +183,9 @@ function validateActivation(fn){
             problems.push(key + ' ' + n + ' is outside [' + bound.min + ',' +
                           (bound.max !== undefined ? bound.max : '∞') + ']');
     }
+}
 
+function validateGenesisVerifiers(fn, problems){
     if('GENESIS_VERIFIERS' in fn){
         let list = fn.GENESIS_VERIFIERS;
         if(!Array.isArray(list)){
@@ -213,10 +210,9 @@ function validateActivation(fn){
                               'into a Set, so the verifier count is lower than the list suggests');
         }
     }
+}
 
-    if(!isActive(fn)) return problems;
-
-    // ── activation deadlocks: only reachable once REWARD_SHARE > 0 ──
+function validateActiveTier(fn, problems){
     let verifiers = Array.isArray(fn.GENESIS_VERIFIERS)
         ? fn.GENESIS_VERIFIERS.filter(v => HEX64.test(String(v))) : [];
     if(verifiers.length === 0)
@@ -238,6 +234,20 @@ function validateActivation(fn){
                           'CHALLENGE_INTERVAL_BLOCKS ' + interval + ': the trailing window contains no ' +
                           'challenge epoch, so the participation denominator is 0 and the tranche never pays');
     }
+}
+
+// Internal coherence of an EFFECTIVE (merged) block. Returns one string per
+// problem; empty means the block is safe to run. Shape problems are reported on
+// any block; the cross-knob deadlock checks only apply once the tier is active,
+// because an inert tier never reads those windows.
+function validateActivation(fn){
+    let problems = [];
+    if(!isPlainObject(fn)) return problems;
+
+    validateRewardShare(fn, problems);
+    validateIntegerBounds(fn, problems);
+    validateGenesisVerifiers(fn, problems);
+    if(isActive(fn)) validateActiveTier(fn, problems);
 
     return problems;
 }

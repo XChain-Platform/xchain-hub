@@ -75,14 +75,24 @@ function payloadFrom(pub, sender, signers, over) {
     return d;
 }
 
-const onChain = (over) => Object.assign({
-    exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
-    confirmations: 60, txid: TXID,
-    block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
-    actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-    // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
-    state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
-}, over || {});
+function onChain(publisher, over) {
+    const result = Object.assign({
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+        confirmations: 60, txid: TXID,
+        block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+        actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
+        // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
+        state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
+    }, over || {});
+    result.anchors = result.exists && result.txid === TXID ? [{
+        version: result.version, status: result.status,
+        checkpoint_network: CP_ROW.network, publisher: publisher,
+        snapshot_block: CP_ROW.snapshot_block, action_index: 0,
+        confirmations: result.confirmations
+    }] : [];
+    result.truncated = false;
+    return result;
+}
 
 const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
 
@@ -121,7 +131,7 @@ function registerPublisherFederationCases() {
         });
         expect(sent.filter(m => m.type === XANCREWARD).length, 'nothing federated while unconfirmed').to.equal(0);
 
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(me);
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the row is written locally first').to.equal(1);
         const msg = sent.find(m => m.type === XANCREWARD);
@@ -142,7 +152,7 @@ function registerPublisherFederationCases() {
             snapshotBlock: CP_ROW.snapshot_block, publisher: me,
             attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }]
         });
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(me);
         await pub.drainDeferredRewardAttest();
         const ins = inserts(queries)[0];
         expect(ins.sql).to.contain('doge_anchor_txid');
@@ -161,7 +171,7 @@ function registerReceiverProofCases() {
         expect(pub._deferredRewardAttest.size, 'queued behind its own mined-anchor proof').to.equal(1);
         expect(inserts(queries).length, 'nothing written on receipt alone').to.equal(0);
 
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(relayer.getPubkeyHex().toLowerCase());
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'written once this hub proved the anchor itself').to.equal(1);
         expect(sent.filter(m => m.type === XANCREWARD).length, 'a receiver never re-broadcasts').to.equal(0);
@@ -173,7 +183,9 @@ function registerReceiverProofCases() {
         const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
         expect(pub._deferredRewardAttest.size, 'the quorum was valid, so it queued').to.equal(1);
-        pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
+        pub.indexerCall = async () => ({
+            exists: false, checkpoint_anchored: false, anchors: [], truncated: false
+        });
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length).to.equal(0);
     });

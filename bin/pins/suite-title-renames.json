@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "test/integration/anchor/archive_quorum_tables_recovery.test.js": "test/unit/anchor/archive_quorum_tables_recovery.test.js",
   "note": "Title renames that ride a commit ahead of the deferred at1-suite-titles.json re-pin. Each entry is old title to new title, keyed by the file's current path.",
   "titles": {
     "test/unit/anchor/reward_tracker.test.js": {
