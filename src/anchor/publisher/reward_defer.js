@@ -145,8 +145,9 @@ module.exports = {
     // of anchor_proof_client/binding.js and never re-derived here. An anchor_bundle entry
     // whose round_reference differs from its snapshot_block is counted, since the bundle
     // round IS its snapshot block and judgeAnchors can never bind such a tuple.
-    // With no DOGE indexer wired the lookup cannot run, and verifyAnchorOnChain has already
-    // needed that same indexer to return 'verified', so the verdict defers to it.
+    // With no DOGE indexer wired, or with a response that omits the anchor rows, there is
+    // no binding evidence. Feed that empty set through judgeAnchors so it remains unknown
+    // rather than inheriting verifyAnchorOnChain's checkpoint-only verdict.
     // Returns 'verified' | 'rejected' | 'unknown'.
     async drainBindingVerdict(e){
         if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
@@ -163,10 +164,18 @@ module.exports = {
             try {
                 r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
             } catch(err){
-                if(err && /^no indexer url for /.test(err.message)) return 'verified';
+                if(err && /^no indexer url for /.test(err.message)) return judgeAnchors([], {
+                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                    minConfirmations: this.dogeConfirmations
+                });
                 throw err;
             }
-            if(r && r.exists && r.anchors === undefined) return 'verified';   // not the confirmations shape: verifyAnchorOnChain already bound this txid
+            if(r && r.exists && r.anchors === undefined) return judgeAnchors([], {
+                rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                minConfirmations: this.dogeConfirmations
+            });
             if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
             anchors = anchors.concat(r.anchors);
             if(r.truncated !== true){

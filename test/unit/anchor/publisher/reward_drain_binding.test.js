@@ -106,6 +106,24 @@ describe('reward drain: undecided and malformed entries', function () {
         expect(pub._deferredRewardAttest.size).to.equal(1);
     });
 
+    it('retains the entry when no DOGE indexer URL is configured', async function () {
+        let pub = makePub([]);
+        pub.indexerCall = async () => { throw new Error('no indexer url for DOGE'); };
+        queue(pub);
+        await pub.runRewardAttestDrain();
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
+    });
+
+    it('retains the entry when the indexer response omits anchor rows', async function () {
+        let pub = makePub([]);
+        pub.indexerCall = async () => ({ exists: true });
+        queue(pub);
+        await pub.runRewardAttestDrain();
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
+    });
+
     it('counts an anchor_bundle entry whose round_reference differs from its snapshot_block, and never writes it', async function () {
         let pub = makePub([anchorRow()]);
         queue(pub, { roundReference: 7 });
