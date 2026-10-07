@@ -90,6 +90,22 @@ describe('chain tips null reasons: BTC latest block', function () {
 
 });
 
+describe('chain tips null reasons: DOGE latest block', function () {
+    installFixtures();
+
+    it('logs when no DOGE indexer URL resolves', async function () {
+        const hub = hubWith(null, { data: { result: { block_index: 1 } } });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('no DOGE indexer URL resolves')).to.equal(true);
+    });
+
+    it('logs when the DOGE indexer returns no usable block_index', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: null } } });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('no usable block_index')).to.equal(true);
+    });
+});
+
 describe('chain tips null reasons: admission tip', function () {
     installFixtures();
 

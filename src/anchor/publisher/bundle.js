@@ -206,7 +206,7 @@ module.exports = {
         if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
             try {
                 let resolved = await this.hub.resolveDogeLatestBlock();
-                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
+                if(resolved != null && Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
             } catch(_e){ foldBlock = snapshotBlock; }
         }
         let foldActive = canonicalForms.isAnchorFoldActive(foldBlock, network);
@@ -243,7 +243,7 @@ module.exports = {
         if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
             try {
                 let resolved = await this.hub.resolveDogeLatestBlock();
-                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
+                if(resolved != null && Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
             } catch(_e){ foldBlock = btcBlock; }
         }
         if(this.network && canonicalForms.isAnchorFoldActive(foldBlock, this.network)) this.suppressLegacyArchiveLeg();
