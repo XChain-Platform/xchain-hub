@@ -38,17 +38,17 @@ class ChainTips {
     get oracle(){ return this._oracle; }
     set oracle(oracleRound){
         this._oracle = oracleRound;
-        if(!oracleRound || oracleRound.hub !== this || oracleRound.db !== this.db) return;
-        let hub = this, roundDb = oracleRound.db;
-        oracleRound.db = new Proxy(roundDb, { get(target, property, receiver){
-            if(property !== 'getChainTip') return Reflect.get(target, property, receiver);
-            return async (coin, network) => {
-                let consensus = hub.oracleConsensus;
-                if(String(coin).toUpperCase() === 'BTC' && typeof (consensus && consensus.resolveRoundPushedBtcTip) === 'function')
-                    return consensus.resolveRoundPushedBtcTip();
-                return target.getChainTip.call(target, coin, network);
-            };
-        }});
+        this.wireOracleRoundPushedBtcTip();
+    }
+    get oracleConsensus(){ return this._oracleConsensus; }
+    set oracleConsensus(consensus){
+        this._oracleConsensus = consensus;
+        this.wireOracleRoundPushedBtcTip();
+    }
+    wireOracleRoundPushedBtcTip(){
+        let consensus = this._oracleConsensus;
+        if(consensus && typeof consensus.wireRoundPushedBtcTip === 'function')
+            consensus.wireRoundPushedBtcTip(this._oracle);
     }
     // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
     // indexer's pushChainTip only when that indexer is configured with HUB_API_URL, on
