@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate } = require('./shared_rows.js');
+const { addGate, UNARMED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -48,3 +48,11 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
+
+// peers/hub_db/landing_watermark
+// Landed-from-clear-frontier: at/above the activation, in the landing indexer's
+// block height, the hub publishes landed[chain] from the indexer's
+// price_landing_clear reading whenever it is ahead of hub_push_delivered. Below
+// it, only hub_push_delivered feeds the watermark. Armed on regtest only until
+// the operator names a testnet and mainnet height.
+addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
