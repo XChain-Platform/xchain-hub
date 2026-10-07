@@ -58,10 +58,11 @@ module.exports = {
         // covers all of them. Gated on the REQUEST's own BTC block_index (never the
         // response's, never the current chain tip), matching every other request-plane
         // gate in this file. `null` in the activation map reads as unratified/off, so
-        // on every network but regtest this branch is dead code until the operator
-        // arms a height (mainnet and testnet are both null as of this writing). The
-        // failover sweep (processQueue) replays from the on-disk queue file
-        // independently of this event, so a legacy-era entry queued before a future
+        // this branch never fires on a network whose entry is null; which networks
+        // are armed, and at what height, lives only in the
+        // attest_response_mirror_activation row of consensus/gate_registry/shared_rows_1.js,
+        // so read it there rather than trusting a snapshot here. The failover sweep
+        // (processQueue) replays from the on-disk queue file independently of this event, so a legacy-era entry queued before a future
         // flag day still drains untouched; skipping the enqueue here needs no sweep
         // change.
         if (gateRegistry.activeAt(ATTEST_RESPONSE_MIRROR_KEY, this.hub.network, null, Number(event.request && event.request.block_index), null)){

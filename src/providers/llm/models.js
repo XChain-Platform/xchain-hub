@@ -25,8 +25,9 @@
 // reasoning tokens against max_completion_tokens, so the ~20-token verdict JSON
 // is routinely starved by internal reasoning at the 256 budget and returns
 // finish_reason 'length' with empty content, which agree() maps to no_quorum:
-// the cross-vendor judge fallback then fails exactly when it is needed. Give
-// reasoning judges headroom while keeping the tight bound for chat-family judges.
+// the cross-vendor judge fallback then fails exactly when it is needed. A Claude
+// judge that thinks spends those tokens out of max_tokens the same way. Give both
+// headroom while keeping the tight bound for chat-family judges.
 const JUDGE_MAX_TOKENS = 256;
 const JUDGE_MAX_TOKENS_REASONING = 2048;
 // Extra completion budget added to a reasoning-family fetch model on top of the
@@ -40,7 +41,8 @@ const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 // purpose: it is the non-reasoning ChatGPT model, it honors an explicit
 // temperature, and classifying it as reasoning would silently drop the
 // temperature-0 judge contract and over-grant reasoning headroom.
-// Shared by the OpenAI transport gate and the judge-budget selection in agree().
+// Gates the OpenAI transport's request shaping; the fetch and judge budgets read
+// needsFetchReasoningHeadroom below, which widens this to the thinking Claude ids.
 //
 // The exclusion absorbs an optional `.N` version segment. `(?!-chat)`
 // only rejected a LITERAL `-chat` directly after `gpt-5`, so every versioned Chat
@@ -81,8 +83,9 @@ function anthropicRejectsSampling(model) {
 // True when a fetch against this model needs FETCH_REASONING_TOKEN_HEADROOM: the
 // OpenAI reasoning family, plus the always-thinking Claude ids, whose thinking
 // tokens count against max_tokens and can leave the response with no text block
-// when the governance content bound is the whole budget. Kept apart from
-// isReasoningModel because that predicate also gates OpenAI-only request shaping.
+// when the governance content bound is the whole budget. Also sizes the judge
+// budget (JUDGE_MAX_TOKENS_REASONING), so the two paths cannot disagree. Kept apart
+// from isReasoningModel because that predicate also gates OpenAI-only request shaping.
 function needsFetchReasoningHeadroom(model) {
     return isReasoningModel(model) || anthropicRejectsSampling(model);
 }

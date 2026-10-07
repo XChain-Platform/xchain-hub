@@ -2,6 +2,9 @@
   "version": 1,
   "note": "Title renames that ride a commit ahead of the deferred at1-suite-titles.json re-pin. Each entry is old title to new title, keyed by the file's current path.",
   "titles": {
+    "test/unit/anchor/reward_tracker.test.js": {
+      "RewardTracker recordAnchorReward() swallows an INSERT failure (idempotent retries)": "RewardTracker recordAnchorReward() rejects on an INSERT failure instead of logging the credit as recorded"
+    },
     "test/unit/attestation/publisher/attestation_publisher_003_queue_i_o.test.js": {
       "_enqueue appends a JSON line and readQueue parses it back": "enqueue appends a JSON line and readQueue parses it back",
       "_enqueue appends multiple entries correctly": "enqueue appends multiple entries correctly",
