@@ -17,7 +17,7 @@
 
 'use strict';
 
-const { LIST_SNAPSHOT_KEYS } = require('../constants.js');
+const { LIST_SNAPSHOT_KEYS } = require('../../constants.js');
 
 const INTEGER_KEYS = new Set([
     'id', 'snapshot_block', 'home_list_index', 'list_type', 'seq', 'origin_block'

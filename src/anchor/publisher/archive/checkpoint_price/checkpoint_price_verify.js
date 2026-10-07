@@ -18,9 +18,9 @@
 
 'use strict';
 
-const { resolveQuorumNetwork } = require('../../quorum_network.js');
-const swq = require('../../../consensus/stake_weighted_quorum.js');
-const { getLogger } = require('../../../observability');
+const { resolveQuorumNetwork } = require('../../../quorum_network.js');
+const swq = require('../../../../consensus/stake_weighted_quorum.js');
+const { getLogger } = require('../../../../observability');
 const logger = getLogger();
 
 function withoutKeys(row, keys){
