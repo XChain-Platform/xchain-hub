@@ -4,7 +4,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { expect } = require('chai');
@@ -20,7 +19,6 @@ const INDEXER_ROOT = [
     path.resolve(__dirname, '../../../../xchain-indexer'),
     path.resolve(__dirname, '../../../../../../../xchain-indexer')
 ].find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
-// Lazy so a sibling-free checkout still collects this file; the suite skips at run time.
 const indexerModule = rel => (INDEXER_ROOT ? require(path.join(INDEXER_ROOT, rel)) : {});
 if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETWORK: 'regtest' });
 const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519] = ['bin/recovery.js',
@@ -314,16 +312,18 @@ function registerCheckpointTest(state){
 }
 function registerPriceTest(state){
     it('round trips signature, batch, skipped, and tombstoned price rows', async function(){
-        const inputs = signedPriceInputs(state.oracleKeys);
-        const stamps = [];
+        const inputs = signedPriceInputs(state.oracleKeys), stamps = [];
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
-        const result = await buildArchive(publisher, inputs);
-        const archive = JSON.parse(result.json);
+        const result = await buildArchive(publisher, inputs), archive = JSON.parse(result.json);
         expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
         await finalize(publisher, inputs);
-        expect(stamps.map(stamp => stamp[0])).to.deep.equal([
-            'price', 'price', 'price', 'price', 'tombstone'
+        expect(archive.price_snapshots.map(row => [row.round_number, row.coin_pair, row.status]))
+            .to.deep.equal([[11, 'BTC/USD', 'finalized'], [11, 'LTC/USD', 'finalized'],
+                [12, 'BTC/USD', 'finalized'], [13, 'DOGE/USD', 'skipped']]);
+        expect(stamps.filter(stamp => stamp[0] === 'price').map(stamp => stamp.slice(-2))).to.deep.equal([
+            [11, 'LTC/USD'], [11, 'BTC/USD'], [12, 'BTC/USD']
         ]);
+        expect(stamps.filter(stamp => stamp[0] === 'tombstone')).to.have.length(1);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
         expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS);
         expectRows(recovered.db.tombstones, archive.price_tombstones, PRICE_TOMBSTONE_KEYS);
