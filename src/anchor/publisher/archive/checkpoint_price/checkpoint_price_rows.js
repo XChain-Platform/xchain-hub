@@ -18,10 +18,10 @@
 
 'use strict';
 
-const StateCheckpointEngine = require('../../checkpoint_engine.js');
-const OracleConsensus = require('../../../oracle/consensus.js');
-const admissionHeight = require('../../../lib/admission_height.js');
-const { CHECKPOINT_KEYS, PRICE_KEYS } = require('../constants.js');
+const StateCheckpointEngine = require('../../../checkpoint_engine.js');
+const OracleConsensus = require('../../../../oracle/consensus.js');
+const admissionHeight = require('../../../../lib/admission_height.js');
+const { CHECKPOINT_KEYS, PRICE_KEYS } = require('../../constants.js');
 
 const INTEGER_KEYS = new Set(['id', 'block_index', 'checkpoint_seq', 'snapshot_block',
     'round_number', 'reference_block', 'block_timestamp', 'validator_count',

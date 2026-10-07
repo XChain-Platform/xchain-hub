@@ -8,7 +8,7 @@
 const { expect } = require('chai');
 const {
     capListRows, sortedListRows, listIdsOf, listCapabilityWants
-} = require('../../../../../../src/anchor/publisher/archive/list_rows_select.js');
+} = require('../../../../../../src/anchor/publisher/archive/list/list_rows_select.js');
 
 describe('archive list row selection', () => {
     it('caps nine rows at eight and reports the cap', () => {
