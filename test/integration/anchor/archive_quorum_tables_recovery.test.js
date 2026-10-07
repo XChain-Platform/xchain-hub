@@ -19,7 +19,6 @@ const INDEXER_ROOT = [
     path.resolve(__dirname, '../../../../xchain-indexer'),
     path.resolve(__dirname, '../../../../../../../xchain-indexer')
 ].find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
-// Lazy so a sibling-free checkout still collects this file; the suite skips at run time.
 const indexerModule = rel => (INDEXER_ROOT ? require(path.join(INDEXER_ROOT, rel)) : {});
 if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETWORK: 'regtest' });
 const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519] = ['bin/recovery.js',
@@ -320,6 +319,7 @@ function registerPriceTest(state){
         const archive = JSON.parse(result.json);
         expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
         await finalize(publisher, inputs);
+        expectRows(archive.price_snapshots, publisher.sortedPriceSnapshots(inputs.prices), ['round_number', 'coin_pair', 'status']);
         expect(stamps.filter(stamp => stamp[0] === 'price').map(stamp => stamp.slice(-2))).to.deep.equal([
             [11, 'LTC/USD'], [11, 'BTC/USD'], [12, 'BTC/USD']
         ]);
