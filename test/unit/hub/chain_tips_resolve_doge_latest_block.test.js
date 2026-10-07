@@ -69,23 +69,56 @@ describe('ChainTips.resolveDogeLatestBlock', function () {
     });
 });
 
-describe('anchor publisher callers treat a null DOGE height as unresolved', function () {
+describe('anchor co-sign treats a null DOGE height as unresolved', function () {
+    it('co-sign refuses before consulting the fold gate when the DOGE height is null', async function () {
+        const activeAt = sinon.stub().returns(true);
+        const forms = proxyquire('../../../src/anchor/publisher/canonical_forms.js', {
+            '../../consensus/gate_registry.js': { activeAt }
+        });
+        const getStateCheckpoint = sinon.stub();
+        const ctx = {
+            identity: { getPubkeyHex: () => 'aa' },
+            hub: { resolveDogeLatestBlock: sinon.stub().resolves(null) },
+            db: { getStateCheckpointByChain: getStateCheckpoint }
+        };
+        const checkpoint = { chain: 'BTC', block_index: 1, checkpoint_seq: 2 };
+        const env = { data: {
+            archive: { checkpoint, wrapper_section_index: 0 },
+            sections: [checkpoint], sig_pubkey: 'bb', publisher: 'bb',
+            snapshot_block: 9999999999, network: 'mainnet'
+        } };
+        expect(await forms.foldPublisherMethods.coSignFoldArchiveRequest.call(ctx, env)).to.equal(null);
+        expect(activeAt.called).to.equal(false);
+        expect(getStateCheckpoint.called).to.equal(false);
+    });
+});
+
+describe('anchor bundle callers treat a null DOGE height as unresolved', function () {
     const canonicalForms = require('../../../src/anchor/publisher/canonical_forms.js');
     const bundle = require('../../../src/anchor/publisher/bundle.js');
 
-    it('co-sign refuses when the DOGE height is null', async function () {
-        const ctx = Object.assign({}, {
-            identity: { getPubkeyHex: () => 'aa' },
-            hub: { resolveDogeLatestBlock: async () => null }
-        });
-        const env = { data: { archive: { checkpoint: {} }, sections: [], sig_pubkey: 'bb', publisher: 'bb', snapshot_block: 1, network: 'mainnet' } };
-        expect(await canonicalForms.foldPublisherMethods.coSignFoldArchiveRequest.call(ctx, env)).to.equal(null);
-    });
-
-    it('publishPendingCheckpoints keeps the BTC fallback height when the DOGE height is null', async function () {
+    it('publishNetworkBundles does not consult the fold gate when the DOGE height is null', async function () {
         const suppress = sinon.stub();
         const ctx = {
-            hub: { resolveDogeLatestBlock: async () => null },
+            hub: { resolveDogeLatestBlock: sinon.stub().resolves(null) },
+            identity: { getPubkeyHex: () => 'aa' },
+            getActiveOraclePublishPubkeys: sinon.stub().resolves(['aa']),
+            splitBundle: sinon.stub().returns({ bundles: [], oversize: [] }),
+            suppressLegacyArchiveLeg: suppress
+        };
+        const spy = sinon.spy(canonicalForms, 'isAnchorFoldActive');
+        try {
+            await bundle.publishNetworkBundles.call(ctx, {}, 'mainnet', [{ snapshot_block: 9999999999 }],
+                                                    777, false, [], { rows: 0 });
+            expect(spy.called).to.equal(false);
+            expect(suppress.called).to.equal(false);
+        } finally { spy.restore(); }
+    });
+
+    it('publishPendingCheckpoints does not consult the fold gate when the DOGE height is null', async function () {
+        const suppress = sinon.stub();
+        const ctx = {
+            hub: { resolveDogeLatestBlock: sinon.stub().resolves(null) },
             network: 'mainnet',
             findAnchorEligibleSections: async () => [],
             groupSectionsByNetwork: () => [],
@@ -94,9 +127,9 @@ describe('anchor publisher callers treat a null DOGE height as unresolved', func
         const cf = require('../../../src/anchor/publisher/canonical_forms.js');
         const spy = sinon.spy(cf, 'isAnchorFoldActive');
         try {
-            await bundle.publishPendingCheckpoints.call(ctx, {}, 777, false);
-            expect(spy.called).to.equal(true);
-            expect(spy.firstCall.args[0]).to.equal(777);
+            await bundle.publishPendingCheckpoints.call(ctx, {}, 9999999999, false);
+            expect(spy.called).to.equal(false);
+            expect(suppress.called).to.equal(false);
         } finally { spy.restore(); }
     });
 });

@@ -22,7 +22,7 @@ function hubWith(url, post) {
     hub.resolveBtcNetwork    = async () => 'mainnet';
     hub.resolveBtcIndexerUrl = async () => url;
     hub.resolveIndexerUrl    = async () => url;
-    axiosStub.post.resolves(post);
+    if (post instanceof Error) axiosStub.post.rejects(post); else axiosStub.post.resolves(post);
     return hub;
 }
 
@@ -97,12 +97,37 @@ describe('chain tips null reasons: DOGE latest block', function () {
         const hub = hubWith(null, { data: { result: { block_index: 1 } } });
         expect(await hub.resolveDogeLatestBlock()).to.equal(null);
         expect(warned('no DOGE indexer URL resolves')).to.equal(true);
+        expect(axiosStub.post.called).to.equal(false);
+    });
+
+    it('logs when the DOGE indexer returns no result', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: {} });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('returned no result')).to.equal(true);
+    });
+
+    it('logs when the DOGE indexer returns an error', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { error: 'boom' } } });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('returned an error ("boom")')).to.equal(true);
     });
 
     it('logs when the DOGE indexer returns no usable block_index', async function () {
         const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: null } } });
         expect(await hub.resolveDogeLatestBlock()).to.equal(null);
         expect(warned('no usable block_index')).to.equal(true);
+    });
+
+    it('logs when the DOGE indexer lag exceeds the bound', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: 5, lag: 100000 } } });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('exceeds MAX_INDEXER_LAG_BLOCKS')).to.equal(true);
+    });
+
+    it('logs when the DOGE indexer call fails', async function () {
+        const hub = hubWith('http://indexer.invalid/api', new Error('down'));
+        expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        expect(warned('failed to resolve from the indexer: down')).to.equal(true);
     });
 });
 

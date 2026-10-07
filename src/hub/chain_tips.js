@@ -108,11 +108,11 @@ class ChainTips {
     async resolveDogeLatestBlock(){
         let why = null, height = null;
         try {
-            let url = await this.resolveIndexerUrl('DOGE');
+            const url = await this.resolveIndexerUrl('DOGE');
             if(!url) why = 'no DOGE indexer URL resolves';
             else {
-                let res = await axiosFor(this).post(url, { jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {} }, { timeout: 5000 });
-                let r = res && res.data && res.data.result;
+                const res = await axiosFor(this).post(url, { jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {} }, { timeout: 5000 });
+                const r = res && res.data && res.data.result;
                 let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
                 if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
                 if(!r || r.error) why = 'indexer getlatestblock returned ' + (r ? 'an error (' + JSON.stringify(r.error) + ')' : 'no result');
