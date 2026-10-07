@@ -86,9 +86,9 @@ const path          = require('path');
 const EncoderClient = require('../peers/encoder_client.js');
 const OracleBatchSigner = require('./batch_signer.js');
 const ah            = require('../lib/admission_height.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
-const { abandonBuild }           = require('../lib/encoder_reservation.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild }           = require('../lib/encoder/encoder_reservation.js');
 const { rewriteFileAtomically }  = require('../lib/fs/durable_file.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
@@ -241,7 +241,7 @@ class OraclePublisher {
             // Forwarded only while the set is inside the encoder's caller-facing
             // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
             // from its own uncapped fetch of this same address. See
-            // lib/encoder_utxo_forward.js.
+            // lib/encoder/encoder_utxo_forward.js.
             utxos:    forwardableUtxos(selection.utxos, 'OraclePublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address (not the raw hex pubkey).
@@ -287,7 +287,7 @@ class OraclePublisher {
             // whose payload only becomes readable when a reveal spends it, and this pipeline
             // has no reveal: broadcasting it publishes an undecodable PRICE and strands the
             // carrier value. Thrown BEFORE the wallet hook, so nothing is signed and no fee
-            // is spent. See lib/two_phase_guard.js.
+            // is spent. See lib/guards/two_phase_guard.js.
             assertSingleTxEncoding(psbtResult, 'OraclePublisher');
 
             // 3. Sign the PSBT via the operator-provided wallet hook

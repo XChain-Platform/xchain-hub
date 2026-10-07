@@ -44,7 +44,7 @@
  **********************************************************************/
 
 'use strict';
-const { getLogger } = require('../observability');
+const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 // xchain-encoder/src/common/validator/constants.js MAX_UTXO_COUNT. Duplicated rather than

@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const { abandonBuild } = require('../../../../src/lib/encoder_reservation');
+const { abandonBuild } = require('../../../../src/lib/encoder/encoder_reservation');
 
 function makeEncoder(impl) {
     const calls = [];
