@@ -39,6 +39,16 @@ function makePub() {
     pub.verifyAnchorOnChain = () => { let h = held(); pub.lookups.push(h); return h.promise; };
     pub.verifyArchiveCheckpointOnChain = () => { let h = held(); pub.lookups.push(h); return h.promise; };
     pub.verifyFinalizedAgainstLocal = async () => true;
+    pub.dogeConfirmations = 60;
+    pub.indexerCall = async () => ({
+        exists: true,
+        anchors: [{
+            version: 0, status: 'valid', checkpoint_network: CP_ROW.network,
+            publisher: 'cd'.repeat(32), snapshot_block: CP_ROW.snapshot_block,
+            action_index: 0, confirmations: 60
+        }],
+        truncated: false
+    });
     pub.applied = [];
     pub.applyBundleDone = async (d) => { pub.applied.push('bundle:' + d.txid); };
     pub.applyFinalized = async (d) => { pub.applied.push('finalized:' + d.txid); };

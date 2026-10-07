@@ -56,14 +56,24 @@ function entry(extra) {
     }, extra || {});
 }
 
-const onChain = (over) => Object.assign({
-    exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
-    confirmations: 60, txid: TXID,
-    block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
-    actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-    // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
-    state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
-}, over || {});
+function onChain(over) {
+    const result = Object.assign({
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+        confirmations: 60, txid: TXID,
+        block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+        actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
+        // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
+        state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
+    }, over || {});
+    result.anchors = result.exists && result.txid === TXID ? [{
+        version: result.version, status: result.status,
+        checkpoint_network: CP_ROW.network, publisher: 'ab'.repeat(32),
+        snapshot_block: CP_ROW.snapshot_block, match_batch_seq: 42,
+        action_index: 0, confirmations: result.confirmations
+    }] : [];
+    result.truncated = false;
+    return result;
+}
 
 const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
 
@@ -125,7 +135,10 @@ function registerConfirmationCases() {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub.deferRewardAttestation(entry());
-        pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: false, confirmations: 0 });
+        pub.indexerCall = async () => ({
+            exists: false, checkpoint_anchored: false, confirmations: 0,
+            anchors: [], truncated: false
+        });
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'evicted anchor mints nothing').to.equal(0);
     });
