@@ -52,13 +52,15 @@ const ark     = require('../anchor/anchor_reward_key.js');
 const anchorMixin              = require('./anchor.js');
 const attestationMixin         = require('./attestation.js');
 const bridgeTransfersMixin     = require('./bridge_transfers.js');
-const snapshotsMixin           = require('./snapshots/index.js');
+const capabilitySnapshotsMixin = require('./snapshots/capability_snapshots.js');
 const configsMixin             = require('./configs.js');
 const consensusStateMixin      = require('./consensus_state.js');
 const crossChainMixin          = require('./cross_chain.js');
 const governanceMixin          = require('./governance.js');
+const listSnapshotsMixin       = require('./snapshots/list_snapshots.js');
 const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
+const policySnapshotsMixin     = require('./snapshots/policy_snapshots.js');
 const pricesMixin              = require('./prices/index.js');
 const priceArchiveMixin        = require('./prices/archive_bookkeeping.js');
 const reorgAttestationsMixin   = require('./reorg_attestations.js');
@@ -95,13 +97,15 @@ const MIXINS = [
     anchorMixin,
     attestationMixin,
     bridgeTransfersMixin,
-    snapshotsMixin,
+    capabilitySnapshotsMixin,
     configsMixin,
     consensusStateMixin,
     crossChainMixin,
     governanceMixin,
+    listSnapshotsMixin,
     oracleMixin,
     p2pPeersMixin,
+    policySnapshotsMixin,
     pricesMixin,
     priceArchiveMixin,
     reorgAttestationsMixin,
