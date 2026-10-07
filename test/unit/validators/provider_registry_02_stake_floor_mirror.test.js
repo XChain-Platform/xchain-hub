@@ -41,6 +41,7 @@ function installSuiteHooks1() {
 const fs   = require('fs');
 
 const path = require('path');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const REPO_ROOT = (function () {
             let dir = __dirname;
@@ -76,14 +77,7 @@ describe('ProviderRegistry', function () {
     installSuiteHooks1();
 describe('provider stake floors agree with the indexer mirror', function () {
 it('the indexer ships the identical genesis floor for every provider', function () {
-            if (!fs.existsSync(MIRROR)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('provider stake-floor parity gate cannot run: xchain-indexer ' +
-                        'provider_registry.js missing at ' + MIRROR +
-                        '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
-                this.skip();
-                return;
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, MIRROR), 'the provider stake-floor parity gate')) return;
             // Fresh read: a module cached by an earlier suite would hide an on-disk edit.
             const resolved = require.resolve(MIRROR);
             delete require.cache[resolved];

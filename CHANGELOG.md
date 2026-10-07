@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.7] - 2026-10-06
+
+### Fixed
+- Paged hub DB peer catch-up and backed off per peer on HTTP 429 so a rate-limited peer is not hammered.
+- Held the caught-up state through a re-check walk so a hub no longer reports not caught up while it re-verifies.
+- Skipped rows that a peer permanently refuses so catch-up stops re-walking them every minute.
+- Stopped relayed gossip from restarting a catch-up that is already running.
+
+## [0.22.6] - 2026-10-06
+
+### Fixed
+- Ran hub DB peer catch-up as one walk at a time and stopped re-walking tables that are already caught up.
+- Bounded the indexer reads a catch-up walk makes so one rejoining hub cannot rate-limit the shared indexer for every hub.
+- Let hub DB peer catch-up store validator-written price rounds by proving each round from its row group.
+
 ## [0.22.5] - 2026-10-06
 
 ### Fixed

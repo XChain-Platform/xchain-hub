@@ -15,25 +15,22 @@ const rewardGate = require('../../../src/consensus/gates/anchor_reward_gate.js')
 const { BRIDGE_KEYS, POLICY_KEYS, CHECKPOINT_KEYS, PRICE_KEYS } =
     require('../../../src/anchor/publisher/constants.js');
 const vectors = require('../../fixtures/anchor_archive_vectors.json');
+const { siblingCheckout } = require('../../helpers/sibling_checkout.js');
 const INDEXER_ROOT = [
     path.resolve(__dirname, '../../../../xchain-indexer'),
     path.resolve(__dirname, '../../../../../../../xchain-indexer')
-].find(candidate => fs.existsSync(path.join(candidate, 'bin/recovery.js')));
-if(!INDEXER_ROOT)
-    throw new Error('required xchain-indexer sibling checkout is missing');
-process.env.INDEXER_COIN = 'DOGE';
-process.env.INDEXER_NETWORK = 'regtest';
-const AnchorRecovery = require(path.join(INDEXER_ROOT, 'bin/recovery.js'));
-const indexerFixture = require(path.join(INDEXER_ROOT, 'test/fixtures/anchor-archive.js'));
-const recoveryStubs = require(path.join(INDEXER_ROOT, 'test/helpers/recovery_stubs.js'));
-const indexerBridge = require(path.join(INDEXER_ROOT, 'src/consensus/bridge_settle.js'));
-const indexerEd25519 = require(path.join(INDEXER_ROOT, 'src/consensus/ed25519.js'));
+].find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
+// Lazy so a sibling-free checkout still collects this file; the suite skips at run time.
+const indexerModule = rel => (INDEXER_ROOT ? require(path.join(INDEXER_ROOT, rel)) : {});
+if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETWORK: 'regtest' });
+const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519] = ['bin/recovery.js',
+    'test/fixtures/anchor-archive.js', 'test/helpers/recovery_stubs.js', 'src/consensus/bridge_settle.js',
+    'src/consensus/ed25519.js'].map(indexerModule);
 const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK;
 const TXID = 'ab'.repeat(32), PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
-function copy(value){ return JSON.parse(JSON.stringify(value)); }
+const copy = value => JSON.parse(JSON.stringify(value));
 function sourceFor(key){ return 'src_' + key.pubkey.slice(0, 16); }
-function capabilitySet(keys){ return keys.map(key => (
-    { pubkey: key.pubkey, amount: '5', source: sourceFor(key) })); }
+const capabilitySet = keys => keys.map(key => ({ pubkey: key.pubkey, amount: '5', source: sourceFor(key) }));
 function signatures(keys, canonical){
     return JSON.stringify(keys.slice(0, 3).map(key => ({
         pubkey: key.pubkey, sig: indexerFixture.signHex(key, canonical)
@@ -387,6 +384,10 @@ function registerFixtureBytesTest(){
 }
 describe('archive quorum table recovery round trip', function(){
     const state = {};
+    before(function(){
+        if(!INDEXER_ROOT && process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling checkout is missing');
+        if(!INDEXER_ROOT) this.skip();
+    });
     beforeEach(function(){
         state.oracleKeys = Array.from({ length: 4 }, () => indexerFixture.makeKeypair());
         state.crossKeys = Array.from({ length: 4 }, () => indexerFixture.makeKeypair());
