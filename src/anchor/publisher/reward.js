@@ -50,14 +50,9 @@ function installFoldAttestHooks(){
     attestRoundMethods.handleAttestSignReq = async function(envelope){
         let archiveReply = this.coSignFoldArchiveRequest(envelope).catch(() => null);
         let peerManager = this.peerManager;
-        let broadcast = peerManager && peerManager.broadcast;
-        let accepted = false;
-        if(broadcast) peerManager.broadcast = (type, data) => {
-            if(type === XANCPUB_SIGN && data && data.sig) accepted = true;
-            return broadcast.call(peerManager, type, data);
-        };
-        try { await handleReq.call(this, envelope); }
-        finally { if(broadcast) peerManager.broadcast = broadcast; }
+        // Gate the archive co-sign on THIS request's own verdict, never on a flag set by
+        // patching the shared broadcast, which overlapping requests would trip for each other.
+        let accepted = (await handleReq.call(this, envelope)) === true;
         let signed = await archiveReply;
         if(accepted && signed && peerManager){
             this.recordObservedArchiveLeader(signed.batchSeq, signed.sender, signed.cp);

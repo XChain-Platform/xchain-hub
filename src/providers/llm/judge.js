@@ -22,7 +22,7 @@
  ********************************************************************/
 
 const crypto = require('crypto');
-const { JUDGE_MAX_TOKENS, JUDGE_MAX_TOKENS_REASONING, isReasoningModel } = require('./models');
+const { JUDGE_MAX_TOKENS, JUDGE_MAX_TOKENS_REASONING, needsFetchReasoningHeadroom } = require('./models');
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are
 // arbitrary attacker-chosen bytes (only the sender's signature over them is
@@ -136,10 +136,10 @@ function judgeRequest(jm, judgeSystem, judgePrompt, attemptTimeoutMs, options) {
         // this to take the CLI's replacing flag instead of its appending one.
         systemIsSoleInstruction: true,
         model:       jm,
-        // Reasoning-family judges need headroom past the reasoning-token
-        // spend or the verdict returns truncated/empty; chat-family judges
-        // keep the tight 256 bound.
-        maxTokens:   isReasoningModel(jm) ? JUDGE_MAX_TOKENS_REASONING : JUDGE_MAX_TOKENS,
+        // Give a judge headroom past its reasoning or thinking spend, by the same
+        // predicate fetch() uses, or the verdict returns truncated/empty; chat-family
+        // judges keep the tight 256 bound.
+        maxTokens:   needsFetchReasoningHeadroom(jm) ? JUDGE_MAX_TOKENS_REASONING : JUDGE_MAX_TOKENS,
         temperature: 0,
         // Use the existing json_object machinery (OpenAI response_format
         // + a JSON-only system instruction for Claude API/CLI) so the
