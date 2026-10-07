@@ -21,7 +21,7 @@ const {
   isAmbiguousSendError,
   AtMostOnce,
   broadcastOnce
-} = require('../../../../src/lib/idempotent_broadcast.js');
+} = require('../../../../src/lib/guards/idempotent_broadcast.js');
 const SpendGuard = require('../../../../src/lib/spend_guard.js');
 function registerIsAmbiguousSendErrorSuite1Part1() {
   it('treats a node/encoder RPC rejection as DEFINITIVE (safe to retry)', function () {

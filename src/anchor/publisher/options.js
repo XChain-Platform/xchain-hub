@@ -26,6 +26,7 @@ const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard = require('../../lib/spend_guard.js');
 const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
 const { DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
+const { positiveIntConfig } = require('../../lib/config_int.js');
 const hubConfig = require('../../config');
 
 module.exports = {
@@ -73,7 +74,10 @@ module.exports = {
         this.batchSize     = parseInt(hubConfig.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
         this.maxBatch      = parseInt(hubConfig.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
         this.chunkMaxBytes = parseInt(hubConfig.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
-        this.roundTimeoutMs = parseInt(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || DEFAULT_ANCHOR_ROUND_TIMEOUT_MS);
+        // Resolve the round timeout exactly as the admission watermark does (a 0, negative or
+        // garbage value would fire every attest/archive round timer at once and stall anchoring).
+        this.roundTimeoutMs = positiveIntConfig(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS,
+            DEFAULT_ANCHOR_ROUND_TIMEOUT_MS, 'ANCHOR_ROUND_TIMEOUT_MS');
         this.chunkRetryDelayMs = parseInt(hubConfig.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
     },
 
@@ -132,7 +136,10 @@ module.exports = {
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
-        this.electionToleranceBlocks = parseInt(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
+        // Require a strictly positive tolerance: it divides in rankUnlocked (0 unlocks every rank
+        // at once) and bounds the follower anti-spam check (NaN would make that check never fire).
+        this.electionToleranceBlocks = positiveIntConfig(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS ||
+            cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS, 36, 'ANCHOR_ELECTION_TOLERANCE_BLOCKS');
         // Failover wake. The ladder above only unlocks a rank when
         // something RE-EVALUATES it, and rank is evaluated only inside flush(); with
         // flush on the 24h interval plus size triggers, the "ranks 1-3 get a slot

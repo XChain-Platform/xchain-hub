@@ -84,11 +84,11 @@ const EncoderClient     = require('../peers/encoder_client.js');
 const SpendGuard        = require('../lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./quorum_network.js');
-const { isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { isAmbiguousSendError } = require('../lib/guards/idempotent_broadcast.js');
 const { sumUtxosCoins, summarizeUtxoConfirmations } = require('../lib/utxo_balance.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
-const { abandonBuild }           = require('../lib/encoder_reservation.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild }           = require('../lib/encoder/encoder_reservation.js');
 const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
 const ValidatorIdentity = require('../validators/identity.js');
 const StateCheckpointEngine = require('./checkpoint_engine.js');
@@ -222,7 +222,7 @@ class StateAnchorPublisher {
         this.refuseWhenNoConfirmedInput(utxos, allowUnconfirmed);
         // utxos forwarded only while inside the encoder's caller-facing
         // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects from
-        // its own uncapped fetch of this same address (lib/encoder_utxo_forward.js).
+        // its own uncapped fetch of this same address (lib/encoder/encoder_utxo_forward.js).
         let psbtResult = await signer.encoder.createTx({
             utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH',
             // See allowUnconfirmedInputs in the constructor: each anchor stands on its
@@ -235,12 +235,12 @@ class StateAnchorPublisher {
         // them back or this address is unavailable to every other publisher until the TTL
         // expires. Scoped strictly to the pre-broadcast section below: past the send,
         // holding the inputs is what stops a second build double-spending a transaction
-        // that may already have landed. See lib/encoder_reservation.js.
+        // that may already have landed. See lib/encoder/encoder_reservation.js.
         let txHex;
         try {
             // Refuse phase 1 of a two-transaction encoding before anything is signed: this
             // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
-            // ANCHOR no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+            // ANCHOR no indexer can decode and strand the carrier value (lib/guards/two_phase_guard.js).
             assertSingleTxEncoding(psbtResult, 'StateAnchorPublisher');
             txHex = await signer.walletSignFn(psbtResult.psbt);
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
