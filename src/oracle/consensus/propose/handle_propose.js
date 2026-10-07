@@ -29,7 +29,7 @@ const { noteDrop }      = require('../../../consensus/diagnostics');
 const { coSignGateRejects } = require('../cosign_gate.js');
 const { bindAndCoSign } = require('../follower_round.js');
 const { nominalRoundSeconds, roundTimeMatches } = require('../round_time/round_time.js');
-const { roundTimeGateActive } = require('../round_time/round_time_gate.js');
+const { roundTimeGateActive } = require('../round_time_gate.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 

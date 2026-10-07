@@ -18,7 +18,7 @@ const assert = require('assert');
 const sinon = require('sinon');
 
 const gateRegistry = require('../../../../../src/consensus/gate_registry');
-const roundTimeGate = require('../../../../../src/oracle/consensus/round_time/round_time_gate');
+const roundTimeGate = require('../../../../../src/oracle/consensus/round_time_gate');
 const { ROUND_TIME_GATE, roundTimeGateActive } = roundTimeGate;
 
 describe('oracle consensus round time gate', function () {

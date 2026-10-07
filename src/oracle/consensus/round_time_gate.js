@@ -14,7 +14,7 @@
  *
  ********************************************************************/
 
-const gateRegistry = require('../../../consensus/gate_registry');
+const gateRegistry = require('../../consensus/gate_registry');
 
 const ROUND_TIME_GATE =
     'oracle_round_time_activation.ORACLE_ROUND_TIME_ACTIVATION';
