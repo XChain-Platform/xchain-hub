@@ -67,6 +67,7 @@
 const crypto            = require('crypto');
 const swq               = require('./stake_weighted_quorum.js');
 const snapWrite         = require('../lib/capability_snapshot_write.js');
+const { positiveIntConfig } = require('../lib/config_int.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -91,9 +92,14 @@ class RetractionConsensus {
         this.broadcaster = hub.hubDbBroadcaster || null;
         this.network     = hub.network || '';
 
-        this.roundTimeoutMs = parseInt(hubConfig.RETRACT_ROUND_TIMEOUT_MS || (hub.p2pConfig && hub.p2pConfig.RETRACT_ROUND_TIMEOUT_MS) || 180000);
-        this.retrySignReqMs = parseInt(hubConfig.RETRACT_SIGN_RETRY_MS    || (hub.p2pConfig && hub.p2pConfig.RETRACT_SIGN_RETRY_MS)    || 15000);
-        this.intentTtlMs    = parseInt(hubConfig.RETRACT_INTENT_TTL_MS    || (hub.p2pConfig && hub.p2pConfig.RETRACT_INTENT_TTL_MS)    || 3600000);
+        // Guard each timing knob as a positive integer: a 0, negative or NaN value would
+        // storm SIGN_REQs, time every round out unsigned, or prune intents before co-sign.
+        this.roundTimeoutMs = positiveIntConfig(hubConfig.RETRACT_ROUND_TIMEOUT_MS || (hub.p2pConfig && hub.p2pConfig.RETRACT_ROUND_TIMEOUT_MS),
+                                                180000, 'RETRACT_ROUND_TIMEOUT_MS');
+        this.retrySignReqMs = positiveIntConfig(hubConfig.RETRACT_SIGN_RETRY_MS    || (hub.p2pConfig && hub.p2pConfig.RETRACT_SIGN_RETRY_MS),
+                                                15000, 'RETRACT_SIGN_RETRY_MS');
+        this.intentTtlMs    = positiveIntConfig(hubConfig.RETRACT_INTENT_TTL_MS    || (hub.p2pConfig && hub.p2pConfig.RETRACT_INTENT_TTL_MS),
+                                                3600000, 'RETRACT_INTENT_TTL_MS');
 
         this.pending      = new Map();   // round id -> { canonical, evt, validators, quorum, weighted, signatures, timers }
         this.localIntents = new Map();   // intent key -> arrival ts (what OUR indexers pushed to us)

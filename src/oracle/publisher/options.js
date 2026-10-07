@@ -25,7 +25,7 @@
 'use strict';
 
 const hubConfig = require('../../config');
-const { AtMostOnce } = require('../../lib/idempotent_broadcast.js');
+const { AtMostOnce } = require('../../lib/guards/idempotent_broadcast.js');
 const SpendGuard    = require('../../lib/spend_guard.js');
 
 // ~10 min. Translates the rank-staggered takeover window from BTC blocks (the

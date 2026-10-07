@@ -26,7 +26,7 @@
 
 'use strict';
 
-const { isAmbiguousSendError }   = require('../../lib/idempotent_broadcast.js');
+const { isAmbiguousSendError }   = require('../../lib/guards/idempotent_broadcast.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

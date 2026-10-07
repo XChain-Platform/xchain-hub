@@ -51,8 +51,11 @@ const forms = {
     },
 
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
-    // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
-    // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
+    // canonical at/above the CHECKPOINT_COMMITMENT flag-day. This is the hub's only
+    // copy and no other repo imports it: the SDK and sync checkpoint.js, the explorer's
+    // proofs.js and the indexer's bin/recovery.js re-type the same gate and join inline,
+    // and the indexer's ANCHOR FORMAT 0 parse and bridge checkpoint_source.js append the
+    // suffix ungated by design, so an edit here must be mirrored in every one of them.
     checkpointRootSuffix(cp){
         if(!forms.isCheckpointCommitmentActive(cp)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine

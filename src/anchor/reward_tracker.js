@@ -63,10 +63,10 @@ class RewardTracker {
     async distributeRewards(round, participants, btcBlockHeight) {
         if (!participants || participants.length === 0) return;
 
-        // Sanity-gate the configured budget only; the split below never touches
-        // this float.
-        let totalReward = parseFloat(this.rewardPerRound);
-        if (!Number.isFinite(totalReward) || totalReward <= 0)
+        // Verify the budget is a positive plain decimal, checked on the same string the
+        // bcmath split reads (never parseFloat, which passes '10abc' that bcdiv rejects).
+        let budget = String(this.rewardPerRound);
+        if (!/^\d+(\.\d+)?$/.test(budget) || !bcmath.bcgt(budget, '0'))
             throw new Error('Invalid reward amount: ' + this.rewardPerRound);
 
         // Canonical set: lowercase, deduplicated, sorted. A case-variant or repeated
@@ -83,7 +83,7 @@ class RewardTracker {
         // satoshi off the 1.66666666 the chain credits.
         let perValidator = bcmath.bcformat(
             bcmath.bcmulfloor(
-                bcmath.bcdiv(this.rewardPerRound, String(validParticipants.length), 18), '1', 8
+                bcmath.bcdiv(budget, String(validParticipants.length), 18), '1', 8
             ), 8);
 
         for (let pubkey of validParticipants) {
@@ -184,13 +184,18 @@ class RewardTracker {
             let minIncumbent = existing.map(r => String(r.validator_pubkey).toLowerCase()).sort()[0];
             if (minIncumbent <= lcPubkey) return;
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
-            // supersedes the local-only incumbent(s); every hub makes the same call.
-            await this.db.deleteValidatorReward(roundNumber, rewardType, qualifier)
-                .catch(e => { logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)); throw e; });
+            // supersedes the local-only incumbent(s); every hub makes the same call. The
+            // delete and our insert share one transaction: a failed insert rolls the
+            // delete back, so the incumbent stays rather than this hub holding no row.
+            await this.db.withTransaction(async conn => {
+                await this.db.deleteValidatorReward(conn, roundNumber, rewardType, qualifier);
+                await this.db.createSupersedingValidatorAnchorReward(conn, lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier);
+            }).catch(e => { logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)); throw e; });
+        } else {
+            // Rethrow like the read: a lost insert must not log the success line below.
+            await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
+                .catch(e => { logger.error(nodeUtil.format('Error recording anchor reward for ' + lcPubkey + ':', e)); throw e; });
         }
-
-        await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
-            .catch(e => logger.error(nodeUtil.format('Error recording anchor reward for ' + lcPubkey + ':', e)));
 
         logger.info('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
