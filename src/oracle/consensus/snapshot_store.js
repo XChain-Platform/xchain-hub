@@ -99,6 +99,12 @@ async function broadcastStoredRound(round) {
 
 module.exports = {
 
+    async resolveRoundPushedBtcTip() {
+        let hub = this.hub;
+        if (!hub || typeof hub.resolveFreshPushedBtcTip !== 'function') return null;
+        return hub.resolveFreshPushedBtcTip();
+    },
+
     // `admitBlocks` is the round's admission map, stored in its per-chain columns with every
     // federation column named (NULL for a legacy round, never 0), so the batch signer and
     // the publisher rebuild the map the quorum signed from the row rather than from memory.

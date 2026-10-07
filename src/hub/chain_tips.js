@@ -34,9 +34,22 @@ const logger = getLogger();
 // One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
 // isolated even when tests or embedded callers deliberately use more than one in a scope.
 const admissionTipMemo = new AsyncLocalStorage();
-
 class ChainTips {
-
+    get oracle(){ return this._oracle; }
+    set oracle(oracleRound){
+        this._oracle = oracleRound;
+        if(!oracleRound || oracleRound.hub !== this || oracleRound.db !== this.db) return;
+        let hub = this, roundDb = oracleRound.db;
+        oracleRound.db = new Proxy(roundDb, { get(target, property, receiver){
+            if(property !== 'getChainTip') return Reflect.get(target, property, receiver);
+            return async (coin, network) => {
+                let consensus = hub.oracleConsensus;
+                if(String(coin).toUpperCase() === 'BTC' && typeof (consensus && consensus.resolveRoundPushedBtcTip) === 'function')
+                    return consensus.resolveRoundPushedBtcTip();
+                return target.getChainTip.call(target, coin, network);
+            };
+        }});
+    }
     // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
     // indexer's pushChainTip only when that indexer is configured with HUB_API_URL, on
     // the network resolveBtcIndexerUrl picks so the tip matches. Then a direct
@@ -50,8 +63,7 @@ class ChainTips {
         let network;
         try { network = await this.resolveBtcNetwork(); }
         catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve BTC latest block:', err.message)); return null; }
-        // Held past the block below: a rejected tip is still the only block_time the hub
-        // has, and the direct path is dated against it.
+        // Keep a rejected tip so the direct path can date its block_time.
         let pushedTip = null;
         try {
             pushedTip = await this.db.getChainTip('BTC', network);
@@ -102,10 +114,8 @@ class ChainTips {
         }
     }
 
-    // The pushed BTC tip a consensus round may anchor on: the stored row only when
-    // btcPushedTipFresh accepts it, otherwise null so the caller takes the gated direct
-    // path through resolveBtcLatestBlock. A frozen row is never returned, which keeps the
-    // round reference block on the tip every peer re-derives when it checks a PROPOSE.
+    // Return a pushed BTC tip only when its stored block time passes the freshness gate;
+    // null makes the oracle round take resolveBtcLatestBlock's gated direct path.
     async resolveFreshPushedBtcTip(){
         let network;
         try { network = await this.resolveBtcNetwork(); }
