@@ -312,14 +312,14 @@ function registerCheckpointTest(state){
 }
 function registerPriceTest(state){
     it('round trips signature, batch, skipped, and tombstoned price rows', async function(){
-        const inputs = signedPriceInputs(state.oracleKeys);
-        const stamps = [];
+        const inputs = signedPriceInputs(state.oracleKeys), stamps = [];
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
-        const result = await buildArchive(publisher, inputs);
-        const archive = JSON.parse(result.json);
+        const result = await buildArchive(publisher, inputs), archive = JSON.parse(result.json);
         expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
         await finalize(publisher, inputs);
-        expectRows(archive.price_snapshots, publisher.sortedPriceSnapshots(inputs.prices), ['round_number', 'coin_pair', 'status']);
+        expect(archive.price_snapshots.map(row => [row.round_number, row.coin_pair, row.status]))
+            .to.deep.equal([[11, 'BTC/USD', 'finalized'], [11, 'LTC/USD', 'finalized'],
+                [12, 'BTC/USD', 'finalized'], [13, 'DOGE/USD', 'skipped']]);
         expect(stamps.filter(stamp => stamp[0] === 'price').map(stamp => stamp.slice(-2))).to.deep.equal([
             [11, 'LTC/USD'], [11, 'BTC/USD'], [12, 'BTC/USD']
         ]);
