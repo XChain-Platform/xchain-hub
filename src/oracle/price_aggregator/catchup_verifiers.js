@@ -11,6 +11,9 @@ const { verifyBatchQuorum } = require('./batch_verification.js');
 const { validateOraclePriceIdentity, validateOraclePriceValue,
         validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
+const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
+const { isProducerRoundRow, groupKey } = require('../../peers/hub_db/price_round_groups.js');
+const admissionHeight = require('../../lib/admission_height.js');
 
 const SOURCE_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 
@@ -31,7 +34,8 @@ function parseProof(raw) {
 
 function aggregatorFrom(context) {
     if (context && context.priceAggregator) return context.priceAggregator;
-    return context && context.hub && context.hub.priceAggregator;
+    const hub = catchupHub(context);
+    return hub && hub.priceAggregator;
 }
 
 function admissionColumns(aggregator, admitBlocks) {
@@ -131,11 +135,69 @@ async function verifyBatchRow(row, context, proof) {
     return { ok: true };
 }
 
+const ROUND_AGREEMENT_KEYS = ['round_number', 'reference_block', 'block_timestamp',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof'];
+
+function groupAgrees(first, group) {
+    const pairs = new Set();
+    for (const member of group) {
+        if (!isProducerRoundRow(member) || pairs.has(member.coin_pair)) return false;
+        pairs.add(member.coin_pair);
+        if (!ROUND_AGREEMENT_KEYS.every(key => sameValue(first[key], member[key]))) return false;
+    }
+    return true;
+}
+
+// Routes the round's price snapshot read through the walk reader so a round costs at most one indexer read.
+function readerBoundAggregator(aggregator, context) {
+    const read = context && context.readCapabilitySnapshot;
+    if (typeof read !== 'function') return aggregator;
+    const capabilitySnapshot = {
+        getSnapshot: (capability, block) => read('getSnapshot', capability, block),
+        getWeightSnapshot: (capability, block) => read('getWeightSnapshot', capability, block)
+    };
+    const hub = Object.create(aggregator.hub, { capabilitySnapshot: { value: capabilitySnapshot } });
+    return Object.create(aggregator, { hub: { value: hub } });
+}
+
+function producerRoundData(group, proof) {
+    const first = group[0];
+    return {
+        round: Number(first.round_number),
+        timestamp: first.block_timestamp,
+        block_index: first.reference_block,
+        btc_block_height: first.reference_block,
+        pairs: group.map(member => ({ pair: member.coin_pair, price: member.price })),
+        admit_blocks: admissionHeight.rowAdmitBlocks(first),
+        sigs: proof
+    };
+}
+
+async function verifyProducerRound(row, context, proof) {
+    const aggregator = aggregatorFrom(context);
+    if (!aggregator) return refuse('complete signed round unavailable');
+    const supplied = context && context.priceRoundRows;
+    const group = Array.isArray(supplied) && supplied.length > 0 ? supplied : [row];
+    if (!group.includes(row)) {
+        return refuse('row is not part of its price round group');
+    }
+    if (!groupAgrees(group[0], group) || groupKey(group[0]) !== groupKey(row)) {
+        return refuse('price round rows disagree on the signed round');
+    }
+    let roundData;
+    try { roundData = producerRoundData(group, proof); }
+    catch (e) { return refuse('admission map unusable: ' + e.message); }
+    const bound = readerBoundAggregator(aggregator, context);
+    const verified = await roundIngest.verifyValidatedRound.call(bound, 'BTC', roundData, false);
+    return verified.accepted ? { ok: true } : refuse(verified.reason);
+}
+
 async function verifyPriceSnapshot(row, context) {
     if (!row || typeof row !== 'object' || row.status !== 'finalized') {
         return refuse('price snapshot is not finalized');
     }
     const proof = parseProof(row.consensus_proof);
+    if (Array.isArray(proof) && isProducerRoundRow(row)) return verifyProducerRound(row, context, proof);
     if (Array.isArray(proof)) return verifyRoundRow(row, context, proof);
     if (proof && proof.batch && Array.isArray(proof.sigs)) return verifyBatchRow(row, context, proof);
     return refuse('invalid consensus_proof');

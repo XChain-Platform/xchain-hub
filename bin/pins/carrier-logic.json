@@ -3,7 +3,7 @@
   "entries": {
     "anchor_reward_activation": {
       "path": "src/consensus/gates/anchor_reward_gate.js",
-      "hash": "86edade703c3228672bf43770ec9c2e79d0f933654a0ce6d851b04e970bb7462",
+      "hash": "1085d2c7e702b6f924bee7d9dd859ebf8638a56815476735e72a72032660d6cc",
       "twins": [
         "xchain-indexer"
       ]
@@ -53,7 +53,7 @@
       ]
     },
     "oracle/consensus/round_time_gate": {
-      "path": "src/oracle/consensus/round_time/round_time_gate.js",
+      "path": "src/oracle/consensus/round_time_gate.js",
       "hash": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
       "twins": []
     },
@@ -744,15 +744,11 @@
       "date": "2026-10-06"
     },
     {
-      "id": "oracle/consensus/round_time_gate",
-      "from": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
-      "to": "eec02ed053a08282fc690ff3e24b5d60bf6f2203caa5ceeb68939613b936bafe",
-      "path": {
-        "from": "src/oracle/consensus/round_time_gate.js",
-        "to": "src/oracle/consensus/round_time/round_time_gate.js"
-      },
-      "date": "2026-10-06",
-      "reason": "relocated into round_time subdirectory, logic unchanged"
+      "id": "anchor_reward_activation",
+      "from": "86edade703c3228672bf43770ec9c2e79d0f933654a0ce6d851b04e970bb7462",
+      "to": "1085d2c7e702b6f924bee7d9dd859ebf8638a56815476735e72a72032660d6cc",
+      "reason": "null threshold guard on the anchor and archive reward gates",
+      "date": "2026-10-06"
     }
   ]
 }
