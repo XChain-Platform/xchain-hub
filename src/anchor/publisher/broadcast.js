@@ -21,7 +21,7 @@
 
 'use strict';
 
-const { isAmbiguousSendError } = require('../../lib/idempotent_broadcast.js');
+const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('../../lib/utxo_balance.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

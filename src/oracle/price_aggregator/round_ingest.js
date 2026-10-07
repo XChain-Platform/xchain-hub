@@ -214,8 +214,8 @@ function priceSnapshotRows(round, roundData, sourceChain, stamps, admitCols) {
 //
 // ONE multi-row INSERT lands the whole round atomically; a getfeequote /
 // getpricesnapshots reader (or the id-ordered mirror bootstrap) can never observe
-// a torn round (some pairs from this round, others from the prior round). The hub
-// Database has no transaction API, so a single statement is the atomicity tool.
+// a torn round (some pairs from this round, others from the prior round). A single
+// statement is the atomicity tool, needing no db.withTransaction.
 function pushedRoundInsert(round, roundData, sourceChain, stamps, admitCols) {
     return this.db.setPushedPriceSnapshotRound(round, roundData.pairs, stamps.referenceBlock, sourceChain || null,
         stamps.timestamp, stamps.validatorCount, stamps.proofJson, stamps.sourceActionIndex, stamps.pushGeneration,

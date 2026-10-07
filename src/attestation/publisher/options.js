@@ -25,7 +25,7 @@
 
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard    = require('../../lib/spend_guard.js');
-const { AtMostOnce } = require('../../lib/idempotent_broadcast.js');
+const { AtMostOnce } = require('../../lib/guards/idempotent_broadcast.js');
 const hubConfig = require('../../config');
 const { APPROX_BTC_BLOCK_MS, DEFAULT_FAILOVER_WINDOW_BLOCKS, DEFAULT_FAILOVER_POLL_MS,
         DEFAULT_LEADER_RETRY_MS, DEFAULT_PUBLISHED_RETENTION_MS } = require('./constants.js');

@@ -228,8 +228,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // One statement so the round lands atomically: a per-pair loop let a getfeequote /
     // getpricesnapshots reader observe a torn round (some pairs from round N, others from
     // N-1), and the id-ordered mirror bootstrap could persist that torn read to a replica.
-    // The hub Database exposes no transaction API, so a single statement is the atomicity
-    // primitive. `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
+    // A single statement is the atomicity primitive here, needing no withTransaction.
+    // `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
     // already resolved to its per-chain columns. The upsert upgrades a 'skipped' placeholder
     // row to 'finalized'.
     async setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols) {

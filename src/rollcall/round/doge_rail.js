@@ -25,8 +25,8 @@
 
 'use strict';
 
-const { forwardableUtxos }       = require('../../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../../lib/two_phase_guard.js');
+const { forwardableUtxos }       = require('../../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../../lib/guards/two_phase_guard.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
