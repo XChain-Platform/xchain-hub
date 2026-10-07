@@ -18,23 +18,45 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const ROOT  = path.join(__dirname, '..', '..', '..');
-const FILES = [
-    'src/coins/BTC.js',
-    'src/coins/LTC.js',
-    'src/coins/DOGE.js',
-    'test/unit/coins/coins_consensus_subset.test.js',
-];
+const ROOT = path.join(__dirname, '..', '..', '..');
+const EXPECTED_COMMENTS = new Map([
+    ['src/coins/BTC.js', [
+        /declared mode/i,
+        /indexer classifies by coin/i,
+        /registry test pins the two together/i,
+    ]],
+    ['src/coins/LTC.js', [
+        /native-only/i,
+        /declared mode/i,
+        /classified by coin in the indexer/i,
+        /pinned by a registry test/i,
+    ]],
+    ['src/coins/DOGE.js', [
+        /native-only/i,
+        /declared mode/i,
+        /classified by coin in the indexer/i,
+        /pinned by a registry test/i,
+    ]],
+    ['test/unit/coins/coins_consensus_subset.test.js', [
+        /declared mode/i,
+        /not a runtime decider/i,
+        /outside the subset/i,
+        /divergent bundle cannot verify clean/i,
+    ]],
+]);
 
 describe('FEE_PAYMENT_MODE comments', () => {
-    for(const rel of FILES){
-        it(`${rel} does not call FEE_PAYMENT_MODE informational or unread`, () => {
-            const lines = fs.readFileSync(path.join(ROOT, rel), 'utf8')
-                .split('\n').filter(l => l.includes("'FEE_PAYMENT_MODE'") || /FEE_PAYMENT_MODE:/.test(l));
-            assert.ok(lines.length > 0, `no FEE_PAYMENT_MODE line in ${rel}`);
-            for(const l of lines){
-                assert.ok(!/informational|not read at runtime/i.test(l), `stale comment: ${l.trim()}`);
-            }
+    for(const [rel, guarantees] of EXPECTED_COMMENTS){
+        it(`${rel} documents the field's active classification`, () => {
+            const line = fs.readFileSync(path.join(ROOT, rel), 'utf8')
+                .split('\n').find(l => l.includes("'FEE_PAYMENT_MODE'") || /FEE_PAYMENT_MODE:/.test(l));
+            assert.ok(line, `no FEE_PAYMENT_MODE line in ${rel}`);
+
+            const comment = line.split('//').slice(1).join('//').trim();
+            assert.ok(comment, `no FEE_PAYMENT_MODE comment in ${rel}`);
+            assert.ok(!/informational|not read at runtime/i.test(comment), `stale comment: ${comment}`);
+            for(const guarantee of guarantees)
+                assert.match(comment, guarantee, `incomplete FEE_PAYMENT_MODE comment in ${rel}`);
         });
     }
 });
