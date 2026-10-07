@@ -102,102 +102,100 @@ function page(engine, chain, transfer, latest){
         : { latest_block_index: 0, network: 'regtest', transfers: [] });
 }
 
-describe('CrossChainBridgeEngine', function(){
-    afterEach(function(){ sinon.restore(); });
+afterEach(function(){ sinon.restore(); });
 
-    describe('snapshot_block on a covering checkpoint', function(){
-        it('the flag-day row is armed on regtest and unarmed on mainnet', function(){
-            expect(registry.activeAt(GATE, 'regtest', 'BTC', 1, null)).to.equal(true);
-            expect(registry.activeAt(GATE, 'mainnet', 'BTC', 999999999, null)).to.equal(false);
-        });
+describe('CrossChainBridgeEngine: snapshot_block proof-ready activation', function(){
+    it('the flag-day row is armed on regtest and unarmed on mainnet', function(){
+        expect(registry.activeAt(GATE, 'regtest', 'BTC', 1, null)).to.equal(true);
+        expect(registry.activeAt(GATE, 'mainnet', 'BTC', 999999999, null)).to.equal(false);
+    });
+});
 
-        describe('the proposer', function(){
-            it('stamps the first checkpoint at or above the leg, not the tip and not an older checkpoint', async function(){
-                const engine = makeEngine([LEG - 6, LEG + 3, LEG + 9], LEG + 8);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
-                expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
-                expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 3);
-            });
+describe('CrossChainBridgeEngine: snapshot_block proposer', function(){
+    it('stamps the first checkpoint at or above the leg, not the tip and not an older checkpoint', async function(){
+        const engine = makeEngine([LEG - 6, LEG + 3, LEG + 9], LEG + 8);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
+        expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
+        expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 3);
+    });
 
-            it('stamps a checkpoint at exactly the leg block', async function(){
-                const engine = makeEngine([LEG - 6, LEG], LEG + 8);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
-                expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG);
-            });
+    it('stamps a checkpoint at exactly the leg block', async function(){
+        const engine = makeEngine([LEG - 6, LEG], LEG + 8);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
+        expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG);
+    });
 
-            it('holds the leg and proposes nothing while no checkpoint sits at or above it', async function(){
-                const engine = makeEngine([LEG - 6], LEG + 2);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 2, LEG + 2, btcLock());
-                expect(engine.transferConsensus.propose.called).to.equal(false);
-                engine.hub.db.state.checkpoints.push(LEG + 3);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 3, LEG + 3, btcLock());
-                expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 3);
-            });
+    it('holds the leg and proposes nothing while no checkpoint sits at or above it', async function(){
+        const engine = makeEngine([LEG - 6], LEG + 2);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 2, LEG + 2, btcLock());
+        expect(engine.transferConsensus.propose.called).to.equal(false);
+        engine.hub.db.state.checkpoints.push(LEG + 3);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 3, LEG + 3, btcLock());
+        expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 3);
+    });
 
-            it('resolves the validator set at the stamped block', async function(){
-                const engine = makeEngine([LEG + 3], LEG + 8);
-                const resolve = sinon.spy(engine, 'resolveCapabilityValidators');
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
-                expect(resolve.firstCall.args.slice(0, 2)).to.deep.equal(['cross_chain', LEG + 3]);
-            });
+    it('resolves the validator set at the stamped block', async function(){
+        const engine = makeEngine([LEG + 3], LEG + 8);
+        const resolve = sinon.spy(engine, 'resolveCapabilityValidators');
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
+        expect(resolve.firstCall.args.slice(0, 2)).to.deep.equal(['cross_chain', LEG + 3]);
+    });
 
-            it('persists the capability snapshot at the stamped block on finalize', async function(){
-                const engine = makeEngine([LEG + 3], LEG + 8);
-                engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
-                const row = engine.transferConsensus.propose.firstCall.args[1].row;
-                expect(await engine.persistSnapshotOrDefer(row, row.transfer_id, engine.transferConsensus)).to.equal(true);
-                expect(engine.persistCapabilitySnapshot.firstCall.args.slice(0, 2)).to.deep.equal(['cross_chain', LEG + 3]);
-            });
+    it('persists the capability snapshot at the stamped block on finalize', async function(){
+        const engine = makeEngine([LEG + 3], LEG + 8);
+        engine.persistCapabilitySnapshot = sinon.stub().resolves(1);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
+        const row = engine.transferConsensus.propose.firstCall.args[1].row;
+        expect(await engine.persistSnapshotOrDefer(row, row.transfer_id, engine.transferConsensus)).to.equal(true);
+        expect(engine.persistCapabilitySnapshot.firstCall.args.slice(0, 2)).to.deep.equal(['cross_chain', LEG + 3]);
+    });
 
-            it('holds a general-token leg when the token gate is not active at the stamped block', async function(){
-                const engine = makeEngine([LEG + 3], LEG + 8);
-                engine.activation.token = (block) => block >= LEG + 5;
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock({ tick: 'FUFU' }));
-                expect(engine.transferConsensus.propose.called).to.equal(false);
-            });
+    it('holds a general-token leg when the token gate is not active at the stamped block', async function(){
+        const engine = makeEngine([LEG + 3], LEG + 8);
+        engine.activation.token = (block) => block >= LEG + 5;
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock({ tick: 'FUFU' }));
+        expect(engine.transferConsensus.propose.called).to.equal(false);
+    });
 
-            it('keeps the tip stamp while the flag day is not reached', async function(){
-                sinon.stub(registry, 'activeAt').callsFake((key, ...rest) =>
-                    key === GATE ? false : registry.activeAt.wrappedMethod.call(registry, key, ...rest));
-                const engine = makeEngine([LEG + 3], LEG + 8);
-                await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
-                expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 8);
-            });
+    it('keeps the tip stamp while the flag day is not reached', async function(){
+        sinon.stub(registry, 'activeAt').callsFake((key, ...rest) =>
+            key === GATE ? false : registry.activeAt.wrappedMethod.call(registry, key, ...rest));
+        const engine = makeEngine([LEG + 3], LEG + 8);
+        await engine.maybeFinalizeTransfer('BTC', 'regtest', LEG + 8, LEG + 8, btcLock());
+        expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 8);
+    });
 
-            it('leaves a DOGE-sourced leg on the tip stamp', async function(){
-                const engine = makeEngine([], LEG + 8);
-                await engine.maybeFinalizeTransfer('DOGE', 'regtest', 90000, LEG + 8, dogeBurn());
-                expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 8);
-            });
-        });
+    it('leaves a DOGE-sourced leg on the tip stamp', async function(){
+        const engine = makeEngine([], LEG + 8);
+        await engine.maybeFinalizeTransfer('DOGE', 'regtest', 90000, LEG + 8, dogeBurn());
+        expect(engine.transferConsensus.propose.firstCall.args[1].row.snapshot_block).to.equal(LEG + 8);
+    });
+});
 
-        describe('the follower', function(){
-            it('refuses a stamp that no finalized BTC checkpoint of its own backs', async function(){
-                const engine = makeEngine([LEG - 6], LEG + 8);
-                page(engine, 'BTC', btcLock(), LEG + 8);
-                expect(await engine.validateProposedMatch(proposedRow(engine))).to.equal(false);
-            });
+describe('CrossChainBridgeEngine: snapshot_block follower', function(){
+    it('refuses a stamp that no finalized BTC checkpoint of its own backs', async function(){
+        const engine = makeEngine([LEG - 6], LEG + 8);
+        page(engine, 'BTC', btcLock(), LEG + 8);
+        expect(await engine.validateProposedMatch(proposedRow(engine))).to.equal(false);
+    });
 
-            it('co-signs a stamp that sits on its own checkpoint at or above the leg', async function(){
-                const engine = makeEngine([LEG - 6, LEG + 3], LEG + 8);
-                page(engine, 'BTC', btcLock(), LEG + 8);
-                expect(await engine.validateProposedMatch(proposedRow(engine))).to.equal(true);
-            });
+    it('co-signs a stamp that sits on its own checkpoint at or above the leg', async function(){
+        const engine = makeEngine([LEG - 6, LEG + 3], LEG + 8);
+        page(engine, 'BTC', btcLock(), LEG + 8);
+        expect(await engine.validateProposedMatch(proposedRow(engine))).to.equal(true);
+    });
 
-            it('still refuses a checkpointed stamp below the leg', async function(){
-                const engine = makeEngine([LEG - 6], LEG + 8);
-                page(engine, 'BTC', btcLock(), LEG + 8);
-                expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: LEG - 6 }))).to.equal(false);
-            });
+    it('still refuses a checkpointed stamp below the leg', async function(){
+        const engine = makeEngine([LEG - 6], LEG + 8);
+        page(engine, 'BTC', btcLock(), LEG + 8);
+        expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: LEG - 6 }))).to.equal(false);
+    });
 
-            it('co-signs a DOGE-sourced row with no BTC checkpoint at its stamp', async function(){
-                const engine = makeEngine([], LEG + 8);
-                page(engine, 'DOGE', dogeBurn(), 90000);
-                expect(await engine.validateProposedMatch(proposedRow(engine, {
-                    src_chain: 'DOGE', src_action_index: 9, dest_chain: 'BTC', dest_address: 'mDestAddress', snapshot_block: LEG + 8
-                }))).to.equal(true);
-            });
-        });
+    it('co-signs a DOGE-sourced row with no BTC checkpoint at its stamp', async function(){
+        const engine = makeEngine([], LEG + 8);
+        page(engine, 'DOGE', dogeBurn(), 90000);
+        expect(await engine.validateProposedMatch(proposedRow(engine, {
+            src_chain: 'DOGE', src_action_index: 9, dest_chain: 'BTC', dest_address: 'mDestAddress', snapshot_block: LEG + 8
+        }))).to.equal(true);
     });
 });
