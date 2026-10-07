@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate } = require('./shared_rows.js');
+const { addGate, UNARMED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -48,3 +48,10 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
+
+// Effective allow/block-list enforcement, inert until coordinated activation.
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
+    mainnet: UNARMED,
+    testnet: UNARMED,
+    regtest: UNARMED,
+});
