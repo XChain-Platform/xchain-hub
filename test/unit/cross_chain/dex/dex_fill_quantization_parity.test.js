@@ -197,6 +197,12 @@ function registerRoundingTests() {
             assert.strictEqual(String(bc.bcround('1.5', 0)), '2');
             assert.strictEqual(String(bc.bcround('2.5', 0)), '3', 'banker\'s rounding would give 2');
         });
+
+        it('serializes a quantized sub-1e-7 amount without exponent notation', function () {
+            const rounded = bc.bcround('0.00000001', 8);
+            assert.match(String(rounded), /e-8$/, 'control: BigNumber String() uses exponent notation');
+            assert.strictEqual(bc.bcstr(rounded), '0.00000001');
+        });
     });
 }
 

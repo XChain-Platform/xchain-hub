@@ -97,10 +97,11 @@ function bcformat(num, decimals){
     return mathjs.format(bcnum(num), {notation: 'fixed', precision: d});
 }
 
-// Minimal-form string, byte-identical to the indexer's utility.js bcstr
-// (bcnum(num).toFixed(), no zero padding): bcstr('1.5') -> '1.5'. Use this
-// wherever output must byte-match indexer-produced amount strings (the SMT
-// canonicalAmount path); use bcformat when a fixed width is required.
+// Minimal-form plain-decimal string, byte-identical to the indexer's utility.js
+// bcstr (bcnum(num).toFixed(), no zero padding): bcstr('1.5') -> '1.5' and
+// bcstr('1e-8') -> '0.00000001'. Unlike String(BigNumber), it never switches
+// small magnitudes to exponent notation. Use this wherever an amount crosses a
+// storage or signing boundary; use bcformat when a fixed width is required.
 function bcstr(num){
     return bcnum(num).toFixed();
 }
