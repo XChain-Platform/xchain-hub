@@ -42,7 +42,7 @@
  * say nothing about what to fix; the map turns "the digest changed" into "these
  * gates changed", which is the sentence an operator can act on, and it is what
  * makes an environment-shifted digest diagnosable in one read (see ONE OF THE
- * FIVE below). The SIGNED wire field is knownGateKeys().join(','), built from
+ * SIX below). The SIGNED wire field is knownGateKeys().join(','), built from
  * the key list alone, so it reads the same whether or not a carrier resolves.
  * That is why consensus_rules_digest takes each gate from the activation
  * registry, or a function-valued one from src/consensus/gates/<stem>_gate.js,
@@ -63,7 +63,7 @@
  * is the config oracle, so its identity is entirely code-derived and this
  * script opens no socket, reads no .env and needs no database.
  *
- * ONE OF THE FIVE IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
+ * ONE OF THE SIX IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
  * hashes gate VALUES, and a regtest venue arms some gates from its own
  * environment rather than from a committed height, so the same build reports one
  * digest in a bare checkout and another inside a configured container. A reading
@@ -176,7 +176,7 @@ function coinConsensusPins() {
 }
 
 /**
- * The five values, all of them derived from the source tree alone.
+ * The six values, all of them derived from the source tree alone.
  * @returns {object}
  */
 function codeIdentity() {
