@@ -36,6 +36,10 @@ const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.
 
 describe('anchor_reward_activation parity (hub copy)', function () {
 
+    it('does not describe the retired reward-push RPC as an active path', function () {
+        expect(fs.readFileSync(LOCAL_PATH, 'utf8')).to.not.include('pushvalidatorrewards');
+    });
+
     // A raw byte twin since W5: the header names "the same path in the hub" instead of
     // the other repo's file, so no line is exempt and a drift of any size is a drift.
     it('is byte-identical to the indexer twin', function () {
