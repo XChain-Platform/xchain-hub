@@ -49,8 +49,4 @@ const { addGate, UNARMED } = require('./shared_rows.js');
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
 
-// cross_chain/bridge/proof_ready_snapshot
-// Stamp BTC transfers with a finalized checkpoint that covers their source leg.
-// The key uses the leg's BTC height. Regtest is armed at genesis; live networks
-// stay UNARMED until their release heights are chosen.
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
