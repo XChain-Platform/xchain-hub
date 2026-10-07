@@ -23,6 +23,7 @@
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { serialPass } = require('./drain_serial.js');
+const { judgeAnchors } = require('../anchor_proof_binding.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -137,6 +138,60 @@ module.exports = {
         return serialPass(this, '_rewardAttestDrain', () => this.runRewardAttestDrain());
     },
 
+    // Does the mined txid bind to this entry's (network, snapshot_block, publisher)? The
+    // checkpoint byte-match above proves the txid carries OUR checkpoint, not that it is
+    // the anchor the reward tuple names: a relayed tuple can pair a real txid with another
+    // publisher or round. The rule is the indexer's judgeAnchors, read from the byte twin
+    // of anchor_proof_client/binding.js and never re-derived here. An anchor_bundle entry
+    // whose round_reference differs from its snapshot_block is counted, since the bundle
+    // round IS its snapshot block and judgeAnchors can never bind such a tuple.
+    // With no DOGE indexer wired, or with a response that omits the anchor rows, there is
+    // no binding evidence. Feed that empty set through judgeAnchors so it remains unknown
+    // rather than inheriting verifyAnchorOnChain's checkpoint-only verdict.
+    // Returns 'verified' | 'rejected' | 'unknown'.
+    async drainBindingVerdict(e){
+        if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
+            this._rewardBundleRoundMismatch = (this._rewardBundleRoundMismatch || 0) + 1;
+            logger.warn('StateAnchorPublisher: anchor_bundle reward entry with round_reference ' + e.roundReference +
+                         ' <> snapshot_block ' + e.snapshotBlock + ' (' + this._rewardBundleRoundMismatch + ' seen)');
+        }
+        let anchors = [];
+        let after = null;
+        for(let page = 0; page < 25; page++){
+            let params = { txid: String(e.txid).toLowerCase() };
+            if(after !== null) params.after_action_index = after;
+            let r;
+            try {
+                r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
+            } catch(err){
+                if(err && /^no indexer url for /.test(err.message)) return judgeAnchors([], {
+                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                    minConfirmations: this.dogeConfirmations
+                });
+                throw err;
+            }
+            if(r && r.exists && r.anchors === undefined) return judgeAnchors([], {
+                rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                minConfirmations: this.dogeConfirmations
+            });
+            if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
+            anchors = anchors.concat(r.anchors);
+            if(r.truncated !== true){
+                return judgeAnchors(anchors, {
+                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+                    minConfirmations: this.dogeConfirmations
+                });
+            }
+            let next = Number(r.next_after_action_index);
+            if(!Number.isInteger(next) || (after !== null && next <= after)) return 'unknown';
+            after = next;
+        }
+        return 'unknown';
+    },
+
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
     async runRewardAttestDrain(){
         if(this._deferredRewardAttest.size === 0) return;
@@ -155,6 +210,14 @@ module.exports = {
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
                 let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
                 if(v === 'verified'){
+                    let bound = await this.drainBindingVerdict(e);
+                    if(bound === 'rejected'){
+                        this._deferredRewardAttest.delete(key);
+                        logger.warn('StateAnchorPublisher: reward attestation ' + key + ' txid does not bind to ' +
+                                     '(network, snapshot_block, publisher); dropped, no reward');
+                        continue;
+                    }
+                    if(bound !== 'verified') continue;   // undecided: retained until the TTL
                     // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
                     // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's
                     // getanchorconfirmations check) binds the reward to. `e` also carries the
