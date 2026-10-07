@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate } = require('./shared_rows.js');
+const { addGate, UNARMED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -48,3 +48,13 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
+
+// cross_chain/bridge/proof_ready_snapshot
+// A BTC-sourced bridge transfer is stamped with the block of the first finalized BTC
+// checkpoint at or above its own source leg, so the destination indexer finds that
+// checkpoint on its first look instead of waiting for the next cadence boundary. Keyed on
+// the leg's OWN block (a BTC height). Regtest is armed at genesis; testnet and mainnet stay
+// UNARMED until the release cut writes heights that take effect once the release has shipped
+// and the fleet is rolled. A mixed fleet is safe: an old follower already accepts the lowered
+// stamp (inside SNAPSHOT_BLOCK_TOLERANCE and at or above the leg).
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });

@@ -34,10 +34,16 @@ const Database               = require('../../../../../src/db');
 // The recording driver the sibling bridge suites use, cut to the reads the poll, the
 // proposer and the follower make, so the real bridge DB methods run as written.
 function memDb(){
-    const state = { persistedIndexes: [], exists: false, sourceTransferId: null };
+    const state = { persistedIndexes: [], exists: false, sourceTransferId: null, checkpoints: [] };
     const db = Object.create(Database.prototype);
     db.state = state;
     db.doQuery = async function(sql, params){
+        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index >=')){
+            const held = state.checkpoints.filter(h => h >= params[2]).sort((a, b) => a - b);
+            return held.length ? [{ block_index: held[0] }] : [];
+        }
+        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?'))
+            return state.checkpoints.includes(params[2]) ? [{ block_index: params[2] }] : [];
         if(sql.startsWith('SELECT 1 FROM bridge_transfers')) return state.exists ? [{ 1: 1 }] : [];
         if(sql.startsWith('SELECT src_action_index FROM bridge_transfers'))
             return state.persistedIndexes.filter(i => params.slice(2).includes(i)).map(i => ({ src_action_index: i }));
@@ -132,12 +138,13 @@ function registerProposer(){
             expect(engine.transferConsensus.propose.called,
                 'a record stamped at 4911 is proven against the 4911 checkpoint, before the 4912 lock').to.equal(false);
 
+            engine.hub.db.state.checkpoints.push(4912);
             tip.block = 4912;
             await engine.poll();
             expect(engine.transferConsensus.propose.calledOnce).to.equal(true);
             const row = engine.transferConsensus.propose.firstCall.args[1].row;
             expect(row.snapshot_block).to.equal(4912);
-            expect(checkpointFor(row.snapshot_block, [4911, 4913])).to.be.at.least(4912);
+            expect(checkpointFor(row.snapshot_block, [4911, 4912, 4913])).to.equal(4912);
         });
 
         it('proposes a DOGE burn whose DOGE block height is far above the BTC snapshot_block', async function(){
@@ -159,6 +166,7 @@ function registerFollower(){
 
         it('co-signs the same lock anchored at its own block, the row an old leader also produces once its tip catches up', async function(){
             const engine = makeEngine({ block: 4912 });
+            engine.hub.db.state.checkpoints.push(4912, 4913);
             pages(engine, { BTC: { latest_block_index: 4913, network: 'regtest', transfers: [btcLock()] } });
             expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4912 }))).to.equal(true);
             expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4913 }))).to.equal(true);
