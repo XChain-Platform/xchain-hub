@@ -12,7 +12,7 @@
 
 const { expect } = require('chai');
 const snapWrite = require('../../../src/lib/capability_snapshot_write.js');
-const { createCapabilitySnapshots } = require('../../../src/db/capability_snapshots.js');
+const { createCapabilitySnapshots } = require('../../../src/db/snapshots/capability_snapshots.js');
 
 const BLOCK = 953200;
 const CAPABILITY = 'oracle_publish';
