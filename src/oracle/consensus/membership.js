@@ -156,8 +156,12 @@ module.exports = {
         let N = this.validatorSet.length;
         if (N <= 0) {
             // Fall back to peer count
-            let own = this.peerManager.validatorAddr;
-            let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open' && p.addr !== own);
+            const own = this.peerManager.validatorAddr;
+            const source = typeof this.peerManager.getQuorumPeerStatus === 'function'
+                ? this.peerManager.getQuorumPeerStatus()
+                : this.peerManager.getPeerStatus();
+            const peers = source.filter(p => p.state === 'open' && p.addr !== own &&
+                p.validatorAddr !== own && p.selfConnection !== true && p.identityVerified !== false);
             N = peers.length + 1;
         }
         // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,

@@ -227,15 +227,15 @@ class PeerInbound {
         }
     }
 
-    // An outbound dial that reached this hub's own listener: forget the peer
-    // so it never counts toward quorum, and stop redialing it.
     dropSelfPeer(ws, addr) {
-        let peer = this.peers.get(addr);
+        const peer = this.peers.get(addr);
         if (!peer || peer.ws !== ws) return;
+        peer.selfConnection = true;
+        peer.state = 'self';
         if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
         this.peers.delete(addr);
-        logger.warn('P2P: outbound dial to ' + addr + ' reached this hub itself; dropping the self-connection');
-        ws.close(1000, 'self-connection');
+        logger.warn('P2P: outbound dial to ' + addr + ' reached this hub itself; dropping connection');
+        ws.close(1000, 'local listener');
     }
 
     registerInboundPeer(ws, addr) {

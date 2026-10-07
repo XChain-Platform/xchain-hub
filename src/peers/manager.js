@@ -302,6 +302,22 @@ class PeerManager extends EventEmitter {
         this.identity = identity;
     }
 
+    getQuorumPeerStatus() {
+        const status = [];
+        for (const [addr, peer] of this.peers) {
+            if (peer.state !== 'open') continue;
+            if (!peer.validatorAddr || peer.validatorAddr === this.validatorAddr) continue;
+            status.push({
+                addr:          addr,
+                validatorAddr: peer.validatorAddr,
+                state:         peer.state,
+                lastSeen:      peer.lastSeen,
+                inbound:       peer.inbound || false
+            });
+        }
+        return status;
+    }
+
     // Serve the hub's READ-ONLY mirror feed on this same public P2P port, so an
     // indexer reads its capability/price/checkpoint mirror from the validators
     // themselves. A validator exposes ONE public port per network (10001 mainnet,
