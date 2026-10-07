@@ -2,7 +2,7 @@
 
 const { expect } = require('chai');
 const { observedListIds, firstListOutside } =
-    require('../../../../../../src/anchor/publisher/archive/list_observed.js');
+    require('../../../../../../src/anchor/publisher/archive/list/list_observed.js');
 
 describe('observed archive lists', () => {
     it('returns an empty set when list snapshots are absent or not an array', () => {

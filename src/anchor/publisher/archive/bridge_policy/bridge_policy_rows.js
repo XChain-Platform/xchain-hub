@@ -21,8 +21,8 @@
 
 'use strict';
 
-const CrossChainBridgeEngine = require('../../../cross_chain/bridge_engine.js');
-const { BRIDGE_KEYS, POLICY_KEYS } = require('../constants.js');
+const CrossChainBridgeEngine = require('../../../../cross_chain/bridge_engine.js');
+const { BRIDGE_KEYS, POLICY_KEYS } = require('../../constants.js');
 
 const INTEGER_KEYS  = new Set(['id', 'snapshot_block', 'src_action_index', 'decimals', 'effective_time',
                                'policy_seq', 'origin_block']);
