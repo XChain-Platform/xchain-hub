@@ -4,7 +4,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { expect } = require('chai');
@@ -321,9 +320,10 @@ function registerPriceTest(state){
         const archive = JSON.parse(result.json);
         expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
         await finalize(publisher, inputs);
-        expect(stamps.map(stamp => stamp[0])).to.deep.equal([
-            'price', 'price', 'price', 'tombstone'
+        expect(stamps.filter(stamp => stamp[0] === 'price').map(stamp => stamp.slice(-2))).to.deep.equal([
+            [11, 'LTC/USD'], [11, 'BTC/USD'], [12, 'BTC/USD']
         ]);
+        expect(stamps.filter(stamp => stamp[0] === 'tombstone')).to.have.length(1);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
         expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS);
         expectRows(recovered.db.tombstones, archive.price_tombstones, PRICE_TOMBSTONE_KEYS);
