@@ -23,7 +23,7 @@
 'use strict';
 
 const { ORACLE_PREPARE } = require('./constants.js');
-const { nominalRoundSeconds } = require('./round_time.js');
+const { nominalRoundSeconds } = require('./round_time/round_time.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 

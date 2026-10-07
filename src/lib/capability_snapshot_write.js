@@ -132,7 +132,7 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     let chainId = (btcChainId === undefined) ? await resolveBtcChainId(db)
                                              : (btcChainId || null);
 
-    // One statement, in db/capability_snapshots.js: the single-statement shape is
+    // One statement, in db/snapshots/capability_snapshots.js: the single-statement shape is
     // what makes the mirror all-or-nothing, and the reason it must not be chunked
     // is recorded beside the statement itself.
     await db.createCapabilitySnapshots(rows, chainId);

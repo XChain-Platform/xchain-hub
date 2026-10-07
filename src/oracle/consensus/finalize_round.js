@@ -25,7 +25,7 @@
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const ocr               = require('../../oracle_clamp_reference_activation.js');
 const { takeSeat }      = require('./seats.js');
-const { nominalRoundSeconds } = require('./round_time.js');
+const { nominalRoundSeconds } = require('./round_time/round_time.js');
 const { roundTimeGateActive } = require('./round_time_gate.js');
 const { singleSourcePairs } = require('./source_diversity.js');
 const { getLogger } = require('../../observability');
