@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate } = require('./shared_rows.js');
+const { addGate, UNPINNED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -48,3 +48,8 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
+
+// Ranked tally failover: at/above the height a lower-ranked validator may tally
+// a proposal the leader left in voting. Only regtest is armed; testnet and
+// mainnet stay unpinned until ratified.
+addGate('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION', 'height', { mainnet: UNPINNED, testnet: UNPINNED, regtest: 0 });
