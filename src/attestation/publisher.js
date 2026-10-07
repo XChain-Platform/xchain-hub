@@ -81,8 +81,8 @@ const markers     = require('./publisher/markers.js');
 const retention   = require('./publisher/retention.js');
 const responsible = require('./publisher/responsible.js');
 const sweep       = require('./publisher/sweep.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
 const hubConfig = require('../config');
 const nodeUtil  = require('node:util');
 const { getLogger } = require('../observability');
@@ -208,7 +208,7 @@ class AttestationPublisher {
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while inside the encoder's caller-facing MAX_UTXO_COUNT;
             // past it the param is omitted so the encoder selects from its own
-            // uncapped fetch of this same address (lib/encoder_utxo_forward.js).
+            // uncapped fetch of this same address (lib/encoder/encoder_utxo_forward.js).
             utxos:    forwardableUtxos(utxos, 'AttestationPublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address, not the raw hex pubkey.
@@ -220,7 +220,7 @@ class AttestationPublisher {
         if (!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
         // Refuse phase 1 of a two-transaction encoding before anything is signed: this
         // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
-        // ATTEST no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+        // ATTEST no indexer can decode and strand the carrier value (lib/guards/two_phase_guard.js).
         assertSingleTxEncoding(psbtResult, 'AttestationPublisher');
         let txHex = await this.walletSignFn(psbtResult.psbt);
         if (!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');

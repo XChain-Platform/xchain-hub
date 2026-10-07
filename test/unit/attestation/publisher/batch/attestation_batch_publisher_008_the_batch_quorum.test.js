@@ -40,7 +40,7 @@ const AttestationBatchPublisher = require('../../../../../src/attestation/batch_
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 const abw = require('../../../../../src/lib/attest_batch_wire.js');
 const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
-const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/idempotent_broadcast.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../../../../src/lib/guards/idempotent_broadcast.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds

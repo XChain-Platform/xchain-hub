@@ -108,8 +108,8 @@ const broadcast = require('./relay/broadcast.js');
 const wal       = require('./relay/wal.js');
 const { HOME_CHAIN, ORIGIN_CHAINS } = require('./relay/constants.js');
 const snapWrite = require('../lib/capability_snapshot_write.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
@@ -331,7 +331,7 @@ class AttestationRelay {
                 // Forwarded only while inside the encoder's caller-facing
                 // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
                 // from its own uncapped fetch of this same address
-                // (lib/encoder_utxo_forward.js).
+                // (lib/encoder/encoder_utxo_forward.js).
                 utxos:    forwardableUtxos(utxos, 'AttestationRelay'),
                 pubkey:   address,
                 data:     payload,
@@ -342,7 +342,7 @@ class AttestationRelay {
             // Refuse phase 1 of a two-transaction encoding before anything is signed: this
             // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
             // relay leg no indexer can decode and strand the carrier value
-            // (lib/two_phase_guard.js).
+            // (lib/guards/two_phase_guard.js).
             assertSingleTxEncoding(psbtResult, 'AttestationRelay');
             // The coin argument is what lets one operator module hold a key per chain;
             // a single-key module ignores it, exactly as it does today.

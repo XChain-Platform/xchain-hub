@@ -27,7 +27,7 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
         ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_LIST_ROWS, ARCHIVE_MAX_PRICE_ROUNDS, ARCHIVE_MAX_JSON_BYTES,
         ARCHIVE_MAX_WIRE_B64_BYTES, ARCHIVE_MAX_CHAIN_TXS,
         ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
-const { capListRows, sortedListRows } = require('./list_rows_select.js');
+const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 

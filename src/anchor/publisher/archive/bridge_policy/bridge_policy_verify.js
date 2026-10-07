@@ -18,12 +18,12 @@
 
 'use strict';
 
-const gateRegistry = require('../../../consensus/gate_registry.js');
-const { parsePolicyColumn } = require('../../../cross_chain/bridge/policy_column.js');
-const { policyHash } = require('../../../cross_chain/bridge/policy_hash.js');
-const { resolveQuorumNetwork } = require('../../quorum_network.js');
-const swq = require('../../../consensus/stake_weighted_quorum.js');
-const { getLogger } = require('../../../observability');
+const gateRegistry = require('../../../../consensus/gate_registry.js');
+const { parsePolicyColumn } = require('../../../../cross_chain/bridge/policy_column.js');
+const { policyHash } = require('../../../../cross_chain/bridge/policy_hash.js');
+const { resolveQuorumNetwork } = require('../../../quorum_network.js');
+const swq = require('../../../../consensus/stake_weighted_quorum.js');
+const { getLogger } = require('../../../../observability');
 const logger = getLogger();
 
 function comparable(row){

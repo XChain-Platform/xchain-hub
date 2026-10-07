@@ -37,7 +37,7 @@
  ********************************************************************/
 
 'use strict';
-const { getLogger } = require('../observability');
+const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 // Release the input claims a successful create_tx minted, when the caller has
