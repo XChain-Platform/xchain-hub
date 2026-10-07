@@ -22,6 +22,7 @@
  ********************************************************************/
 
 const http = require('http');
+const assert = require('node:assert/strict');
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
 const os = require('node:os');
@@ -205,6 +206,10 @@ class PeerConnections {
         return isOwnListener(this, addr, lookup);
     }
 
+    dialSeedPeers() {
+        return dialSeedPeers(this);
+    }
+
     recordValidatorFeedUrl(validatorAddr, feedUrl) {
         if (!validatorAddr || !feedUrl) return false;
         this.validatorFeedUrls.set(validatorAddr, feedUrl);
@@ -261,7 +266,7 @@ class PeerConnections {
         });
 
         this.running = true;
-        await dialSeedPeers(this);
+        await this.dialSeedPeers();
 
         this.startHeartbeat();
         this.startDedupPruner();
@@ -395,3 +400,31 @@ class PeerConnections {
 }
 
 module.exports = PeerConnections;
+
+if (typeof globalThis.describe === 'function' && typeof globalThis.it === 'function') {
+    globalThis.describe('PeerConnections self-dial invariant', function () {
+        globalThis.it('never dials a seed that resolves to its own listener', async function () {
+            let dialed = 0;
+            const pm = {
+                config: {
+                    HUB_NETWORK: 'mainnet',
+                    P2P_HOST: '127.0.0.1',
+                    P2P_PORT: 10001,
+                    SEED_NODES: ['ws://seed-alias.example:10001']
+                },
+                constructor: { bootstrapSeeds: () => [] },
+                validatorAddr: 'ws://listener.example:10001',
+                httpServer: { address: () => ({ address: '127.0.0.1', port: 10001 }) },
+                running: true,
+                seedLookup: async () => [{ address: '127.0.0.1', family: 4 }],
+                isOwnListener: PeerConnections.prototype.isOwnListener,
+                connectToPeer: () => { dialed++; },
+                recordPeer: () => {}
+            };
+
+            await PeerConnections.prototype.dialSeedPeers.call(pm);
+
+            assert.equal(dialed, 0);
+        });
+    });
+}
