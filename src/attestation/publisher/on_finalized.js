@@ -24,9 +24,8 @@
 'use strict';
 
 const nodeUtil = require('node:util');
-// The mirror flag day is a registry row read by literal key (W5), on the request's own block.
-const gateRegistry = require('../../consensus/gate_registry');
-const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
+// The mirror era predicate, shared with the mirror and consensus so the three cannot drift.
+const { isMirrorEraRequest } = require('../response_mirror_era.js');
 const { ATTEST_WIRE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -65,7 +64,7 @@ module.exports = {
         // (processQueue) replays from the on-disk queue file independently of this event, so a legacy-era entry queued before a future
         // flag day still drains untouched; skipping the enqueue here needs no sweep
         // change.
-        if (gateRegistry.activeAt(ATTEST_RESPONSE_MIRROR_KEY, this.hub.network, null, Number(event.request && event.request.block_index), null)){
+        if (isMirrorEraRequest(this.hub.network, Number(event.request && event.request.block_index))){
             return true;
         }
         return false;
