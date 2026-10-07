@@ -73,9 +73,12 @@
  *   node bin/consensus-identity.js --out <file>       write the pin as JSON
  *   node bin/consensus-identity.js --root <dir>       measure another checkout
  *   node bin/consensus-identity.js --assert-no-absent exit 1 if any gate reads
- *                                                     `<absent>`; a lost carrier
- *                                                     is the exit-2 refusal
- *                                                     above, flag or no flag
+ *                                                     `<absent>`; a gate with no
+ *                                                     registry row and, if it
+ *                                                     is function-valued, no
+ *                                                     loadable carrier is the
+ *                                                     exit-2 refusal above,
+ *                                                     flag or no flag
  *   node bin/consensus-identity.js --compare <pin>    diff a tree against a pin,
  *                                                     exit 1 on any difference
  *
@@ -370,7 +373,7 @@ function main() {
         // Loud and by name. An absent gate is the failure this whole script is
         // built around, and a silent exit code would be read as a passing run.
         console.error(`ABSENT GATES (${identity.absent_gates.length}): the digest is over a rules set this build `
-            + 'has lost, while the signed GATES field is unchanged:');
+            + 'has lost:');
         for (const key of identity.absent_gates) console.error(`  ${key}`);
         process.exitCode = 1;
     }

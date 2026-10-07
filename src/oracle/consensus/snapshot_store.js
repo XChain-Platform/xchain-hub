@@ -144,8 +144,8 @@ module.exports = {
         // round lands atomically. The per-pair loop this replaced let a getfeequote /
         // getpricesnapshots reader observe a torn round (some pairs from round N, others
         // from N-1) mid-loop, and the id-ordered mirror bootstrap could persist that torn
-        // read to a replica. The hub Database exposes no transaction API, so a single
-        // statement is the atomicity primitive here.
+        // read to a replica. A single statement is the atomicity primitive here, needing
+        // no db.withTransaction.
         let admitCols = this.admission.admitBlocksToColumns(admitBlocks === undefined ? null : admitBlocks);
         await this.db.setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols);
 

@@ -191,7 +191,7 @@ handler, governance, and attestation subsystems are **all enabled only when
 |---|---|---|---|
 | `ORACLE_ROUND_INTERVAL` | No | `600000` | Round length (ms). |
 | `ORACLE_SUBMISSION_WINDOW` | No | `180000` | Submission window within a round (ms). |
-| `ORACLE_REWARD_PER_ROUND` | No | `10.00000000` | Reward per round. |
+| `ORACLE_REWARD_PER_ROUND` | No | `10.00000000` | Reward per round, a positive plain decimal; any other form fails reward distribution with "Invalid reward amount". |
 | `ORACLE_FINALIZATION_TIMEOUT` | No | `120000` | Finalization timeout (ms). |
 | `ORACLE_MIN_SUBMISSIONS` | No | `1` | Minimum submissions to finalize a round. |
 | `ORACLE_ROUND_ABANDON_GRACE_MS` | No | `15000` | Slack added to the round timer ladder before a round that opened here but never finalized is recorded as skipped. Rarely set: the watchdog window already tracks `ORACLE_FINALIZATION_TIMEOUT` and the leader timeout. |

@@ -74,4 +74,14 @@ describe('llm provider, always-thinking fetch headroom', function () {
         expect(sent).to.be.greaterThan(THINKING_FLOOR);
         expect(Buffer.from(out.body).toString('utf8')).to.equal('answer');
     });
+
+    // Size the judge budget with the same predicate as the fetch headroom, so a
+    // judge id that fetch() treats as thinking never gets the 256 chat budget.
+    it('sizes the judge budget with the fetch headroom predicate', function () {
+        const { judgeRequest } = require('../../../../src/providers/llm/judge');
+        for (const id of ['claude-opus-4-7', 'claude-sonnet-5', 'claude-opus-5', 'claude-opus-4-7-20260101', 'gpt-5-mini'])
+            expect(judgeRequest(id, 'sys', 'prompt', 1000, {}).maxTokens, id).to.equal(models.JUDGE_MAX_TOKENS_REASONING);
+        for (const id of ['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-5-chat-latest', 'gpt-4o'])
+            expect(judgeRequest(id, 'sys', 'prompt', 1000, {}).maxTokens, id).to.equal(models.JUDGE_MAX_TOKENS);
+    });
 });
