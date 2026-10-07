@@ -18,6 +18,7 @@ const { SHARED_GATES } = require('../../../../src/consensus_rules_digest.js');
 const registry = require('../../../../src/consensus/gate_registry.js');
 
 const REGISTRY_FILE = path.join(__dirname, '../../../../src/consensus/gate_registry.js');
+const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
 
 describe('gate_registry: digest value-row count @regression @tier1', function () {
     it('keeps the registry comment and shared digest counts pinned together', function () {
@@ -33,5 +34,12 @@ describe('gate_registry: digest value-row count @regression @tier1', function ()
         assert.strictEqual(valueRows, Number(valueMatch[1]));
         assert.strictEqual(functionKeys, Number(functionMatch[1]));
         assert.strictEqual(valueRows + functionKeys, keys.length);
+    });
+
+    it('keeps the attest batch-head row registry-only until it joins the shared digest', function () {
+        const keys = SHARED_GATES.flatMap(([mod, names]) => names.map(name => mod + '.' + name));
+
+        assert.strictEqual(registry.has(ATTEST_BATCH_HEAD_KEY), true);
+        assert.strictEqual(keys.includes(ATTEST_BATCH_HEAD_KEY), false);
     });
 });

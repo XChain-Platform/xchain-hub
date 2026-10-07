@@ -24,6 +24,8 @@ const { spawnSync } = require('child_process');
 
 const BIN  = path.resolve(__dirname, '../../../bin/consensus-identity.js');
 const REPO = path.resolve(__dirname, '../../..');
+const PIN  = path.resolve(REPO, 'bin/pins/at1-consensus-identity.json');
+const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
 
 function run(args) {
     return spawnSync(process.execPath, [BIN, ...args], { cwd: REPO, encoding: 'utf8' });
@@ -35,7 +37,14 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
     it('exits 0 and still prints the identity on the healthy path', function () {
         const res = run(['--json']);
         expect(res.status, res.stderr).to.equal(0);
-        expect(() => JSON.parse(res.stdout)).to.not.throw();
+        const identity = JSON.parse(res.stdout);
+        expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_BATCH_HEAD_KEY);
+    });
+
+    it('keeps the committed identity pinned when a registry-only row is added', function () {
+        const res = run(['--compare', PIN]);
+        expect(res.status, res.stderr).to.equal(0);
+        expect(res.stdout).to.equal(`consensus identity holds against ${PIN}\n`);
     });
 
     it('exits 2 with one clean stderr line, not a raw stack, on a thrown error', function () {
