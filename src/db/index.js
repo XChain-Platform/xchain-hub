@@ -71,8 +71,8 @@ const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
 // The class's own plumbing, split out of this file by behaviour and installed the
 // same way, non-enumerably, by the same installMixins() below. These are NOT table
-// families: they are bring-up, the two migration-helper families and the step list
-// runMigrations() walks, so they live under schema/, which has no index.js, rather
+// families: they are bring-up, the two migration-helper families, the step list
+// runMigrations() walks and withTransaction, so they live under schema/, which has no index.js, rather
 // than beside the families: db_prototype_install.test.js and the mockHub scanner
 // read every `<family>.js` and `<family>/index.js` and would take a plumbing method
 // for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
@@ -82,6 +82,7 @@ const bootstrapMixin        = require('./schema/bootstrap.js');
 const keyMigrationsMixin    = require('./schema/keys.js');
 const columnMigrationsMixin = require('./schema/columns.js');
 const migrationStepsMixin   = require('./schema/migrations.js');
+const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -378,7 +379,8 @@ installMixins(Database.prototype, [
     bootstrapMixin,
     keyMigrationsMixin,
     columnMigrationsMixin,
-    migrationStepsMixin
+    migrationStepsMixin,
+    transactionMixin
 ]);
 
 module.exports = Database;

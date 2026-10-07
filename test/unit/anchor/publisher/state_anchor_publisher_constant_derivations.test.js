@@ -113,6 +113,37 @@ function registerAnchorDefaultTests() {
         expect(pub.intervalMs).to.equal(86400000);
         expect(pub.roundTimeoutMs).to.equal(120000);
     });
+
+    // Build one publisher with a single env knob set, restoring it afterwards.
+    function mkPubWith(key, value){
+        process.env[key] = value;
+        try { return mkPub(); }
+        finally { delete process.env[key]; }
+    }
+
+    it('falls back to the default for a zero, negative or unparseable round timeout or tolerance', function () {
+        for(const bad of ['0', '-5', 'abc']){
+            expect(mkPubWith('ANCHOR_ROUND_TIMEOUT_MS', bad).roundTimeoutMs, 'timeout ' + bad).to.equal(120000);
+            expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', bad).electionToleranceBlocks, 'tolerance ' + bad).to.equal(36);
+        }
+        expect(mkPubWith('ANCHOR_ROUND_TIMEOUT_MS', '45000').roundTimeoutMs).to.equal(45000);
+        expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12').electionToleranceBlocks).to.equal(12);
+    });
+
+    it('resolves the round timeout to the same value as the admission watermark for every input', function () {
+        const { AdmissionHeightWatermark } = require('../../../../src/peers/hub_db/admission_height_watermark.js');
+        for(const v of ['0', '-5', 'abc', '45000']){
+            process.env.ANCHOR_ROUND_TIMEOUT_MS = v;
+            try {
+                expect(mkPub().roundTimeoutMs, 'input ' + v).to.equal(new AdmissionHeightWatermark({}).roundWindows.anchor);
+            } finally { delete process.env.ANCHOR_ROUND_TIMEOUT_MS; }
+        }
+    });
+
+    it('a zero tolerance does not unlock every backup rank at once', function () {
+        const pub = mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '0');
+        expect(pub.rankUnlocked(['aa', 'bb', 'cc'], 'cc', 1)).to.equal(false);
+    });
 }
 
 function registerAnchorChunkTests() {

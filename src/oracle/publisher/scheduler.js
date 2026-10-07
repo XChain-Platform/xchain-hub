@@ -277,7 +277,8 @@ module.exports = {
     armCatchupSweep(delayMs) {
         this._catchupSweepTimer = setTimeout(() => {
             this._catchupSweepTimer = null;
-            this.runCatchupSweepTick();
+            this.runCatchupSweepTick().catch(e =>
+                logger.error(nodeUtil.format('OraclePublisher: buffer catch-up sweep tick failed:', e)));
         }, delayMs);
         if (this._catchupSweepTimer.unref) this._catchupSweepTimer.unref();
     },
@@ -293,12 +294,23 @@ module.exports = {
             await this._windowChain;
         } catch (e) {
             logger.error(nodeUtil.format('OraclePublisher: buffer catch-up sweep failed:', e));
+        } finally {
+            // Re-arm whatever the tick did, so one bad pass cannot end the only recurring retry.
+            if (!this._stopped) this.armCatchupSweep(this.nextCatchupSweepDelayMs());
         }
-        if (this._stopped) return;
-        let backlog = this.pendingCatchupWindows().length;
-        this.armCatchupSweep(backlog > CATCHUP_WINDOWS_PER_SWEEP
-            ? this.batchCatchupBacklogIntervalMs
-            : this.batchCatchupIntervalMs);
+    },
+
+    // Next sweep delay: the backlog cadence while more windows wait than one sweep takes,
+    // else the idle cadence. A failed count falls back to idle so a fault cannot spin fast.
+    nextCatchupSweepDelayMs() {
+        let backlog;
+        try {
+            backlog = this.pendingCatchupWindows().length;
+        } catch (e) {
+            logger.error(nodeUtil.format('OraclePublisher: catch-up backlog count failed:', e));
+            return this.batchCatchupIntervalMs;
+        }
+        return backlog > CATCHUP_WINDOWS_PER_SWEEP ? this.batchCatchupBacklogIntervalMs : this.batchCatchupIntervalMs;
     },
 
     noteAssembled(windowIndex) {

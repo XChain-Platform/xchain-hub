@@ -20,10 +20,11 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const coins      = require('../../../../src/coins');
 
 let XChainHub, axiosStub, mockDb, errorLog;
 const ENV_KEYS = ['BTC_INDEXER_API_URL', 'BTC_INDEXER_URL', 'DOGE_INDEXER_API_URL',
-                  'DOGE_INDEXER_URL', 'INDEXER_COIN_CHECK'];
+                  'DOGE_INDEXER_URL', 'INDEXER_COIN_CHECK', 'NWC_INDEXER_API_URL', 'NWC_INDEXER_URL'];
 let savedEnv;
 
 // A configs tree carrying BOTH regtest and mainnet legs: the shape the finding is about.
@@ -239,6 +240,20 @@ function registerIndexerUrlResolutionSuite() {
             const hub = scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS);
             expect(await hub.resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
             expect(await hub.resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
+        });
+
+        // A chain added through the coin registry alone must resolve under the
+        // registry's full name, the key the configs writer stores it under.
+        it('resolves a registry-only coin under its registry full name', async function () {
+            coins.COIN_FULL_NAME.NWC = 'newcoin';
+            try {
+                const hub = validatorHub('mainnet', {
+                    newcoin: { mainnet: { 'xchain-indexer': { host: '10.0.0.9', port: 3590 } } }
+                });
+                expect(await hub.resolveIndexerUrl('NWC')).to.equal('http://10.0.0.9:3590');
+            } finally {
+                delete coins.COIN_FULL_NAME.NWC;
+            }
         });
     });
 }

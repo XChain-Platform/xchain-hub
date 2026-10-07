@@ -36,7 +36,8 @@
 // delegated by two sources keeps BOTH (source, pubkey) rows in the mirror stream
 // instead of collapsing to one. A stale indexer on the 3-column key would
 // INSERT-IGNORE-drop the second source row and understate stake, so it must
-// reject a v2 snapshot stream until it has migrated.
+// reject a v2 snapshot stream until it has applied the
+// 2026-07-20-capability-snapshots-source-in-unique-key migration.
 //
 // v3: the mirror set gained anchor_reward_attestations (hub_db_sync
 // HUB_STATE_TABLES). It carries the XANCPUB publisher-attestation quorum the BTC
@@ -112,14 +113,16 @@
 // shared-list versions every consuming indexer applies as injected LIST legs,
 // so a stale indexer that lacks the table never learns a version and its mirror
 // lists silently stop following the home list. A stale reader must reject this
-// stream until it has applied the list_snapshots migration.
+// stream until it has applied the 2026-09-30-list-share-tables migration, a
+// manual one that is a required deploy precondition.
 //
 // v8 ROLL: the v6 and v7 order stands. This hub rolls FIRST and stamps 8, then
 // every indexer and the explorer roll back to back behind it.
 //
 // v9: list_snapshots gained name, description and meta_hash so every shared-list
 // version can carry metadata bound to the signed record. A stale reader cannot
-// interpret the expanded row and must reject the stream until it has migrated.
+// interpret the expanded row and must reject the stream until it has applied
+// the 2026-10-02-list-snapshots-meta migration.
 //
 // v9 ROLL: the v8 order stands. This hub rolls FIRST and stamps 9, then every
 // indexer and the explorer roll back to back behind it. The whole roll completes

@@ -34,9 +34,9 @@ const logger = getLogger();
  *
  * The whole set therefore goes in ONE statement. InnoDB rolls a failed statement back
  * whole and, under autocommit, the statement IS the transaction, so the mirror is
- * all-or-nothing without introducing a transaction idiom this repo does not have (its
- * transactionConnection is a per-Db global that would capture unrelated concurrent
- * queries). Do NOT chunk the statement: the set is capped at VALIDATOR_QUERY_LIMIT and
+ * all-or-nothing with no explicit transaction (db.withTransaction serves multi-statement
+ * writes; the per-Db transactionConnection is a global that would capture unrelated
+ * concurrent queries). Do NOT chunk the statement: the set is capped at VALIDATOR_QUERY_LIMIT and
  * each writer refuses an over-cap set outright, so it fits one statement, and chunking
  * would silently reintroduce the partial-commit window this module exists to close.
  *
