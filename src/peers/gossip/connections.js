@@ -24,6 +24,8 @@
 const http = require('http');
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
+const os = require('node:os');
+const dns = require('node:dns').promises;
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -71,9 +73,46 @@ function acceptInboundSocket(pm, ws, req) {
     ws.on('error', (e) => logger.error(nodeUtil.format('Inbound peer error:', e)));
 }
 
+function splitHostPort(addr) {
+    const m = /^(?:wss?:\/\/)?([\w.\-]+):(\d+)$/.exec(String(addr || ''));
+    return m ? { host: m[1].toLowerCase(), port: parseInt(m[2], 10) } : null;
+}
+
+// Every address this machine answers on, loopback included.
+function localAddresses() {
+    const out = new Set(['127.0.0.1', '::1', 'localhost']);
+    for (const list of Object.values(os.networkInterfaces())) {
+        for (const i of list || []) out.add(i.address);
+    }
+    return out;
+}
+
+// True when a seed address is this hub's own listener: the same host:port as
+// its advertised validator address, or a port equal to the listen port whose
+// host is a local address or resolves to one. A resolver failure is not
+// self; the seed is then dialed as before.
+async function isOwnListener(pm, addr, lookup) {
+    const seed = splitHostPort(addr);
+    if (!seed) return false;
+    const own = splitHostPort(pm.validatorAddr);
+    if (own && own.host === seed.host && own.port === seed.port) return true;
+    const listenPort = parseInt(pm.config.P2P_PORT, 10) || 10001;
+    if (seed.port !== listenPort && !(own && own.port === seed.port)) return false;
+    const locals = localAddresses();
+    if (locals.has(seed.host)) return true;
+    try {
+        const found = await (lookup || dns.lookup)(seed.host, { all: true });
+        return found.some(r => locals.has(r.address));
+    } catch (e) {
+        return false;
+    }
+}
+
 // Dial the configured seeds, or the network default bootstrap peers when the
-// operator configured none.
-function dialSeedPeers(pm, host) {
+// operator configured none. A seed that is this hub's own listener is never
+// dialed: the socket would land on its own inbound side, count as a peer and
+// spend the per-IP connection budget.
+async function dialSeedPeers(pm, host) {
     // A hub with no SEED_NODES dials nobody and joins no gossip mesh, while
     // running and looking healthy. Fall back to the bootstrap peers.
     // regtest gets none: a local venue must never dial public seeds.
@@ -81,13 +120,17 @@ function dialSeedPeers(pm, host) {
     if (seeds.length === 0) {
         const defaults = pm.constructor.bootstrapSeeds(pm.config.HUB_NETWORK);
         if (defaults.length) {
-            // Never dial ourselves: one of the five IS one of the five.
-            seeds = defaults.filter(a => !host || host === '0.0.0.0' ? true : !a.includes(host));
+            seeds = defaults;
             logger.info('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
                         ' default bootstrap seed(s) for ' + pm.config.HUB_NETWORK);
         }
     }
     for (let addr of seeds) {
+        if (await isOwnListener(pm, addr, pm._seedLookup)) {
+            logger.info('PeerManager: seed ' + addr + ' is this hub\'s own listener; not dialing');
+            continue;
+        }
+        if (!pm.running) return;
         pm.connectToPeer(addr);
         // Record seed in DB (fire and forget). validator_id is the peer's own addr,
         // not ours; we are recording the peer, not ourselves.
@@ -192,7 +235,7 @@ class PeerConnections {
         });
 
         this.running = true;
-        dialSeedPeers(this, host);
+        await dialSeedPeers(this, host);
 
         this.startHeartbeat();
         this.startDedupPruner();
