@@ -22,15 +22,11 @@
 'use strict';
 
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
+const gateRegistry = require('../../consensus/gate_registry.js');
 
 const PUBKEY_RE = /^[0-9a-f]{64}$/;
-const UNARMED_HEIGHT = 9999999999;
-
-const REORG_SNAPSHOT_ACTIVATION = Object.freeze({
-    mainnet: UNARMED_HEIGHT,
-    testnet: UNARMED_HEIGHT,
-    regtest: 0
-});
+const REORG_SNAPSHOT_ACTIVATION = gateRegistry.get(
+    'anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION');
 
 const REORG_SNAPSHOT_TOLERANCE_BLOCKS = 144;
 
@@ -51,7 +47,7 @@ function isReorgSnapshotActive(blockHeight, network) {
 
 function isReorgSnapshotRatified(network) {
     let threshold = REORG_SNAPSHOT_ACTIVATION[String(network || '').toLowerCase()];
-    return Number.isSafeInteger(threshold) && threshold < UNARMED_HEIGHT;
+    return Number.isSafeInteger(threshold) && threshold < gateRegistry.UNARMED;
 }
 
 function snapshotMemberPubkeys(snapshot) {
