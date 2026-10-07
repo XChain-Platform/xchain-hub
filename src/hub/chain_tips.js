@@ -102,6 +102,21 @@ class ChainTips {
         }
     }
 
+    // The pushed BTC tip a consensus round may anchor on: the stored row only when
+    // btcPushedTipFresh accepts it, otherwise null so the caller takes the gated direct
+    // path through resolveBtcLatestBlock. A frozen row is never returned, which keeps the
+    // round reference block on the tip every peer re-derives when it checks a PROPOSE.
+    async resolveFreshPushedBtcTip(){
+        let network;
+        try { network = await this.resolveBtcNetwork(); }
+        catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve BTC network for the pushed tip:', err.message)); return null; }
+        try {
+            let tip = await this.db.getChainTip('BTC', network);
+            if(tip && tip.blockHeight && this.btcPushedTipFresh(tip)) return tip;
+        } catch (_) { /* hub db down? no pushed tip */ }
+        return null;
+    }
+
     // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
     // `lag` cannot see a halted chain: a stopped bitcoind freezes the decoder and the
     // committed tip together, so lag reads 0 while the height never moves.
