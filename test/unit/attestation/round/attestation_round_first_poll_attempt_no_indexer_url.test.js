@@ -10,10 +10,6 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// A hub with no resolvable BTC indexer URL still attempts a poll every tick, so it stamps
-// firstPollAttemptAt and reports how long its feed has gone without a usable poll. An
-// observer-only hub never attempts one and stays unstamped.
-
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
