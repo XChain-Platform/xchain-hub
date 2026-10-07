@@ -144,6 +144,23 @@ function recordDirectHubAdvertisement(peer, peerAddr, envelope) {
     else delete peer.api_url;
 }
 
+// Only the outbound peer's own messages say where its sender serves its feed; a relayed
+// message names the original publisher, so recording it would move that feed URL to the relayer.
+function isDirectFromOutboundPeer(peer, envelope) {
+    return Boolean(peer) && !peer.inbound && Boolean(peer.validatorAddr) && peer.validatorAddr === envelope.sender;
+}
+
+function notePeerMessage(pm, peer, peerAddr, envelope, knownAddr) {
+    const firstFromOutbound = !peer.inbound && !peer.validatorAddr;
+    if (firstFromOutbound) peer.validatorAddr = envelope.sender;
+    const inheritedFeedUrl = isDirectFromOutboundPeer(peer, envelope) &&
+        pm.recordValidatorFeedUrl(envelope.sender, peer.feedUrl || knownAddr);
+    if (firstFromOutbound) pm.emit('peer:connect', peerAddr);
+    peer.lastSeen = Date.now();
+    recordDirectHubAdvertisement(peer, peer.validatorAddr || peerAddr, envelope);
+    if (inheritedFeedUrl) pm.emit('peer:connect', envelope.sender);
+}
+
 class PeerInbound {
 
     handleInbound(ws, rawData, knownAddr) {
@@ -182,20 +199,7 @@ class PeerInbound {
 
         let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
         let peer = this.peers.get(peerAddr);
-        let inheritedFeedUrl = false;
-        if (peer) {
-            if (!peer.inbound) {
-                inheritedFeedUrl = this.recordValidatorFeedUrl(
-                    envelope.sender, peer.feedUrl || knownAddr);
-            }
-            if (!peer.inbound && !peer.validatorAddr) {
-                peer.validatorAddr = envelope.sender;
-                this.emit('peer:connect', peerAddr);
-            }
-            peer.lastSeen = Date.now();
-            recordDirectHubAdvertisement(peer, peer.validatorAddr || peerAddr, envelope);
-        }
-        if (inheritedFeedUrl) this.emit('peer:connect', envelope.sender);
+        if (peer) notePeerMessage(this, peer, peerAddr, envelope, knownAddr);
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
