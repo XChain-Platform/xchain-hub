@@ -28,8 +28,8 @@ function createHarness(gateActive, overrides = {}) {
         roundInterval: ROUND_INTERVAL,
         nowMs:         overrides.nowMs === undefined ? NOW_MS : overrides.nowMs
     });
-    let methods = proxyquire('../../../../../src/oracle/consensus/handle_propose', {
-        './round_time_gate.js': {
+    let methods = proxyquire('../../../../../src/oracle/consensus/propose/handle_propose', {
+        '../round_time_gate.js': {
             roundTimeGateActive: () => gateActive
         }
     });

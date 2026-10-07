@@ -7,7 +7,7 @@ const { expect } = require('chai');
 const {
     nominalRoundSeconds,
     roundTimeMatches
-} = require('../../../../../src/oracle/consensus/round_time');
+} = require('../../../../../src/oracle/consensus/round_time/round_time');
 
 describe('Oracle consensus round time', function () {
     const EPOCH_START_MS = 1700000000123;

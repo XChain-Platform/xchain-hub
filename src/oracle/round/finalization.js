@@ -21,7 +21,7 @@
  ********************************************************************/
 
 const { noteRoundLost } = require('../../consensus/diagnostics');
-const { nominalRoundSeconds } = require('../consensus/round_time');
+const { nominalRoundSeconds } = require('../consensus/round_time/round_time');
 const { roundTimeGateActive } = require('../consensus/round_time_gate');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');

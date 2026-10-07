@@ -22,15 +22,15 @@
 
 'use strict';
 
-const swq               = require('../../consensus/stake_weighted_quorum.js');
-const ocr               = require('../../oracle_clamp_reference_activation.js');
-const { provenPubkey }  = require('../../lib/chain_signer_admission.js');
-const { noteDrop }      = require('../../consensus/diagnostics');
-const { coSignGateRejects } = require('./cosign_gate.js');
-const { bindAndCoSign } = require('./follower_round.js');
-const { nominalRoundSeconds, roundTimeMatches } = require('./round_time.js');
-const { roundTimeGateActive } = require('./round_time_gate.js');
-const { getLogger } = require('../../observability');
+const swq               = require('../../../consensus/stake_weighted_quorum.js');
+const ocr               = require('../../../oracle_clamp_reference_activation.js');
+const { provenPubkey }  = require('../../../lib/chain_signer_admission.js');
+const { noteDrop }      = require('../../../consensus/diagnostics');
+const { coSignGateRejects } = require('../cosign_gate.js');
+const { bindAndCoSign } = require('../follower_round.js');
+const { nominalRoundSeconds, roundTimeMatches } = require('../round_time/round_time.js');
+const { roundTimeGateActive } = require('../round_time_gate.js');
+const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
 // Tells handlePropose's steps to drop the message; distinct from a legitimate null or 0.
