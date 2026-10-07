@@ -322,7 +322,7 @@ function registerPriceTest(state){
         expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
         await finalize(publisher, inputs);
         expect(stamps.map(stamp => stamp[0])).to.deep.equal([
-            'price', 'price', 'price', 'price', 'tombstone'
+            'price', 'price', 'price', 'tombstone'
         ]);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
         expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS);
