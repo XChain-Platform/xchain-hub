@@ -16,7 +16,7 @@ const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engin
 const registry = require('../../../../src/consensus/gate_registry.js');
 const policyPoll = require('../../../../src/cross_chain/bridge/policy_poll.js');
 const validate = require('../../../../src/cross_chain/bridge/validate.js');
-const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy_verify.js');
+const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy/bridge_policy_verify.js');
 const { policyHash } = require('../../../../src/cross_chain/bridge/policy_hash.js');
 
 const SNAPSHOT_BLOCK = 150;

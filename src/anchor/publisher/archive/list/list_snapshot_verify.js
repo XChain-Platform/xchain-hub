@@ -17,9 +17,9 @@
 
 'use strict';
 
-const listCanonical = require('../../../cross_chain/list/canonical.js');
-const { archivedListRowRefusal } = require('../../../cross_chain/list/archive_checks.js');
-const { getLogger } = require('../../../observability');
+const listCanonical = require('../../../../cross_chain/list/canonical.js');
+const { archivedListRowRefusal } = require('../../../../cross_chain/list/archive_checks.js');
+const { getLogger } = require('../../../../observability');
 const logger = getLogger();
 
 function comparable(row){

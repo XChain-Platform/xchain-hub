@@ -22,7 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
-const { sortedListRows, listCapabilityWants } = require('./list_rows_select.js');
+const { sortedListRows, listCapabilityWants } = require('./list/list_rows_select.js');
 const { canonicalBatchCrc } = require('../fold/wrapper_canonical.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
