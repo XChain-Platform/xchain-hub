@@ -56,3 +56,10 @@ addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainn
 // it, only hub_push_delivered feeds the watermark. Armed on regtest only until
 // the operator names a testnet and mainnet height.
 addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
+// Effective allow/block-list enforcement, inert until coordinated activation.
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
+    mainnet: UNARMED,
+    testnet: UNARMED,
+    regtest: UNARMED,
+});
