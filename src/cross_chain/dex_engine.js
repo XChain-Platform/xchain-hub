@@ -64,6 +64,7 @@ const matchPart    = require('./dex/match.js');
 const finalizePart = require('./dex/finalize.js');
 const validatePart = require('./dex/validate.js');
 const plumbingPart = require('./dex/plumbing.js');
+const remoteTokens = require('./remote_token_snapshots.js');
 
 class CrossChainDexEngine extends EventEmitter {
 
@@ -120,6 +121,8 @@ class CrossChainDexEngine extends EventEmitter {
             this._inflight.delete(String(ev.matchId));
         });
 
+        this.initRemoteTokenSnapshots();
+
         this._pollTimer = null;
         this._matching  = false;   // poll self-overlap guard, see discoverAndMatch()
     }
@@ -144,14 +147,18 @@ class CrossChainDexEngine extends EventEmitter {
         }
         await this.rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
+        await this.remoteTokenConsensus.start();
         this._pollTimer = setInterval(() => {
             this.discoverAndMatch().catch(err => logger.error(nodeUtil.format('CrossChainDex: tick error:', err && err.message)));
+            this.publishRemoteTokenSnapshots().catch(err => logger.error(nodeUtil.format(
+                'CrossChainDex: remote token publication error:', err && err.message)));
         }, this.pollMs);
         logger.info('Cross-chain DEX engine started (poll ' + this.pollMs + 'ms)');
     }
 
     async stop(){
         if(this._pollTimer){ clearInterval(this._pollTimer); this._pollTimer = null; }
+        await this.remoteTokenConsensus.stop();
         await this.consensus.stop();
     }
 
@@ -347,7 +354,8 @@ class CrossChainDexEngine extends EventEmitter {
 }
 
 installParts(CrossChainDexEngine.prototype, [
-    ledgerPart, matchPart, finalizePart, validatePart, plumbingPart
+    ledgerPart, matchPart, finalizePart, validatePart, plumbingPart,
+    remoteTokens.enginePart
 ]);
 
 module.exports = CrossChainDexEngine;
