@@ -26,6 +26,7 @@
 'use strict';
 
 const assert = require('assert');
+const fs     = require('fs');
 const path   = require('path');
 
 const titles = require('../suite-title-map.js');
@@ -49,6 +50,20 @@ describe('bin/suite-title-map.js', function () {
             assert.ok(SCRIPT_NAMES.includes('ci:security'));
             assert.ok(SCRIPT_NAMES.includes('ci:regression'),
                 'the venue runs these, so a glob that stopped collecting here must be visible');
+        });
+
+        it('pins the suites that were absent from the failed standalone map', () => {
+            const pin = JSON.parse(fs.readFileSync(
+                path.resolve(__dirname, '../pins/at1-suite-titles.json'), 'utf8'));
+            const files = pin.scripts.test.files;
+            for (const name of [
+                'test/unit/lib/regtest_snapshot_seams.test.js',
+                'test/unit/peers/hub_db/admission_sampling_single_flight.test.js',
+                'test/unit/providers/llm/cli_outcome_status_phrase.test.js',
+            ]) {
+                assert.ok(files[name], `${name} must remain represented in the standalone suite pin`);
+                assert.ok(pin.titleSets[files[name]], `${name} must reference a pinned title set`);
+            }
         });
     });
 });
