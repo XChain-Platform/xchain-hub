@@ -19,14 +19,16 @@ const {
 } = require('chai');
 const {
   installHubOracleMetrics,
-  installHubStakeShareMetrics
+  installHubStakeShareMetrics,
+  installHubGovernanceOverdueMetrics
 } = require('../../../../src/api/hub_metrics');
 const {
   StakeShareMonitor,
   evaluateStakeShare
 } = require('../../../../src/validators/stake_share_monitor.js');
 const {
-  installObservability
+  installObservability,
+  _resetObservability: resetObservability
 } = require('../../../../src/observability');
 
 // Real registry from the observability module, not a stub: the claim under test
@@ -44,7 +46,7 @@ function registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part1() {
   // service), so a case asserting a series is ABSENT has to start from a
   // clean registry rather than inheriting the previous case's series.
   afterEach(function () {
-    require('../../../../src/observability')._resetObservability();
+    resetObservability();
   });
   it('renders freshness, round number and skip streak from live oracle state', function () {
     const observability = realObservability();
@@ -261,4 +263,22 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part3.call(this);
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part4.call(this);
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part5.call(this);
+});
+
+describe('hub governance overdue proposal metric', function () {
+  afterEach(function () {
+    resetObservability();
+  });
+
+  it('publishes the live overdue count as a gauge', function () {
+    const observability = realObservability();
+    const hub = { governance: { _overdueCount: 2 } };
+    expect(installHubGovernanceOverdueMetrics(observability, hub)).to.equal(true);
+    expect(observability.registry.render())
+      .to.match(/^xchain_governance_overdue_proposals 2$/m);
+
+    Reflect.set(hub.governance, '_overdueCount', 0);
+    expect(observability.registry.render())
+      .to.match(/^xchain_governance_overdue_proposals 0$/m);
+  });
 });

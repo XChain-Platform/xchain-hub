@@ -86,6 +86,8 @@ module.exports = {
             return;
         }
 
+        await this.countOverdueProposals(Date.now(), expired);
+
         for (let proposal of expired) {
             if (!this.canTallyProposal(proposal)) continue;
             try {
