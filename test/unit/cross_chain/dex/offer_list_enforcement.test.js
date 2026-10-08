@@ -1,5 +1,7 @@
 'use strict';
 
+// GENERATED
+
 // Copyright © 2025–2026 Dankest, LLC
 // Based on XChain Platform by Dankest, LLC – https://dankest.llc
 //
@@ -86,9 +88,7 @@ function armGate(active){
         key === offerLists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT ? active : false;
 }
 
-describe('cross-chain DEX offer-list enforcement', function(){
-    afterEach(function(){ registry.activeAt = originalActiveAt; });
-
+function registerPolicyEnforcementTests(){
     it('keeps the legacy matcher byte path below the hub gate', async function(){
         armGate(false);
         let [a, b] = pair();
@@ -139,7 +139,9 @@ describe('cross-chain DEX offer-list enforcement', function(){
         assert.strictEqual(engine.tryMatch(...emptyPair), null);
         assert.strictEqual(engine.tryMatch(...blockedPair), null);
     });
+}
 
+function registerPolicyRejectionTests(){
     it('fails closed on omitted fields, malformed ids, wrong list types and read failures', async function(){
         armGate(true);
         let cases = [
@@ -178,7 +180,9 @@ describe('cross-chain DEX offer-list enforcement', function(){
         assert.strictEqual(matches.length, 1);
         assert.strictEqual(matches[0].hi.action_index, 3);
     });
+}
 
+function registerLeaderEnforcementTests(){
     it('the leader proposes nothing when an active list cannot be resolved', async function(){
         armGate(true);
         let offers = pair({ allow_list: 11 });
@@ -229,7 +233,9 @@ describe('cross-chain DEX offer-list enforcement', function(){
         assert.strictEqual(resolver.callCount, 1);
         assert.strictEqual(await engine.resolveSnapshotBlock(), 101);
     });
+}
 
+function registerFollowerEnforcementTests(){
     it('the follower refuses a proposal when its independent list read fails', async function(){
         armGate(true);
         let [a, b] = pair({ allow_list: 11 });
@@ -248,4 +254,12 @@ describe('cross-chain DEX offer-list enforcement', function(){
 
         assert.strictEqual(await engine.validateProposedMatch(row), false);
     });
+}
+
+describe('cross-chain DEX offer-list enforcement', function(){
+    afterEach(function(){ registry.activeAt = originalActiveAt; });
+    registerPolicyEnforcementTests();
+    registerPolicyRejectionTests();
+    registerLeaderEnforcementTests();
+    registerFollowerEnforcementTests();
 });
