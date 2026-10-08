@@ -55,17 +55,25 @@
  * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
  * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
  * shared "still pending" signal, so a late rank-0 and an early rank-1 can both
- * publish). The on-chain state never diverges: both build byte-identical
- * commitments, and the anchor-reward rail does NOT inflate: recordAnchorReward
- * deterministically keeps a single reward per (checkpoint_seq, reward_type)
- * across distinct publisher pubkeys (see below), so the only residual cost of
- * the race is the duplicate DOGE tx fee. One validator publishes the whole
+ * publish). The checkpoint state never diverges: both carry the same quorum-agreed
+ * checkpoint sections, though the two transactions are NOT byte-identical, since
+ * every wire ends in its own publisher tail (the publisher's pubkey and its own
+ * XANCPUB attestation list). The anchor-reward rail does NOT inflate, and where the
+ * dedup happens depends on the reward flag-day. Below it, every hub mirrors the
+ * reward from the signed BUNDLE_DONE / FINALIZED announcement and recordAnchorReward
+ * keeps a single reward per (checkpoint_seq, reward_type) across distinct publisher
+ * pubkeys (see below). At/above it that mirror is retired, each publisher's hub
+ * holds only its own validator_rewards row, and the indexer's winner reconcile
+ * (reconcileAnchorRewardWinner) is the ONLY cross-publisher dedup; do not weaken it
+ * on the belief that the hub collapses failover duplicates. Either way the only
+ * residual cost of the race is the duplicate DOGE tx fee. One validator publishes the whole
  * bundle in a cycle, FROM ITS OWN DOGE WALLET, and the election rotates that
  * work across the federation cycle by cycle. Each successful publish records an
  * `anchor_bundle` / `anchor_archive` reward on the validator_rewards rail (oracle-round
- * pattern; recordAnchorReward collapses failover-race duplicates to a single
- * deterministic per-(round,type) winner, best-effort push to the BTC indexer
- * for COLLECT). The v1 archive round elects a single leader the same way with a
+ * pattern; below the flag-day recordAnchorReward collapses failover-race duplicates
+ * to a single deterministic per-(round,type) winner). That row is hub-local: the hub
+ * never pushes a reward to an indexer, which derives the COLLECT-spendable reward
+ * from the on-chain attestation itself. The v1 archive round elects a single leader the same way with a
  * per-election-block key. Signer resolution, balance checks and the DOGE
  * broadcast pipeline mirror OraclePublisher (the DB is
  * the durable queue: pending checkpoints are rows with anchor_txid IS NULL,

@@ -70,16 +70,19 @@ installFoldAttestHooks();
 
 module.exports = {
 
-    // Anchor-publish reward: the validator that paid the DOGE earns it. Recorded
-    // on EVERY hub (by the publisher at publish time and by peers from the
-    // signature-verified BUNDLE_DONE / FINALIZED announcements) with blockIndex =
-    // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
-    // hold identical row bytes and the archived rewards section verifies by
-    // re-derivation. recordAnchorReward dedups all paths, including a failover
-    // race that hands the same (round, type) to two different publisher pubkeys,
-    // which it collapses to a single deterministic per-(round,type) winner.
+    // Anchor-publish reward: the validator that paid the DOGE earns it, with blockIndex =
+    // the quorum-agreed snapshot_block of the rewarded checkpoint. BELOW each reward
+    // type's flag-day it is recorded on EVERY hub (by the publisher at publish time and
+    // by peers from the signature-verified BUNDLE_DONE for anchor_bundle, FINALIZED for
+    // anchor_archive), so all hubs hold identical row bytes and the archived rewards
+    // section verifies by re-derivation; recordAnchorReward dedups all paths, including
+    // a failover race that hands the same (round, type) to two different publisher
+    // pubkeys, which it collapses to a single deterministic per-(round,type) winner.
+    // AT/ABOVE the flag-day both mirrors are retired (bundle_done.js, finalized_apply.js):
+    // only an attested publisher records its own hub-local row, and the indexer's winner
+    // reconcile is the only cross-publisher dedup.
     // `network` is the REWARD's network (the checkpoint row's), threaded through
-    // so RewardTracker's derive-vs-push flag-day gate reads the SAME source as
+    // so RewardTracker's flag-day amount gate (resolveAnchorRewardAmount) reads the SAME source as
     // this publisher's payload-build gate: re-deriving it from
     // this.hub.network inside RewardTracker double-credited on an unscoped hub.
     recordReward(rewardType, roundNumber, pubkey, blockIndex, network){

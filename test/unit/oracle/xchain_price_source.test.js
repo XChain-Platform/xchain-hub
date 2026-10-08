@@ -40,6 +40,7 @@ const FINALIZED_BTC = { 'BTC/USD': '100000.00000000' };
 const BOOTSTRAP_AT_100K = '1.00000000';
 const { COIN_ID_SQL, XCHAIN_TICK_SQL, DISPENSE_FILLS_SQL, DEX_FILLS_SQL } =
     require('../../../src/xchainPriceQuery.js');
+const { INDEXER_TIP_SQL } = require('../../../src/db/price/indexer_tip_sql.js');
 
 // HUB_NETWORK belongs in the shared fixture because the four consensus-uniform
 // derivation overrides are honored only on regtest. A fixture that omitted it would
@@ -72,7 +73,10 @@ function indexerDouble(rows = {}) {
         return {
             pool: { end: async () => {} },
             async doQuery(sql) {
+                if (rows.log) rows.log.push(sql);
                 if (rows.throwOn && rows.throwOn(sql)) throw new Error('indexer unreachable');
+                // Default tip: the indexer has reached the window top of the shared CTX.
+                if (sql === INDEXER_TIP_SQL)  return rows.tip === undefined ? [{ tip: CTX.referenceHeight }] : rows.tip;
                 if (sql === COIN_ID_SQL)      return rows.coin  === undefined ? [{ id: 1, coin: 'BTC' }] : rows.coin;
                 if (sql === XCHAIN_TICK_SQL)  return rows.tick  === undefined ? [{ id: 1, tick: 'XCHAIN' }] : rows.tick;
                 if (sql === DISPENSE_FILLS_SQL) return rows.dispenses || [];
@@ -223,4 +227,51 @@ xchainPriceSourceTests('carry-forward (publication is unconditional)', function 
         expect(q.sql).to.match(/status\s*=\s*'finalized'/);
     });
 
+});
+
+
+xchainPriceSourceTests('indexer tip gate - a lagging indexer abstains instead of reading as a quiet market', function () {
+    // The window top the source itself computes, never a hardcoded buffer.
+    function windowTop(src) { return CTX.referenceHeight - src.confirmationBuffer; }
+
+    it('abstains when the indexer tip is below the window top and the window is empty', async function () {
+        const probe = makeSource({}, FINALIZED_BTC).src;
+        const { src } = makeSource({ tip: [{ tip: windowTop(probe) - 1 }] }, FINALIZED_BTC);
+        expect(await src.derive(CTX)).to.equal(null);
+    });
+
+    it('abstains on a partial window, even with fills present', async function () {
+        const probe = makeSource({}, FINALIZED_BTC).src;
+        const { src } = makeSource({ tip: [{ tip: windowTop(probe) - 1 }], dispenses: [DISPENSE_ROW] }, FINALIZED_BTC);
+        expect(await src.derive(CTX)).to.equal(null);
+    });
+
+    it('abstains when the tip query returns no row or a null tip', async function () {
+        expect(await makeSource({ tip: [] }, FINALIZED_BTC).src.derive(CTX)).to.equal(null);
+        expect(await makeSource({ tip: [{ tip: null }] }, FINALIZED_BTC).src.derive(CTX)).to.equal(null);
+    });
+
+    it('proceeds when the tip sits exactly at the window top', async function () {
+        const probe = makeSource({}, FINALIZED_BTC).src;
+        const { src } = makeSource({ tip: [{ tip: windowTop(probe) }] }, FINALIZED_BTC);
+        const out = await src.derive(CTX);
+        expect(out).to.not.equal(null);
+        expect(out.price).to.equal(BOOTSTRAP_AT_100K);
+    });
+
+    it('reads the tip before either fill query', async function () {
+        const log = [];
+        await makeSource({ log }, FINALIZED_BTC).src.derive(CTX);
+        expect(log.indexOf(INDEXER_TIP_SQL)).to.be.at.least(0);
+        expect(log.indexOf(INDEXER_TIP_SQL)).to.be.below(log.indexOf(DISPENSE_FILLS_SQL));
+        expect(log.indexOf(INDEXER_TIP_SQL)).to.be.below(log.indexOf(DEX_FILLS_SQL));
+    });
+
+    it('skips the tip read for a window empty by chain youth and still carries forward', async function () {
+        const log = [];
+        const { src } = makeSource({ log, tip: [] }, FINALIZED_BTC);
+        const out = await src.derive({ ...CTX, referenceHeight: src.confirmationBuffer });
+        expect(out).to.not.equal(null);
+        expect(log).to.not.include(INDEXER_TIP_SQL);
+    });
 });

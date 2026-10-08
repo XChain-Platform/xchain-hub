@@ -19,8 +19,8 @@
 // leader = btcBlock % N, a latch written only by the leader is stale on the
 // N-1 blocks a hub does not lead, so each hub re-leads at its own residue and
 // the FEDERATION produces a checkpoint roughly every intervalBlocks / N
-// blocks: checkpoint_seq (and with it ANCHOR_CHECKPOINT_EVERY_N, defined
-// against seq % N) runs N times faster than CHECKPOINT_INTERVAL_BLOCKS
+// blocks: checkpoint_seq (and with it ANCHOR_CHECKPOINT_EVERY_N, which samples
+// the ordinal FLOOR(seq / interval) % N) runs N times faster than CHECKPOINT_INTERVAL_BLOCKS
 // configured, burning DOGE on the extra anchors.
 
 const { expect }            = require('chai');
