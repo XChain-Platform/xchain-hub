@@ -39,3 +39,10 @@ const { addGate, UNARMED } = require('./shared_rows.js');
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
 
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
+// Effective allow/block-list enforcement, inert until coordinated activation.
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
+    mainnet: UNARMED,
+    testnet: UNARMED,
+    regtest: UNARMED,
+});
