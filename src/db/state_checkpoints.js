@@ -100,6 +100,12 @@ module.exports = {
         return this.doQuery('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ? LIMIT 1', [chain, network, checkpoint_seq]);
     },
 
+    // The lowest-height checkpoint of one chain at or above a block, the latest sequence at
+    // that height winning as the table's reorg rule does.
+    async getFirstStateCheckpointAtOrAbove(chain, network, blockIndex) {
+        return this.doQuery('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index >= ? ORDER BY block_index ASC, checkpoint_seq DESC LIMIT 1', [chain, network, blockIndex]);
+    },
+
     // Reads one row from state_checkpoints.
     // Moved here from src/anchor/publisher.js:2559.
     async getStateCheckpointByNetwork(network) {
