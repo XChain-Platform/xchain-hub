@@ -30,7 +30,8 @@
       "hash": "260da1c6f73a0778d12d7c29c2922067be53559d28bd019e754a6fa2ee601080",
       "twins": [
         "xchain-indexer"
-      ]
+      ],
+      "note": "Hub-only registry values are pinned separately by at1-consensus-identity.json."
     },
     "equivocation_header": {
       "path": "src/consensus/equivocation_header.js",
