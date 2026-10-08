@@ -49,4 +49,14 @@ function rankOpensAt(votingEnd, rank, stepMs) {
     return votingEndMs + rank * stepMs;
 }
 
-module.exports = { rankedElectorate, takeoverRank, rankOpensAt };
+function resultSenderEntitled(ranked, senderAddr, votingEnd, now, stepMs, failoverActive) {
+    const rank = takeoverRank(ranked, senderAddr);
+    const nowMs = now instanceof Date ? now.getTime() : now;
+    if (rank < 0 || typeof nowMs !== 'number' || !Number.isFinite(nowMs)) return false;
+    if (rank === 0) return true;
+    if (failoverActive !== true) return false;
+    const opensAt = rankOpensAt(votingEnd, rank, stepMs);
+    return opensAt !== null && nowMs >= opensAt;
+}
+
+module.exports = { rankedElectorate, takeoverRank, rankOpensAt, resultSenderEntitled };
