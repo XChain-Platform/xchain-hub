@@ -11,7 +11,7 @@
  *
  **********************************************************************
  *
- * The five numbers that say whether this build still applies the same rules as
+ * The six numbers that say whether this build still applies the same rules as
  * the one before it. A restructure may move any file it likes; it may not move
  * one of these.
  *
@@ -19,6 +19,10 @@
  *                             SHARED_GATES, with the gate-by-gate preimage kept
  *                             beside it. Comparable across repos: it answers
  *                             "same rules?".
+ *   hub_only_rules_digest     sha256 over the rows in hub_rows.js, with the
+ *                             gate-by-gate preimage kept beside it. These rules
+ *                             have no indexer twin, so they stay separate from
+ *                             the cross-repo digest above.
  *   gates_field_hash          sha256 of the GATES field this hub signs into a
  *                             ROLLCALL v1 epoch, which is
  *                             knownGateKeys().join(','). Built by gatesFor()
@@ -38,7 +42,7 @@
  * say nothing about what to fix; the map turns "the digest changed" into "these
  * gates changed", which is the sentence an operator can act on, and it is what
  * makes an environment-shifted digest diagnosable in one read (see ONE OF THE
- * FIVE below). The SIGNED wire field is knownGateKeys().join(','), built from
+ * SIX below). The SIGNED wire field is knownGateKeys().join(','), built from
  * the key list alone, so it reads the same whether or not a carrier resolves.
  * That is why consensus_rules_digest takes each gate from the activation
  * registry, or a function-valued one from src/consensus/gates/<stem>_gate.js,
@@ -59,7 +63,7 @@
  * is the config oracle, so its identity is entirely code-derived and this
  * script opens no socket, reads no .env and needs no database.
  *
- * ONE OF THE FIVE IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
+ * ONE OF THE SIX IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
  * hashes gate VALUES, and a regtest venue arms some gates from its own
  * environment rather than from a committed height, so the same build reports one
  * digest in a bare checkout and another inside a configured container. A reading
@@ -108,6 +112,29 @@ function projectGates(gates) {
 }
 
 /**
+ * The hub-only registry rows and their digest. The row source is the membership
+ * list: its data-only shape is guarded by the registry layout suite, so adding a
+ * new row cannot leave the identity tool's separate hardcoded list stale.
+ * @param {{canonical: Function}} rulesModule the measured checkout's digest module
+ * @returns {{digest: string, gates: object}}
+ */
+function hubOnlyRulesIdentity(rulesModule) {
+    const source = fs.readFileSync(path.join(REPO_ROOT, 'src/consensus/gate_registry/hub_rows.js'), 'utf8');
+    const keys = Array.from(source.matchAll(/^addGate\('([^']+)'/gm), (match) => match[1]);
+    if (!keys.length) throw new Error('hub_rows.js has no registry rows');
+    if (new Set(keys).size !== keys.length) throw new Error('hub_rows.js has a duplicate registry row');
+
+    const registry = loadFromRepo('src/consensus/gate_registry.js');
+    const gates = {};
+    for (const key of keys.sort()) gates[key] = rulesModule.canonical(registry.get(key));
+    const preimage = Object.keys(gates).map((key) => `${key}=${gates[key]}`).join('\n');
+    return {
+        digest: crypto.createHash('sha256').update(preimage, 'utf8').digest('hex'),
+        gates,
+    };
+}
+
+/**
  * Measure `dir` instead of the checkout this script lives in.
  * @param {string} dir a hub checkout
  * @returns {string} the resolved root
@@ -149,7 +176,7 @@ function coinConsensusPins() {
 }
 
 /**
- * The five values, all of them derived from the source tree alone.
+ * The six values, all of them derived from the source tree alone.
  * @returns {object}
  */
 function codeIdentity() {
@@ -161,6 +188,7 @@ function codeIdentity() {
 
     const rules = rulesModule.computeConsensusRulesDigest();
     const gates = projectGates(rules.gates);
+    const hubOnlyRules = hubOnlyRulesIdentity(rulesModule);
     // The GATES field verbatim, because the hash alone cannot be checked by hand
     // against a wire capture and this is the string the hub signs.
     const gatesField = rulesModule.knownGateKeys().join(',');
@@ -175,6 +203,9 @@ function codeIdentity() {
         consensus_rules_gates: gates,
         gate_key_count: Object.keys(gates).length,
         absent_gates: absentGates,
+        hub_only_rules_digest: hubOnlyRules.digest,
+        hub_only_rules_gates: hubOnlyRules.gates,
+        hub_only_gate_key_count: Object.keys(hubOnlyRules.gates).length,
         gates_field: gatesField,
         gates_field_hash: crypto.createHash('sha256').update(gatesField, 'utf8').digest('hex'),
         coin_consensus_pins: coinPins.pairs,
@@ -267,6 +298,7 @@ function compare(pin, fresh) {
     const scalars = [
         'consensus_rules_digest', 'gates_field', 'gates_field_hash',
         'coin_consensus_pin_hash', 'hub_schema_version', 'gate_key_count', 'carrier_logic_digest',
+        'hub_only_rules_digest', 'hub_only_gate_key_count',
     ];
     for (const key of scalars) {
         if (pin[key] !== fresh[key]) {
@@ -282,6 +314,20 @@ function compare(pin, fresh) {
         if (before === after) continue;
         differences.push({
             kind: after === undefined ? 'gate_dropped' : (before === undefined ? 'gate_added' : 'gate_value'),
+            field: key,
+            before: before === undefined ? null : before,
+            after: after === undefined ? null : after,
+        });
+    }
+    const hubGateKeys = Array.from(new Set(
+        Object.keys(pin.hub_only_rules_gates || {}).concat(Object.keys(fresh.hub_only_rules_gates || {})),
+    )).sort();
+    for (const key of hubGateKeys) {
+        const before = (pin.hub_only_rules_gates || {})[key];
+        const after = (fresh.hub_only_rules_gates || {})[key];
+        if (before === after) continue;
+        differences.push({
+            kind: after === undefined ? 'hub_gate_dropped' : (before === undefined ? 'hub_gate_added' : 'hub_gate_value'),
             field: key,
             before: before === undefined ? null : before,
             after: after === undefined ? null : after,
@@ -355,6 +401,8 @@ function main() {
     } else {
         console.log(`consensus_rules_digest:   ${identity.consensus_rules_digest}`);
         console.log(`gate keys:                ${identity.gate_key_count} (${identity.absent_gates.length} absent)`);
+        console.log(`hub_only_rules_digest:    ${identity.hub_only_rules_digest}`);
+        console.log(`hub-only gate keys:       ${identity.hub_only_gate_key_count}`);
         console.log(`gates_field_hash:         ${identity.gates_field_hash}`);
         console.log(`coin_consensus_pin_hash:  ${identity.coin_consensus_pin_hash}`);
         for (const pair of Object.keys(identity.coin_consensus_pins).sort()) {

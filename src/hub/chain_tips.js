@@ -102,9 +102,7 @@ class ChainTips {
         }
     }
 
-    // The pushed BTC tip a consensus round may anchor on: the stored row only when
-    // btcPushedTipFresh accepts it, otherwise null so the caller takes the gated direct
-    // path through resolveBtcLatestBlock.
+    // Return the stored BTC tip only while its timestamp passes the freshness gate.
     async resolveFreshPushedBtcTip(resolvedNetwork){
         let network = resolvedNetwork;
         try {
@@ -116,6 +114,28 @@ class ChainTips {
             if(tip && tip.blockHeight && this.btcPushedTipFresh(tip)) return tip;
         } catch (_) { /* hub db down? no pushed tip */ }
         return null;
+    }
+
+    // The DOGE indexer's committed tip, read directly: the anchor fold gate dates itself
+    // on the chain the anchor lands on, so a BTC height must not stand in. Null, never 0,
+    // on a missing URL, a failed or errored call, a stale lag or an unusable block_index.
+    async resolveDogeLatestBlock(){
+        let why = null, height = null;
+        try {
+            const url = await this.resolveIndexerUrl('DOGE');
+            if(!url) why = 'no DOGE indexer URL resolves';
+            else {
+                const res = await axiosFor(this).post(url, { jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {} }, { timeout: 5000 });
+                const r = res && res.data && res.data.result;
+                let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
+                if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
+                if(!r || r.error) why = 'indexer getlatestblock returned ' + (r ? 'an error (' + JSON.stringify(r.error) + ')' : 'no result');
+                else if(r.lag != null && Number(r.lag) > maxLag) why = 'indexer lag ' + r.lag + ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip';
+                else if(!(height = Number(r.block_index) || null)) why = 'indexer getlatestblock returned no usable block_index (' + JSON.stringify(r.block_index) + ')';
+            }
+        } catch (err) { why = 'failed to resolve from the indexer: ' + err.message; }
+        if(why) logger.warn('XChainHub: DOGE latest block unavailable: ' + why);
+        return why ? null : height;
     }
 
     // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
