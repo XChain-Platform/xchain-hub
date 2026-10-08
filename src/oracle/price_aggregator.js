@@ -254,7 +254,7 @@ class PriceAggregator extends EventEmitter {
         try {
             // tip + admitMarginBlocks('oracle_prices'), through the one stamp definition, so
             // this rail cannot drift from the margin the barrier certifies it against.
-            return ah.admitBlocks(readSet, { [chain]: tip }, 'oracle_prices')[chain];
+            return ah.admitBlocks(readSet, { [chain]: tip }, 'oracle_prices', this.hub && this.hub.network)[chain];
         } catch (e) {
             logger.warn('PriceAggregator: could not stamp an admission height for a ' + chain +
                 ' PRICE v1 row (' + (e && e.message) + '); storing it as a legacy row.');
