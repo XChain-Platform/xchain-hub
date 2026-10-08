@@ -36,8 +36,11 @@ const electorateMixin     = require('./governance/electorate.js');
 const proposeInboundMixin = require('./governance/propose_inbound.js');
 const voteInboundMixin    = require('./governance/vote_inbound.js');
 const resultInboundMixin  = require('./governance/result_inbound.js');
+const resultRequestMixin  = require('./governance/result_request.js');
 const tallyMixin          = require('./governance/tally.js');
+const overdueMixin        = require('./governance/overdue.js');
 const boundsMixin         = require('./governance/bounds.js');
+const { GOV_RESULT_REQ }   = resultRequestMixin;
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -55,6 +58,7 @@ class Governance extends EventEmitter {
         this.validatorSet = [];
         this._messageHandler = null;
         this._tallyTimer = null;
+        this._resultRequests = new Map();
 
         this.votingPeriod  = parseInt(hubConfig.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
         this.tallyInterval = parseInt(hubConfig.GOVERNANCE_TALLY_INTERVAL) || 60000;
@@ -81,7 +85,9 @@ class Governance extends EventEmitter {
         // rejection into process death, so without this a per-tick fault kills the hub
         // instead of logging and re-arming, which is what the tally path intends.
         this._tallyTimer = setInterval(() => {
-            this.checkExpiredProposals().catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
+            this.checkExpiredProposals()
+                .then(() => this._tallyTimer && this.requestMissingResults())
+                .catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
         }, this.tallyInterval);
 
         logger.info('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
@@ -96,6 +102,7 @@ class Governance extends EventEmitter {
             clearInterval(this._tallyTimer);
             this._tallyTimer = null;
         }
+        this._resultRequests.clear();
     }
 
     // Compute the block-anchored activation height for a capability MIN_STAKE change. The change
@@ -300,8 +307,14 @@ class Governance extends EventEmitter {
             case GOV_RESULT:
                 // async: a rejection out of the gossip dispatcher would be an
                 // unhandled rejection (process exit), so catch and log here.
-                this.handleResult(envelope).catch(e =>
-                    logger.error(nodeUtil.format('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e)));
+                (envelope.data && envelope.data.catchUp === true
+                    ? this.handleCatchUpResult(envelope)
+                    : this.handleResult(envelope)).catch(e =>
+                        logger.error(nodeUtil.format('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e)));
+                break;
+            case GOV_RESULT_REQ:
+                this.handleResultRequest(envelope).catch(e =>
+                    logger.error(nodeUtil.format('Governance: GOV_RESULT_REQ handler error:', e && e.message ? e.message : e)));
                 break;
         }
     }
@@ -328,7 +341,8 @@ function installMixins(target, mixins) {
 }
 
 installMixins(Governance.prototype, [
-    electorateMixin, proposeInboundMixin, voteInboundMixin, resultInboundMixin, tallyMixin, boundsMixin
+    electorateMixin, proposeInboundMixin, voteInboundMixin, resultInboundMixin, resultRequestMixin, tallyMixin,
+    overdueMixin, boundsMixin
 ]);
 
 module.exports = Object.assign(Governance, {
@@ -336,5 +350,6 @@ module.exports = Object.assign(Governance, {
     // functions, and a test that rebuilt the signed bytes itself would keep passing
     // even if production drifted away from it, so the suite must use these.
     voteSigningPayload,
-    normalizeVoteSeq
+    normalizeVoteSeq,
+    GOV_RESULT_REQ
 });

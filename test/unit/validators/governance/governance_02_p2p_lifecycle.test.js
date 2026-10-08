@@ -91,10 +91,7 @@ it('handleVote REJECTS a registered validator vote with a forged signature', fun
 });
 });
 
-// Tally leadership
-describe('Governance', function () {
-    installSuiteHooks1();
-describe('P2P message handlers', function () {
+function registerP2PProposalTests() {
 it('handlePropose defaults a missing proposerPubkey and rationale to empty strings', async function () {
             await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
@@ -119,6 +116,9 @@ it('handleVote REJECTS an unsigned vote (no signature to authenticate the voter)
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
+}
+
+function registerP2PResultTests() {
 it('handleResult updates proposal status (from the tally leader, post voting_end)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: '2020-01-01T00:00:00Z' }]); // SELECT voting_end
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });                       // UPDATE
@@ -134,20 +134,35 @@ it('ignores messages with missing fields', function () {
             gov.handlePropose({ sender: 'peer', data: {} });
             gov.handleVote({ sender: 'peer', data: {} });
             gov.handleResult({ sender: 'peer', data: {} });
+            gov.handleResultRequest({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
         });
 it('handleMessage routes each governance message type and ignores unknown', function () {
             let p = sinon.spy(gov, 'handlePropose');
             let v = sinon.spy(gov, 'handleVote');
             let r = sinon.spy(gov, 'handleResult');
+            let q = sinon.spy(gov, 'handleResultRequest');
+            let c = sinon.spy(gov, 'handleCatchUpResult');
             gov.handleMessage({ type: 'GOV_PROPOSE', data: {} });
             gov.handleMessage({ type: 'GOV_VOTE', data: {} });
             gov.handleMessage({ type: 'GOV_RESULT', data: {} });
+            gov.handleMessage({ type: 'GOV_RESULT_REQ', data: {} });
+            gov.handleMessage({ type: 'GOV_RESULT', data: { catchUp: true } });
             expect(() => gov.handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
             expect(p.calledOnce).to.be.true;
             expect(v.calledOnce).to.be.true;
             expect(r.calledOnce).to.be.true;
+            expect(q.calledOnce).to.be.true;
+            expect(c.calledOnce).to.be.true;
         });
+}
+
+// Tally leadership
+describe('Governance', function () {
+    installSuiteHooks1();
+describe('P2P message handlers', function () {
+    registerP2PProposalTests();
+    registerP2PResultTests();
 });
 });
 
@@ -158,17 +173,23 @@ describe('start() / stop()', function () {
 it('start() subscribes and schedules the tally timer; stop() tears both down', async function () {
             let clock = sinon.useFakeTimers();
             gov.tallyInterval = 1000;
-            let spy = sinon.spy(gov, 'checkExpiredProposals');
+            let spy = sinon.stub(gov, 'checkExpiredProposals').resolves();
+            let requests = sinon.stub(gov, 'requestMissingResults').resolves();
             await gov.start();
             expect(pm.listenerCount('message')).to.equal(1);
             expect(gov._tallyTimer).to.not.equal(null);
 
             clock.tick(1001);
             expect(spy.called).to.be.true;
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(requests.called).to.be.true;
 
+            gov._resultRequests.set('gov:P:1', Date.now());
             await gov.stop();
             expect(gov._messageHandler).to.equal(null);
             expect(gov._tallyTimer).to.equal(null);
+            expect(gov._resultRequests.size).to.equal(0);
             expect(pm.listenerCount('message')).to.equal(0);
             clock.restore();
         });
