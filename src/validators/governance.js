@@ -37,6 +37,7 @@ const proposeInboundMixin = require('./governance/propose_inbound.js');
 const voteInboundMixin    = require('./governance/vote_inbound.js');
 const resultInboundMixin  = require('./governance/result_inbound.js');
 const tallyMixin          = require('./governance/tally.js');
+const overdueMixin        = require('./governance/overdue.js');
 const boundsMixin         = require('./governance/bounds.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
@@ -328,7 +329,8 @@ function installMixins(target, mixins) {
 }
 
 installMixins(Governance.prototype, [
-    electorateMixin, proposeInboundMixin, voteInboundMixin, resultInboundMixin, tallyMixin, boundsMixin
+    electorateMixin, proposeInboundMixin, voteInboundMixin, resultInboundMixin, tallyMixin, overdueMixin,
+    boundsMixin
 ]);
 
 module.exports = Object.assign(Governance, {

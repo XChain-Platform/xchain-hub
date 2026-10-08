@@ -62,6 +62,8 @@ module.exports = {
             return;
         }
 
+        await this.countOverdueProposals(Date.now(), expired);
+
         for (let proposal of expired) {
             // Only the deterministic leader for this proposal tallies and
             // broadcasts the result; followers accept the GOV_RESULT broadcast

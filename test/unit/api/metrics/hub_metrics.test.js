@@ -19,7 +19,8 @@ const {
 } = require('chai');
 const {
   installHubOracleMetrics,
-  installHubStakeShareMetrics
+  installHubStakeShareMetrics,
+  installHubGovernanceOverdueMetrics
 } = require('../../../../src/api/hub_metrics');
 const {
   StakeShareMonitor,
@@ -261,4 +262,22 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part3.call(this);
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part4.call(this);
   registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part5.call(this);
+});
+
+describe('hub governance overdue proposal metric', function () {
+  afterEach(function () {
+    require('../../../../src/observability')._resetObservability();
+  });
+
+  it('publishes the live overdue count as a gauge', function () {
+    const observability = realObservability();
+    const hub = { governance: { _overdueCount: 2 } };
+    expect(installHubGovernanceOverdueMetrics(observability, hub)).to.equal(true);
+    expect(observability.registry.render())
+      .to.match(/^xchain_governance_overdue_proposals 2$/m);
+
+    hub.governance._overdueCount = 0;
+    expect(observability.registry.render())
+      .to.match(/^xchain_governance_overdue_proposals 0$/m);
+  });
 });
