@@ -7987,6 +7987,18 @@
       "5408e5df68cc186320c9ce7d5e02bd2966ffadc79e564b81beaeac0a64ea11c3",
       "9a9f62c0692c8fe56ed07acaccf25e14cd9d32e0ee70ebfee14efbf744ec6bd2"
     ],
+    "ae7ad1d19661c731": [
+      "e61935b7807184b19ace78db3c03db6e93eeebc3d09816aa1528597906a042ff",
+      "633d134b9127b9a96cb1b911dcca33577bd9270778245d40299290c0b32775e3",
+      "d73f525a4c7e19e38673ea8cbb16efa6ad981c5abaddf76531c76b774647eeae",
+      "4c748483a8f3b38af74503602f29dace0e9d6dc9c1e6683a078b51136e207780",
+      "54e30856a27fc12d8bbd0987f4b3c6f36ad89582e7d468b0789b50c0becd43e7",
+      "819b0d6e780814f1d41a41ee89093203bbb5f0e34dc8032337add84aff8d0335",
+      "4dccc9dd84f6bcf4df43732f47aaf21b47c348e72c22d06126e4ee43804de629",
+      "d0990147a647d347369f77d17e2083a2e65087b987c6c25ef15a167134776fb2",
+      "4917e9e897246108fde5de17fb87a48a5fbba5558c73b1cba9ee6fee713e683b",
+      "c41ae277751629e5cf841bebaf8eab2c2493fe1022fb097c57e4131ae4d6369b"
+    ],
     "ae9fdc20218e386b": [
       "76bb47f402a962e31ad3d4e51da8c70cb7355fc7dc462abb46eafa166a41f72e",
       "7aec2f3c6413bccfec99ff69e938f68d2cc206a3481b914336fa15a22a407569",
@@ -8823,16 +8835,6 @@
       "715c23bcc20da0d24a4ee06cabbd1693ae40156b60dc5cec64a3ae2c356da8bb",
       "fa9df3e50291405fda7fa1b735406beb9a567a0fbfd648100c6c22e294fc75f4",
       "7caa96c6e5683450d1e35bc9a2c00bdc68ac373bea0eea4d3fcfe3fb0530be39"
-    ],
-    "c28a1995f6462a3a": [
-      "e61935b7807184b19ace78db3c03db6e93eeebc3d09816aa1528597906a042ff",
-      "633d134b9127b9a96cb1b911dcca33577bd9270778245d40299290c0b32775e3",
-      "d73f525a4c7e19e38673ea8cbb16efa6ad981c5abaddf76531c76b774647eeae",
-      "819b0d6e780814f1d41a41ee89093203bbb5f0e34dc8032337add84aff8d0335",
-      "4dccc9dd84f6bcf4df43732f47aaf21b47c348e72c22d06126e4ee43804de629",
-      "d0990147a647d347369f77d17e2083a2e65087b987c6c25ef15a167134776fb2",
-      "4917e9e897246108fde5de17fb87a48a5fbba5558c73b1cba9ee6fee713e683b",
-      "c41ae277751629e5cf841bebaf8eab2c2493fe1022fb097c57e4131ae4d6369b"
     ],
     "c2a3f40e24286d3d": [
       "95559dd7c7d87446b042d686f858752feb3e8a967861ad556411423eec164809",
@@ -11318,7 +11320,7 @@
         "ci:regression"
       ],
       "fileCount": 877,
-      "titleCount": 8213,
+      "titleCount": 8215,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11697,7 +11699,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "c28a1995f6462a3a",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -12252,7 +12254,7 @@
     },
     "test": {
       "fileCount": 877,
-      "titleCount": 8213,
+      "titleCount": 8215,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12631,7 +12633,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "c28a1995f6462a3a",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -13135,7 +13137,7 @@
     },
     "test:all": {
       "fileCount": 957,
-      "titleCount": 9036,
+      "titleCount": 9038,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13594,7 +13596,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "c28a1995f6462a3a",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
