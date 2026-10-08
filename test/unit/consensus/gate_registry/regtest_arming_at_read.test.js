@@ -54,6 +54,8 @@ function sha256(bytes) {
     return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
+const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
+
 function withEnv(value, fn) {
     const saved = process.env[ENV];
     try {
@@ -113,6 +115,15 @@ describe('gate_registry: regtest arming is applied at READ time @regression @tie
             assert.strictEqual(rowOf(KEY).regtest, null);
             assert.strictEqual(registry.activeAt(KEY, 'regtest', null, 0, 0), false);
         });
+    });
+
+    it('keeps the attest batch-head gate at the dark sentinel off regtest and active at regtest genesis', function () {
+        const row = registry.get(ATTEST_BATCH_HEAD_KEY);
+
+        assert.deepStrictEqual(row, { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'mainnet', null, 0, 0), false);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', null, 0, 0), false);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'regtest', null, 0, 0), true);
     });
 
 });

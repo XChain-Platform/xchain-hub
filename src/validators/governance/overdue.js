@@ -60,13 +60,14 @@ function reportOverdue(subject, overdue, now) {
 
 module.exports = {
 
-    async countOverdueProposals(now = Date.now()) {
-        let proposals;
-        try {
-            proposals = await this.db.findGovernanceProposalsByStatusAndVotingEnd();
-        } catch (e) {
-            logger.error(nodeUtil.format('Governance overdue count error:', e.message, e));
-            return this._overdueCount || 0;
+    async countOverdueProposals(now = Date.now(), proposals) {
+        if (!proposals) {
+            try {
+                proposals = await this.db.findGovernanceProposalsByStatusAndVotingEnd();
+            } catch (e) {
+                logger.error(nodeUtil.format('Governance overdue count error:', e.message, e));
+                return this._overdueCount || 0;
+            }
         }
 
         let overdue = overdueRows(proposals, now, getOverdueMs(this));

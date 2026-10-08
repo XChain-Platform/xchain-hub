@@ -35,7 +35,13 @@ module.exports = {
         let { proposalId, status } = envelope.data;
         if (!proposalId || !status) return;
 
-        if (!this.resultComesFromTallyLeader(envelope, proposalId)) return;
+        let failoverActive = typeof this.isTallyFailoverActive === 'function' && this.isTallyFailoverActive();
+        if (failoverActive) {
+            if (!this.isKnownSender(envelope.sender)) {
+                noteDrop({ reason: 'unknown_sender', phase: 'gov_result', sender: envelope.sender, envelope });
+                return;
+            }
+        } else if (!this.resultComesFromTallyLeader(envelope, proposalId)) return;
 
         // Reject a result that arrives before the voting window closes: the legitimate leader
         // only tallies after voting_end (checkExpiredProposals), so an early result is
@@ -48,6 +54,11 @@ module.exports = {
             prows = await this.db.getGovernanceProposalElectorate(proposalId);
         } catch (e) { return; }
         if (!prows.length || new Date(prows[0].voting_end).getTime() > Date.now()) return;
+        if (failoverActive && !this.isProposalTallySenderEntitled({
+            proposal_id: proposalId,
+            voting_end: prows[0].voting_end,
+            validator_snapshot: prows[0].validator_snapshot
+        }, envelope.sender)) return;
 
         let applyStatus = await this.resolveResultStatus(envelope, proposalId, status, prows[0]);
         if (applyStatus === null) return;
