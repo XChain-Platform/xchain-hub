@@ -121,8 +121,13 @@ module.exports = {
             // synchronously. Left UNSET when this resolve throws, so a hub that could
             // not determine its own network fails the gate closed rather than guessing.
             this.currentBtcNetwork = network;
-            let btcTip = await this.db.getChainTip('BTC', network);
+            let btcTip = typeof this.hub.resolveFreshPushedBtcTip === 'function'
+                ? await this.hub.resolveFreshPushedBtcTip(network)
+                : await this.db.getChainTip('BTC', network);
             if (btcTip) {
+                let ageS = Math.floor(Date.now() / 1000) - Number(btcTip.blockTime);
+                logger.info('Oracle: round reference block using pushed BTC tip (height ' +
+                    btcTip.blockHeight + ') ' + (Number.isFinite(ageS) ? ageS + 's old' : 'with unknown age'));
                 applyPushedChainTip.call(this, btcTip);
             } else {
                 let directHeight = null, directCause = null;
