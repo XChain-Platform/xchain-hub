@@ -58,7 +58,7 @@ describe('governance overdue proposal alert', function () {
         await governance.checkExpiredProposals();
 
         expect(error.calledOnceWithMatch('gov:STALE:1')).to.equal(true);
-        expect(governance._overdueCount).to.equal(1);
+        expect(Reflect.get(governance, '_overdueCount')).to.equal(1);
         expect(db.findGovernanceProposalsByStatusAndVotingEnd.calledOnceWithExactly()).to.equal(true);
         expect(mail.called).to.equal(false);
         clock.restore();
@@ -77,7 +77,7 @@ describe('governance overdue proposal alert', function () {
 
         await governance.checkExpiredProposals();
 
-        expect(governance._overdueCount).to.equal(1);
+        expect(Reflect.get(governance, '_overdueCount')).to.equal(1);
         expect(tally.called).to.equal(false);
         clock.restore();
     });

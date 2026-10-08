@@ -27,7 +27,8 @@ const {
   evaluateStakeShare
 } = require('../../../../src/validators/stake_share_monitor.js');
 const {
-  installObservability
+  installObservability,
+  _resetObservability: resetObservability
 } = require('../../../../src/observability');
 
 // Real registry from the observability module, not a stub: the claim under test
@@ -45,7 +46,7 @@ function registerHubOracleRoundHeartbeatMetricsItemA98d6746Suite1Part1() {
   // service), so a case asserting a series is ABSENT has to start from a
   // clean registry rather than inheriting the previous case's series.
   afterEach(function () {
-    require('../../../../src/observability')._resetObservability();
+    resetObservability();
   });
   it('renders freshness, round number and skip streak from live oracle state', function () {
     const observability = realObservability();
@@ -266,7 +267,7 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
 
 describe('hub governance overdue proposal metric', function () {
   afterEach(function () {
-    require('../../../../src/observability')._resetObservability();
+    resetObservability();
   });
 
   it('publishes the live overdue count as a gauge', function () {
@@ -276,7 +277,7 @@ describe('hub governance overdue proposal metric', function () {
     expect(observability.registry.render())
       .to.match(/^xchain_governance_overdue_proposals 2$/m);
 
-    hub.governance._overdueCount = 0;
+    Reflect.set(hub.governance, '_overdueCount', 0);
     expect(observability.registry.render())
       .to.match(/^xchain_governance_overdue_proposals 0$/m);
   });
