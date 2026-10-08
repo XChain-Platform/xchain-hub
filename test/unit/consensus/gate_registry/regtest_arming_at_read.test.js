@@ -32,6 +32,7 @@ const registry = require('../../../../src/consensus/gate_registry.js');
 const { REGTEST_ARMING } = require('../../../../src/consensus/gate_registry/shared_rows.js');
 const core = require('../../../../src/consensus/gate_registry/core.js');
 const hubConfig = require('../../../../src/config.js');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const { createRegistry } = core;
 
@@ -125,7 +126,7 @@ describe('gate_registry: regtest arming at read, the edges @regression @tier1', 
 
     it('matches the available indexer canonical files byte for byte', function () {
         const firstCanonical = path.join(INDEXER_SHARED_ROWS_DIR, 'shared_rows.js');
-        if (!fs.existsSync(firstCanonical)) this.skip();
+        if (!skipOrFail(this, siblingCheckout(__dirname, firstCanonical), 'the indexer shared row canonical')) return;
         for (const name of Object.keys(CANONICAL_SHARED_ROWS_SHA256)) {
             const local = fs.readFileSync(path.join(SHARED_ROWS_DIR, name));
             const canonical = fs.readFileSync(path.join(INDEXER_SHARED_ROWS_DIR, name));
