@@ -36,7 +36,7 @@ const gateRegistry = require('../../consensus/gate_registry.js');
 const CLEAR_FRONTIER_KEY = 'peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION';
 
 function clearFrontierActive(network, chain, block) {
-    return gateRegistry.activeAt(CLEAR_FRONTIER_KEY, String(network || ''), chain, block, null);
+    return gateRegistry.activeAt(CLEAR_FRONTIER_KEY, String(network || '').toLowerCase(), chain, block, null);
 }
 
 // The reading a chain publishes: the indexer's price_landing_clear when the gate is

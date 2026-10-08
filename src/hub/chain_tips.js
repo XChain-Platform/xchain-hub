@@ -330,9 +330,10 @@ class ChainTips {
     }
 
     // Each landing chain's landed reading, read beside the admission tips: its
-    // `hub_push_delivered`, or `price_landing_clear` when the clear-frontier gate is active
-    // and that is ahead. A chain whose indexer does not report one (an older indexer, a failed read, a
-    // malformed value) comes back null, which publishes nothing for it.
+    // `hub_push_delivered`, or `price_landing_clear` when the clear-frontier gate is
+    // active and that is ahead. A chain whose indexer does not report one (an older
+    // indexer, a failed read, a malformed value) comes back null, which publishes
+    // nothing for it.
     async resolveLandingReadings(chains, opts) {
         let out = {};
         let signal = opts && opts.signal;
@@ -351,7 +352,8 @@ class ChainTips {
                 }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
                 let result = res && res.data && res.data.result;
                 if (!result || result.error) return null;
-                return selectReading(c, result.hub_push_delivered, result.price_landing_clear, hubConfig.HUB_NETWORK);
+                return selectReading(c, result.hub_push_delivered, result.price_landing_clear,
+                    this.network || hubConfig.HUB_NETWORK);
             } catch (err) {
                 return null;
             }
