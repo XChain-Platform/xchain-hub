@@ -78,6 +78,7 @@ module.exports = {
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
+        if(this.declinesOffCadence(cp)) return;                    // too soon after the last checkpoint
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
@@ -105,6 +106,20 @@ module.exports = {
         logger.warn('StateCheckpointEngine: declining to co-sign ' + cp.chain + '@' + cp.block_index +
             ' seq ' + cp.checkpoint_seq + ': ' + reason + (detail ? ' (' + detail + ')' : '') +
             ' (declines for this reason so far: ' + declines[reason] + ')');
+    },
+
+    // Refuse a round that starts less than intervalBlocks after our last checkpoint, the
+    // follower half of the leader's gate in tick; without it a slot holder can checkpoint at
+    // every block it leads and pick the snapshot_block that keys the bundle election. A
+    // snapshot_block EQUAL to the latch is the same round (one SIGN_REQ per chain, and the
+    // first chain's FINALIZED may already have moved the latch there), so it still passes.
+    declinesOffCadence(cp){
+        let latch = this._lastCheckpointBtcBlock;
+        let snap  = Number(cp.snapshot_block);
+        if(latch == null || snap === latch || snap >= latch + this.intervalBlocks) return false;
+        this.noteCosignDecline('off_cadence', cp,
+            'proposed ' + snap + ', last checkpoint ' + latch + ', interval ' + this.intervalBlocks);
+        return true;
     },
 
     // The follower's leader check over the resolved set: this hub must be a member, and

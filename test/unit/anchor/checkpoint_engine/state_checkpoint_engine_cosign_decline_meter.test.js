@@ -12,7 +12,7 @@
 
 // A follower that cannot confirm a proposed checkpoint declines to co-sign, which is the
 // fail-closed answer, and the decline must leave a trace: a silent one lets a member whose
-// own indexer is down drop out of every quorum while the rest still sign. Each of the four
+// own indexer is down drop out of every quorum while the rest still sign. Each of the five
 // declines is counted by reason, warned at most once per window, and reported by
 // getcheckpointstats, and a leader's round timeout names the validators that never signed.
 // No signing decision moves: every case below that declines still does not co-sign.
@@ -52,6 +52,7 @@ function buildFollower(opts) {
     engine.resolveCapabilityValidators = async () => [leader, follower].map(id => ({ pubkey: pk(id), amount: '1' }));
     engine.followsCadenceLeader = () => true;
     engine.getMaxCheckpointSeq = async () => null;
+    if (opts.latch !== undefined) engine._lastCheckpointBtcBlock = opts.latch;
     engine.indexerCall = opts.indexerCall || (async () => Object.assign({}, TIP));
     engine.cosigned = [];
     engine.coSignAgainstOwnBlock = (cp) => { engine.cosigned.push(cp); };
@@ -77,6 +78,7 @@ const DECLINE_CASES = [
     ['indexer_no_block',    { indexerCall: async () => null }, /indexer_no_block/],
     ['own_tip_unresolved',  { tip: null }, /own_tip_unresolved/],
     ['snapshot_out_of_tolerance', { tip: SNAP + 10000 }, /proposed 500, our tip 10500/],
+    ['off_cadence',         { latch: SNAP - 2 }, /proposed 500, last checkpoint 498, interval 6/],
 ];
 
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
@@ -105,7 +107,8 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
     it('getcheckpointstats reports every reason and the last one seen', async function () {
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
-        expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'indexer_read_failed', 'indexer_no_block');
+        expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
+            'indexer_read_failed', 'indexer_no_block');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();

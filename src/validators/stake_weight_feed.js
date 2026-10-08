@@ -61,7 +61,7 @@ class StakeWeightFeed {
         // is remembered as null rather than re-resolved every round.
         this._floors = new Map();
         // Rounds whose membership question this feed answered from a snapshot,
-        // and those it could not. Read by getDiagnostics on the oracle path.
+        // and those it could not. Count-only; no diagnostics payload reads them yet.
         this.membershipResolved   = 0;
         this.membershipUnresolved = 0;
     }
@@ -83,10 +83,16 @@ class StakeWeightFeed {
     // false when the snapshot cannot be resolved, so an unreachable Bitcoin view
     // authorizes nobody.
     async isQualified(capability, blockIndex, pubkey) {
-        if (!pubkey) return false;
+        return (await this.membership(capability, blockIndex, pubkey)) === 'member';
+    }
+
+    // Place `pubkey` as 'member', 'non_member' or 'unresolved' at `blockIndex`, so a
+    // caller can tell an unreachable snapshot apart from a key that holds no stake.
+    async membership(capability, blockIndex, pubkey) {
+        if (!pubkey) return 'non_member';
         let members = await this.qualifiedPubkeys(capability, blockIndex);
-        if (!members) return false;
-        return members.has(String(pubkey).toLowerCase());
+        if (!members) return 'unresolved';
+        return members.has(String(pubkey).toLowerCase()) ? 'member' : 'non_member';
     }
 
     // Lowercased pubkeys of the qualifying set at `blockIndex`, or null when the
