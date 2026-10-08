@@ -36,6 +36,17 @@
 
 const { addGate, UNARMED } = require('./shared_rows.js');
 
+// validators/governance/rules
+// R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
+// height a hub still ATTACHES and PERSISTS a validator_snapshot (harmless,
+// additive) but tallies by the legacy live-set rule and accepts snapshotless
+// proposals; at/above it the snapshot is REQUIRED and is the tally denominator,
+// so validator-set churn between propose() and tally can no longer move the
+// quorum/approval goalposts. Same shape + BTC-anchored gating discipline as
+// STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet ARMED 2026-07-16, with the rest of
+// that flag-day set: BTC 963000, RE-PINNED 2026-08-12 off 969500
+// onto the shared pre-freeze train boundary, the one height the rest of that
+// BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
 
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
