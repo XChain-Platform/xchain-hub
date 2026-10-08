@@ -25,7 +25,7 @@ const admissionHeight = require('../lib/admission_height.js');
 const { blockIntervalS } = require('../lib/relay_margin.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const hubConfig = require('../config');
-const { readingOf } = require('../peers/hub_db/landing_watermark.js');
+const { selectReading } = require('../peers/hub_db/landing_watermark.js');
 const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
@@ -101,7 +101,33 @@ class ChainTips {
             return null;
         }
     }
-
+    // Return the stored BTC tip only while its timestamp passes the freshness gate.
+    async resolveFreshPushedBtcTip(resolvedNetwork){
+        let network;
+        try { network = resolvedNetwork || await this.resolveBtcNetwork(); }
+        catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve fresh pushed BTC tip:', err.message)); return null; }
+        try { const tip = await this.db.getChainTip('BTC', network); return tip && tip.blockHeight && this.btcPushedTipFresh(tip) ? tip : null; }
+        catch (_) { return null; }
+    }
+    // Read the DOGE committed tip directly so the anchor fold gate uses its own chain.
+    async resolveDogeLatestBlock(){
+        let why = null, height = null;
+        try {
+            const url = await this.resolveIndexerUrl('DOGE');
+            if(!url) why = 'no DOGE indexer URL resolves';
+            else {
+                const res = await axiosFor(this).post(url, { jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {} }, { timeout: 5000 });
+                const r = res && res.data && res.data.result;
+                let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
+                if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
+                if(!r || r.error) why = 'indexer getlatestblock returned ' + (r ? 'an error (' + JSON.stringify(r.error) + ')' : 'no result');
+                else if(r.lag != null && Number(r.lag) > maxLag) why = 'indexer lag ' + r.lag + ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip';
+                else if(!(height = Number(r.block_index) || null)) why = 'indexer getlatestblock returned no usable block_index (' + JSON.stringify(r.block_index) + ')';
+            }
+        } catch (err) { why = 'failed to resolve from the indexer: ' + err.message; }
+        if(why) logger.warn('XChainHub: DOGE latest block unavailable: ' + why);
+        return why ? null : height;
+    }
     // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
     // `lag` cannot see a halted chain: a stopped bitcoind freezes the decoder and the
     // committed tip together, so lag reads 0 while the height never moves.
@@ -126,9 +152,7 @@ class ChainTips {
         return false;
     }
 
-    // Freshness gate for the pushed BTC tip used by path 1 above. setChainTip stores
-    // block_time alongside the height, so the age check costs no round-trip. Returns
-    // false when the tip is older than MAX_TIP_AGE_S or its block_time is missing.
+    // Freshness gate for the pushed BTC tip used by path 1 above.
     // Default bound mirrors OracleRound: 2x the oracle round interval.
     btcPushedTipFresh(tip){
         let maxAge = Number(hubConfig.MAX_TIP_AGE_S);
@@ -307,9 +331,8 @@ class ChainTips {
         return out;
     }
 
-    // Each landing chain's `hub_push_delivered` reading, read beside the admission tips.
-    // A chain whose indexer does not report one (an older indexer, a failed read, a
-    // malformed value) comes back null, which publishes nothing for it.
+    // Read each landing chain's delivered or gated clear-frontier watermark.
+    // Missing, failed, or malformed indexer readings publish nothing for that chain.
     async resolveLandingReadings(chains, opts) {
         let out = {};
         let signal = opts && opts.signal;
@@ -328,7 +351,8 @@ class ChainTips {
                 }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
                 let result = res && res.data && res.data.result;
                 if (!result || result.error) return null;
-                return readingOf(result.hub_push_delivered);
+                return selectReading(c, result.hub_push_delivered, result.price_landing_clear,
+                    this.network || hubConfig.HUB_NETWORK);
             } catch (err) {
                 return null;
             }
@@ -371,5 +395,4 @@ class ChainTips {
         }
     }
 }
-
 module.exports = ChainTips;

@@ -39,12 +39,14 @@ function registerAttestationIdTests(getEngine) {
         // or peers, so resolveQuorum would return 0; stub a real federation
         // quorum so this test exercises the accept branch, not the 0-quorum guard.
         sinon.stub(engine, 'resolveQuorum').resolves(3);
+        // The follower bounds the leader-stamped height against its own BTC tip.
+        engine.hub.resolveBtcLatestBlock = async () => 900000;
         let attestationId = 'BTC:1:LTC';
         let digest = engine.digest(attestationId, 3);
         let envelope = {
             sender: 'ws://v:1',
             sig_pubkey: pubkeyForTestSender('ws://v:1'),
-            data: { attestationId, digest, confirmations: 3, sourceChain: 'BTC', sourceActionIndex: 1, destChain: 'LTC' }
+            data: { attestationId, digest, confirmations: 3, sourceChain: 'BTC', sourceActionIndex: 1, destChain: 'LTC', btcBlockHeight: 900000 }
         };
         await engine.handlePropose(envelope);
         expect(engine.pendingAttestations.has(attestationId)).to.be.true;

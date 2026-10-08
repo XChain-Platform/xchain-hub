@@ -42,7 +42,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').dige
 function memDb(){
     const calls = [];
     const state = { insertAffected: 1, reviveAffected: 0, pairs: [], inflight: [], seq: 0, atSeq: null,
-                    exists: false, rows: [], sourceTransferId: null, persistedIndexes: [] };
+                    exists: false, rows: [], sourceTransferId: null, persistedIndexes: [], tip: 150 };
     const db = Object.create(Database.prototype);
     db.calls = calls;
     db.state = state;
@@ -55,6 +55,11 @@ function memDb(){
         if(sql.startsWith('SELECT snapshot_id, policy_hash')) return state.atSeq ? [state.atSeq] : [];
         if(sql.startsWith('SELECT DISTINCT tick, src_chain, dest_chain')) return state.pairs;
         if(sql.startsWith('SELECT tick, dest_chain, amount FROM bridge_transfers')) return state.inflight;
+        // A hub holding a finalized BTC checkpoint at its own tip and at any height asked for.
+        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index >='))
+            return [{ block_index: Math.max(Number(params[2]), state.tip) }];
+        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?'))
+            return [{ block_index: params[2] }];
         if(sql.startsWith('SELECT 1 FROM bridge_transfers')) return state.exists ? [{ 1: 1 }] : [];
         // The per-poll persisted-leg read answers with the intersection of what was asked
         // for and what the test says is held, the way the IN (...) does.
@@ -79,6 +84,7 @@ function memDb(){
 function makeEngine(opts){
     opts = opts || {};
     const db = memDb();
+    if(opts.btcBlock != null) db.state.tip = opts.btcBlock;
     const broadcaster = { broadcastRow: sinon.stub(), broadcastDeletion: sinon.stub(), dropAllForResync: sinon.stub() };
     const hub = {
         db,
@@ -236,11 +242,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part2()
     expect(engine.indexerCall.called, 'the in-flight refusal comes before the leg read').to.equal(false);
   });
 
-  // Row 41, the follower half of the one-id-per-leg rule and the exact drive-15 shape:
-  // this hub opened its round for leg 41 at ITS tip (150), the leader read the tip one
-  // block later (151) and proposed the same leg with snapshot_block 151. The ids agree,
-  // so the in-flight exemption applies, the leader's height is adopted as a
-  // leader-choice field, and the row is co-signed instead of buffered to death.
+  // An in-flight identity match does not waive the proof-ready checkpoint rule.
 }
 function registerFeature6followerVerificationOfAProposedTransferFragment1Part3() {
   // Row 41, the follower half of the one-id-per-leg rule and the exact drive-15 shape:
@@ -248,7 +250,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part3()
   // block later (151) and proposed the same leg with snapshot_block 151. The ids agree,
   // so the in-flight exemption applies, the leader's height is adopted as a
   // leader-choice field, and the row is co-signed instead of buffered to death.
-  it('co-signs the leader\'s row for a leg it has in flight when the snapshot heights differ by a block (row 41)', async function () {
+  it('refuses the leader\'s later checkpoint for a leg it has in flight (row 41)', async function () {
     const follower = makeEngine({
       btcBlock: 150
     });
@@ -267,18 +269,14 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part3()
     feature6followerVerificationOfAProposedTransferFragment1WithLeg(follower.engine, {
       src_action_index: 41
     });
-    expect(await follower.engine.validateProposedMatch(leaderRow), 'a follower must co-sign the leader\'s row for its own in-flight leg at the leader\'s height').to.equal(true);
+    expect(await follower.engine.validateProposedMatch(leaderRow), 'the follower already holds an earlier covering checkpoint').to.equal(false);
   });
 
-  // snapshot_block is adopted from the leader, so the window is the only bound on it:
-  // the XCALL rail's 144 blocks either side of this hub's own tip view. Both edges,
-  // both directions, against a tip of 150.
-  // snapshot_block is adopted from the leader, so the window is the only bound on it:
-  // the XCALL rail's 144 blocks either side of this hub's own tip view. Both edges,
-  // both directions, against a tip of 150.
+  // Supply a matching first checkpoint for each row to isolate the 144-block window.
   it('bounds the leader\'s snapshot_block to 144 blocks of its own tip, either side', async function () {
     const {
-      engine
+      engine,
+      db
     } = makeEngine({
       btcBlock: 150
     });
@@ -286,6 +284,7 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part3()
       // The lock sits at block 5 so the lower edge is the window alone, not the rule that a
       // BTC leg is never anchored below its own block (snapshotCoversLeg).
       feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, { block_index: 5 });
+      db.state.tip = block;
       // eslint-disable-next-line no-await-in-loop
       expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine, {
         snapshot_block: block

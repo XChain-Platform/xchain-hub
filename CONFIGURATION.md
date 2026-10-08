@@ -490,7 +490,7 @@ continuation chunks) is unchanged.
 |---|---|---|---|
 | `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
 | `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
-| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and the cadence latch advances it by exactly one interval per round: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and an on-time round lands exactly one interval after the last: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. The ordinal cycles the residues in at most N-1 rounds only while rounds stay on time: a round that lands late (its slot holder offline) latches the later tip and can skip the eligible residue, so for N > 1 the anchor delay has no fixed bound. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
 | `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
@@ -737,6 +737,7 @@ BTC indexer's `getrollcallabsences`, where they are authoritative.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GOV_VOTING_PERIOD` | No | `604800000` (7 days) | Proposal voting period (ms). |
+| `GOVERNANCE_OVERDUE_MS` | No | `7200000` (2 hours) | Time after voting ends before a still-voting proposal is considered overdue (ms). |
 | `GOVERNANCE_TALLY_INTERVAL` | No | `60000` | Vote tally interval (ms). |
 
 ## HTTP attestation provider (`http_get`)

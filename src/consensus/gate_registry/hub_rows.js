@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate, UNPINNED } = require('./shared_rows.js');
+const { addGate, UNARMED, UNPINNED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -53,3 +53,26 @@ addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainn
 // a proposal the leader left in voting. Only regtest is armed; testnet and
 // mainnet stay unpinned until ratified.
 addGate('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION', 'height', { mainnet: UNPINNED, testnet: UNPINNED, regtest: 0 });
+
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
+// peers/hub_db/landing_watermark
+// Landed-from-clear-frontier: at/above the activation, in the landing indexer's
+// block height, the hub publishes landed[chain] from the indexer's
+// price_landing_clear reading whenever it is ahead of hub_push_delivered. Below
+// it, only hub_push_delivered feeds the watermark. Armed on regtest only until
+// the operator names a testnet and mainnet height.
+addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
+// anchor/reorg_handler/snapshot_lock
+// Reorg rollback rounds stamp a BTC height and derive membership and quorum from
+// its federation snapshot. Keep the wire fields dark on deployed networks until
+// a coordinated release; regtest exercises them from genesis.
+addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
+
+// Effective allow/block-list enforcement, inert until coordinated activation.
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
+    mainnet: UNARMED,
+    testnet: UNARMED,
+    regtest: UNARMED,
+});

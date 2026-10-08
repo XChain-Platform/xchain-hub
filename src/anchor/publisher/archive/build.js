@@ -85,9 +85,9 @@ module.exports = {
     // Failover-ladder check shared by leader election and follower verification:
     // rank 0 may publish immediately; each further rank unlocks after another
     // ANCHOR_ELECTION_TOLERANCE_BLOCKS past the anchor point. Concurrent
-    // unlocked publishers build byte-identical archives (both verify against
-    // the same quorum-agreed rows), so a race is duplicate-tx waste, not a
-    // divergence hazard.
+    // unlocked publishers build archives with identical bodies (both verify against
+    // the same quorum-agreed rows; only the wire's per-publisher tail differs), so
+    // a race is duplicate-tx waste, not a divergence hazard.
     rankUnlocked(order, pubkey, sinceBlocks){
         let rank = order.indexOf(String(pubkey || '').toLowerCase());
         if(rank < 0) return false;

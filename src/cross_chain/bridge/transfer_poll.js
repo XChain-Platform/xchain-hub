@@ -23,6 +23,7 @@
 const bc = require('../../bcmath.js');
 const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const { ALLOWED_CHAINS, PENDING_PAGE } = require('./constants.js');
+const { proofReadyActive, proofReadySnapshot } = require('./proof_ready_snapshot.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -218,10 +219,12 @@ module.exports = {
         logger.info('CrossChainBridge: not proposing ' + leg + ' (' + reason + ')');
     },
 
-    async maybeFinalizeTransfer(coin, network, latestBlock, snapshotBlock, t){
-        let leg = await this.admitTransferLeg(coin, network, latestBlock, snapshotBlock, t);
+    async maybeFinalizeTransfer(coin, network, latestBlock, tipBlock, t){
+        let leg = await this.admitTransferLeg(coin, network, latestBlock, tipBlock, t);
         if(!leg) return;
         let { destChain, tick, srcActionIndex, transferId, sourceLegKey } = leg;
+        let snapshotBlock = await this.stampSnapshotBlock(coin, network, tipBlock, t);
+        if(snapshotBlock == null) return;
         // Held, not raised: this hub has no validator set past its own tip (snapshotCoversLeg).
         if(!this.snapshotCoversLeg(coin, snapshotBlock, t.block_index))
             return this.logHeld(coin, t, 'snapshot_block below the source block ' + t.block_index);
@@ -267,6 +270,23 @@ module.exports = {
             this.releaseSourceLegGuard(transferId);
             throw e;
         }
+    },
+
+    // The block a leg's row is stamped with: the tip, or for a BTC leg past its flag day the
+    // block of the first finalized BTC checkpoint at or above the leg, or null while the leg
+    // is held. A stamp at or below the tip leaves every snapshot-keyed gate at the same answer.
+    async stampSnapshotBlock(coin, network, tipBlock, t){
+        if(!proofReadyActive(network, coin, t.block_index)) return tipBlock;
+        let stamped = await proofReadySnapshot(this.db, network, t.block_index);
+        if(stamped == null){
+            this.logHeld(coin, t, 'no finalized BTC checkpoint at or above the source block ' + t.block_index);
+            return null;
+        }
+        if(String(t.tick || '') !== 'XCHAIN' && !this.gateActive('token', stamped, 'BTC')){
+            this.logHeld(coin, t, 'token bridge not active at snapshot_block ' + stamped);
+            return null;
+        }
+        return stamped;
     },
 
     // Every reason a pending leg is not proposed this tick, each logged once through logHeld,

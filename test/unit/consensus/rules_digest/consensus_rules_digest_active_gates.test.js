@@ -148,10 +148,9 @@ function registerGateOrderingTest() {
 }
 
 function registerSentinelGateTest() {
-    // The 2026-09-09 genesis-arm ruling left no SHIPPED gate on the far-future sentinel,
-    // so the exclusion branch is driven against a stubbed gate module instead of riding
-    // whichever map happened to be unarmed. PRICE_PAIR_WIDEN_ACTIVATION, the last live
-    // example before the arm, is the map stubbed here.
+    // TOKEN_BRIDGE_ACTIVATION.mainnet and LIST_META_ACTIVATION.mainnet now sit on the
+    // far-future sentinel. This branch still stubs PRICE_PAIR_WIDEN_ACTIVATION with an
+    // active testnet height so the network contrast proves that the sentinel excludes it.
     it('excludes a far-future sentinel height, however high the chain climbs', function () {
         const CRD     = require.resolve('../../../../src/consensus_rules_digest.js');
         const realCrd = require.cache[CRD];

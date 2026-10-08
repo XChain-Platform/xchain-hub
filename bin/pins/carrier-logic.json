@@ -22,7 +22,7 @@
     },
     "attest_zero_conf_activation": {
       "path": "src/attestation/attest_zero_conf_gate.js",
-      "hash": "16ff3e1e17a412003dbc83bf27e1a7e88a526f7704fa43a8a4afce51441af675",
+      "hash": "550c123deb96e43a0c2f9d2d66e44a586922a810eee6a032e0acb90b80750eed",
       "twins": []
     },
     "consensus_rules_digest": {
@@ -757,6 +757,13 @@
       "to": "1085d2c7e702b6f924bee7d9dd859ebf8638a56815476735e72a72032660d6cc",
       "reason": "null threshold guard on the anchor and archive reward gates",
       "date": "2026-10-06"
+    },
+    {
+      "id": "attest_zero_conf_activation",
+      "from": "16ff3e1e17a412003dbc83bf27e1a7e88a526f7704fa43a8a4afce51441af675",
+      "to": "550c123deb96e43a0c2f9d2d66e44a586922a810eee6a032e0acb90b80750eed",
+      "reason": "read XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT through config.js; no behaviour change",
+      "date": "2026-10-08"
     }
   ]
 }
