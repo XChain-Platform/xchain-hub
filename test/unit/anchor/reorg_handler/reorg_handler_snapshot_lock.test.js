@@ -20,6 +20,7 @@ const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7 } = require('../../../helpers/f
 const OLD_HASH = 'a'.repeat(64);
 const NEW_HASH = 'b'.repeat(64);
 const SNAPSHOT_HEIGHT = 900;
+const handlers = [];
 
 function snapshotHub(self, snapshotValidators, options = {}) {
     const registry = new Map(snapshotValidators.map(v => [v.addr, v.pubkey]));
@@ -50,15 +51,7 @@ function clearRounds(handler) {
     }
 }
 
-describe('reorg snapshot lock', function () {
-    const handlers = [];
-
-    afterEach(function () {
-        for (const handler of handlers) clearRounds(handler);
-        handlers.length = 0;
-        sinon.restore();
-    });
-
+function registerSnapshotFormationTests() {
     it('reads its activation from the hub gate registry', function () {
         const key = 'anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION';
         expect(gateRegistry.get(key)).to.deep.equal({
@@ -109,7 +102,9 @@ describe('reorg snapshot lock', function () {
             .that.includes('deterministic stamped federation snapshot');
         expect(handler.pendingReorgs.size).to.equal(0);
     });
+}
 
+function registerPrepareVoteTests() {
     it('deduplicates prepare votes by authenticated snapshot pubkey', async function () {
         const { hub, handler } = snapshotHub(VALIDATORS_4[0], VALIDATORS_4);
         handlers.push(handler);
@@ -144,4 +139,15 @@ describe('reorg snapshot lock', function () {
         expect(hub._peerManager.broadcast.lastCall.args[1].btcBlockHeight)
             .to.equal(SNAPSHOT_HEIGHT);
     });
+}
+
+describe('reorg snapshot lock', function () {
+    afterEach(function () {
+        for (const handler of handlers) clearRounds(handler);
+        handlers.length = 0;
+        sinon.restore();
+    });
+
+    registerSnapshotFormationTests();
+    registerPrepareVoteTests();
 });

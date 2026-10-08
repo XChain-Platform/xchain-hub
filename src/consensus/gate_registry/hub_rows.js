@@ -51,7 +51,6 @@ addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainn
 
 // anchor/reorg_handler/snapshot_lock
 // Reorg rollback rounds stamp a BTC height and derive membership and quorum from
-// the whole-federation snapshot at that height. Keep the new wire fields dark on
-// deployed networks until a coordinated release; regtest exercises them from
-// genesis.
+// its federation snapshot. Keep the wire fields dark on deployed networks until
+// a coordinated release; regtest exercises them from genesis.
 addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
