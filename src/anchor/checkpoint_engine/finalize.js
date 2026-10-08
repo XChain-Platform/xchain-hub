@@ -184,7 +184,7 @@ module.exports = {
     // = btcBlock % N, every hub's latch is stale on the N-1 blocks it does not
     // lead, so the federation finalizes a round roughly every intervalBlocks / N
     // blocks. That advances checkpoint_seq (and therefore ANCHOR_CHECKPOINT_EVERY_N,
-    // which is defined against seq % N) N times faster than CHECKPOINT_INTERVAL_BLOCKS
+    // which samples the ordinal FLOOR(seq / interval) % N) N times faster than CHECKPOINT_INTERVAL_BLOCKS
     // configures, and burns DOGE on the extra anchors. Monotonic so an out-of-order
     // or replayed FINALIZED cannot walk the latch backwards into an early round.
     advanceLatchAndEmit(cp, sigs, quorum, isLeader){
