@@ -66,7 +66,28 @@ const validatePart = require('./dex/validate.js');
 const plumbingPart = require('./dex/plumbing.js');
 const remoteTokens = require('./remote_token_snapshots.js');
 
+class RemoteTokenConsensus extends CrossChainDexConsensus {
+    async propose(snapshotId, context){
+        return super.propose(snapshotId, {
+            row: context.match,
+            snapshot: context.snapshot
+        });
+    }
+
+    emit(type, event, ...rest){
+        if(type !== 'match:finalized' || !event || !event.row)
+            return super.emit(type, event, ...rest);
+        const matched = Object.assign({}, event, { match: event.row });
+        delete matched.row;
+        return super.emit(type, matched, ...rest);
+    }
+}
+
 class CrossChainDexEngine extends EventEmitter {
+
+    static get RemoteTokenConsensus(){
+        return RemoteTokenConsensus;
+    }
 
     constructor(hub){
         super();
@@ -121,7 +142,7 @@ class CrossChainDexEngine extends EventEmitter {
             this._inflight.delete(String(ev.matchId));
         });
 
-        this.initRemoteTokenSnapshots();
+        this.initRemoteTokenSnapshots(RemoteTokenConsensus);
 
         this._pollTimer = null;
         this._matching  = false;   // poll self-overlap guard, see discoverAndMatch()

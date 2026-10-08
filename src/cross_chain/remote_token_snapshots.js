@@ -14,7 +14,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const EventEmitter = require('events');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -146,33 +145,19 @@ function createRemoteTokenConsensus(parent, Consensus){
         validateProposedMatch: row => parent.validateRemoteTokenSnapshot(row),
         persistCapabilitySnapshot: (...args) => parent.persistCapabilitySnapshot(...args)
     };
-    const consensus = new Consensus(adapter, {
+    return new Consensus(adapter, {
         messageTypes: MESSAGE_TYPES,
         controlTags: { vc: 'XREMOTEV', nv: 'XREMOTEN' },
         idField: 'snapshot_id'
     });
-    const bridge = new EventEmitter();
-    consensus.on('match:finalized', event => {
-        const bridged = Object.assign({}, event, { match: event.row });
-        delete bridged.row;
-        bridge.emit('match:finalized', bridged);
-    });
-    consensus.on('match:abandoned', event => bridge.emit('match:abandoned', event));
-    bridge.propose = (snapshotId, context) => consensus.propose(snapshotId, {
-        row: context.match,
-        snapshot: context.snapshot
-    });
-    for(const method of ['start', 'stop', 'forgetFinalized'])
-        bridge[method] = (...args) => consensus[method](...args);
-    return bridge;
 }
 
 const enginePart = {
-    initRemoteTokenSnapshots(){
+    initRemoteTokenSnapshots(Consensus){
         this._remoteTokenInflight = new Set();
         this._remoteTokenPublishing = false;
         this.remoteTokenConsensus = createRemoteTokenConsensus(
-            this, this.consensus.constructor);
+            this, Consensus || this.consensus.constructor);
         this.remoteTokenConsensus.on('match:finalized', (event) => {
             this.writeFinalizedRemoteTokenSnapshot(event).catch(error =>
                 logger.error(nodeUtil.format(

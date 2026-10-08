@@ -5,6 +5,7 @@ const EventEmitter = require('events');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const DexEngine = require('../../../src/cross_chain/dex_engine.js');
 const remote = require('../../../src/cross_chain/remote_token_snapshots.js');
 const queries = require('../../../src/db/snapshots/remote_token_snapshots.js');
 
@@ -82,22 +83,22 @@ function registerAgreementTests(){
     });
 }
 
-function registerConsensusTransportTests(){
-    it('bridges match payloads through the row-shaped PBFT implementation', async function(){
-        let pbft;
+function registerConsensusContractTest(){
+    it('passes match payloads through the remote-token consensus contract', async function(){
+        let transport;
         class FakeConsensus extends EventEmitter {
             constructor(adapter, options){
                 super();
                 this.adapter = adapter;
                 this.options = options;
-                pbft = this;
+                transport = this;
             }
 
             async propose(snapshotId, context){
                 this.proposal = { snapshotId, context };
                 this.emit('match:finalized', {
                     matchId: snapshotId,
-                    row: context.row,
+                    match: context.match,
                     signatures: [{ pubkey: 'validator', sig: 'signature' }],
                     view: 2
                 });
@@ -120,11 +121,48 @@ function registerConsensusTransportTests(){
 
         await consensus.propose(row.snapshot_id, { match: row, snapshot });
 
-        assert.strictEqual(pbft.proposal.context.row, row);
-        assert.strictEqual(pbft.proposal.context.snapshot, snapshot);
+        assert.strictEqual(transport.proposal.context.match, row);
+        assert.strictEqual(Object.hasOwn(transport.proposal.context, 'row'), false);
+        assert.strictEqual(transport.proposal.context.snapshot, snapshot);
         assert.strictEqual(finalized.match, row);
         assert.strictEqual(Object.hasOwn(finalized, 'row'), false);
-        assert.strictEqual(pbft.options.idField, 'snapshot_id');
+        assert.strictEqual(transport.options.idField, 'snapshot_id');
+    });
+}
+
+function registerProductionConsensusTest(){
+    it('publishes match payloads through the production PBFT compatibility class', async function(){
+        const parent = {
+            hub: { p2pConfig: {} },
+            peerManager: null,
+            identity: {
+                getPubkeyHex: () => 'validator',
+                sign: () => 'signature'
+            },
+            capSnapshot: null,
+            validateRemoteTokenSnapshot: async () => true,
+            persistCapabilitySnapshot: async () => true
+        };
+        const consensus = remote.createRemoteTokenConsensus(
+            parent, DexEngine.RemoteTokenConsensus);
+        const row = remote.buildRemoteTokenSnapshot(
+            NETWORK, SNAPSHOT_BLOCK, 'DOGE', offer());
+        let finalized;
+        consensus.on('match:finalized', event => { finalized = event; });
+
+        await consensus.propose(row.snapshot_id, {
+            match: row,
+            snapshot: {
+                validators: [{ pubkey: 'validator', source: 'validator', weight: '1' }],
+                count: 1
+            }
+        });
+
+        assert.strictEqual(finalized.match, row);
+        assert.strictEqual(Object.hasOwn(finalized, 'row'), false);
+        assert.deepStrictEqual(finalized.signatures, [
+            { pubkey: 'validator', sig: 'signature' }
+        ]);
     });
 }
 
@@ -250,7 +288,8 @@ function registerPersistenceTests(){
 
 describe('remote token snapshots', function(){
     registerAgreementTests();
-    registerConsensusTransportTests();
+    registerConsensusContractTest();
+    registerProductionConsensusTest();
     registerNormalizationTests();
     registerPublicationTests();
     registerPersistenceTests();
