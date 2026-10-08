@@ -3433,16 +3433,6 @@
       "37e4947a54ddbb6e57b9afa37c7fb224b559e20e632c8e9c15787dc2c9a25e4a",
       "c2cd62a97ff6fbd5db266ad4a5ec7969292bd86baadfc01e5015c1a0ba8ae9ec"
     ],
-    "4a0ac2f1326571e8": [
-      "147ffa3f25ac83e5220bf9e4c9cf0ef40f97af2e287707a310e59f1f02d641d4",
-      "1826de3880d19dd3319283196b4f792fde1540c684c3e1b69d69aee5f90d131a",
-      "ec02a1e0028636bf8728cf5d6b64fe055f3430512db5dc225efb79ff19101f82",
-      "d411c7e03105a147d7f59db6422816e3d8eec0036967f48d444056d10cccf28c",
-      "cfeecbff5d0841ad4e7e0613642be6f8a0a5dc9893c280d4efd78739ab494767",
-      "7210760c5e42cbe63c5d7fe94cb43f40e2b92e748af331670e99a7de2b720581",
-      "1e98fbc90f14b0429f3ff026de0da8999428585e2bc6c43b3a51b5e22e713bb3",
-      "763b40b97822494109a7e40ecb0bf299faf9a8a93b1edf6a6907f6b60fd1ecd0"
-    ],
     "4a590d714ed67ac5": [
       "5d21842dfa5b528621ec6a1df9eca8f462056be43adc0837b0af4d4e553f941c",
       "450eb93672a3d7dd017d3b619ae4fa990f7724b1b6618ea2133567db933e3f46",
@@ -6556,6 +6546,17 @@
       "daf72c8206ae5c1e162365794546883165c4afaf3049dc855d077bd42cd692ff",
       "24f8d7bd4ad9c87a33a95a85f55f03e42e688cfbe2b77562f59a57dd6d04c6cc",
       "86d7b62c18fb96650c495995899faf6bc96fe67accd7691d452ed003ebf5804f"
+    ],
+    "8af335364d29936b": [
+      "31846582ad06f1fa623a01490c821f7191d087a5f9eb64179b8cc2521d9a2422",
+      "147ffa3f25ac83e5220bf9e4c9cf0ef40f97af2e287707a310e59f1f02d641d4",
+      "1826de3880d19dd3319283196b4f792fde1540c684c3e1b69d69aee5f90d131a",
+      "ec02a1e0028636bf8728cf5d6b64fe055f3430512db5dc225efb79ff19101f82",
+      "d411c7e03105a147d7f59db6422816e3d8eec0036967f48d444056d10cccf28c",
+      "cfeecbff5d0841ad4e7e0613642be6f8a0a5dc9893c280d4efd78739ab494767",
+      "7210760c5e42cbe63c5d7fe94cb43f40e2b92e748af331670e99a7de2b720581",
+      "1e98fbc90f14b0429f3ff026de0da8999428585e2bc6c43b3a51b5e22e713bb3",
+      "763b40b97822494109a7e40ecb0bf299faf9a8a93b1edf6a6907f6b60fd1ecd0"
     ],
     "8b30fd6794a0e64c": [
       "fdbf26d420ecd631040efda113be428cfc1ceecc8a0afb896b1912e2ab49d5dc",
@@ -11259,9 +11260,9 @@
         "ci:regression"
       ],
       "fileCount": 870,
-      "titleCount": 8168,
+      "titleCount": 8169,
       "files": {
-        "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
+        "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
         "test/unit/activations/attest_zero_conf_activation.test.js": "6570d185ba838173",
@@ -12186,9 +12187,9 @@
     },
     "test": {
       "fileCount": 870,
-      "titleCount": 8168,
+      "titleCount": 8169,
       "files": {
-        "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
+        "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
         "test/unit/activations/attest_zero_conf_activation.test.js": "6570d185ba838173",
@@ -13062,7 +13063,7 @@
     },
     "test:all": {
       "fileCount": 950,
-      "titleCount": 8991,
+      "titleCount": 8992,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13144,7 +13145,7 @@
         "test/smoke/hub.test.js": "1e54f4f7b611aa21",
         "test/smoke/hub_api.test.js": "49c5b6b7cea406aa",
         "test/smoke/hub_oracle.test.js": "3ee2106eb797a750",
-        "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
+        "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
         "test/unit/activations/attest_responsible_widening_activation.test.js": "6477b18d537fe7f4",
         "test/unit/activations/attest_zero_conf_activation.test.js": "6570d185ba838173",
