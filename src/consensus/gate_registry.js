@@ -30,8 +30,8 @@
  * judges, queued into the same registry after the block.
  *
  * REGTEST ARMING is applied WHEN A ROW IS READ (shared_rows.js registerRows
- * installs it as the core's read overlay): the block writes the five
- * venue-armed regtest entries UNPINNED, the registry stores that committed
+ * installs it as the core's read overlay): each block row REGTEST_ARMING
+ * lists commits a bare regtest entry, the registry stores that committed
  * table, and every get(), copy(), rows() and activeAt() arms the entry from
  * this process's environment as it stands at that moment. The bare reading is
  * the block literal and the armed reading is the venue's; a test that re-arms

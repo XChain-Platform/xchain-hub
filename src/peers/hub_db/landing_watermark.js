@@ -31,6 +31,24 @@
 
 const { normalizeChain } = require('../../lib/admission_height.js');
 const hubConfig = require('../../config');
+const gateRegistry = require('../../consensus/gate_registry.js');
+
+const CLEAR_FRONTIER_KEY = 'peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION';
+
+function clearFrontierActive(network, chain, block) {
+    return gateRegistry.activeAt(CLEAR_FRONTIER_KEY, String(network || '').toLowerCase(), chain, block, null);
+}
+
+// The reading a chain publishes: the indexer's price_landing_clear when the gate is
+// active at its block and it is ahead of hub_push_delivered (or that is unknown),
+// otherwise hub_push_delivered unchanged.
+function selectReading(chain, delivered, clear, network) {
+    const d = readingOf(delivered);
+    const c = readingOf(clear);
+    if (c === null || !clearFrontierActive(network, chain, c.block)) return d;
+    if (d !== null && c.block <= d.block) return d;
+    return c;
+}
 
 function relayFlag(config) {
     const raw = String(hubConfig.HUB_ADMISSION_RELAY || (config && config.HUB_ADMISSION_RELAY) || '');
@@ -126,4 +144,4 @@ class LandingWatermark {
     }
 }
 
-module.exports = { LandingWatermark, readingOf };
+module.exports = { LandingWatermark, readingOf, selectReading, clearFrontierActive };

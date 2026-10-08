@@ -136,8 +136,11 @@ const foldPublisherMethods = {
         if(!sender || sender === myPubkey || String(d.publisher || '').toLowerCase() !== sender) return null;
         let foldBlock = Number(d.snapshot_block);
         if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
-            try { foldBlock = Number(await this.hub.resolveDogeLatestBlock()); }
+            let resolved;
+            try { resolved = await this.hub.resolveDogeLatestBlock(); }
             catch(_e){ return null; }
+            if(resolved == null || !Number.isFinite(Number(resolved))) return null;
+            foldBlock = Number(resolved);
         }
         if(!isAnchorFoldActive(foldBlock, String(d.network))) return null;
         let index = Number(a.wrapper_section_index);

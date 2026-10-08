@@ -41,6 +41,22 @@ const { LandingWatermark } = require('./hub_db/landing_watermark.js');
 const HubDbDeletionReplay = require('./hub_db/deletion_replay.js');
 const HubDbSubscribers = require('./hub_db/subscribers.js');
 
+// The ceiling a consumer applies to the interval it adopts from the ready frame, before it
+// drops a socket idle for 3x that (adoptHubWatermarkInterval in the indexer's and explorer's
+// hub_db_sync/watermarks.js). The two are a pair: move one, move the other.
+const WATERMARK_INTERVAL_MAX_MS = 300000;
+
+// Resolve the heartbeat interval, clamped so this hub never advertises a cadence slower
+// than every consumer will wait for. A faster one needs no floor: it only refreshes sooner.
+function resolveWatermarkIntervalMs(config) {
+    let ms = positiveIntConfig(
+        hubConfig.WS_WATERMARK_INTERVAL_MS || config.WS_WATERMARK_INTERVAL_MS, 10000, 'WS_WATERMARK_INTERVAL_MS');
+    if (ms <= WATERMARK_INTERVAL_MAX_MS) return ms;
+    logger.warn('HubDbBroadcaster: WS_WATERMARK_INTERVAL_MS ' + ms + ' exceeds the ' + WATERMARK_INTERVAL_MAX_MS
+        + 'ms consumers accept (they drop a socket idle for 3x that); using ' + WATERMARK_INTERVAL_MAX_MS);
+    return WATERMARK_INTERVAL_MAX_MS;
+}
+
 // The cadence half of the constructor: how late a watermark tick may be, and
 // the counters that record how late they have actually been.
 function initWatermarkCadence(broadcaster) {
@@ -116,8 +132,7 @@ class HubDbBroadcaster {
         // Guarded like the caps above: a NaN interval makes setInterval clamp to ~1ms,
         // storming every subscriber, and serializes as null in the 'ready' frame so
         // consumers cannot size their watchdog from it.
-        this.watermarkIntervalMs = positiveIntConfig(
-            hubConfig.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS, 10000, 'WS_WATERMARK_INTERVAL_MS');
+        this.watermarkIntervalMs = resolveWatermarkIntervalMs(this.config);
 
         initWatermarkCadence(this);
 

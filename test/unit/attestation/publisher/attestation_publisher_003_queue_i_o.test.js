@@ -252,3 +252,88 @@ describe('AttestationPublisher: queue I/O', function () { beforeEach(hookAt19388
         expect(pub.readQueue().map(e => e.requestId)).to.deep.equal(['bb'.repeat(32)]);
     }); });
 }
+
+// A dequeue rewrite may only persist what it actually read: an unreadable queue is
+// left untouched, and a line no reader can use is quarantined, never dropped.
+{
+let pub;
+
+const corruptPathOf = (p) => p.replace(/\.jsonl$/, '') + '.corrupt.jsonl';
+
+const freshQueue = function () {
+        pub = makePublisher();
+        fs.writeFileSync(pub.queuePath, '');
+    };
+
+const removeQueueFiles = function () {
+        sinon.restore();
+        for (const f of [pub.queuePath, corruptPathOf(pub.queuePath)]) { try { fs.unlinkSync(f); } catch (_) {} }
+    };
+
+// Fail only reads of the queue file itself, so every other read passes through.
+function failQueueReads(code) {
+    const real = fs.readFileSync;
+    return sinon.stub(fs, 'readFileSync').callsFake(function (file, ...rest) {
+        if (file === pub.queuePath) throw Object.assign(new Error(code + ': injected'), { code });
+        return real.call(fs, file, ...rest);
+    });
+}
+
+describe('AttestationPublisher: queue rewrite keeps what it cannot read', function () { beforeEach(freshQueue); afterEach(removeQueueFiles);
+    it('removeFromQueue leaves the queue byte for byte and the guard armed when the read fails', function () {
+        pub.enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        pub.enqueue({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' });
+        pub._publishedRequests.mark('aa'.repeat(32));
+        const before = fs.readFileSync(pub.queuePath, 'utf8');
+        const errStub = sinon.stub(console, 'error');
+        failQueueReads('EIO');
+        expect(pub.removeFromQueue(new Set(['aa'.repeat(32)]))).to.equal(false);
+        fs.readFileSync.restore();
+        expect(fs.readFileSync(pub.queuePath, 'utf8')).to.equal(before);
+        expect(pub._publishedRequests.has('aa'.repeat(32))).to.equal(true);
+        expect(errStub.called).to.equal(true);
+    });
+
+    it('readQueue logs a non-ENOENT read failure and still returns an empty list', function () {
+        const errStub = sinon.stub(console, 'error');
+        failQueueReads('EIO');
+        expect(pub.readQueue()).to.deep.equal([]);
+        expect(errStub.called).to.equal(true);
+    });
+
+    it('removeFromQueue on a missing queue file rewrites it empty and succeeds silently', function () {
+        fs.unlinkSync(pub.queuePath);
+        const errStub = sinon.stub(console, 'error');
+        expect(pub.removeFromQueue(new Set(['aa'.repeat(32)]))).to.equal(true);
+        expect(errStub.called).to.equal(false);
+    });
+
+    it('a torn line is moved to the corrupt file and counted, and the other entries survive', function () {
+        const torn = '{"ts":1,"requestId":"' + 'aa'.repeat(8);
+        fs.writeFileSync(pub.queuePath, torn + JSON.stringify({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' }) + '\n' +
+            JSON.stringify({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' }) + '\n' +
+            JSON.stringify({ ts: 4, requestId: 'dd'.repeat(32), wire: 'W4' }) + '\n');
+        sinon.stub(console, 'error');
+        expect(pub.removeFromQueue(new Set(['cc'.repeat(32)]))).to.equal(true);
+        const quarantined = readQueue(corruptPathOf(pub.queuePath));
+        expect(quarantined).to.have.length(1);
+        expect(quarantined[0].raw.startsWith(torn)).to.equal(true);
+        expect(pub.getPublisherStats().corruptQueueLines).to.equal(1);
+        expect(readQueue(pub.queuePath).map(e => e.requestId)).to.deep.equal(['dd'.repeat(32)]);
+    });
+
+    it('a line that cannot be quarantined is kept verbatim on the rewritten queue', function () {
+        fs.writeFileSync(pub.queuePath, 'not json\n' + JSON.stringify({ ts: 2, requestId: 'bb'.repeat(32), wire: 'W2' }) + '\n');
+        sinon.stub(console, 'error');
+        const realOpen = fs.openSync;
+        sinon.stub(fs, 'openSync').callsFake(function (file, ...rest) {
+            if (file === corruptPathOf(pub.queuePath)) throw Object.assign(new Error('EACCES: injected'), { code: 'EACCES' });
+            return realOpen.call(fs, file, ...rest);
+        });
+        expect(pub.removeFromQueue(new Set(['bb'.repeat(32)]))).to.equal(true);
+        fs.openSync.restore();
+        expect(fs.readFileSync(pub.queuePath, 'utf8')).to.equal('not json\n');
+        expect(pub.getPublisherStats().corruptQueueLines).to.equal(0);
+    });
+});
+}

@@ -14,7 +14,7 @@ const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
 const { expect } = require('chai');
-const { rewriteFileAtomically } = require('../../../../src/lib/fs/durable_file');
+const { rewriteFileAtomically, splitJsonLines } = require('../../../../src/lib/fs/durable_file');
 
 // A real-filesystem fs whose named operation throws, every other call passing through.
 function fsFailingAt(name, code) {
@@ -74,5 +74,20 @@ describe('rewriteFileAtomically', function () {
         try { failing.writeSync(fd, 'new-1\n'); } catch (_) { /* expected */ }
         fs.closeSync(fd);
         expect(fs.readFileSync(file, 'utf8')).to.equal('');
+    });
+});
+
+// A queue reader must hand back every line it cannot use, so a rewrite can keep it.
+describe('splitJsonLines', function () {
+    it('keeps accepted values and returns every other non-blank line raw', function () {
+        const torn = '{"round":5,"pri{"round":6}';
+        const text = '{"round":1}\n\n' + torn + '\nnull\n{"other":2}\n';
+        const out = splitJsonLines(text, (v) => v.round !== undefined);
+        expect(out.entries).to.deep.equal([{ round: 1 }]);
+        expect(out.rejected).to.deep.equal([torn, 'null', '{"other":2}']);
+    });
+
+    it('returns empty lists for empty text', function () {
+        expect(splitJsonLines('', () => true)).to.deep.equal({ entries: [], rejected: [] });
     });
 });

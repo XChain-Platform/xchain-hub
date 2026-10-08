@@ -142,8 +142,8 @@ module.exports = {
         let b  = ledger.get(kB) || { give: '0', get: '0' };
         let aAmt = String(r.a_amount), bAmt = String(r.b_amount);
         let f = (sign < 0)
-            ? (cur, amt) => String(bc.bcsub(cur, amt, 64))
-            : (cur, amt) => String(bc.bcadd(cur, amt, 64));
+            ? (cur, amt) => bc.bcstr(bc.bcsub(cur, amt, 64))
+            : (cur, amt) => bc.bcstr(bc.bcadd(cur, amt, 64));
         a.give = f(a.give, aAmt); a.get = f(a.get, bAmt);   // A gives a_amount, receives b_amount
         b.give = f(b.give, bAmt); b.get = f(b.get, aAmt);   // B gives b_amount, receives a_amount
         ledger.set(kA, a);
@@ -164,9 +164,9 @@ module.exports = {
         let give = bc.bcsub(fullGive, c.give, 64);
         let get  = bc.bcsub(fullGet,  c.get,  64);
         return {
-            give: bc.bclt(give, 0) ? '0' : String(give),
-            get:  bc.bclt(get,  0) ? '0' : String(get),
-            committedGive: c.give
+            give: bc.bclt(give, 0) ? '0' : bc.bcstr(give),
+            get:  bc.bclt(get,  0) ? '0' : bc.bcstr(get),
+            committedGive: bc.bcstr(c.give)
         };
     },
 };

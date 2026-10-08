@@ -24,7 +24,8 @@
 
 const bcmath = require('../../bcmath.js');
 const { deriveXchainRate, toUsd } = require('../../xchainPrice.js');
-const { getWindowFills } = require('../../xchainPriceQuery.js');
+const { getWindowFills, computeWindowBounds } = require('../../xchainPriceQuery.js');
+const { INDEXER_TIP_SQL } = require('../../db/price/indexer_tip_sql.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { XCHAIN_PAIR, BTC_PAIR, GAS_TICK } = require('./pairs.js');
@@ -99,7 +100,11 @@ const deriveSteps = {
     // Selects the round's fill window from the indexer. Returns the selection, or
     // null to abstain.
     async findWindowFills(referenceHeight) {
-        let selection = await getWindowFills(this.openIndexerDb(), {
+        let indexerDb = this.openIndexerDb();
+        let window = computeWindowBounds(referenceHeight, this.confirmationBuffer, this.windowBlocks);
+        // Read the tip BEFORE the fills, so a tip that advances mid-read cannot vouch for rows already read.
+        if (!window.empty && !(await this.indexerReachedWindowTop(indexerDb, window))) return null;
+        let selection = await getWindowFills(indexerDb, {
             referenceHeight:    referenceHeight,
             confirmationBuffer: this.confirmationBuffer,
             windowLength:       this.windowBlocks,
@@ -115,6 +120,20 @@ const deriveSteps = {
             return null;
         }
         return selection;
+    },
+
+    // Whether the indexer has processed every block up to the window top. A lagging,
+    // wedged or catching-up indexer returns an empty or partial window that reads as a
+    // quiet market, so it is the same "could not look" LOCAL failure as an unreachable
+    // DB: warn and return false, and the pair abstains for the round.
+    async indexerReachedWindowTop(indexerDb, window) {
+        let rows = await indexerDb.doQuery(INDEXER_TIP_SQL);
+        let raw = rows && rows[0] ? rows[0].tip : null;
+        let tip = raw == null ? NaN : Number(raw);
+        if (Number.isInteger(tip) && tip >= window.toBlockInclusive) return true;
+        logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - indexer tip ' + raw +
+            ' has not reached the window top ' + window.toBlockInclusive);
+        return false;
     },
 
     // Turns a successful selection into the entry to publish. `basis` carries

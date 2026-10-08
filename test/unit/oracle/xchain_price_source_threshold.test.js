@@ -37,6 +37,7 @@ const FINALIZED_BTC = { 'BTC/USD': '100000.00000000' };
 const BOOTSTRAP_AT_100K = '1.00000000';
 const { COIN_ID_SQL, XCHAIN_TICK_SQL, DISPENSE_FILLS_SQL, DEX_FILLS_SQL } =
     require('../../../src/xchainPriceQuery.js');
+const { INDEXER_TIP_SQL } = require('../../../src/db/price/indexer_tip_sql.js');
 
 
 const CONFIG = {
@@ -60,7 +61,10 @@ function indexerDouble(rows = {}) {
         return {
             pool: { end: async () => {} },
             async doQuery(sql) {
+                if (rows.log) rows.log.push(sql);
                 if (rows.throwOn && rows.throwOn(sql)) throw new Error('indexer unreachable');
+                // Default tip: the indexer has reached the window top of the shared CTX.
+                if (sql === INDEXER_TIP_SQL)  return rows.tip === undefined ? [{ tip: CTX.referenceHeight }] : rows.tip;
                 if (sql === COIN_ID_SQL)      return rows.coin  === undefined ? [{ id: 1, coin: 'BTC' }] : rows.coin;
                 if (sql === XCHAIN_TICK_SQL)  return rows.tick  === undefined ? [{ id: 1, tick: 'XCHAIN' }] : rows.tick;
                 if (sql === DISPENSE_FILLS_SQL) return rows.dispenses || [];
