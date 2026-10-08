@@ -331,11 +331,8 @@ class ChainTips {
         return out;
     }
 
-    // Each landing chain's landed reading, read beside the admission tips: its
-    // `hub_push_delivered`, or `price_landing_clear` when the clear-frontier gate is
-    // active and that is ahead. A chain whose indexer does not report one (an older
-    // indexer, a failed read, a malformed value) comes back null, which publishes
-    // nothing for it.
+    // Read each landing chain's delivered or gated clear-frontier watermark.
+    // Missing, failed, or malformed indexer readings publish nothing for that chain.
     async resolveLandingReadings(chains, opts) {
         let out = {};
         let signal = opts && opts.signal;
