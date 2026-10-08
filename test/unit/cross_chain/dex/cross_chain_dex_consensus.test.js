@@ -103,11 +103,6 @@ function rootSuiteBuildMesh(n, opts) {
 // than signer count. Each node is its OWN distinct staking source with weight 1,
 // so the equal-stake mesh reduces to the same 2f+1 threshold the count rule gave:
 // a blank/missing source fails closed in meetsStakeThreshold (never finalizes).
-// STAKE_WEIGHTED_QUORUM (WI-1) is active at regtest snapshot_block 0+, so the
-// round finalizes on summed signer STAKE (source-deduped, 3·Σweight > 2·S) rather
-// than signer count. Each node is its OWN distinct staking source with weight 1,
-// so the equal-stake mesh reduces to the same 2f+1 threshold the count rule gave:
-// a blank/missing source fails closed in meetsStakeThreshold (never finalizes).
 function rootSuiteValidatorsOf(bus) {
   return bus.nodes.map(nd => ({
     pubkey: nd.pubkey,
@@ -369,6 +364,17 @@ function registerDirect1Part4() {
     // propose() resolves the elected-signer check inline, so the refusal is decided
     // by the time it returns.
     expect(bus.nodes[0].finalized.length).to.equal(0);
+  });
+  it('does not finalize when every follower rejects the proposed match', async function () {
+    let bus = rootSuiteBuildMesh(4, { validate: () => false });
+    await rootSuiteStartAll(bus);
+    let mid = 'af'.repeat(32), row = sampleRow(mid);
+    await rootSuiteProposeAll(bus, mid, row);
+    expect(bus.nodes.every(nd => nd.finalized.length === 0)).to.equal(true);
+    expect(bus.nodes.every(nd => {
+      let pending = nd.consensus.pending.get(mid);
+      return !pending || pending.commits.size === 0;
+    })).to.equal(true);
   });
 }
 function registerDirect1() {
