@@ -388,7 +388,7 @@ class ChainTips {
                     String(table) + ' rows read by ' + c + ' until one is available');
             return null;
         }
-        try { return admissionHeight.admitBlocks(readSet, tips, table); }
+        try { return admissionHeight.admitBlocks(readSet, tips, table, this.network); }
         catch (err) {
             logger.error(nodeUtil.format('XChainHub: cannot stamp an admission map for ' + String(table) + ':', err.message));
             return null;
