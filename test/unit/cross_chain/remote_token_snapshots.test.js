@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert');
+const EventEmitter = require('events');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -81,6 +82,52 @@ function registerAgreementTests(){
     });
 }
 
+function registerConsensusTransportTests(){
+    it('bridges match payloads through the row-shaped PBFT implementation', async function(){
+        let pbft;
+        class FakeConsensus extends EventEmitter {
+            constructor(adapter, options){
+                super();
+                this.adapter = adapter;
+                this.options = options;
+                pbft = this;
+            }
+
+            async propose(snapshotId, context){
+                this.proposal = { snapshotId, context };
+                this.emit('match:finalized', {
+                    matchId: snapshotId,
+                    row: context.row,
+                    signatures: [{ pubkey: 'validator', sig: 'signature' }],
+                    view: 2
+                });
+            }
+
+            start(){}
+            stop(){}
+            forgetFinalized(){}
+        }
+        const parent = {
+            validateRemoteTokenSnapshot: async () => true,
+            persistCapabilitySnapshot: async () => true
+        };
+        const consensus = remote.createRemoteTokenConsensus(parent, FakeConsensus);
+        const row = remote.buildRemoteTokenSnapshot(
+            NETWORK, SNAPSHOT_BLOCK, 'DOGE', offer());
+        const snapshot = { validators: [], count: 0 };
+        let finalized;
+        consensus.on('match:finalized', event => { finalized = event; });
+
+        await consensus.propose(row.snapshot_id, { match: row, snapshot });
+
+        assert.strictEqual(pbft.proposal.context.row, row);
+        assert.strictEqual(pbft.proposal.context.snapshot, snapshot);
+        assert.strictEqual(finalized.match, row);
+        assert.strictEqual(Object.hasOwn(finalized, 'row'), false);
+        assert.strictEqual(pbft.options.idField, 'snapshot_id');
+    });
+}
+
 function registerNormalizationTests(){
     it('deduplicates identical book observations and sorts rows canonically', function(){
         const rows = remote.remoteTokenRowsFromBooks(NETWORK, SNAPSHOT_BLOCK, {
@@ -111,6 +158,54 @@ function registerNormalizationTests(){
             NETWORK, SNAPSHOT_BLOCK, 'DOGE', offer());
         assert.strictEqual(remote.remoteTokenRowShapeOk(
             Object.assign({}, row, { decimals: '00' })), false);
+    });
+}
+
+function registerPublicationTests(){
+    it('proposes and persists the finalized consensus match payload', async function(){
+        const row = remote.buildRemoteTokenSnapshot(
+            NETWORK, SNAPSHOT_BLOCK, 'DOGE', offer());
+        const validators = [{ pubkey: 'validator' }];
+        const proposals = [];
+        const inserts = [];
+        const engine = Object.assign({
+            _remoteTokenInflight: new Set(),
+            db: {
+                getRemoteTokenSnapshotById: async () => [],
+                insertRemoteTokenSnapshot: async (...args) => {
+                    inserts.push(args);
+                    return { affectedRows: 0 };
+                }
+            },
+            remoteTokenConsensus: {
+                propose: async (...args) => proposals.push(args),
+                forgetFinalized: () => assert.fail('successful write was forgotten')
+            },
+            persistCapabilitySnapshot: async () => true,
+            resolveBtcChainId: async () => 'btc-chain-id'
+        }, remote.enginePart);
+
+        await engine.proposeRemoteTokenSnapshot(row, validators);
+        assert.strictEqual(proposals.length, 1);
+        assert.strictEqual(proposals[0][0], row.snapshot_id);
+        assert.strictEqual(proposals[0][1].match, row);
+        assert.strictEqual(Object.hasOwn(proposals[0][1], 'row'), false);
+
+        await engine.writeFinalizedRemoteTokenSnapshot({
+            match: proposals[0][1].match,
+            signatures: [{ pubkey: 'validator', sig: 'signature' }],
+            view: 3
+        });
+
+        assert.strictEqual(inserts.length, 1);
+        assert.strictEqual(inserts[0][0], row);
+        assert.strictEqual(inserts[0][1], 'btc-chain-id');
+        assert.strictEqual(row.finalizing_view, 3);
+        assert.strictEqual(row.status, 'finalized');
+        assert.strictEqual(
+            row.validator_signatures,
+            '[{"pubkey":"validator","sig":"signature"}]');
+        assert.strictEqual(engine._remoteTokenInflight.has(row.snapshot_id), false);
     });
 }
 
@@ -155,6 +250,8 @@ function registerPersistenceTests(){
 
 describe('remote token snapshots', function(){
     registerAgreementTests();
+    registerConsensusTransportTests();
     registerNormalizationTests();
+    registerPublicationTests();
     registerPersistenceTests();
 });

@@ -14,6 +14,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const EventEmitter = require('events');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -145,11 +146,25 @@ function createRemoteTokenConsensus(parent, Consensus){
         validateProposedMatch: row => parent.validateRemoteTokenSnapshot(row),
         persistCapabilitySnapshot: (...args) => parent.persistCapabilitySnapshot(...args)
     };
-    return new Consensus(adapter, {
+    const consensus = new Consensus(adapter, {
         messageTypes: MESSAGE_TYPES,
         controlTags: { vc: 'XREMOTEV', nv: 'XREMOTEN' },
         idField: 'snapshot_id'
     });
+    const bridge = new EventEmitter();
+    consensus.on('match:finalized', event => {
+        const bridged = Object.assign({}, event, { match: event.row });
+        delete bridged.row;
+        bridge.emit('match:finalized', bridged);
+    });
+    consensus.on('match:abandoned', event => bridge.emit('match:abandoned', event));
+    bridge.propose = (snapshotId, context) => consensus.propose(snapshotId, {
+        row: context.match,
+        snapshot: context.snapshot
+    });
+    for(const method of ['start', 'stop', 'forgetFinalized'])
+        bridge[method] = (...args) => consensus[method](...args);
+    return bridge;
 }
 
 const enginePart = {
@@ -209,7 +224,7 @@ const enginePart = {
         this._remoteTokenInflight.add(row.snapshot_id);
         try {
             await this.remoteTokenConsensus.propose(row.snapshot_id, {
-                row,
+                match: row,
                 snapshot: { validators, count: validators.length }
             });
         } catch(error){
@@ -227,7 +242,7 @@ const enginePart = {
     },
 
     async writeFinalizedRemoteTokenSnapshot(event){
-        const row = event.row;
+        const row = event.match;
         row.validator_signatures = JSON.stringify(event.signatures || []);
         row.finalizing_view = event.view != null ? Number(event.view) : 0;
         row.status = 'finalized';
