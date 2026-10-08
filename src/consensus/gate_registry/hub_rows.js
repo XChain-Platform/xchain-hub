@@ -51,6 +51,12 @@ addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainn
 
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
 
+// anchor/reorg_handler/snapshot_lock
+// Reorg rollback rounds stamp a BTC height and derive membership and quorum from
+// its federation snapshot. Keep the wire fields dark on deployed networks until
+// a coordinated release; regtest exercises them from genesis.
+addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
+
 // Effective allow/block-list enforcement, inert until coordinated activation.
 addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
     mainnet: UNARMED,

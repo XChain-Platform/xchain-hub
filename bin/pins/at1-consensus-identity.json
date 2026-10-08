@@ -47,8 +47,9 @@
   },
   "gate_key_count": 43,
   "absent_gates": [],
-  "hub_only_rules_digest": "91263b530f509772bdedd43775845368bc1d28bf762f0c687b761a8b970d58ec",
+  "hub_only_rules_digest": "de146c8a53d7b49cc70262bea7c49e0b8775ea5fffca10670357675f0721356a",
   "hub_only_rules_gates": {
+    "anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT": "{\"mainnet\":9999999999,\"regtest\":9999999999,\"testnet\":9999999999}",
     "validators/governance/rules.GOV_SNAPSHOT_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}"

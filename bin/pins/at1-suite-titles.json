@@ -7390,6 +7390,12 @@
       "05b4cd7791b2675d3247fdf489e9926318e6485fbc17d0055845c9a78fb9e77b",
       "55420df3c8db26cfa38348378c110b076a6c68e03ce79507f38ab3e7ba8b0a01"
     ],
+    "a134445465762923": [
+      "73bf12316438a6758ecb9837d23a603b4d62dd2a17612e36859915891dfa3854",
+      "b16c9244c57aee4f812e771f345131124de7faa22ab19ee9ad107ffc0df46a37",
+      "912505060fc187b0d9e65c29736ea01794cacc4dccf24087876a5ff4d4a6a7d2",
+      "9892b30230df4b2e11aeb2eab3d95bd56d19a45b45e2653b64f490f69b2c642d"
+    ],
     "a1a67154d9da3652": [
       "1dc29e4e1321c36f862aa909cc708a19a644767a43ede8a317b9fe338c38c3a6",
       "b06ec3088b17f35c5767044b4fd6c72b0caf755b3440e9720075d3b58e7a5fa8",
@@ -11387,6 +11393,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
@@ -12305,6 +12312,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
@@ -13252,6 +13260,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
