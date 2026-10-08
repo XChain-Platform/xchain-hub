@@ -49,6 +49,10 @@ function initPublisherSpend(self, cfg){
     // getPublisherStats() so it is visible without log-grepping.
     self._enqueueFailures = 0;
 
+    // Count of unusable queue lines moved to the .corrupt.jsonl sibling before a
+    // rewrite, surfaced via getPublisherStats() so a quarantine is never silent.
+    self._corruptQueueLines = 0;
+
     // Append-only, fsync'd audit log of ACTUAL on-chain spends (rid,
     // txid, ts). The WAL queue is a pre-send intent record that is REMOVED on
     // success, so post-success reconstruction otherwise depends on stdout retention;

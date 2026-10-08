@@ -88,6 +88,19 @@ describe('chain tips null reasons: BTC latest block', function () {
         expect(warned('exceeds MAX_INDEXER_LAG_BLOCKS')).to.equal(true);
     });
 
+    it('refuses and logs a BTC tip whose lag is null or missing, since nothing dates it', async function () {
+        for (const result of [{ block_index: 5, lag: null }, { block_index: 5 }, { block_index: 5, lag: '' }]) {
+            const hub = hubWith('http://indexer.invalid/api', { data: { result } });
+            expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        }
+        expect(warned('no usable lag')).to.equal(true);
+    });
+
+    it('still accepts a BTC tip whose lag is zero', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: 5, lag: 0 } } });
+        expect(await hub.resolveBtcLatestBlock()).to.equal(5);
+    });
+
 });
 
 describe('chain tips null reasons: DOGE latest block', function () {
@@ -122,6 +135,19 @@ describe('chain tips null reasons: DOGE latest block', function () {
         const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: 5, lag: 100000 } } });
         expect(await hub.resolveDogeLatestBlock()).to.equal(null);
         expect(warned('exceeds MAX_INDEXER_LAG_BLOCKS')).to.equal(true);
+    });
+
+    it('refuses and logs a DOGE tip whose lag is null or missing, since nothing dates it', async function () {
+        for (const result of [{ block_index: 5, lag: null }, { block_index: 5 }]) {
+            const hub = hubWith('http://indexer.invalid/api', { data: { result } });
+            expect(await hub.resolveDogeLatestBlock()).to.equal(null);
+        }
+        expect(warned('DOGE latest block unavailable: indexer reported no usable lag')).to.equal(true);
+    });
+
+    it('still accepts a DOGE tip whose lag is zero', async function () {
+        const hub = hubWith('http://indexer.invalid/api', { data: { result: { block_index: 5, lag: 0 } } });
+        expect(await hub.resolveDogeLatestBlock()).to.equal(5);
     });
 
     it('logs when the DOGE indexer call fails', async function () {

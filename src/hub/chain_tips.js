@@ -35,6 +35,19 @@ const logger = getLogger();
 // isolated even when tests or embedded callers deliberately use more than one in a scope.
 const admissionTipMemo = new AsyncLocalStorage();
 
+// Guard against anchoring a snapshot on a stale tip. `lag` is how far the indexer's
+// committed tip trails the decoder's; an indexer processing far behind (repeated
+// contract watchdog timeouts, say) no longer reflects recent chain state, so past a
+// configurable gap treat the tip as untrustworthy and degrade rather than lock a
+// stale validator set into the consensus round. A missing lag degrades the same way:
+// the indexer sends null until its first decoder poll, and Number(null) reads as 0.
+function lagRefusal(lag){
+    let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
+    if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
+    if(lag == null || lag === '' || !Number.isFinite(Number(lag))) return 'reported no usable lag (' + JSON.stringify(lag) + '); cannot date the committed tip';
+    return (Number(lag) > maxLag) ? 'lag ' + lag + ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip' : null;
+}
+
 class ChainTips {
 
     // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
@@ -76,24 +89,14 @@ class ChainTips {
                     (result ? 'an error (' + JSON.stringify(result.error) + ')' : 'no result') + '; no BTC latest block');
                 return null;
             }
-            // Guard against anchoring a snapshot on a stale tip. `lag` is how far the indexer's
-            // committed tip trails the decoder's; an indexer processing far behind (repeated
-            // contract watchdog timeouts, say) no longer reflects recent chain state, so past a
-            // configurable gap treat the tip as untrustworthy and degrade rather than lock a
-            // stale validator set into the consensus round.
-            let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
-            if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
-            if(result.lag != null && Number(result.lag) > maxLag){
-                logger.warn('XChainHub: BTC indexer lag ' + result.lag +
-                    ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip');
-                return null;
-            }
             let directHeight = Number(result.block_index) || null;
             if(!directHeight){
                 logger.warn('XChainHub: BTC indexer getlatestblock returned no usable block_index (' +
                     JSON.stringify(result.block_index) + '); no BTC latest block');
                 return null;
             }
+            let lagWhy = lagRefusal(result.lag);
+            if(lagWhy){ logger.warn('XChainHub: BTC indexer ' + lagWhy); return null; }
             if(!this.btcDirectTipAcceptable(directHeight, pushedTip)) return null;
             return directHeight;
         } catch (err) {
@@ -111,18 +114,16 @@ class ChainTips {
     }
     // Read the DOGE committed tip directly so the anchor fold gate uses its own chain.
     async resolveDogeLatestBlock(){
-        let why = null, height = null;
+        let why = null, height = null, lagWhy = null;
         try {
             const url = await this.resolveIndexerUrl('DOGE');
             if(!url) why = 'no DOGE indexer URL resolves';
             else {
                 const res = await axiosFor(this).post(url, { jsonrpc: '2.0', id: Date.now(), method: 'getlatestblock', params: {} }, { timeout: 5000 });
                 const r = res && res.data && res.data.result;
-                let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
-                if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
                 if(!r || r.error) why = 'indexer getlatestblock returned ' + (r ? 'an error (' + JSON.stringify(r.error) + ')' : 'no result');
-                else if(r.lag != null && Number(r.lag) > maxLag) why = 'indexer lag ' + r.lag + ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip';
                 else if(!(height = Number(r.block_index) || null)) why = 'indexer getlatestblock returned no usable block_index (' + JSON.stringify(r.block_index) + ')';
+                else if((lagWhy = lagRefusal(r.lag))) why = 'indexer ' + lagWhy;
             }
         } catch (err) { why = 'failed to resolve from the indexer: ' + err.message; }
         if(why) logger.warn('XChainHub: DOGE latest block unavailable: ' + why);

@@ -102,10 +102,33 @@ function registerFeature16backgroundTimersPart2() {
     clock.restore();
   });
 }
+function pingStub(alive) {
+  return { readyState: 1, _isAlive: alive, ping: sinon.stub(), terminate: sinon.stub() };
+}
+function registerFeature16backgroundTimersPart3() {
+  it('startPingInterval keeps sweeping every peer and client after reaping a dead outbound peer', function () {
+    let clock = sinon.useFakeTimers();
+    rootSuiteConfig.P2P_WS_PING_INTERVAL = 1000;
+    let deadOut = pingStub(false), liveOut = pingStub(true), deadIn = pingStub(false), liveIn = pingStub(true);
+    rootSuitePm.peers.set('ws://dead:1', { ws: deadOut, inbound: false, state: 'open' });
+    rootSuitePm.peers.set('ws://live:1', { ws: liveOut, inbound: false, state: 'open' });
+    rootSuitePm.wss = { clients: new Set([deadIn, liveIn]) };
+    rootSuitePm.startPingInterval();
+    clock.tick(1001);
+    expect(deadOut.terminate.called).to.be.true;
+    expect(liveOut.ping.called).to.be.true;
+    expect(liveOut._isAlive).to.be.false;
+    expect(deadIn.terminate.called).to.be.true;
+    expect(liveIn.ping.called).to.be.true;
+    clearInterval(rootSuitePm.pingTimer);
+    clock.restore();
+  });
+}
 function registerFeature16backgroundTimers() {
   describe('background timers', function () {
     registerFeature16backgroundTimersPart1();
     registerFeature16backgroundTimersPart2();
+    registerFeature16backgroundTimersPart3();
   });
 }
 function registerFeature17addToDedupCheckMsgRateRecordPeerPart1() {

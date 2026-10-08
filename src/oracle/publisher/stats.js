@@ -41,6 +41,7 @@ module.exports = {
             queueDepth:          queueDepth,
             published:           this.publishedCount,
             abandoned:           this.abandonedCount,
+            corruptQueueLines:   this.corruptQueueLines,
             oversizedDrops:      this.oversizedDrops,
             quarantined:         this._quarantinedRounds.size,
             // Marker-table retention: the configured window plus the lifetime prune

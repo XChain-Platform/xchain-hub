@@ -112,6 +112,7 @@ class AttestationPublisher {
             broadcastSucceeded: this._broadcastSucceeded,
             broadcastFailed:    this._broadcastFailed,
             enqueueFailures:    this._enqueueFailures,
+            corruptQueueLines:  this._corruptQueueLines,
             enabled:            this.enabled,
             quarantined:        this._quarantinedRequests.size,   // needs operator replay
             publishedRequestsRetentionMs: this.publishedRequestsRetentionMs,
