@@ -16,6 +16,7 @@ describe('landing watermark clear frontier', function () {
     it('registers a gate armed on regtest only', function () {
         expect(gateRegistry.has(KEY)).to.equal(true);
         expect(gateRegistry.activeAt(KEY, 'regtest', 'DOGE', 1, null)).to.equal(true);
+        expect(clearFrontierActive('REGTEST', 'DOGE', 1)).to.equal(true);
         expect(gateRegistry.activeAt(KEY, 'testnet', 'DOGE', 999999999, null)).to.equal(false);
         expect(gateRegistry.activeAt(KEY, 'mainnet', 'DOGE', 999999999, null)).to.equal(false);
     });
