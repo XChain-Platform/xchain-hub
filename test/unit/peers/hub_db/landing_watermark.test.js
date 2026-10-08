@@ -186,5 +186,20 @@ describe('landing watermark indexer readings', function () {
 
         Tips.modules = { axios: { post: async () => { throw new Error('down'); } } };
         expect(await new Tips().resolveLandingReadings(['DOGE'])).to.deep.equal({ DOGE: null });
+
+        const delivered = { block: 9, protocol_time: 1791144000 };
+        const clear = { block: 12, protocol_time: 1791144180 };
+        Tips.modules = { axios: { post: async () => ({ data: { result: {
+            hub_push_delivered: delivered,
+            price_landing_clear: clear
+        } } }) } };
+
+        const regtest = new Tips();
+        regtest.network = 'regtest';
+        expect(await regtest.resolveLandingReadings(['DOGE'])).to.deep.equal({ DOGE: clear });
+
+        const testnet = new Tips();
+        testnet.network = 'testnet';
+        expect(await testnet.resolveLandingReadings(['DOGE'])).to.deep.equal({ DOGE: delivered });
     });
 });
