@@ -30,7 +30,7 @@ function queryRecorder(result){
     return doQuery;
 }
 
-describe('remote token snapshots', function(){
+function registerAgreementTests(){
     it('requires every follower fixture to reproduce the leader token claim exactly', function(){
         const leader = remote.buildRemoteTokenSnapshot(
             NETWORK, SNAPSHOT_BLOCK, 'DOGE', offer());
@@ -79,7 +79,9 @@ describe('remote token snapshots', function(){
                 remote.deriveRemoteTokenSnapshotId(changed), row.snapshot_id, key);
         }
     });
+}
 
+function registerNormalizationTests(){
     it('deduplicates identical book observations and sorts rows canonically', function(){
         const rows = remote.remoteTokenRowsFromBooks(NETWORK, SNAPSHOT_BLOCK, {
             LTC: [offer({ action_index: 9, give_tick: 'ZED', give_decimals: 2,
@@ -110,7 +112,9 @@ describe('remote token snapshots', function(){
         assert.strictEqual(remote.remoteTokenRowShapeOk(
             Object.assign({}, row, { decimals: '00' })), false);
     });
+}
 
+function registerPersistenceTests(){
     it('stores the attested row and exposes deterministic mirror reads', async function(){
         const doQuery = queryRecorder({ affectedRows: 1 });
         const row = Object.assign(remote.buildRemoteTokenSnapshot(
@@ -147,4 +151,10 @@ describe('remote token snapshots', function(){
         assert.match(sql,
             /CREATE INDEX pinned_remote_token ON remote_token_snapshots \(network, coin, tick, snapshot_block\)/);
     });
+}
+
+describe('remote token snapshots', function(){
+    registerAgreementTests();
+    registerNormalizationTests();
+    registerPersistenceTests();
 });
