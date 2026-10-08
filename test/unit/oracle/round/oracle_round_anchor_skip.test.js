@@ -122,7 +122,7 @@ describe('OracleRound scheduleFinalization: round-number anchor', function () {
     describe('on a single-node hub', registerSingleNodeTests);
 });
 
-describe('OracleRound stale pushed BTC reference block', function () {
+describe('OracleRound stale pushed tip reference block', function () {
     let hub, round, savedMaxTipAge;
 
     beforeEach(function () {
@@ -152,18 +152,24 @@ describe('OracleRound stale pushed BTC reference block', function () {
         else process.env.MAX_TIP_AGE_S = savedMaxTipAge;
     });
 
-    for (const ageHours of [22, 47]) {
-        it('rejects a pushed tip from ' + ageHours + ' hours ago and uses the direct height', async function () {
-            hub.db.getChainTip.resolves(tipAged(ageHours));
+    async function expectDirectHeightFor(ageHours) {
+        hub.db.getChainTip.resolves(tipAged(ageHours));
 
-            await round.executeRound();
+        await round.executeRound();
 
-            expect(round.currentBtcBlockHeight).to.equal(DIRECT_HEIGHT);
-            expect(round.anchorTipBlockTime).to.equal(null);
-            expect(round.chainTipFallbackActive).to.equal(false);
-            expect(hub.resolveBtcLatestBlock.calledOnce).to.equal(true);
-        });
+        expect(round.currentBtcBlockHeight).to.equal(DIRECT_HEIGHT);
+        expect(round.anchorTipBlockTime).to.equal(null);
+        expect(round.chainTipFallbackActive).to.equal(false);
+        expect(hub.resolveBtcLatestBlock.calledOnce).to.equal(true);
     }
+
+    it('rejects a stale pushed tip from 22 hours ago', async function () {
+        await expectDirectHeightFor(22);
+    });
+
+    it('rejects a stale pushed tip from 47 hours ago', async function () {
+        await expectDirectHeightFor(47);
+    });
 
     it('keeps a fresh pushed tip as the round reference block', async function () {
         const freshTip = tipAged(0);

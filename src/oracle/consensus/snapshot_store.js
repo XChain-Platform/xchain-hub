@@ -28,7 +28,6 @@ const swq               = require('../../consensus/stake_weighted_quorum.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-const roundTipRoutes = new WeakMap();
 
 // The rest of a stored round: the per-pair skip markers for pairs it dropped, the clamp
 // reference the next round is judged against, then the mirror broadcast.
@@ -99,38 +98,6 @@ async function broadcastStoredRound(round) {
 }
 
 module.exports = {
-
-    wireRoundPushedBtcTip(oracleRound) {
-        let hub = this.hub;
-        if (!hub || !oracleRound || oracleRound.hub !== hub) return;
-        let prior = roundTipRoutes.get(oracleRound);
-        let roundDb = prior ? prior.rawDb : oracleRound.db;
-        if (!roundDb || roundDb !== hub.db || typeof roundDb.getChainTip !== 'function') return;
-        if (prior && prior.consensus === this && oracleRound.db === prior.proxy) return;
-
-        let consensus = this;
-        let proxy = new Proxy(roundDb, { get(target, property, receiver) {
-            if (property !== 'getChainTip') return Reflect.get(target, property, receiver);
-            return async (coin, network) => {
-                if (String(coin).toUpperCase() === 'BTC')
-                    return consensus.resolveRoundPushedBtcTip();
-                return target.getChainTip.call(target, coin, network);
-            };
-        }});
-        roundTipRoutes.set(oracleRound, { rawDb: roundDb, consensus: this, proxy: proxy });
-        oracleRound.db = proxy;
-    },
-
-    async resolveRoundPushedBtcTip() {
-        let hub = this.hub;
-        if (!hub || typeof hub.resolveFreshPushedBtcTip !== 'function') return null;
-        let tip = await hub.resolveFreshPushedBtcTip();
-        if (!tip) return null;
-        let ageS = Math.floor(Date.now() / 1000) - Number(tip.blockTime);
-        logger.info('Oracle: round reference block using pushed BTC tip (height ' + tip.blockHeight +
-            ') ' + ageS + 's old');
-        return tip;
-    },
 
     // `admitBlocks` is the round's admission map, stored in its per-chain columns with every
     // federation column named (NULL for a legacy round, never 0), so the batch signer and
