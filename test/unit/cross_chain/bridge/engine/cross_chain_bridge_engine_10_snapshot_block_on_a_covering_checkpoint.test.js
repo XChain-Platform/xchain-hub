@@ -185,6 +185,12 @@ describe('CrossChainBridgeEngine: snapshot_block follower', function(){
         expect(await engine.validateProposedMatch(proposedRow(engine))).to.equal(true);
     });
 
+    it('refuses a later covering checkpoint when it also holds an earlier one', async function(){
+        const engine = makeEngine([LEG + 3, LEG + 9], LEG + 12);
+        page(engine, 'BTC', btcLock(), LEG + 12);
+        expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: LEG + 9 }))).to.equal(false);
+    });
+
     it('still refuses a checkpointed stamp below the leg', async function(){
         const engine = makeEngine([LEG - 6], LEG + 8);
         page(engine, 'BTC', btcLock(), LEG + 8);

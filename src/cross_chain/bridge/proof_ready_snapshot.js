@@ -42,10 +42,4 @@ async function proofReadySnapshot(db, network, legBlock){
     return Number.isFinite(block) ? block : null;
 }
 
-// Whether this hub holds a finalized BTC checkpoint at exactly `snapshotBlock`.
-async function holdsCheckpointAt(db, network, snapshotBlock){
-    let rows = await db.getStateCheckpointByChainAndNetwork('BTC', network, Number(snapshotBlock));
-    return Array.isArray(rows) && rows.length > 0;
-}
-
-module.exports = { BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION, proofReadyActive, proofReadySnapshot, holdsCheckpointAt };
+module.exports = { BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION, proofReadyActive, proofReadySnapshot };

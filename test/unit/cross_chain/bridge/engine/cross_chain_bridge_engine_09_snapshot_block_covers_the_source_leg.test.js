@@ -164,12 +164,12 @@ function registerFollower(){
             expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4911 }))).to.equal(false);
         });
 
-        it('co-signs the same lock anchored at its own block, the row an old leader also produces once its tip catches up', async function(){
+        it('co-signs the first covering checkpoint and refuses a later one', async function(){
             const engine = makeEngine({ block: 4912 });
             engine.hub.db.state.checkpoints.push(4912, 4913);
             pages(engine, { BTC: { latest_block_index: 4913, network: 'regtest', transfers: [btcLock()] } });
             expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4912 }))).to.equal(true);
-            expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4913 }))).to.equal(true);
+            expect(await engine.validateProposedMatch(proposedRow(engine, { snapshot_block: 4913 }))).to.equal(false);
         });
 
         it('co-signs a DOGE burn anchored at a BTC height below the DOGE block it was mined in', async function(){

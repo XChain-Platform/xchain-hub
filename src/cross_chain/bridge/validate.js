@@ -25,7 +25,7 @@ const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
 const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { ALLOWED_CHAINS, PENDING_PAGE, TRANSFER_CANONICAL_INT_FIELDS, POLICY_CANONICAL_INT_FIELDS, SNAPSHOT_BLOCK_TOLERANCE } = require('./constants.js');
 const { parsePolicyColumn } = require('./policy_column.js');
-const { proofReadyActive, holdsCheckpointAt } = require('./proof_ready_snapshot.js');
+const { proofReadyActive, proofReadySnapshot } = require('./proof_ready_snapshot.js');
 
 module.exports = {
     // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
@@ -132,9 +132,11 @@ module.exports = {
         if(!Number.isFinite(depth) || depth < this.effectiveDepth(row.src_chain, leg.min_depth)) return false;
         // The leader's adopted snapshot_block must not predate the leg (snapshotCoversLeg).
         if(!this.snapshotCoversLeg(row.src_chain, row.snapshot_block, leg.block_index)) return false;
-        // Past the proof-ready flag day the stamp is a checkpoint block this hub also holds.
-        if(proofReadyActive(row.network, row.src_chain, leg.block_index) &&
-           !(await holdsCheckpointAt(this.db, row.network, row.snapshot_block))) return false;
+        // Past the proof-ready flag day the stamp is this hub's first covering checkpoint.
+        if(proofReadyActive(row.network, row.src_chain, leg.block_index)){
+            let expected = await proofReadySnapshot(this.db, row.network, leg.block_index);
+            if(expected == null || Number(row.snapshot_block) !== expected) return false;
+        }
 
         // The SOURCE CHAIN's own flag day, at the height the leg was mined: the mirror of the
         // proposer's gate in maybeFinalizeTransfer, on the same (block, coin) pair, so a leg
