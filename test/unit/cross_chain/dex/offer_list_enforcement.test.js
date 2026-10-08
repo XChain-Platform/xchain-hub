@@ -237,22 +237,36 @@ function registerLeaderEnforcementTests(){
 
 function registerFollowerEnforcementTests(){
     it('the follower refuses a proposal when its independent list read fails', async function(){
-        armGate(true);
         let [a, b] = pair({ allow_list: 11 });
-        let engine = Object.assign(matchEngine(rejects(new Error('list rpc down'))), validatePart, {
+        let rpc = rejects(new Error('list rpc down'));
+        let engine = Object.assign(matchEngine(rpc), validatePart, {
             proposedMatchInBounds: () => true,
-            findOpenOffer: async coin => coin === 'BTC' ? a : b
+            findOpenOffer: async coin => coin === 'BTC' ? a : b,
+            deriveMatchId: () => 'complete-proposal'
         });
         let row = {
+            match_id: 'complete-proposal',
             network: 'regtest',
             snapshot_block: 100,
             a_chain: 'BTC',
             a_action_index: 1,
+            a_kind: 'swap',
+            a_amount: '5',
+            a_filled_before: '0',
             b_chain: 'LTC',
-            b_action_index: 2
+            b_action_index: 2,
+            b_kind: 'swap',
+            b_amount: '10',
+            b_filled_before: '0'
         };
 
+        armGate(false);
+        assert.strictEqual(await engine.validateProposedMatch(row), true);
+        assert.strictEqual(rpc.callCount, 0);
+
+        armGate(true);
         assert.strictEqual(await engine.validateProposedMatch(row), false);
+        assert.strictEqual(rpc.callCount, 1);
     });
 }
 
