@@ -124,7 +124,6 @@ describe('OracleRound scheduleFinalization: round-number anchor', function () {
 
 describe('OracleRound stale pushed tip reference block', function () {
     let hub, round, savedMaxTipAge;
-
     beforeEach(function () {
         savedMaxTipAge = process.env.MAX_TIP_AGE_S;
         delete process.env.MAX_TIP_AGE_S;
@@ -144,6 +143,7 @@ describe('OracleRound stale pushed tip reference block', function () {
         hub.resolveFreshPushedBtcTip = ChainTips.prototype.resolveFreshPushedBtcTip;
         hub.resolveBtcLatestBlock.resolves(DIRECT_HEIGHT);
         round = new OracleRound(hub);
+        sinon.stub(round, 'scheduleFinalization');
     });
 
     afterEach(function () {
