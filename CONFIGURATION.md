@@ -737,6 +737,7 @@ BTC indexer's `getrollcallabsences`, where they are authoritative.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GOV_VOTING_PERIOD` | No | `604800000` (7 days) | Proposal voting period (ms). |
+| `GOVERNANCE_OVERDUE_MS` | No | `7200000` (2 hours) | Time after voting ends before a still-voting proposal is considered overdue (ms). |
 | `GOVERNANCE_TALLY_INTERVAL` | No | `60000` | Vote tally interval (ms). |
 
 ## HTTP attestation provider (`http_get`)

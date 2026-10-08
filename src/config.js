@@ -133,6 +133,7 @@ const config = {
     get FULLNODE_POLL_MS() { return process.env.FULLNODE_POLL_MS; },
     get FULLNODE_SPEND_LOG_PATH() { return process.env.FULLNODE_SPEND_LOG_PATH; },
     get GOVERNANCE_TALLY_INTERVAL() { return process.env.GOVERNANCE_TALLY_INTERVAL; },
+    get GOVERNANCE_OVERDUE_MS() { return process.env.GOVERNANCE_OVERDUE_MS; },
     get GOV_VOTING_PERIOD() { return process.env.GOV_VOTING_PERIOD; },
     get HUB_ADMISSION_RELAY() { return process.env.HUB_ADMISSION_RELAY; },
     get HUB_ALLOW_UNAUTHENTICATED() { return process.env.HUB_ALLOW_UNAUTHENTICATED; },
