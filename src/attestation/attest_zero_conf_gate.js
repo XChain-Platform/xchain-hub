@@ -78,6 +78,7 @@
 const gateRegistry = require('../consensus/gate_registry');
 const { ATTEST_RESPONSIBLE_WIDENING_ACTIVATION } = require('../consensus/gates/attest_responsible_widening_gate.js');
 const { getLogger } = require('../observability');
+const hubConfig = require('../config');
 const logger = getLogger();
 
 // Per-network activation height, a copy of the registry row. Compared against
@@ -140,7 +141,7 @@ function assertZeroConfOrdering(network){
     let detail = 'ATTEST_ZERO_CONF_ACTIVATION.' + net + ' is ' + zc + ' but ' + problem +
         '. Fix the map in both service copies and the documentation canon ' +
         '(XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1 to bypass on a venue where every hub runs the SAME maps).';
-    if(process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT === '1'){
+    if(hubConfig.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT === '1'){
         logger.warn('XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1: skipping the zero-conf ordering assertion. ' + detail);
         return;
     }

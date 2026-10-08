@@ -164,7 +164,8 @@ module.exports = {
         // Follower co-sign declines by reason (noteCosignDecline). A member whose own indexer
         // cannot confirm checkpoints stops co-signing, and while the rest still reach quorum
         // nothing else shows the margin shrinking. Zero-filled so the stats shape is fixed.
-        this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, indexer_read_failed: 0, indexer_no_block: 0 };
+        this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, off_cadence: 0,
+                                 indexer_read_failed: 0, indexer_no_block: 0 };
         this._lastCosignDeclineReason = null;
         this._cosignDeclineLoggedAt   = {};   // per-reason warn throttle, on the cadence-stall window
     },
