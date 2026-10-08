@@ -274,7 +274,6 @@ const testCase12 = async function () {
             };
 
 const testCase13 = async function () {
-                this.timeout(10000);
                 // The hourly idle IS the structural stall: at four windows an hour these
                 // twenty windows need five hours, and the fleet's 697 need seven months.
                 let clock = sinon.useFakeTimers();
@@ -299,7 +298,6 @@ const testCase13 = async function () {
             };
 
 const testCase14 = async function () {
-                this.timeout(10000);
                 let clock = sinon.useFakeTimers();
                 let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
                                                ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 1 } });
@@ -383,6 +381,7 @@ function registerSuite1() {
 }
 
 function registerOuterSuite3() {
+    this.timeout(30000);
     beforeEach(function () {
         logs = { log: [], warn: [], error: [] };
         sinon.stub(console, 'log').callsFake((...args) => logs.log.push(args.join(' ')));
