@@ -23,19 +23,70 @@
 'use strict';
 
 const { noteDrop } = require('../../consensus/diagnostics');
+const { isAdmissibleSigner } = require('../../lib/chain_signer_admission.js');
 const nodeUtil = require('node:util');
 const { XCHAIN_REORG_PREPARE, XCHAIN_REORG_COMMIT } = require('./message_types.js');
+const snapshotRoundMethods = require('./snapshot_round.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+function armLeaderTimeout(self, reorgId, pending) {
+    pending.timer = setTimeout(() => {
+        if (pending.finalized) return;
+        logger.warn('Reorg: Consensus timeout for ' + reorgId);
+        self.emit('reorg:timeout', {
+            reorgId,
+            sourceChain:    pending.chain,
+            reorgHeight:    pending.reorgHeight,
+            timestamp:      pending.timestamp,
+            affectedChains: pending.affectedChains,
+            prepares:       self.reorgVoteCount(pending, 'prepare'),
+            commits:        self.reorgVoteCount(pending, 'commit'),
+            quorum:         pending.quorum
+        });
+        self.pendingReorgs.delete(reorgId);
+    }, self.timeout);
+}
+
+async function openRoundFromPrepare(self, envelope, fields, auth) {
+    let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
+        oldHash, newHash, btcBlockHeight } = fields;
+    if (self.processed.has(reorgId)) return false;
+    if (self.pendingReorgs.size >= self.maxPendingReorgs) return false;
+
+    let snapshotContext = await self.lockReorgFederationSnapshot(btcBlockHeight, true);
+    if (snapshotContext.refused) return false;
+    let expectedDigest = self.reorgRoundDigest(reorgId, chain, reorgHeight, timestamp,
+        oldHash, newHash, snapshotContext.active ? snapshotContext.btcBlockHeight : null);
+    if (digest !== expectedDigest) return false;
+    if (snapshotContext.active) {
+        let senderPubkey = self.resolveReorgSenderPubkey(envelope);
+        if (!auth.pubkeyKnown || !senderPubkey || !snapshotContext.members.has(senderPubkey)) return false;
+    } else if (!auth.legacyKnown) {
+        return false;
+    }
+
+    let verified = await self.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
+    if (!verified) return false;
+    let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
+    if (!self.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return false;
+    if (!self.pendingReorgs.has(reorgId)) {
+        self.openFollowerRound({ reorgId, chain, reorgHeight, timestamp, affectedChains,
+            digest, oldHash, newHash, observedBlockTimeMs, snapshotContext });
+    }
+    return true;
+}
 
 module.exports = {
 
     async handleAlert(envelope) {
-        if (!this.isKnownSender(envelope.sender)) {
+        let legacyKnown = this.isKnownSender(envelope.sender);
+        let pubkeyKnown = isAdmissibleSigner(this.peerManager, envelope);
+        if (!legacyKnown && !pubkeyKnown) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_alert', sender: envelope.sender, envelope });
             return;
         }
-        let { chain, reorgHeight, timestamp, reorgId, oldHash, newHash } = envelope.data;
+        let { chain, reorgHeight, timestamp, reorgId, oldHash, newHash, btcBlockHeight } = envelope.data;
         if (!chain || !reorgHeight || !timestamp || !reorgId) return;
         // Bind reorgId to its canonical (chain:reorgHeight:timestamp) form so one valid
         // observation cannot spawn unlimited distinct rounds (REORG-INBOUND-UNBOUNDED-ROUNDS-1):
@@ -70,14 +121,29 @@ module.exports = {
         // reorg may have created the round meanwhile.
         if (this.processed.has(reorgId) || this.pendingReorgs.has(reorgId)) return;
 
+        let snapshotContext = await this.lockReorgFederationSnapshot(btcBlockHeight, true);
+        if (snapshotContext.refused) return;
+        if (snapshotContext.active) {
+            let senderPubkey = this.resolveReorgSenderPubkey(envelope);
+            if (!pubkeyKnown || !senderPubkey || !snapshotContext.members.has(senderPubkey)) return;
+        } else if (!legacyKnown) {
+            return;
+        }
+
         let affectedChains = this.getAffectedChains(chain);
-        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
+        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains,
+            oldHash, newHash, observedBlockTimeMs, snapshotContext);
     },
 
-    initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs) {
+    initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash,
+            observedBlockTimeMs, snapshotContext) {
         if (this.pendingReorgs.has(reorgId)) return;
+        if (snapshotContext && snapshotContext.refused) return;
 
-        let digest = this.digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
+        let snapshotActive = !!(snapshotContext && snapshotContext.active);
+        let btcBlockHeight = snapshotActive ? snapshotContext.btcBlockHeight : null;
+        let digest = this.reorgRoundDigest(reorgId, chain, reorgHeight, timestamp,
+            oldHash, newHash, btcBlockHeight);
 
         let pending = {
             reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
@@ -93,52 +159,43 @@ module.exports = {
             // Lock quorum at round start so the threshold can't shift between
             // PREPARE and COMMIT (validator set / peer count may change during
             // the 60s window), keeping every hub in lockstep across the round.
-            quorum:   this.getQuorum(),
+            quorum:   snapshotActive ? snapshotContext.quorum : this.getQuorum(),
+            snapshotActive,
+            btcBlockHeight,
+            memberPubkeys: snapshotActive ? snapshotContext.members : null,
             prepares: new Set(),
             commits:  new Set(),
+            preparePubkeys: new Set(),
+            commitPubkeys:  new Set(),
             finalized: false,
             timer:    null
         };
 
         pending.prepares.add(this.peerManager.validatorAddr);
+        if (snapshotActive) pending.preparePubkeys.add(snapshotContext.selfPubkey);
         this.pendingReorgs.set(reorgId, pending);
 
-        pending.timer = setTimeout(() => {
-            if (!pending.finalized) {
-                logger.warn('Reorg: Consensus timeout for ' + reorgId);
-                // Surface the discarded rollback before dropping it, so operators
-                // (and downstream consumers) can alert or retry. Without this, a
-                // stalled round silently leaves attestations un-deleted and price
-                // snapshots un-disputed after a reorg, leaving dirty cross-chain state
-                // with no signal beyond a log line.
-                this.emit('reorg:timeout', {
-                    reorgId,
-                    sourceChain:    pending.chain,
-                    reorgHeight:    pending.reorgHeight,
-                    timestamp:      pending.timestamp,
-                    affectedChains: pending.affectedChains,
-                    prepares:       pending.prepares.size,
-                    commits:        pending.commits.size,
-                    quorum:         pending.quorum
-                });
-                this.pendingReorgs.delete(reorgId);
-            }
-        }, this.timeout);
+        armLeaderTimeout(this, reorgId, pending);
 
-        this.peerManager.broadcast(XCHAIN_REORG_PREPARE, {
+        let prepare = {
             reorgId, chain, reorgHeight, timestamp,
             affectedChains, digest, oldHash, newHash
-        });
+        };
+        if (snapshotActive) prepare.btcBlockHeight = btcBlockHeight;
+        this.peerManager.broadcast(XCHAIN_REORG_PREPARE, prepare);
 
         this.checkPrepareQuorum(reorgId);
     },
 
     async handlePrepare(envelope) {
-        if (!this.isKnownSender(envelope.sender)) {
+        let legacyKnown = this.isKnownSender(envelope.sender);
+        let pubkeyKnown = isAdmissibleSigner(this.peerManager, envelope);
+        if (!legacyKnown && !pubkeyKnown) {
             noteDrop({ reason: 'unknown_sender', phase: 'reorg_prepare', sender: envelope.sender, envelope });
             return;
         }
-        let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash } = envelope.data;
+        let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
+            oldHash, newHash, btcBlockHeight } = envelope.data;
         if (!reorgId || !digest) return;
         // Same canonical-reorgId binding as handleAlert: reject a PREPARE whose reorgId is
         // not the canonical form of its own (chain,reorgHeight,timestamp), so the round-
@@ -156,38 +213,26 @@ module.exports = {
         newHash = String(newHash || '').toLowerCase();
         if (!this.hashesWellFormed(oldHash, newHash)) return;
 
-        // The digest is fully derivable from the PREPARE's own fields, so never
-        // trust the wire value: a mismatch is either corruption or an attempt to
-        // fragment the round with per-follower digests.
-        if (digest !== this.digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash)) return;
-
         if (!this.pendingReorgs.has(reorgId)) {
-            if (this.processed.has(reorgId)) return;
-            // Abstain when already at the concurrent-round cap, BEFORE the indexer probe,
-            // so a burst of distinct rounds can neither grow pendingReorgs without bound
-            // nor amplify self-verification RPCs (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
-            if (this.pendingReorgs.size >= this.maxPendingReorgs) return;
-
-            // Leader-bypass path (we never saw the ALERT): verify against our own
-            // node BEFORE creating the round. On failure we abstain entirely; a
-            // later PREPARE retries, so a hub whose node re-syncs mid-round can
-            // still join.
-            let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
-            if (!verified) return;
-            let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
-            // Same over-rollback abstain as handleAlert: never co-sign a round
-            // whose timestamp predates the reorged block's own block_time.
-            if (!this.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return;
-            if (this.pendingReorgs.has(reorgId)) {
-                // Round appeared while we were verifying; fall through to record.
-            } else {
-                // Create pending from the received (now verified) data
-                this.openFollowerRound({ reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash, observedBlockTimeMs });
-            }
+            let opened = await openRoundFromPrepare(this, envelope, {
+                reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
+                oldHash, newHash, btcBlockHeight
+            }, { legacyKnown, pubkeyKnown });
+            if (!opened) return;
         }
 
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.digest !== digest) return;
+        if (pending.snapshotActive) {
+            if (btcBlockHeight !== pending.btcBlockHeight) return;
+            let senderPubkey = this.resolveReorgSenderPubkey(envelope);
+            if (!pubkeyKnown || !senderPubkey || !pending.memberPubkeys.has(senderPubkey)) return;
+            pending.preparePubkeys.add(senderPubkey);
+        } else {
+            if (!legacyKnown) return;
+            if (digest !== this.reorgRoundDigest(reorgId, chain, reorgHeight, timestamp,
+                    oldHash, newHash, null)) return;
+        }
 
         pending.prepares.add(envelope.sender);
         this.checkPrepareQuorum(reorgId);
@@ -197,7 +242,9 @@ module.exports = {
     // PREPARE's own fields once handlePrepare has verified them against our node. Its
     // timeout is twice the leader's, and it clears the round whether or not it finalized.
     openFollowerRound(fields) {
-        let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash, observedBlockTimeMs } = fields;
+        let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash,
+            newHash, observedBlockTimeMs, snapshotContext } = fields;
+        let snapshotActive = !!(snapshotContext && snapshotContext.active);
         let pending = {
             reorgId, chain, reorgHeight, timestamp,
             affectedChains: affectedChains || [],
@@ -206,9 +253,14 @@ module.exports = {
             observedBlockTimeMs,
             selfVerified: true,
             // Lock quorum at round start (see initiateReorgConsensus).
-            quorum:   this.getQuorum(),
+            quorum:   snapshotActive ? snapshotContext.quorum : this.getQuorum(),
+            snapshotActive,
+            btcBlockHeight: snapshotActive ? snapshotContext.btcBlockHeight : null,
+            memberPubkeys: snapshotActive ? snapshotContext.members : null,
             prepares: new Set(),
             commits:  new Set(),
+            preparePubkeys: new Set(),
+            commitPubkeys:  new Set(),
             finalized: false,
             timer: null
         };
@@ -223,8 +275,8 @@ module.exports = {
                     reorgHeight:    pending.reorgHeight,
                     timestamp:      pending.timestamp,
                     affectedChains: pending.affectedChains,
-                    prepares:       pending.prepares.size,
-                    commits:        pending.commits.size,
+                    prepares:       this.reorgVoteCount(pending, 'prepare'),
+                    commits:        this.reorgVoteCount(pending, 'commit'),
                     quorum:         pending.quorum
                 });
             }
@@ -234,16 +286,22 @@ module.exports = {
     },
 
     handleCommit(envelope) {
-        if (!this.isKnownSender(envelope.sender)) {
-            noteDrop({ reason: 'unknown_sender', phase: 'reorg_commit', sender: envelope.sender, envelope });
-            return;
-        }
-        let { reorgId, digest } = envelope.data;
+        let { reorgId, digest, btcBlockHeight } = envelope.data;
         if (!reorgId || !digest) return;
 
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.digest !== digest) return;
 
+        if (pending.snapshotActive) {
+            if (btcBlockHeight !== pending.btcBlockHeight ||
+                    !isAdmissibleSigner(this.peerManager, envelope)) return;
+            let senderPubkey = this.resolveReorgSenderPubkey(envelope);
+            if (!senderPubkey || !pending.memberPubkeys.has(senderPubkey)) return;
+            pending.commitPubkeys.add(senderPubkey);
+        } else if (!this.isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'reorg_commit', sender: envelope.sender, envelope });
+            return;
+        }
         pending.commits.add(envelope.sender);
         this.checkCommitQuorum(reorgId);
     },
@@ -256,14 +314,21 @@ module.exports = {
         if (pending.selfVerified !== true) return;
 
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
-        if (pending.prepares.size >= quorum && !pending._commitSent) {
+        if (this.reorgVoteCount(pending, 'prepare') >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
+            if (pending.snapshotActive) {
+                let selfPubkey = this.selfReorgPubkey();
+                if (!selfPubkey || !pending.memberPubkeys.has(selfPubkey)) return;
+                pending.commitPubkeys.add(selfPubkey);
+            }
 
-            this.peerManager.broadcast(XCHAIN_REORG_COMMIT, {
+            let commit = {
                 reorgId: reorgId,
                 digest:  pending.digest
-            });
+            };
+            if (pending.snapshotActive) commit.btcBlockHeight = pending.btcBlockHeight;
+            this.peerManager.broadcast(XCHAIN_REORG_COMMIT, commit);
 
             this.checkCommitQuorum(reorgId);
         }
@@ -277,15 +342,18 @@ module.exports = {
         if (pending.selfVerified !== true) return;
 
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
-        if (pending.commits.size >= quorum) {
+        if (this.reorgVoteCount(pending, 'commit') >= quorum) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
 
-            let proof = JSON.stringify([...pending.commits]);
+            let proofSet = pending.snapshotActive ? pending.commitPubkeys : pending.commits;
+            let proof = JSON.stringify([...proofSet]);
+            let validatorCount = pending.snapshotActive
+                ? pending.preparePubkeys.size : pending.prepares.size;
 
             this.executeRollback(
                 pending.chain, pending.reorgHeight, pending.timestamp,
-                reorgId, pending.prepares.size, proof, pending.observedBlockTimeMs
+                reorgId, validatorCount, proof, pending.observedBlockTimeMs
             ).then(() => {
                 this.pendingReorgs.delete(reorgId);
             }).catch(err => {
@@ -296,3 +364,5 @@ module.exports = {
     }
 
 };
+
+Object.assign(module.exports, snapshotRoundMethods);

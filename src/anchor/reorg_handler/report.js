@@ -22,7 +22,6 @@
 'use strict';
 
 const coins = require('../../coins');
-const { REORG_ALERT } = require('./message_types.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -103,27 +102,22 @@ module.exports = {
             throw new Error('timestamp predates the reorged block\'s own block_time at reorgHeight ' +
                 '(a reorg cannot be observed before the block existed)');
 
+        let snapshotContext = await this.localReorgSnapshotContext();
+
         // Verified and about to act: now consume the per-chain rate budget (covers both
         // the single-node local-execute path and the broadcast+consensus path below).
         this.reorgRateTracker.set(chain, now);
 
         // Single-node fallback
-        let quorum = this.getQuorum();
+        let quorum = snapshotContext.active ? snapshotContext.quorum : this.getQuorum();
         if (quorum === 0) {
-            await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, '[]', observedBlockTimeMs);
+            let proof = snapshotContext.active ? JSON.stringify([snapshotContext.selfPubkey]) : '[]';
+            await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, proof, observedBlockTimeMs);
             return;
         }
 
-        // Broadcast REORG_ALERT
-        this.peerManager.broadcast(REORG_ALERT, {
-            chain, reorgHeight, timestamp, reorgId, oldHash, newHash
-        });
-
-        // Determine affected chains (any chain that had cross-chain interactions with the source)
-        let affectedChains = this.getAffectedChains(chain);
-
-        // Start consensus
-        this.initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains, oldHash, newHash, observedBlockTimeMs);
+        this.startReportedReorgRound({ reorgId, chain, reorgHeight, timestamp,
+            oldHash, newHash, observedBlockTimeMs }, snapshotContext);
     },
 
     async getReorgHistory(limit) {
