@@ -101,24 +101,15 @@ class ChainTips {
             return null;
         }
     }
-
     // Return the stored BTC tip only while its timestamp passes the freshness gate.
     async resolveFreshPushedBtcTip(resolvedNetwork){
-        let network = resolvedNetwork;
-        try {
-            if(!network) network = await this.resolveBtcNetwork();
-        }
-        catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve BTC network for the pushed tip:', err.message)); return null; }
-        try {
-            let tip = await this.db.getChainTip('BTC', network);
-            if(tip && tip.blockHeight && this.btcPushedTipFresh(tip)) return tip;
-        } catch (_) { /* hub db down? no pushed tip */ }
-        return null;
+        let network;
+        try { network = resolvedNetwork || await this.resolveBtcNetwork(); }
+        catch (err) { logger.error(nodeUtil.format('XChainHub: cannot resolve fresh pushed BTC tip:', err.message)); return null; }
+        try { const tip = await this.db.getChainTip('BTC', network); return tip && tip.blockHeight && this.btcPushedTipFresh(tip) ? tip : null; }
+        catch (_) { return null; }
     }
-
-    // The DOGE indexer's committed tip, read directly: the anchor fold gate dates itself
-    // on the chain the anchor lands on, so a BTC height must not stand in. Null, never 0,
-    // on a missing URL, a failed or errored call, a stale lag or an unusable block_index.
+    // Read the DOGE committed tip directly so the anchor fold gate uses its own chain.
     async resolveDogeLatestBlock(){
         let why = null, height = null;
         try {
@@ -137,7 +128,6 @@ class ChainTips {
         if(why) logger.warn('XChainHub: DOGE latest block unavailable: ' + why);
         return why ? null : height;
     }
-
     // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
     // `lag` cannot see a halted chain: a stopped bitcoind freezes the decoder and the
     // committed tip together, so lag reads 0 while the height never moves.
@@ -162,9 +152,7 @@ class ChainTips {
         return false;
     }
 
-    // Freshness gate for the pushed BTC tip used by path 1 above. setChainTip stores
-    // block_time alongside the height, so the age check costs no round-trip. Returns
-    // false when the tip is older than MAX_TIP_AGE_S or its block_time is missing.
+    // Freshness gate for the pushed BTC tip used by path 1 above.
     // Default bound mirrors OracleRound: 2x the oracle round interval.
     btcPushedTipFresh(tip){
         let maxAge = Number(hubConfig.MAX_TIP_AGE_S);
@@ -407,5 +395,4 @@ class ChainTips {
         }
     }
 }
-
 module.exports = ChainTips;
