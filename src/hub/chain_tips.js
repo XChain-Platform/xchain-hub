@@ -25,7 +25,7 @@ const admissionHeight = require('../lib/admission_height.js');
 const { blockIntervalS } = require('../lib/relay_margin.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
 const hubConfig = require('../config');
-const { readingOf } = require('../peers/hub_db/landing_watermark.js');
+const { selectReading } = require('../peers/hub_db/landing_watermark.js');
 const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
@@ -331,9 +331,8 @@ class ChainTips {
         return out;
     }
 
-    // Each landing chain's `hub_push_delivered` reading, read beside the admission tips.
-    // A chain whose indexer does not report one (an older indexer, a failed read, a
-    // malformed value) comes back null, which publishes nothing for it.
+    // Read each landing chain's delivered or gated clear-frontier watermark.
+    // Missing, failed, or malformed indexer readings publish nothing for that chain.
     async resolveLandingReadings(chains, opts) {
         let out = {};
         let signal = opts && opts.signal;
@@ -352,7 +351,8 @@ class ChainTips {
                 }, signal ? { timeout: 5000, signal } : { timeout: 5000 });
                 let result = res && res.data && res.data.result;
                 if (!result || result.error) return null;
-                return readingOf(result.hub_push_delivered);
+                return selectReading(c, result.hub_push_delivered, result.price_landing_clear,
+                    this.network || hubConfig.HUB_NETWORK);
             } catch (err) {
                 return null;
             }
