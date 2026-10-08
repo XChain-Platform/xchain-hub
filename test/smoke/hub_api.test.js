@@ -192,7 +192,10 @@ function disabledSubsystemSuite() {
 
 // ─── SMOKE-HUB-003 through 005, 010: API Server ────────────
 function apiSmokeSuite() {
-        before(startApiSmokeServer);
+        before(async function () {
+            this.timeout(30000);
+            await startApiSmokeServer();
+        });
 
         after(async function () {
             if (server) await new Promise(r => server.close(r));

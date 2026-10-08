@@ -25,6 +25,7 @@ const { spawnSync } = require('child_process');
 const BIN  = path.resolve(__dirname, '../../../bin/consensus-identity.js');
 const REPO = path.resolve(__dirname, '../../..');
 const SUITE_TITLE_PIN = path.join(REPO, 'bin/pins/at1-suite-titles.json');
+const PIN  = path.join(REPO, 'bin/pins/at1-consensus-identity.json');
 
 function run(args) {
     return spawnSync(process.execPath, [BIN, ...args], { cwd: REPO, encoding: 'utf8' });
@@ -37,6 +38,11 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         const res = run(['--json']);
         expect(res.status, res.stderr).to.equal(0);
         expect(() => JSON.parse(res.stdout)).to.not.throw();
+    });
+
+    it('matches the committed identity pin on the healthy path', function () {
+        const res = run(['--compare', PIN]);
+        expect(res.status, res.stdout + res.stderr).to.equal(0);
     });
 
     it('exits 2 with one clean stderr line, not a raw stack, on a thrown error', function () {
