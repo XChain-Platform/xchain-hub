@@ -9540,6 +9540,11 @@
       "05605950365161291d242e9f8e08a3112a3b4bcdca0f4d730acb5e9ab11bf5db",
       "25c03a998e689e53c2a95527b8c06369e5ecb04bd4955567b223a36373f40a3a"
     ],
+    "d327fcec500e9a35": [
+      "fcf16c4ba7b0ea563f6d6b924b12e69b0c65fb15ac1bf133a660944f184feb6f",
+      "437662527effe8548f76bf255a13c476789f413e093d39aca8053683b671f5e6",
+      "05e0cc5a0bff87efe86833186c823c03b4b9405574cc8cf8c71cc4ebe5e7d4d1"
+    ],
     "d338f3d214ba6bad": [
       "98524cb10fe4a52307a62a74d5434aeb0f67936b4ece37ab3114bb4f4c68a07d",
       "1a6a9a37f5cf998dc6330792511502249e9c9a243dd59ebf9d571a5450e985f0",
@@ -10716,6 +10721,15 @@
       "276b3be84c5740265b80fe6860ef45218f49a6c5630f17f7c1acf717231d784f",
       "72ecee9ca6e387d231782c8efe16c016b9dcce7dfeba32540f27c8f9d4cb05c8"
     ],
+    "f43efa06d2c465fe": [
+      "2db8780ea2cb09f60c836a1933173b56eed23575a3b36a8b96ab17aa92514ce7",
+      "7f66d008978208e50018f6fb6013660c4ac2ac6d40754c9e4ce8ff82c572c80f",
+      "142b73e1dfc2c939687806c5db2ecef8fc7e0921bf922927bebecda787775001",
+      "9b984159ebee442c3fa7be4b7445e0c8d55080f7c9223b8dfcb8b2ebe61a36fd",
+      "6c253267e677bd9a47d5f443b6b0d0e9070f40a3975204eb6299de2a015689ac",
+      "8125e6952ad04a712cffc7ccc3c997f46594a0c26f4dcb3977e75e4e16f0ecfe",
+      "99f038db8fd46242f01cd691379cbeb69b69a7f6fe3222ed710ba99cf57530fb"
+    ],
     "f44a68f03584e4e0": [
       "5a6f358353d7584d3932ab092f163fff4e54b2c60a6b9aece54e3db627124dde",
       "4383aefb751561f031fda506914f9b505276aab3f88a29478f1605c2ee9caeaf",
@@ -11227,8 +11241,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 858,
-      "titleCount": 8161,
+      "fileCount": 860,
+      "titleCount": 8171,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11304,6 +11318,7 @@
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_singleton_membership.test.js": "22fe09fae995c037",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_derived_reward_archive.test.js": "1b4a1dd710541111",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_pkg8_archive_wrapper.test.js": "fc28fee45164e9ce",
+        "test/unit/anchor/publisher/archive/state_anchor_publisher_rejected_head_rearchive.test.js": "f43efa06d2c465fe",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_split_bundle_election.test.js": "1df328bc558d5e62",
         "test/unit/anchor/publisher/archive_seq_floor_seed.test.js": "98a73c450f6fbf51",
         "test/unit/anchor/publisher/broadcast/state_anchor_publisher_broadcast_classification.test.js": "3f6328cc77c0a02a",
@@ -11525,6 +11540,7 @@
         "test/unit/attestation/round/attestation_round_018_module_exports.test.js": "2c969cc60fb8d306",
         "test/unit/attestation/round/attestation_round_019_retry_window_vs_consensus_round_timeout.test.js": "e4cab15fc6855aab",
         "test/unit/attestation/round/attestation_round_020_pollpending_in_flight_guard.test.js": "f66dbe7129b541c9",
+        "test/unit/attestation/round/attestation_round_first_poll_attempt_no_indexer_url.test.js": "d327fcec500e9a35",
         "test/unit/attestation/round/attestation_round_poll_failure_health.test.js": "0d39cc5ac06724d4",
         "test/unit/attestation/round/lifecycle/attestation_round_001_stop.test.js": "1d65458c2e9035bf",
         "test/unit/attestation/round/lifecycle/attestation_round_002_start.test.js": "b1d3d27e43afcb48",
@@ -12142,8 +12158,8 @@
       }
     },
     "test": {
-      "fileCount": 858,
-      "titleCount": 8161,
+      "fileCount": 860,
+      "titleCount": 8171,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "4a0ac2f1326571e8",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12219,6 +12235,7 @@
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_singleton_membership.test.js": "22fe09fae995c037",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_derived_reward_archive.test.js": "1b4a1dd710541111",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_pkg8_archive_wrapper.test.js": "fc28fee45164e9ce",
+        "test/unit/anchor/publisher/archive/state_anchor_publisher_rejected_head_rearchive.test.js": "f43efa06d2c465fe",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_split_bundle_election.test.js": "1df328bc558d5e62",
         "test/unit/anchor/publisher/archive_seq_floor_seed.test.js": "98a73c450f6fbf51",
         "test/unit/anchor/publisher/broadcast/state_anchor_publisher_broadcast_classification.test.js": "3f6328cc77c0a02a",
@@ -12440,6 +12457,7 @@
         "test/unit/attestation/round/attestation_round_018_module_exports.test.js": "2c969cc60fb8d306",
         "test/unit/attestation/round/attestation_round_019_retry_window_vs_consensus_round_timeout.test.js": "e4cab15fc6855aab",
         "test/unit/attestation/round/attestation_round_020_pollpending_in_flight_guard.test.js": "f66dbe7129b541c9",
+        "test/unit/attestation/round/attestation_round_first_poll_attempt_no_indexer_url.test.js": "d327fcec500e9a35",
         "test/unit/attestation/round/attestation_round_poll_failure_health.test.js": "0d39cc5ac06724d4",
         "test/unit/attestation/round/lifecycle/attestation_round_001_stop.test.js": "1d65458c2e9035bf",
         "test/unit/attestation/round/lifecycle/attestation_round_002_start.test.js": "b1d3d27e43afcb48",
@@ -13006,8 +13024,8 @@
       }
     },
     "test:all": {
-      "fileCount": 938,
-      "titleCount": 8984,
+      "fileCount": 940,
+      "titleCount": 8994,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13163,6 +13181,7 @@
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_singleton_membership.test.js": "22fe09fae995c037",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_derived_reward_archive.test.js": "1b4a1dd710541111",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_pkg8_archive_wrapper.test.js": "fc28fee45164e9ce",
+        "test/unit/anchor/publisher/archive/state_anchor_publisher_rejected_head_rearchive.test.js": "f43efa06d2c465fe",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_split_bundle_election.test.js": "1df328bc558d5e62",
         "test/unit/anchor/publisher/archive_seq_floor_seed.test.js": "98a73c450f6fbf51",
         "test/unit/anchor/publisher/broadcast/state_anchor_publisher_broadcast_classification.test.js": "3f6328cc77c0a02a",
@@ -13384,6 +13403,7 @@
         "test/unit/attestation/round/attestation_round_018_module_exports.test.js": "2c969cc60fb8d306",
         "test/unit/attestation/round/attestation_round_019_retry_window_vs_consensus_round_timeout.test.js": "e4cab15fc6855aab",
         "test/unit/attestation/round/attestation_round_020_pollpending_in_flight_guard.test.js": "f66dbe7129b541c9",
+        "test/unit/attestation/round/attestation_round_first_poll_attempt_no_indexer_url.test.js": "d327fcec500e9a35",
         "test/unit/attestation/round/attestation_round_poll_failure_health.test.js": "0d39cc5ac06724d4",
         "test/unit/attestation/round/lifecycle/attestation_round_001_stop.test.js": "1d65458c2e9035bf",
         "test/unit/attestation/round/lifecycle/attestation_round_002_start.test.js": "b1d3d27e43afcb48",
