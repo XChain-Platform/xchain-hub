@@ -42,7 +42,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').dige
 function memDb(){
     const calls = [];
     const state = { insertAffected: 1, reviveAffected: 0, pairs: [], inflight: [], seq: 0, atSeq: null,
-                    exists: false, rows: [], sourceTransferId: null, persistedIndexes: [], tip: 150 };
+                    exists: false, rows: [], sourceTransferId: null, persistedIndexes: [] };
     const db = Object.create(Database.prototype);
     db.calls = calls;
     db.state = state;
@@ -55,11 +55,6 @@ function memDb(){
         if(sql.startsWith('SELECT snapshot_id, policy_hash')) return state.atSeq ? [state.atSeq] : [];
         if(sql.startsWith('SELECT DISTINCT tick, src_chain, dest_chain')) return state.pairs;
         if(sql.startsWith('SELECT tick, dest_chain, amount FROM bridge_transfers')) return state.inflight;
-        // A hub holding a finalized BTC checkpoint at its own tip and at any height asked for.
-        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index >='))
-            return [{ block_index: Math.max(Number(params[2]), state.tip) }];
-        if(sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?'))
-            return [{ block_index: params[2] }];
         if(sql.startsWith('SELECT 1 FROM bridge_transfers')) return state.exists ? [{ 1: 1 }] : [];
         // The per-poll persisted-leg read answers with the intersection of what was asked
         // for and what the test says is held, the way the IN (...) does.
@@ -84,7 +79,6 @@ function memDb(){
 function makeEngine(opts){
     opts = opts || {};
     const db = memDb();
-    if(opts.btcBlock != null) db.state.tip = opts.btcBlock;
     const broadcaster = { broadcastRow: sinon.stub(), broadcastDeletion: sinon.stub(), dropAllForResync: sinon.stub() };
     const hub = {
         db,
