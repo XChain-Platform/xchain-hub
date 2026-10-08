@@ -1,3 +1,4 @@
+'use strict';
 /*********************************************************************
  *
  * Copyright © 2025–2026 Dankest, LLC
@@ -12,14 +13,12 @@
  *
  **********************************************************************
  *
- * XChain Hub - DEX offer-list enforcement
+ * XChain Hub - DEX offer-list enforcement and rules
  *
  * Resolve each offer's chain-local allow and block lists at the source tip that
  * supplied the open book, then apply them to the counterparty payout address.
  *
  ********************************************************************/
-
-'use strict';
 
 const registry = require('../../consensus/gate_registry.js');
 
@@ -141,8 +140,54 @@ function offerPairAllowed(a, b){
     return oneSideAllows(a, b) && oneSideAllows(b, a);
 }
 
+function attachedListIds(offer){
+    if(offer === null || typeof offer !== 'object') return [];
+
+    let attached = [];
+    for(let field of ['allow_list', 'block_list']){
+        let value = offer[field];
+        if(value === null || value === undefined) continue;
+        let id = Number(value);
+        if(id !== 0) attached.push({ field, id });
+    }
+    return attached;
+}
+
+function resolvedMembers(answer){
+    if(answer === null || typeof answer !== 'object' || 'error' in answer || answer.type !== 2 ||
+       !Array.isArray(answer.members) || answer.members.length === 0 ||
+       !answer.members.every(member => typeof member === 'string' && member.length > 0)) return null;
+    return answer.members.slice();
+}
+
+function offerListVerdict(offer, answers, taker){
+    let attached = attachedListIds(offer);
+    if(attached.length === 0) return { admitted: true, reason: null };
+    if(typeof taker !== 'string' || taker.length === 0){
+        return { admitted: false, reason: 'taker address missing' };
+    }
+
+    for(let list of attached){
+        let allow = list.field === 'allow_list';
+        let members = resolvedMembers(answers && answers[allow ? 'allow' : 'block']);
+        if(members === null){
+            return { admitted: false, reason: allow ? 'allow list unresolved' : 'block list unresolved' };
+        }
+        if(allow && !members.includes(taker)){
+            return { admitted: false, reason: 'taker not on allow list' };
+        }
+        if(!allow && members.includes(taker)){
+            return { admitted: false, reason: 'taker on block list' };
+        }
+    }
+    return { admitted: true, reason: null };
+}
+
 module.exports = {
     CROSS_CHAIN_OFFER_LIST_ENFORCEMENT,
     prepareOfferLists,
-    offerPairAllowed
+    offerPairAllowed,
+    attachedListIds,
+    resolvedMembers,
+    offerListVerdict
 };
