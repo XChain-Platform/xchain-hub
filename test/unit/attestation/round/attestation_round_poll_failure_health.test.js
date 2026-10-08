@@ -86,10 +86,10 @@ describe('AttestationRound: poll transport and auth failures are measured', func
         let noUrl = makeRound({ url: null });
         await observer.pollPending();
         await noUrl.pollPending();
-        for (let ar of [observer, noUrl]) {
-            expect(ar.firstPollAttemptAt).to.equal(null);
-            expect(ar.getStats().poll_unsuccessful_for_ms).to.equal(null);
-        }
+        expect(observer.firstPollAttemptAt).to.equal(null);
+        expect(observer.getStats().poll_unsuccessful_for_ms).to.equal(null);
+        expect(noUrl.firstPollAttemptAt).to.be.a('number');
+        expect(noUrl.getStats().poll_unsuccessful_for_ms).to.be.a('number').and.at.least(0);
         expect(axiosStub.post.called).to.equal(false);
     });
 
