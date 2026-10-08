@@ -9205,6 +9205,13 @@
       "8c02b7d506f8e1c49a4647d6ba1398347d6b64e454388c816f312ff8999b80b3",
       "c13bdf262dbad55996e4f6797871742e85c9ba26740920397f1eb777f0ca4a54"
     ],
+    "c7f04e2b8dbfd526": [
+      "8fe0fa826abecb09f569d5785d0ec4b71a9db5d4973ac937d8580391162d493f",
+      "7cb11b98ff226650c194a5c570314c047048fc49bd3918cd469d499b88f3bb51",
+      "e9a18458c667baa8be033e5aaf314c8195d87e64bc5b63ef0313230f9060a38b",
+      "6d8731a81d879595ff4b9739b908b485aa1d51620d30e1a39c3c31ee2df958ba",
+      "9be0be9956110f0e7e92690cfb4e4e5800a43b7f84cca3b0598e8fc4d504eda4"
+    ],
     "c83b90aff657ed0c": [
       "0cdef5318636d4222dfe161fae4e2ccb8a0c38c718307fcc573ed07bad597096",
       "8a8f5011c3c67e730af9998b5cf1d33beb5d5a903a4f8223750074936c0a5949",
@@ -11436,8 +11443,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 879,
-      "titleCount": 8328,
+      "fileCount": 880,
+      "titleCount": 8333,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12298,6 +12305,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
@@ -12372,8 +12380,8 @@
       }
     },
     "test": {
-      "fileCount": 879,
-      "titleCount": 8328,
+      "fileCount": 880,
+      "titleCount": 8333,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13234,6 +13242,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
@@ -13257,8 +13266,8 @@
       }
     },
     "test:all": {
-      "fileCount": 959,
-      "titleCount": 9151,
+      "fileCount": 960,
+      "titleCount": 9156,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14199,6 +14208,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
