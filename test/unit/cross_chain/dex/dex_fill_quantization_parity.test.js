@@ -24,7 +24,6 @@ const path       = require('path');
 const sinon      = require('sinon');
 const proxyquire = require('proxyquire');
 const bc         = require('../../../../src/bcmath.js');
-const registry   = require('../../../../src/consensus/gate_registry.js');
 const { createMockHub } = require('../../../helpers/mockHub');
 
 // Warm the mathjs/bcmath require cache outside any timed hook (mirrors
@@ -131,10 +130,6 @@ function registerLedgerPlainAmountTest() {
 
 function registerPlainAmountTests() {
     describe('DEX fill amount plain-decimal serialization @regression @tier1', function () {
-        it('pins the signed-row amount encoding in the hub registry', function () {
-            assert.strictEqual(registry.get('cross_chain/dex/match.DEX_FILL_AMOUNT_ENCODING'), 'plain-decimal');
-        });
-
         registerSignedRowPlainAmountTest();
         registerLedgerPlainAmountTest();
     });

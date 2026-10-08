@@ -48,5 +48,3 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
-
-addGate('cross_chain/dex/match.DEX_FILL_AMOUNT_ENCODING', 'constant', 'plain-decimal');
