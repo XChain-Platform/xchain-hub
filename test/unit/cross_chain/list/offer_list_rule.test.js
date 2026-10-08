@@ -31,7 +31,7 @@ const list = (members, extra = {}) => Object.assign({
     meta_hash: 'meta-hash'
 }, extra);
 
-describe('DEX offer list rules', function () {
+describe('DEX offer list attachment and resolution rules', function () {
     it('returns attached list ids in allow-then-block order', function () {
         assert.deepStrictEqual(attachedListIds({ allow_list: '7', block_list: 9 }), [
             { field: 'allow_list', id: 7 },
@@ -62,7 +62,9 @@ describe('DEX offer list rules', function () {
         assert.strictEqual(resolvedMembers(undefined), null);
         assert.strictEqual(resolvedMembers(null), null);
     });
+});
 
+describe('DEX offer list verdict rules', function () {
     it('ignores the taker and answers when both lists are detached', function () {
         assert.deepStrictEqual(offerListVerdict({ allow_list: null, block_list: null }, {}, 'A'), admitted);
         assert.deepStrictEqual(offerListVerdict({ allow_list: 0 }, undefined, undefined), admitted);
