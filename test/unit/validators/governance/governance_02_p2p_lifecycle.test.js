@@ -91,10 +91,7 @@ it('handleVote REJECTS a registered validator vote with a forged signature', fun
 });
 });
 
-// Tally leadership
-describe('Governance', function () {
-    installSuiteHooks1();
-describe('P2P message handlers', function () {
+function registerP2PProposalTests() {
 it('handlePropose defaults a missing proposerPubkey and rationale to empty strings', async function () {
             await gov.handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
@@ -119,6 +116,9 @@ it('handleVote REJECTS an unsigned vote (no signature to authenticate the voter)
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
+}
+
+function registerP2PResultTests() {
 it('handleResult updates proposal status (from the tally leader, post voting_end)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: '2020-01-01T00:00:00Z' }]); // SELECT voting_end
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });                       // UPDATE
@@ -155,6 +155,14 @@ it('handleMessage routes each governance message type and ignores unknown', func
             expect(q.calledOnce).to.be.true;
             expect(c.calledOnce).to.be.true;
         });
+}
+
+// Tally leadership
+describe('Governance', function () {
+    installSuiteHooks1();
+describe('P2P message handlers', function () {
+    registerP2PProposalTests();
+    registerP2PResultTests();
 });
 });
 

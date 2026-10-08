@@ -38,7 +38,7 @@ function voteRows() {
     ];
 }
 
-describe('Governance result request catch-up', function () {
+function installHooks() {
     beforeEach(function () {
         hub = createMockHub();
         pm = hub._peerManager;
@@ -51,7 +51,9 @@ describe('Governance result request catch-up', function () {
         if (gov._tallyTimer) clearInterval(gov._tallyTimer);
         sinon.restore();
     });
+}
 
+function registerMissingResultTests() {
     it('broadcasts a delayed result request for an expired voting row and throttles repeats', async function () {
         let clock = sinon.useFakeTimers({ now: Date.parse('2026-10-08T00:00:10.000Z') });
         gov.tallyInterval = 1000;
@@ -85,7 +87,9 @@ describe('Governance result request catch-up', function () {
         await gov.requestMissingResults();
         expect(pm.broadcast.called).to.equal(false);
     });
+}
 
+function registerResultReplyTests() {
     it('answers an authenticated request with the stored final status and vote evidence', async function () {
         hub.db.doQuery.onCall(0).resolves([finalProposal('passed')]);
         hub.db.doQuery.onCall(1).resolves(voteRows());
@@ -122,7 +126,9 @@ describe('Governance result request catch-up', function () {
         expect(pm.broadcast.getCall(0).args[0]).to.equal('GOV_RESULT');
         expect(pm.broadcast.getCall(0).args[1].catchUp).to.equal(true);
     });
+}
 
+function registerResultReplyRejectionTest() {
     it('does not answer unknown, absent, voting, legacy, or inconsistent proposals', async function () {
         pm.validatorPubkeys = new Map([['known', snapshot[0].pubkey]]);
         await gov.handleResultRequest({ sender: 'unknown', data: { proposalId: PROPOSAL_ID } });
@@ -140,7 +146,9 @@ describe('Governance result request catch-up', function () {
         expect(pm.sendToPeer.called).to.equal(false);
         expect(pm.broadcast.called).to.equal(false);
     });
+}
 
+function registerCatchUpApplyTest() {
     it('applies a requested catch-up result from a known non-leader after local re-tally', async function () {
         let nonLeader = VALIDATORS_3.find(v => v.addr !== gov.getProposalLeader(PROPOSAL_ID).addr).addr;
         pm.validatorPubkeys = new Map([[nonLeader, snapshot[0].pubkey]]);
@@ -176,7 +184,9 @@ describe('Governance result request catch-up', function () {
         expect(finalized).to.include({ proposalId: PROPOSAL_ID, parameter: 'P' });
         expect(gov._resultRequests.has(PROPOSAL_ID)).to.equal(false);
     });
+}
 
+function registerCatchUpRejectionTest() {
     it('rejects unsolicited, unknown, early, and tally-mismatched catch-up results', async function () {
         let data = {
             proposalId: PROPOSAL_ID,
@@ -216,4 +226,13 @@ describe('Governance result request catch-up', function () {
         expect(hub.db.doQuery.callCount).to.equal(3);
         expect(gov._resultRequests.has(PROPOSAL_ID)).to.equal(true);
     });
+}
+
+describe('Governance result request catch-up', function () {
+    installHooks();
+    registerMissingResultTests();
+    registerResultReplyTests();
+    registerResultReplyRejectionTest();
+    registerCatchUpApplyTest();
+    registerCatchUpRejectionTest();
 });
