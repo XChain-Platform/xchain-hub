@@ -1,135 +1,142 @@
 'use strict';
 
-// Copyright © 2025-2026 Dankest, LLC
-// Based on XChain Platform by Dankest, LLC - https://dankest.llc
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
 
 const { expect } = require('chai');
 const sinon = require('sinon');
 const overdueMixin = require('../../../../src/validators/governance/overdue.js');
-const { getLogger } = require('../../../../src/observability');
+const logger = require('../../../../src/observability').getLogger();
 
-const HOUR_MS = 60 * 60 * 1000;
-const NOW = Date.parse('2026-10-08T12:00:00Z');
+const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const OVERDUE_MS = 2 * HOUR;
+const NOW = Date.UTC(2026, 9, 8, 12);
 
-class StubGovernance {
-    constructor(db) {
-        this.db = db;
-    }
+function proposal(id, votingEnd) {
+    return { proposal_id: id, voting_end: new Date(votingEnd) };
 }
 
-Object.assign(StubGovernance.prototype, overdueMixin);
-
-function subjectWith(proposals) {
-    let query = sinon.stub().resolves(proposals);
-    return new StubGovernance({ findGovernanceProposalsByStatusAndVotingEnd: query });
+function makeCounter(rows = [], overdueMs) {
+    let counter = {
+        db: { findGovernanceProposalsByStatusAndVotingEnd: sinon.stub().resolves(rows) }
+    };
+    if (overdueMs !== undefined) counter.overdueMs = overdueMs;
+    return Object.assign(counter, overdueMixin);
 }
 
-function installHooks(state) {
+describe('governance overdue counter mixin', function () {
+    let error;
+    let originalOverdueMs;
+
     beforeEach(function () {
-        state.originalOverdueMs = process.env.GOVERNANCE_OVERDUE_MS;
+        originalOverdueMs = process.env.GOVERNANCE_OVERDUE_MS;
         delete process.env.GOVERNANCE_OVERDUE_MS;
-        sinon.stub(Date, 'now').returns(NOW);
-        state.loggerError = sinon.stub(getLogger(), 'error');
+        error = sinon.stub(logger, 'error');
     });
 
     afterEach(function () {
         sinon.restore();
-        if (state.originalOverdueMs === undefined) delete process.env.GOVERNANCE_OVERDUE_MS;
-        else process.env.GOVERNANCE_OVERDUE_MS = state.originalOverdueMs;
+        if (originalOverdueMs === undefined) delete process.env.GOVERNANCE_OVERDUE_MS;
+        else process.env.GOVERNANCE_OVERDUE_MS = originalOverdueMs;
     });
-}
-
-describe('governance overdue proposal counting', function () {
-    let state = {};
-    installHooks(state);
 
     it('returns zero without logging when no proposal is overdue', async function () {
-        let subject = subjectWith([]);
-
-        expect(await subject.countOverdueProposals()).to.equal(0);
-        expect(subject.overdueProposalCount).to.equal(0);
-        expect(state.loggerError.called).to.equal(false);
-        expect(subject.db.findGovernanceProposalsByStatusAndVotingEnd.calledOnceWithExactly())
+        let counter = makeCounter([]);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(0);
+        expect(error.called).to.equal(false);
+        expect(counter.db.findGovernanceProposalsByStatusAndVotingEnd.calledOnceWithExactly())
             .to.equal(true);
     });
 
-    it('counts and reports only rows older than the default threshold', async function () {
-        let subject = subjectWith([
-            { proposal_id: 'old', voting_end: new Date(NOW - 2 * HOUR_MS - 1).toISOString() },
-            { proposal_id: 'threshold', voting_end: new Date(NOW - 2 * HOUR_MS) },
-            { proposal_id: 'recent', voting_end: new Date(NOW - HOUR_MS) }
+    it('counts rows at or beyond the default threshold', async function () {
+        let counter = makeCounter([
+            proposal('old', NOW - OVERDUE_MS - 1),
+            proposal('threshold', NOW - OVERDUE_MS),
+            proposal('recent', NOW - OVERDUE_MS + 1)
         ]);
 
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(subject.overdueProposalCount).to.equal(1);
-        expect(state.loggerError.calledOnce).to.equal(true);
-        expect(state.loggerError.firstCall.args[0]).to.include('old');
+        expect(await counter.countOverdueProposals(NOW)).to.equal(2);
+        expect(counter._overdueCount).to.equal(2);
+        expect(error.callCount).to.equal(2);
     });
-});
 
-describe('governance overdue proposal reporting', function () {
-    let state = {};
-    installHooks(state);
+    it('logs a newly overdue proposal and throttles repeat lines for one hour', async function () {
+        let counter = makeCounter([proposal('proposal-1', NOW - OVERDUE_MS - MINUTE)]);
+
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        expect(error.calledOnceWithMatch('proposal-1')).to.equal(true);
+        error.resetHistory();
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        expect(error.called).to.equal(false);
+        expect(await counter.countOverdueProposals(NOW + 61 * MINUTE)).to.equal(1);
+        expect(error.calledOnceWithMatch('proposal-1')).to.equal(true);
+    });
 
     it('tracks each overdue id on its own hourly schedule', async function () {
-        let proposals = [{ proposal_id: 'stuck-a', voting_end: new Date(NOW - 3 * HOUR_MS) }];
-        let subject = subjectWith(proposals);
+        let rows = [proposal('proposal-a', NOW - 3 * HOUR)];
+        let counter = makeCounter(rows);
 
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(state.loggerError.calledOnce).to.equal(true);
-        proposals.push({ proposal_id: 'stuck-b', voting_end: new Date(NOW - 3 * HOUR_MS) });
-        expect(await subject.countOverdueProposals(NOW + HOUR_MS / 2)).to.equal(2);
-        expect(state.loggerError.callCount).to.equal(2);
-        expect(await subject.countOverdueProposals(NOW + HOUR_MS + 1)).to.equal(2);
-        expect(state.loggerError.callCount).to.equal(3);
-        expect(await subject.countOverdueProposals(NOW + HOUR_MS * 1.5 + 1)).to.equal(2);
-        expect(state.loggerError.callCount).to.equal(4);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        rows.push(proposal('proposal-b', NOW - 3 * HOUR));
+        expect(await counter.countOverdueProposals(NOW + 30 * MINUTE)).to.equal(2);
+        expect(error.callCount).to.equal(2);
+        expect(await counter.countOverdueProposals(NOW + 61 * MINUTE)).to.equal(2);
+        expect(error.callCount).to.equal(3);
+        expect(await counter.countOverdueProposals(NOW + 91 * MINUTE)).to.equal(2);
+        expect(error.callCount).to.equal(4);
     });
 
-    it('drops ids that are no longer overdue', async function () {
-        let row = { proposal_id: 'recovered', voting_end: new Date(NOW - 3 * HOUR_MS) };
-        let subject = subjectWith([row]);
-        let query = subject.db.findGovernanceProposalsByStatusAndVotingEnd;
+    it('removes proposal ids from the log throttle after they stop being overdue', async function () {
+        let row = proposal('proposal-2', NOW - OVERDUE_MS - MINUTE);
+        let counter = makeCounter([row]);
+        await counter.countOverdueProposals(NOW);
+        counter.db.findGovernanceProposalsByStatusAndVotingEnd.resolves([]);
 
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        query.resolves([]);
-        expect(await subject.countOverdueProposals(NOW)).to.equal(0);
-        query.resolves([row]);
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(state.loggerError.callCount).to.equal(2);
-    });
-});
-
-describe('governance overdue failures and configuration', function () {
-    let state = {};
-    installHooks(state);
-
-    it('keeps the previous count when the query rejects', async function () {
-        let subject = subjectWith([
-            { proposal_id: 'stuck', voting_end: new Date(NOW - 3 * HOUR_MS) }
-        ]);
-
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        state.loggerError.resetHistory();
-        subject.db.findGovernanceProposalsByStatusAndVotingEnd.rejects(new Error('db unavailable'));
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(subject.overdueProposalCount).to.equal(1);
-        expect(state.loggerError.calledOnce).to.equal(true);
-        expect(state.loggerError.firstCall.args[0]).to.include('db unavailable');
+        expect(await counter.countOverdueProposals(NOW)).to.equal(0);
+        expect(counter._overdueLogged.has('proposal-2')).to.equal(false);
+        counter.db.findGovernanceProposalsByStatusAndVotingEnd.resolves([row]);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        expect(error.callCount).to.equal(2);
     });
 
-    it('uses GOVERNANCE_OVERDUE_MS when it is configured', async function () {
+    it('uses GOVERNANCE_OVERDUE_MS when configured', async function () {
         process.env.GOVERNANCE_OVERDUE_MS = '1000ms';
-        let subject = subjectWith([
-            { proposal_id: 'configured', voting_end: new Date(NOW - 1001) },
-            { proposal_id: 'too-recent', voting_end: new Date(NOW - 999) }
+        let counter = makeCounter([
+            proposal('configured', NOW - 1000),
+            proposal('too-recent', NOW - 999)
         ]);
 
-        expect(await subject.countOverdueProposals(NOW)).to.equal(1);
-        expect(state.loggerError.calledOnce).to.equal(true);
-        expect(state.loggerError.firstCall.args[0]).to.include('configured');
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        expect(error.calledOnceWithMatch('configured')).to.equal(true);
+    });
+
+    it('prefers a positive integer instance threshold', async function () {
+        process.env.GOVERNANCE_OVERDUE_MS = '1000';
+        let counter = makeCounter([proposal('instance', NOW - MINUTE)], 2 * MINUTE);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(0);
+    });
+
+    it('uses the default threshold when thresholds are invalid', async function () {
+        process.env.GOVERNANCE_OVERDUE_MS = 'invalid';
+        let counter = makeCounter([proposal('proposal-3', NOW - OVERDUE_MS - MINUTE)], 0);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+    });
+
+    it('logs a rejected query and returns the previous count', async function () {
+        let counter = makeCounter([proposal('proposal-4', NOW - OVERDUE_MS - MINUTE)]);
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        error.resetHistory();
+        counter.db.findGovernanceProposalsByStatusAndVotingEnd.rejects(new Error('database unavailable'));
+
+        expect(await counter.countOverdueProposals(NOW)).to.equal(1);
+        expect(error.calledOnceWithMatch('database unavailable')).to.equal(true);
     });
 });

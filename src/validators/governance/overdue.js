@@ -1,7 +1,7 @@
 /*********************************************************************
  *
- * Copyright © 2025-2026 Dankest, LLC
- * Based on XChain Platform by Dankest, LLC - https://dankest.llc
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
@@ -12,41 +12,49 @@
  *
  **********************************************************************
  *
- * XChain Hub - overdue governance proposal accounting mixin.
+ * XChain Hub - the OVERDUE counter, as a Governance.prototype mixin.
+ *
+ * Counts voting proposals that remain open after their voting window and
+ * rate-limits the error line for each proposal to once per hour.
  *
  ********************************************************************/
 
 'use strict';
 
+const nodeUtil = require('node:util');
 const hubConfig = require('../../config');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-const DEFAULT_OVERDUE_MS = 2 * 60 * 60 * 1000;
-const ERROR_REPEAT_MS = 60 * 60 * 1000;
+const DEFAULT_OVERDUE_MS = 7200000;
+const LOG_INTERVAL_MS = 3600000;
+
+function getOverdueMs(subject) {
+    if (Number.isInteger(subject.overdueMs) && subject.overdueMs > 0) {
+        return subject.overdueMs;
+    }
+    let configured = parseInt(hubConfig.GOVERNANCE_OVERDUE_MS, 10);
+    return Number.isInteger(configured) && configured > 0
+        ? configured
+        : DEFAULT_OVERDUE_MS;
+}
 
 function overdueRows(proposals, now, overdueMs) {
     return proposals.filter(proposal =>
-        new Date(proposal.voting_end).getTime() < now - overdueMs
-    );
+        now - new Date(proposal.voting_end).getTime() >= overdueMs);
 }
 
-function reportNewlyOverdue(subject, overdue, now) {
-    if (!(subject._overdueProposalLastReports instanceof Map)) {
-        subject._overdueProposalLastReports = new Map();
-    }
-
+function reportOverdue(subject, overdue, now) {
+    if (!(subject._overdueLogged instanceof Map)) subject._overdueLogged = new Map();
     let overdueIds = new Set(overdue.map(proposal => proposal.proposal_id));
-    for (let id of subject._overdueProposalLastReports.keys()) {
-        if (!overdueIds.has(id)) subject._overdueProposalLastReports.delete(id);
+    for (let id of subject._overdueLogged.keys()) {
+        if (!overdueIds.has(id)) subject._overdueLogged.delete(id);
     }
-
     for (let proposal of overdue) {
-        let lastReport = subject._overdueProposalLastReports.get(proposal.proposal_id);
-        if (lastReport !== undefined && now - lastReport < ERROR_REPEAT_MS) continue;
-        subject._overdueProposalLastReports.set(proposal.proposal_id, now);
-        logger.error('Governance: proposal ' + proposal.proposal_id +
-            ' remains in voting after its overdue threshold');
+        let lastLogged = subject._overdueLogged.get(proposal.proposal_id);
+        if (lastLogged !== undefined && now - lastLogged < LOG_INTERVAL_MS) continue;
+        logger.error('Governance: Proposal ' + proposal.proposal_id + ' is overdue');
+        subject._overdueLogged.set(proposal.proposal_id, now);
     }
 }
 
@@ -56,16 +64,15 @@ module.exports = {
         let proposals;
         try {
             proposals = await this.db.findGovernanceProposalsByStatusAndVotingEnd();
-        } catch (error) {
-            logger.error('Governance: failed to count overdue proposals: ' +
-                (error && error.message ? error.message : error));
-            return this.overdueProposalCount || 0;
+        } catch (e) {
+            logger.error(nodeUtil.format('Governance overdue count error:', e.message, e));
+            return this._overdueCount || 0;
         }
 
-        let overdueMs = parseInt(hubConfig.GOVERNANCE_OVERDUE_MS) || DEFAULT_OVERDUE_MS;
-        let overdue = overdueRows(proposals, now, overdueMs);
-        reportNewlyOverdue(this, overdue, now);
-        this.overdueProposalCount = overdue.length;
-        return this.overdueProposalCount;
+        let overdue = overdueRows(proposals, now, getOverdueMs(this));
+        reportOverdue(this, overdue, now);
+        this._overdueCount = overdue.length;
+        return this._overdueCount;
     }
+
 };

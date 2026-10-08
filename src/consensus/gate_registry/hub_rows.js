@@ -49,6 +49,8 @@ const { addGate, UNARMED } = require('./shared_rows.js');
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
 
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
 // peers/hub_db/landing_watermark
 // Landed-from-clear-frontier: at/above the activation, in the landing indexer's
 // block height, the hub publishes landed[chain] from the indexer's
