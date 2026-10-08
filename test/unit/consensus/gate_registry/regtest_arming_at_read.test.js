@@ -43,7 +43,7 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.resolve(__dirname, '.
 const INDEXER_SHARED_ROWS_DIR = path.join(INDEXER_DIR, 'src', 'protocol_changes');
 const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
     'shared_rows.js': '1db6bd06818eca6fc27a57858ac820592e6dc9e366e87e75be28ea099f8780dc',
-    'shared_rows_1.js': 'dafd67482b0d4f2e60958f7184f1596620798dabe3f4d5b5637b7b83da489dc1',
+    'shared_rows_1.js': '6769da650408acc79b5db6fa0d93f835b077a37d8f7885e8aa81d61bcd8618de',
     'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
     'shared_rows_3.js': '89127614a54b9a4007b8e63f18c4f8abb0873d8f8cb0d3f31a1115d67485c2b4',
     'shared_rows_4.js': 'dec84cd5f6e10b5bc631eb3a68ddcdfa5e37c5fb10cdf01ddd43cbb35980dc9b',
