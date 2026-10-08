@@ -74,6 +74,8 @@ function registerMissingResultTests() {
     });
 
     it('does not request before the grace interval or when the query fails', async function () {
+        // Freeze the clock: the row sits 1 ms inside the grace interval.
+        let clock = sinon.useFakeTimers({ now: Date.parse('2026-10-08T00:00:10.000Z') });
         gov.tallyInterval = 1000;
         hub.db.doQuery.resolves([{
             proposal_id: PROPOSAL_ID,
@@ -86,6 +88,7 @@ function registerMissingResultTests() {
         hub.db.doQuery.rejects(new Error('offline'));
         await gov.requestMissingResults();
         expect(pm.broadcast.called).to.equal(false);
+        clock.restore();
     });
 }
 
