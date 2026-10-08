@@ -178,6 +178,43 @@ it('is a no-op wherever ATTEST_ZERO_CONF_ACTIVATION is null (unratified there)',
     });
 }
 
+// Run fn with testnet armed below max(mirror, widening) and the bypass variable set to value.
+function withTestnetViolation(value, fn) {
+    const orig = local.ATTEST_ZERO_CONF_ACTIVATION.testnet;
+    const prior = process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT;
+    try {
+        local.ATTEST_ZERO_CONF_ACTIVATION.testnet = 100000;
+        process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT = value;
+        fn();
+    } finally {
+        local.ATTEST_ZERO_CONF_ACTIVATION.testnet = orig;
+        if (prior === undefined) delete process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT;
+        else process.env.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT = prior;
+    }
+}
+
+function registerZeroConfBypassTests() {
+    it('XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1 bypasses loudly, even on testnet', function () {
+        withTestnetViolation('1', () => withPatchedWarn(() => {
+            expect(() => local.assertZeroConfOrdering('testnet')).to.not.throw();
+        }));
+        expect(warnSpy.join('\n')).to.match(/XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT=1: skipping/);
+    });
+
+    it('any XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT value other than 1 still throws on testnet', function () {
+        withTestnetViolation('0', () => {
+            expect(() => local.assertZeroConfOrdering('testnet')).to.throw(/ATTEST zero-conf/);
+        });
+    });
+
+    it('reads XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT through the config inventory', function () {
+        const hubConfig = require('../../../src/config');
+        withTestnetViolation('1', () => {
+            expect(hubConfig.XCHAIN_HUB_SKIP_ZERO_CONF_ASSERT).to.equal('1');
+        });
+    });
+}
+
 function registerZeroConfOrderingSuite() {
 describe('assertZeroConfOrdering: the height ordering invariant (§3.2 a, D9)', function () {
         beforeEach(function () { warnSpy = []; });
@@ -186,6 +223,8 @@ describe('assertZeroConfOrdering: the height ordering invariant (§3.2 a, D9)', 
         registerZeroConfOrderingCoreTests();
 
         registerZeroConfOrderingEdgeTests();
+
+        registerZeroConfBypassTests();
     });
 }
 

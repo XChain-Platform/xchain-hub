@@ -23,6 +23,7 @@
 const nodeUtil = require('node:util');
 const { noteDrop } = require('../../consensus/diagnostics');
 const { ALLOWED_CHAINS, DEFAULT_CONFIRMATIONS, XCHAIN_ATTEST_PROPOSE, XCHAIN_ATTEST_PREPARE, XCHAIN_ATTEST_COMMIT } = require('./constants.js');
+const { SNAPSHOT_BLOCK_TOLERANCE } = require('../bridge/constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -206,6 +207,7 @@ module.exports = {
             // freezes the same N for this round. With no snapshot (indexer down or no
             // btcBlockHeight), resolveQuorum throws on a federated hub and the catch drops
             // the PROPOSE; only single-node / regtest hubs fall back to the live set.
+            if (!(await this.proposeHeightBounded(attestationId, envelope, btcBlockHeight))) return;
             let quorum;
             try {
                 quorum = await this.resolveQuorum(sourceChain, destChain, btcBlockHeight);
@@ -235,6 +237,34 @@ module.exports = {
         });
 
         this.checkPrepareQuorum(attestationId);
+    },
+
+    // Bound the proposer's snapshot height against our own BTC tip before it locks N, the
+    // quorum and the vote population. An old but indexed height still resolves a valid
+    // snapshot, so without this the proposer picks the electorate (same guard as pbft
+    // tipBoundOk and oracle boundedProposeHeight). A PROPOSE only comes from a peer, so this
+    // hub is federated here. A missing height, an unresolvable tip or a gap over
+    // SNAPSHOT_BLOCK_TOLERANCE returns false after a warning, and the PROPOSE is dropped.
+    async proposeHeightBounded(attestationId, envelope, btcBlockHeight) {
+        let height = Number(btcBlockHeight);
+        let myTip = null;
+        try {
+            myTip = this.hub && this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
+        } catch (err) {
+            myTip = null;
+        }
+        let reason = null;
+        if (btcBlockHeight == null || !Number.isInteger(height) || height <= 0) reason = 'carries no valid btcBlockHeight';
+        else if (myTip == null || !Number.isFinite(Number(myTip))) reason = 'cannot resolve our own BTC tip to bound its height';
+        else if (Math.abs(Number(myTip) - height) > SNAPSHOT_BLOCK_TOLERANCE) {
+            reason = 'btcBlockHeight ' + height + ' deviates from our own BTC tip ' + myTip +
+                ' by more than ' + SNAPSHOT_BLOCK_TOLERANCE + ' blocks';
+        }
+        if (!reason) return true;
+        logger.warn('CrossChain: refusing to PREPARE ' + attestationId + ' from ' +
+            (envelope && envelope.sender) + ': PROPOSE ' + reason +
+            '; a stale height would let the proposer select the quorum and the voter set');
+        return false;
     },
 
     // The checks a PROPOSE passes before any snapshot or indexer work is spent on it: a

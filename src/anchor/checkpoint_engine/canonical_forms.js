@@ -90,7 +90,8 @@ const forms = {
     // at most one honest leader per BTC block; so tying seq to snapshot_block guarantees
     // two honest leaders cannot mint divergent payloads under one seq (a shared seq
     // implies a shared snapshot_block implies a shared tip implies one payload). It is
-    // monotonic across cadences (snapshot_block only advances by intervalBlocks), so the
+    // monotonic across cadences (snapshot_block only moves forward, at least intervalBlocks
+    // past the last round's, since tick latches the tip it fired at), so the
     // readers' MAX(checkpoint_seq) supersession and the co-sign replay guard still hold,
     // and it strictly exceeds any legacy COALESCE(MAX)+1 dense seq (a count of prior
     // checkpoints <= snapshot_block/interval), so a mid-upgrade hub never stalls.
