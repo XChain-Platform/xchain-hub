@@ -98,12 +98,13 @@ class RewardTracker {
 
     // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
     // rewardType: 'anchor_bundle' / 'anchor_archive'; roundNumber: snapshot_block /
-    // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
-    // (the publisher at publish time; peers from the signature-verified
-    // BUNDLE_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
-    // snapshot_block of the rewarded checkpoint, so all hubs record identical
-    // row bytes and the ANCHOR archive's rewards section verifies by
-    // re-derivation.
+    // batch_seq. The publisher that paid the DOGE earns it. Below each reward type's
+    // flag-day it is called on EVERY hub (the publisher at publish time; peers from the
+    // signature-verified BUNDLE_DONE/FINALIZED announcements); at/above it those peer
+    // mirrors are retired and only the publisher calls it, for a hub-local row.
+    // blockIndex MUST be the quorum-agreed snapshot_block of the rewarded checkpoint,
+    // so hubs that do record it hold identical row bytes and the ANCHOR archive's
+    // rewards section verifies by re-derivation.
     //
     // One logical anchor → exactly ONE reward, even across DISTINCT publisher
     // pubkeys. The table's UNIQUE KEY includes validator_pubkey, so a bare INSERT
@@ -112,9 +113,11 @@ class RewardTracker {
     // same (round_number, reward_type) and BOTH rows would land, minting the
     // reward twice and inflating the COLLECT rail. We collapse them
     // deterministically: the lexicographically smallest pubkey keeps the credit.
-    // Every hub computes the identical winner from the same set of rows, so the
-    // surviving row stays byte-identical fleet-wide (the ANCHOR archive's
-    // re-derivation invariant holds and recovery restores a single reward). A row
+    // Below the flag-day every hub computes the identical winner from the same set
+    // of rows, so the surviving row stays byte-identical fleet-wide (the ANCHOR
+    // archive's re-derivation invariant holds and recovery restores a single reward).
+    // At/above it a hub sees only its own publish, so this collapse dedups same-hub
+    // writes only, and the indexer's winner reconcile is the cross-publisher dedup. A row
     // that has already ridden an on-chain archive (batch_seq IS NOT NULL) is
     // immutable and is never displaced. Retries / re-flushes / multi-hub recording
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
