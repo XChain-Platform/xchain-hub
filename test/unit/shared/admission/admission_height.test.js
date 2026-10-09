@@ -130,12 +130,11 @@ describe('admission_height: the measured read sets', () => {
 
 describe('admission_height: the stamp', () => {
 
-    it('is tip + margin on every chain in the read set, the SAME block count on each', () => {
+    it('uses the chain-specific margin above its activation', () => {
         let map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: 5000000 }, 'cross_chain_matches', 'regtest');
-        // Default margin is 4 blocks, and it is four blocks of each chain rather than a
-        // duration converted per chain: the conversion is what the admission axis deletes.
-        expect(map).to.deep.equal({ BTC: 900004, DOGE: 5000004 });
-        expect(map.BTC - 900000).to.equal(map.DOGE - 5000000);
+        expect(map).to.deep.equal({ BTC: 900004, DOGE: 5000014 });
+        expect(map.BTC - 900000).to.equal(4);
+        expect(map.DOGE - 5000000).to.equal(14);
     });
 
     it('uses each table\'s own margin', () => {

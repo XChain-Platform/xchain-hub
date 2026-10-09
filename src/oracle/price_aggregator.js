@@ -252,8 +252,8 @@ class PriceAggregator extends EventEmitter {
         if (!isMirrorAdmissionProducerActive(chain, this.hub && this.hub.network, tip)) return null;
 
         try {
-            // tip + admitMarginBlocks('oracle_prices'), through the one stamp definition, so
-            // this rail cannot drift from the margin the barrier certifies it against.
+            // The admission seam resolves this chain and row's margin era, so this rail
+            // cannot drift from the margin the barrier certifies it against.
             return ah.admitBlocks(readSet, { [chain]: tip }, 'oracle_prices', this.hub && this.hub.network)[chain];
         } catch (e) {
             logger.warn('PriceAggregator: could not stamp an admission height for a ' + chain +

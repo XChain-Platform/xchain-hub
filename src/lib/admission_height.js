@@ -33,9 +33,9 @@
  *
  *   1. THE READ SETS (section 5.1). Which chains read a row decides which chains
  *      its map must cover. Measured from the consuming selects, not guessed.
- *   2. THE STAMP. admitBlocks() is tip + margin on every chain in the read set,
- *      the SAME block count on each, because the margin is a block count on the
- *      admission axis rather than a duration that has to be converted per chain.
+ *   2. THE STAMP. admitBlocks() is tip + the margin selected for every chain in
+ *      the read set. A chain-specific margin replaces the legacy table margin at
+ *      its activation, on the admission axis rather than the wall-clock axis.
  *   3. THE FOLLOWER BOUND, per chain. A flat block window would collapse DOGE's
  *      clock-skew tolerance from an hour to six minutes and refuse honest rows.
  *
@@ -56,7 +56,6 @@
 // seam, with exactly one DEFINITION of each per repo.
 const {
     ADMIT_MIN_FUTURE_BLOCKS,
-    admitMarginBlocks,
     admitMaxFutureBlocks,
     isAdmitBlockInFollowerBound,
     CHAIN_CODE_RE,
@@ -68,6 +67,7 @@ const {
     ADMIT_COLUMN_CHAINS,
     columnsAdmitBlocks,
 } = require('../consensus/gates/mirror_admission_gate.js');
+const { stampMarginBlocks } = require('../consensus/gates/mirror_admission_margin_gate.js');
 // The read-set TABLE is data with no dependency, kept in its own part; the functions that
 // read it stay here beside the twin they encode through.
 const { ADMISSION_READ_SETS } = require('./admission_height/read_sets.js');
@@ -229,14 +229,13 @@ function missingAdmissionTips(readSet, tips){
 }
 
 /**
- * The admission map for a row: `tip + admitMarginBlocks(table)` on every chain in
- * the read set.
+ * The admission map for a row: `tip + stampMarginBlocks(table, chain, network, tip)`
+ * on every chain in the read set.
  *
- * The SAME block count on every chain, deliberately. On the seconds axis a
- * producer sized its forward margin as 4 blocks of the gating chain and then
- * CONVERTED it to seconds, which is why the seconds axis needs a nominal block
- * interval per chain and a default for an unknown one. Deleting the conversion
- * deletes both: four blocks of DOGE and four blocks of BTC are four blocks each.
+ * The margin resolver keeps the legacy table margin until a chain-specific margin
+ * would place the row at or above that chain's activation. This makes the stamped
+ * height itself identify the margin era, including a round opened just below the
+ * boundary whose larger margin lands exactly on it.
  *
  * Fails closed and says which chain: a partial map would admit the row on some
  * chains and silently leave it to the legacy effective_time rule on the rest,
@@ -264,9 +263,11 @@ function admitBlocks(readSet, tips, table, network){
             ' (read set ' + chains.join(', ') + '); refusing to stamp an admission map for ' + String(table) +
             '. A guessed admission height forks; this refusal stalls one rail.');
 
-    let margin = admitMarginBlocks(table);
     let map = {};
-    for(let c of chains) map[c] = Number(tips[c]) + margin;
+    for(let c of chains){
+        let tip = Number(tips[c]);
+        map[c] = tip + stampMarginBlocks(table, c, network, tip);
+    }
     return map;
 }
 
