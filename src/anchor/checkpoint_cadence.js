@@ -28,8 +28,46 @@
 
 const { positiveIntConfig } = require('../lib/config_int.js');
 const hubConfig = require('../config');
+const { getLogger } = require('../observability');
+
+const logger = getLogger();
 
 const DEFAULT_CHECKPOINT_INTERVAL_BLOCKS = 6;
+const CANONICAL_ANCHOR_CHECKPOINT_EVERY_N = 1;
+const SKIP_ENV = 'XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT';
+
+const warned = new Set();
+
+/**
+ * Report a cadence knob that differs from the fleet-canonical value. Both knobs
+ * feed a deterministic fleet-wide predicate, so a hub that diverges anchors a
+ * different set of checkpoints than its peers. Log-only; the skip env var
+ * silences it for deliberate test fleets.
+ *
+ * @param {number} intervalBlocks resolved CHECKPOINT_INTERVAL_BLOCKS
+ * @param {number} everyN resolved ANCHOR_CHECKPOINT_EVERY_N
+ * @returns {string[]} the drifting knob names (empty when canonical or skipped)
+ */
+function assertCanonicalCadence(intervalBlocks, everyN) {
+    const drift = [];
+    if (hubConfig.env()[SKIP_ENV] === '1') return drift;
+    if (intervalBlocks !== DEFAULT_CHECKPOINT_INTERVAL_BLOCKS) drift.push('CHECKPOINT_INTERVAL_BLOCKS');
+    if (everyN !== CANONICAL_ANCHOR_CHECKPOINT_EVERY_N) drift.push('ANCHOR_CHECKPOINT_EVERY_N');
+    const key = drift.join(',') + ':' + intervalBlocks + ':' + everyN;
+    if (drift.length && !warned.has(key)) {
+        warned.add(key);
+        logger.warn('config: ' + drift.join(' and ') + ' differ from the fleet-canonical cadence (' +
+            DEFAULT_CHECKPOINT_INTERVAL_BLOCKS + ' blocks, every ' + CANONICAL_ANCHOR_CHECKPOINT_EVERY_N +
+            '): resolved ' + intervalBlocks + ' / ' + everyN + '. Hubs on different values anchor different ' +
+            'checkpoints. Set ' + SKIP_ENV + '=1 to silence this on a deliberate non-default fleet.');
+    }
+    return drift;
+}
+
+function resolveAnchorEveryN(cfg) {
+    const raw = hubConfig.ANCHOR_CHECKPOINT_EVERY_N || (cfg && cfg.ANCHOR_CHECKPOINT_EVERY_N) || '1';
+    return Math.max(1, parseInt(raw, 10) || 1);
+}
 
 /**
  * BTC blocks between checkpoint cycles, honoured only when strictly positive.
@@ -41,7 +79,12 @@ function resolveCheckpointIntervalBlocks(cfg) {
     cfg = cfg || {};
     let raw = hubConfig.CHECKPOINT_INTERVAL_BLOCKS;
     if (raw === undefined || raw === null || raw === '') raw = cfg.CHECKPOINT_INTERVAL_BLOCKS;
-    return positiveIntConfig(raw, DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, 'CHECKPOINT_INTERVAL_BLOCKS');
+    const interval = positiveIntConfig(raw, DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, 'CHECKPOINT_INTERVAL_BLOCKS');
+    assertCanonicalCadence(interval, resolveAnchorEveryN(cfg));
+    return interval;
 }
 
-module.exports = { resolveCheckpointIntervalBlocks, DEFAULT_CHECKPOINT_INTERVAL_BLOCKS };
+module.exports = {
+    resolveCheckpointIntervalBlocks, assertCanonicalCadence, resolveAnchorEveryN,
+    DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, CANONICAL_ANCHOR_CHECKPOINT_EVERY_N
+};
