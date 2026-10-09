@@ -20,6 +20,8 @@ const { createMockHub } = require('../../../../helpers/mockHub');
 // buildPriceV0Payload. Tests sign these exact bare-JSON bytes for fixtures whose
 // EQUIV header gate is off;
 // btc_block_height still rides in the signed content (#4232).
+// The mock hub runs as mainnet and the fixture BTC heights sit below the mainnet
+// EQUIV header activation height, so the gate stays off and these sign bare bytes.
 function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     let sortedPairs = pairs
         .map(p => ({ pair: p.pair, price: String(p.price) }))
