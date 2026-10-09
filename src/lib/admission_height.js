@@ -245,9 +245,14 @@ function missingAdmissionTips(readSet, tips){
  * @param {string[]} readSet the chains that read the row (admissionReadSet)
  * @param {object} tips chain code -> this hub's fresh admission tip for it
  * @param {string} table the mirrored table, which picks the margin
+ * @param {string} network the hub's deployment network
  * @returns {object} chain code -> admission height
  */
-function admitBlocks(readSet, tips, table){
+function admitBlocks(readSet, tips, table, network){
+    if(network === null || network === undefined || String(network).trim() === '')
+        throw new Error('admission_height: no network supplied for ' + String(table) +
+            '; refusing to stamp a network-ambiguous admission map');
+
     let chains = (readSet || []).map(normalizeChain);
     if(chains.length === 0 || chains.indexOf(null) !== -1)
         throw new Error('admission_height: refusing to stamp an admission map over read set ' +
