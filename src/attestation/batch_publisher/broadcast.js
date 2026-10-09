@@ -24,6 +24,7 @@
 
 const { forwardableUtxos }  = require('../../lib/encoder/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../../lib/guards/two_phase_guard.js');
+const { abandonBuild } = require('../../lib/encoder/encoder_reservation.js');
 const { isAmbiguousSendError, isNeverSentError } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -228,8 +229,16 @@ module.exports = {
             throw e;
         }
 
-        let txHex = await this.walletSignFn(psbtResult.psbt);
-        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        // Release the build's input reservation on a signing abandon, never past the send
+        // (lib/encoder/encoder_reservation.js).
+        let txHex;
+        try {
+            txHex = await this.walletSignFn(psbtResult.psbt);
+            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        } catch(e){
+            await abandonBuild(this.encoder, psbtResult, 'AttestationBatchPublisher');
+            throw e;
+        }
         return (await this.encoder.broadcastTx(txHex)) || { txid: null };
     },
 
@@ -254,10 +263,16 @@ module.exports = {
             // its ancestors, so one underpaid batch would hold down every later window.
             unconfirmed: this.allowUnconfirmedInputs
         });
-        if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
-        // Refuse phase one of a two-transaction encoding: this pipeline has no reveal,
-        // so broadcasting it would publish an undecodable batch and strand the value.
-        assertSingleTxEncoding(psbtResult, 'AttestationBatchPublisher');
+        // The caller never sees psbtResult when this throws, so the release lives here.
+        try {
+            if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase one of a two-transaction encoding: this pipeline has no reveal,
+            // so broadcasting it would publish an undecodable batch and strand the value.
+            assertSingleTxEncoding(psbtResult, 'AttestationBatchPublisher');
+        } catch(e){
+            await abandonBuild(this.encoder, psbtResult, 'AttestationBatchPublisher');
+            throw e;
+        }
         return psbtResult;
     }
 

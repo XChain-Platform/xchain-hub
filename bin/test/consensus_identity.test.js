@@ -228,6 +228,8 @@ describe('bin/consensus-identity.js', function () {
                 assert.ok(/mirror_admission_activation\.encodeAdmitBlocks/.test(r.stderr),
                     `${args.join(' ')} must name the gate on stderr; got: ${r.stderr}`);
                 assert.strictEqual(r.stdout, '', `${args.join(' ')} printed an identity it could not compute`);
+                assert.strictEqual(r.stderr.trim().split('\n').length, 1,
+                    `${args.join(' ')}: one clean line, not a stack; got: ${r.stderr}`);
             }
         });
 

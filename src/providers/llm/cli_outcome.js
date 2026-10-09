@@ -22,7 +22,7 @@
  *
  ********************************************************************/
 
-const { isTransientStatus } = require('./http');
+const { isTransientStatus, redactVendorText } = require('./http');
 
 // A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
 // an outcome the model actually produced. The boundary is the one providers/llm/http.js
@@ -173,14 +173,14 @@ function closeOutcome(code, stdout, stderr) {
         // happens to be the CLI must not lose the round to the same outage.
         // Everything unrecognized -- auth, 4xx, an exhausted --max-budget-usd,
         // a refusal -- keeps the hard classification.
-        const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : '');
+        const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + redactVendorText(stderr.trim()).slice(0, 400) : '');
         if (cliFailureIsTransient(stdout, stderr)) return transient(msg);
         else                                        return hard(msg);
     }
     let json;
     try { json = JSON.parse(stdout); }
     catch (e) {
-        return hard('claude-spawn: unparseable JSON from CLI: ' + stdout.slice(0, 200));
+        return hard('claude-spawn: unparseable JSON from CLI: ' + redactVendorText(stdout).slice(0, 200));
     }
     const result = (json && typeof json.result === 'string') ? json.result : '';
     if (!result) return emptyResultOutcome(json, stdout);

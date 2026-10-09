@@ -106,7 +106,7 @@ module.exports = {
     // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
     //
     // The mirror alone is not enough reach: HubDbSync holds ONE hubUrl
-    // (xchain-indexer/src/hub/hub_db_sync.js), the row is written only on the ELECTED publisher,
+    // (xchain-indexer/src/hub/hub_db_sync/instance_state.js), the row is written only on the ELECTED publisher,
     // and the publisher rotates per bundle by hashOrder, so without federation a federation's
     // hubs would hold DISJOINT subsets and an indexer would derive only the subset its own hub
     // published. So the PRODUCER federates: `e` carries the confirmed anchor txid and, on the
@@ -114,8 +114,8 @@ module.exports = {
     // every peer independently re-verifies and writes its own copy. Two notes:
     //   - Do NOT "correct" the sibling sentence in src/sql/anchor_reward_attestations.sql. Its
     //     "exactly like state_checkpoints" is TRUE and scoped to the MIRROR semantics (id-parity
-    //     INSERT IGNORE, never retracted); hub_db_sync.js states the identical property for both
-    //     tables in HUB_STATE_TABLES. It makes no hub-to-hub federation claim, so replacing it
+    //     INSERT IGNORE, never retracted); xchain-indexer/src/hub/hub_db_sync/mirror_tables.js
+    //     states the identical property for both tables in its HUB_STATE_TABLES note. It makes no hub-to-hub federation claim, so replacing it
     //     with one would trade a true sentence for a false one on a consensus table.
     //   - The XANCPUB quorum a receiver re-verifies is the SAME quorum XANCPUB_SIGN already put
     //     on the wire, verified the same way (handleAttestSign). The receiver mints money rows,

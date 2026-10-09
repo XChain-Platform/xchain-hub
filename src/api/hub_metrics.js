@@ -220,7 +220,7 @@ function registerStakeShareSeries(registry){
     });
     const headroom = registry.gauge({
         name: 'xchain_stake_share_headroom',
-        help: 'Additional third-party stake this chain/capability can absorb while the two-thirds commit gate stays reachable; negative means it is already lost',
+        help: 'Third-party stake this chain/capability can still absorb before the strict two-thirds commit gate (3*tally > 2*S) is lost; added stake must stay strictly below this value; zero or negative means the gate is already lost',
         labelNames
     });
     const stakesToHalt = registry.gauge({

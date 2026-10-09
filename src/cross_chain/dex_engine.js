@@ -193,10 +193,10 @@ class CrossChainDexEngine extends EventEmitter {
         if(!priced) return null;
         let { maker, taker, ownership, takerGivePrice, takerGetPrice, takerRem, makerRem } = priced;
 
-        // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
+        // Bottleneck clamp (indexer order_match/index.js computeFillAmounts), orderInfo = taker / matchInfo = maker.
         let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
         let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
-        // PRECISION 64, matching order_match.js:197/202 exactly.
+        // PRECISION 64, matching both clamp bcmul calls in order_match/index.js computeFillAmounts.
         //
         // These two multiplications ran at precision 18 while the indexer's identical
         // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above

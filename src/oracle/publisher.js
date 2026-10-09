@@ -246,7 +246,9 @@ class OraclePublisher {
 
         // 2. Create an unsigned PSBT with the PRICE v0 payload
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
-        // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
+        // so the encoder answers P2SH, a two-transaction lane signBuiltTx refuses: this
+        // built-in pipeline publishes no PRICE, and a hub needs a HUB_SIGNER_MODULE
+        // exporting broadcast(payload) (examples/doge-signer.example.js).
         let selection = this.selectInputs(utxos);
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while the set is inside the encoder's caller-facing

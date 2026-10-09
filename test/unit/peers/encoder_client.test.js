@@ -266,12 +266,12 @@ function registerStructuredErrorTests() {
 //
 // Unlike the create_tx fixture above, this body is DELIBERATELY synthetic and
 // must not be copied as a wire example. The encoder never sends it: broadcast_tx
-// collapses every failure to -32010's sibling -32603 with no `data` at all, its
-// own busy body is -32029 with no reason, and UTXO_TRACKER_STALE reaches a caller
-// only through create_tx's -32010. The fixture exists to prove the passthrough is
-// driven by the STATUS and not by the body, so it carries fields the real 5xx
-// lacks on purpose: a consumer that branches on rpcData.reason after a
-// broadcast_tx would read undefined in production.
+// answers a node error with a node code as a 200-body -32010 whose reason is
+// TX_ALREADY_IN_CHAIN or NODE_REJECTED, and anything else as -32603 with no `data`;
+// its own busy body is -32029 with no reason, and UTXO_TRACKER_STALE reaches a
+// caller only through create_tx's -32010. The fixture exists to prove the
+// passthrough is driven by the STATUS and not by the body, so it carries fields the
+// real 5xx lacks on purpose.
 function registerAmbiguousErrorTest() {
         it('a 5xx keeps its untouched message and its ambiguous classification', async function () {
             axiosStub.post.rejects(httpError(503, { jsonrpc: '2.0', id: null, error: {

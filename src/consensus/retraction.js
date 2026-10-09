@@ -45,7 +45,7 @@
  *                      indexer fleet).
  *
  * The signed canonical (MUST byte-match the consumer rebuild in
- * hub_db_sync.js verifyRetractionSignatures - indexer + explorer copies):
+ * hub_db_sync/retractions.js verifyRetractionSignatures - indexer + explorer copies):
  *
  *   XRETRACTV1|<table>|<source_chain>|<from_action_index>|<to_action_index or ''>|<retraction_generation or ''>|<snapshot_block>
  *

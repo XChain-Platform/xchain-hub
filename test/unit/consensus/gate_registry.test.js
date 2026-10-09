@@ -163,6 +163,16 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
     });
 
+    it('spells every dark threshold in the hub-only rows through UNARMED, never as a run of nines', function () {
+        // Eight or more nines also catches a sentinel with a digit dropped, which would arm at a reachable height.
+        for (const part of HUB_PARTS) {
+            const live = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8')
+                .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+            const offenders = live.split('\n').filter((line) => /9{8,}/.test(line));
+            expect(offenders, part + ' writes the sentinel as a number').to.deep.equal([]);
+        }
+    });
+
     it('registers every queued row: the part files name exactly the keys the registry holds', function () {
         const queued = [];
         for (const part of PARTS.concat(HUB_PARTS)) {

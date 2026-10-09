@@ -37,26 +37,34 @@ module.exports = {
     // recovery dedup: the "indexer can never re-derive these" invariant is NOT
     // uniformly true any more, and the difference matters because these rows land
     // on the COLLECT-spendable ledger.
-    //   - anchor_<CHAIN> BELOW the anchor-reward flag-day, and anchor_archive BELOW
-    //     the archive-reward flag-day: genuinely hub-pushed. The chain
-    //     carries no parse for them, so the archive is their only recovery
-    //     transport. The original invariant holds here.
-    //   - anchor_<CHAIN> AT/ABOVE the anchor-reward flag-day, and anchor_archive
-    //     AT/ABOVE the archive-reward flag-day: the indexer DOES re-derive these
-    //     on-chain from the v0/v1 XANCPUB publisher attestation (anchor.js
-    //     createValidatorReward / reconcileAnchorRewardWinner), crediting the same
-    //     frozen ANCHOR_REWARD_AMOUNT / ARCHIVE_REWARD_AMOUNT. The hub still records the row locally
-    //     (RewardTracker isDerived path) and this selector still archives it, so the
-    //     archive redundantly transports a row the chain reproduces.
-    // That redundancy is safe ONLY because restore and derive both key on the UNIQUE
-    // (validator_pubkey, round_number, reward_type), so the two paths dedup and the
-    // amounts agree. Weaken that dedup and the archived anchor_<CHAIN> row becomes a
-    // genuine SECOND credit. Do not treat "archived" as proof of "not re-derivable".
+    //   - anchor_<CHAIN>/anchor_bundle BELOW the anchor-reward flag-day, and
+    //     anchor_archive BELOW the archive-reward flag-day: genuinely hub-pushed.
+    //     The chain carries no parse for them, so the archive is their only
+    //     recovery transport. The original invariant holds here.
+    //   - anchor_<CHAIN>/anchor_bundle AT/ABOVE the anchor-reward flag-day, and
+    //     anchor_archive AT/ABOVE the archive-reward flag-day: the indexer DOES
+    //     re-derive these on-chain from the v0/v1 XANCPUB publisher attestation
+    //     (anchor.js createValidatorReward / reconcileAnchorRewardWinner), crediting
+    //     the same frozen ANCHOR_REWARD_AMOUNT / ARCHIVE_REWARD_AMOUNT. The hub still
+    //     records the row locally (RewardTracker isDerived path), but this selector
+    //     does NOT archive it on a scoped hub: the flag-day exclusion clause in
+    //     findArchivableAnchorRewardsBelowFlagDays (applied before the LIMIT) and
+    //     dropChainDerivedRewards / isChainDerivedReward keep it out, both read from
+    //     the same flag-day constants.
+    // That exclusion is the double-credit guard. The only path that still archives a
+    // derived row is an unscoped or unknown-network hub: derivedRewardFlagDays()
+    // returns null, the unnarrowed findArchivableAnchorRewards runs, and
+    // isChainDerivedReward answers false. There, recovery leans on restore and derive
+    // both keying on UNIQUE (validator_pubkey, round_number, reward_type), which
+    // collapses two copies of the SAME validator's row but does not merge rows
+    // recorded under different validator_pubkeys for one round. Weaken the exclusion
+    // and derived rows ride the archive again on that dedup alone. Do not treat
+    // "archived" as proof of "not re-derivable".
     // (oracle_round/attest_fee rows are indexer-derived and NEVER archived.)
     // Rows are immutable, so batch_seq IS NULL is the only pending test;
     // pre-upgrade rows without a deterministic block_index stay local.
     // ELIGIBILITY BEFORE LIMIT. Derived rows keep batch_seq NULL forever by design, so
-    // they stay eligible for this SELECT on every round and their number only grows
+    // they stay eligible for the unnarrowed SELECT on every round and their number only grows
     // (each archive publish records another anchor_archive). Filtered after the LIMIT,
     // a maxBatch-sized block of them occupied the page permanently, and an older
     // below-flag-day reward sorted behind them was never examined again: those rows

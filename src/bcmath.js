@@ -17,9 +17,11 @@
  * Faithful port of the bignumber helpers in xchain-indexer/src/utility.js
  * (mathjs bignumber + decimal.js native compare/floor). The cross-chain DEX
  * order book must compute fill quantities with the SAME arithmetic the indexer
- * uses for its local order book (order_match.js bottleneck-clamp + getPrice /
- * bcmul precision 18 / bcsub precision 64) so a fill the hub finalizes lands the
- * legs and reduces each order's `getOrderAmountsRemaining` consistently. Pin the
+ * uses for its local order book (order_match/index.js computeFillAmounts
+ * bottleneck-clamp + getPrice / bcmul precision 64; order_match/settle.js bcsub
+ * precision 64) so a fill the hub finalizes lands the legs and reduces each
+ * order's `getOrderAmountsRemaining` consistently. The clamp multiply must never
+ * drop to 18: that was a known hub/indexer fill divergence. Pin the
  * same mathjs major as the indexer (15.x, default BigNumber precision 64).
  * These MUST stay byte-equivalent.
  *

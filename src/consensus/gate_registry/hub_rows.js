@@ -68,7 +68,7 @@ addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'hei
 // Reorg rollback rounds stamp a BTC height and derive membership and quorum from
 // its federation snapshot. Keep the wire fields dark on deployed networks until
 // a coordinated release; regtest exercises them from genesis.
-addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
+addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
 
 // Effective allow/block-list enforcement, inert until coordinated activation.
 addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {

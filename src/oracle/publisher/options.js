@@ -184,6 +184,9 @@ module.exports = {
         this.takeoverAttempts  = 0;
         this.takeoverPublished = 0;
         this.takeoverDeferred  = 0;
+        // Takeovers declined because the observation feed is unproven, counted on every
+        // declined window (the decline warning in takeover.js fires once per process).
+        this.takeoverDeclinedUnproven = 0;
         // How long an armed follower waits, once something says a batch for
         // the window may ALREADY be on the wire, before it treats that tx as gone and
         // publishes its own. Mirrors AttestationPublisher's

@@ -102,6 +102,9 @@ module.exports = {
             // climbs without takeoverPublished ever moving means leaders are broadcasting
             // batches that never mine, which is a fee/mempool problem, not a hub one.
             takeoverDeferred:             this.takeoverDeferred,
+            // Nonzero means a leader went silent and this hub declined to cover it on a deaf
+            // feed (takeoverArmed alone cannot tell that from failover never being needed).
+            takeoverDeclinedUnproven:     this.takeoverDeclinedUnproven,
             takeoverAmbiguousCooldownMs:  this.takeoverAmbiguousCooldownMs
         };
     },

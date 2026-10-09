@@ -27,6 +27,7 @@
 
 const { forwardableUtxos }       = require('../../lib/encoder/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../../lib/guards/two_phase_guard.js');
+const { abandonBuild }           = require('../../lib/encoder/encoder_reservation.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -86,10 +87,18 @@ module.exports = {
             utxos: forwardableUtxos(utxos, 'RollcallRound'), pubkey: this.dogeAddress,
             data: payload, change: this.dogeAddress, encoding: 'P2SH'
         });
-        if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
-        assertSingleTxEncoding(built, 'RollcallRound');
-        let txHex = await signer.walletSignFn(built.psbt);
-        if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        // Every abandon below hands the reserved inputs back; the send stays outside
+        // (lib/encoder/encoder_reservation.js).
+        let txHex;
+        try {
+            if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+            assertSingleTxEncoding(built, 'RollcallRound');
+            txHex = await signer.walletSignFn(built.psbt);
+            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        } catch(e){
+            await abandonBuild(signer.encoder, built, 'RollcallRound');
+            throw e;
+        }
         return await signer.encoder.broadcastTx(txHex);
     }
 };

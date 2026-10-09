@@ -103,6 +103,7 @@ function registerHubStakeShareMetricsSuite2Part1() {
     expect(out).to.match(/xchain_stake_share_meets_gate\{chain="DOGE",capability="price"\} 0\b/);
     expect(out).to.match(/xchain_stake_share_stakes_to_halt\{chain="DOGE",capability="price"\} 0\b/);
     expect(out).to.match(/xchain_stake_share_headroom\{chain="DOGE",capability="price"\} -12500\b/);
+    expect(out).to.match(/^# HELP xchain_stake_share_headroom .*zero or negative means the gate is already lost/m);
   });
 }
 function registerHubStakeShareMetricsSuite2Part2() {

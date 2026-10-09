@@ -124,6 +124,7 @@ const testCase6 = async function () {
                 expect(took).to.equal(true);
                 expect(h.broadcasts).to.have.length(1);
                 expect(h.p.getStats().takeoverPublished).to.equal(1);
+                expect(h.p.getStats().takeoverDeclinedUnproven).to.equal(0);
                 // The wire is a batch over window 1's rounds, exactly what the leader
                 // would have sent: same rounds, same canonical shape.
                 let entry = readJsonl(h.queuePath).concat(h.broadcasts);
@@ -137,6 +138,7 @@ const testCase7 = async function () {
                 let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
+                expect(h.p.getStats().takeoverDeclinedUnproven).to.equal(0);
             };
 
 // The safety property: a hub that has never seen a batch land cannot tell
@@ -150,6 +152,11 @@ const testCase8 = async function () {
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);
                 expect(h.p.getStats().takeoverArmed).to.equal(false);
+                // Every declined window is counted, not once per process like the warning.
+                expect(h.p.getStats().takeoverDeclinedUnproven).to.equal(1);
+                expect(await h.p.attemptTakeover(2)).to.equal(false);
+                expect(h.p.getStats().takeoverDeclinedUnproven).to.equal(2);
+                expect(h.broadcasts).to.have.length(0);
             };
 
 const testCase9 = async function () {

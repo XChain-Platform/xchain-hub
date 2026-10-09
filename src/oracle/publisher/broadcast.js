@@ -49,7 +49,8 @@ module.exports = {
 
     // Default broadcast pipeline: uses the EncoderClient + walletSignFn to construct, sign, and broadcast
     // a PRICE v0 transaction to the DOGE chain. Returns { txid } on success.
-    // This is used automatically when no custom broadcastFn is set but encoder + walletSignFn are configured.
+    // Used when no custom broadcastFn is set; a PRICE payload builds as P2SH, which the
+    // two-phase guard refuses, so in practice only a broadcastFn publishes.
     async defaultBroadcast(payload) {
         // Everything down to step 4 builds and signs: no money has moved and nothing has
         // left this process, so every failure here is DEFINITIVELY never-sent whatever it

@@ -22,7 +22,7 @@ const RetractionConsensus = require('../../../src/consensus/retraction.js');
 const ValidatorIdentity   = require('../../../src/validators/identity.js');
 const { waitUntil }       = require('../../helpers/waitUntil');
 const { DB_METHODS } = require('../../helpers/mockHub.js');
-// The golden canonical: MUST byte-match hub_db_sync.js canonicalRetraction()
+// The golden canonical: MUST byte-match hub_db_sync/retractions.js canonicalRetraction()
 // in xchain-indexer / xchain-explorer (their suites sign this same literal).
 const GOLDEN_EVT = {
     table: 'cross_chain_calls', source_chain: 'DOGE',
