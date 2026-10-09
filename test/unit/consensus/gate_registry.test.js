@@ -171,6 +171,9 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
         expect(queued).to.deep.equal(registry.keys());
     });
+});
+
+describe('src/consensus/gate_registry.js: the shared layout', function () {
 
     it('spells dark thresholds through UNARMED in the migrated shared row files', function () {
         const targets = {
