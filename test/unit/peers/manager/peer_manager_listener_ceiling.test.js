@@ -38,6 +38,9 @@ const path = require('path');
 const { expect } = require('chai');
 
 const PeerManager = require('../../../../src/peers/manager.js');
+const CrossChainDexConsensus = require('../../../../src/cross_chain/dex_consensus.js');
+const CrossChainDexEngine = require('../../../../src/cross_chain/dex_engine.js');
+const remoteTokenSnapshots = require('../../../../src/cross_chain/remote_token_snapshots.js');
 
 const SRC_DIR = path.join(__dirname, '..', '..', '..', '..', 'src');
 
@@ -112,6 +115,13 @@ function constructionSites(module, dir = SRC_DIR) {
             const named = call.match(/PROPOSE:\s*'([A-Z0-9_]+)_PROPOSE'/);
             sites.push({ file, channel: named ? named[1] : null });
         }
+    }
+    if (dir === SRC_DIR && module === 'CrossChainDexConsensus' &&
+        CrossChainDexEngine.RemoteTokenConsensus.prototype instanceof CrossChainDexConsensus) {
+        sites.push({
+            file: 'cross_chain/remote_token_snapshots.js',
+            channel: remoteTokenSnapshots.MESSAGE_TYPES.PROPOSE.replace(/_PROPOSE$/, '')
+        });
     }
     return sites;
 }
