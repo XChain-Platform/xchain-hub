@@ -131,7 +131,7 @@ describe('admission_height: the measured read sets', () => {
 describe('admission_height: the stamp', () => {
 
     it('is tip + margin on every chain in the read set, the SAME block count on each', () => {
-        let map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: 5000000 }, 'cross_chain_matches');
+        let map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: 5000000 }, 'cross_chain_matches', 'regtest');
         // Default margin is 4 blocks, and it is four blocks of each chain rather than a
         // duration converted per chain: the conversion is what the admission axis deletes.
         expect(map).to.deep.equal({ BTC: 900004, DOGE: 5000004 });
@@ -139,17 +139,23 @@ describe('admission_height: the stamp', () => {
     });
 
     it('uses each table\'s own margin', () => {
-        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'attestation_responses')).to.deep.equal({ BTC: 101 });
-        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'oracle_prices')).to.deep.equal({ BTC: 101 });
-        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'anchor_reward_attestations')).to.deep.equal({ BTC: 244 });
-        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'policy_snapshots')).to.deep.equal({ BTC: 104 });
+        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'attestation_responses', 'regtest')).to.deep.equal({ BTC: 101 });
+        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'oracle_prices', 'testnet')).to.deep.equal({ BTC: 101 });
+        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'anchor_reward_attestations', 'mainnet')).to.deep.equal({ BTC: 244 });
+        expect(ah.admitBlocks(['BTC'], { BTC: 100 }, 'policy_snapshots', 'regtest')).to.deep.equal({ BTC: 104 });
+    });
+
+    it('REFUSES an absent network and names the table', () => {
+        for(let network of [undefined, null, '', '   '])
+            expect(() => ah.admitBlocks(['BTC'], { BTC: 100 }, 'bridge_transfers', network), String(network))
+                .to.throw(/bridge_transfers/);
     });
 
     it('REFUSES when any chain in the read set has no fresh tip, and names the chain', () => {
         // C4: a guessed admission height forks the federation; a refusal stalls one rail.
-        expect(() => ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: null }, 'cross_chain_matches'))
+        expect(() => ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: null }, 'cross_chain_matches', 'regtest'))
             .to.throw(/no fresh admission tip for DOGE/);
-        expect(() => ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000 }, 'cross_chain_matches'))
+        expect(() => ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000 }, 'cross_chain_matches', 'regtest'))
             .to.throw(/no fresh admission tip for DOGE/);
     });
 
@@ -207,7 +213,7 @@ describe('admission_height: the follower bound is PER CHAIN', () => {
     });
 
     it('a stamped map passes the bound of a follower whose tip matches the producer\'s', () => {
-        let map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: 5000000 }, 'cross_chain_matches');
+        let map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: 900000, DOGE: 5000000 }, 'cross_chain_matches', 'regtest');
         expect(ah.checkAdmitBlocks(['BTC', 'DOGE'], map, { BTC: 900000, DOGE: 5000000 }).ok).to.equal(true);
         // And still passes when the follower trails by a couple of blocks on each chain.
         expect(ah.checkAdmitBlocks(['BTC', 'DOGE'], map, { BTC: 899998, DOGE: 4999998 }).ok).to.equal(true);
