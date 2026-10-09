@@ -216,7 +216,7 @@ function makeValidator() {
 
     function priceaggregatorBatchLandingClockBatchBlockSuite1() {
         beforeEach(function () {
-            hub = createMockHub();
+            hub = createMockHub({ network: 'mainnet' });
             agg = new PriceAggregator(hub);
             hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(snapshotOf(V)) };
             sinon.stub(console, 'log');

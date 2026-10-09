@@ -57,7 +57,7 @@ function makeValidator() {
 function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Hooks() {
 
     beforeEach(function () {
-        hub = createMockHub();
+        hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
         publisher = { clearPublishedMarkers: sinon.stub().resolves() };
         hub.oraclePublisher = publisher;
