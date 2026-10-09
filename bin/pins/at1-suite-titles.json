@@ -11331,6 +11331,11 @@
       "e66fc56a6d8dd680b38f1d9ef4ed7897fc220f7c3f9ec4454d64fbdcc7f2fde5",
       "8d4322a0ec382a635eec80a243a11650290788277f3c4eb9362fccb9c1474a41"
     ],
+    "f7b09e34fdecf336": [
+      "33f7ea75de7703a63b36ec815264daa29f81ab8b0b323806b79b12375b2ad9c8",
+      "8757fbe8b886d024ab928ab7180913a75c889536b9523cff84fff91a87921583",
+      "e7b9e3ea10b20527ad61bd4b2fc0b0934de37e749138d4abbcc66f49f52359a1"
+    ],
     "f953a8b2b85a8ca3": [
       "740dd235c568298428b9f45ffb3e01d0adb24727e72ac6fdf0ff9c15504490b3",
       "2921316d35e05fc5a69446ad7b05b57d88701879a26ff2ca7f6cbaa6b8156791",
@@ -11532,8 +11537,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 886,
-      "titleCount": 8408,
+      "fileCount": 887,
+      "titleCount": 8411,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12405,6 +12410,7 @@
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
         "test/unit/validators/governance/slash_proposals_rpc_controller.test.js": "8504ec96eab3b272",
+        "test/unit/validators/governance_slash_env_owned.test.js": "f7b09e34fdecf336",
         "test/unit/validators/provider_registry.test.js": "7c8d5277a4612fc4",
         "test/unit/validators/provider_registry_01_anchored_config.test.js": "a5fd5617e01b2106",
         "test/unit/validators/provider_registry_02_stake_floor_mirror.test.js": "5e5f9157623a7972",
@@ -12475,8 +12481,8 @@
       }
     },
     "test": {
-      "fileCount": 886,
-      "titleCount": 8408,
+      "fileCount": 887,
+      "titleCount": 8411,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13348,6 +13354,7 @@
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
         "test/unit/validators/governance/slash_proposals_rpc_controller.test.js": "8504ec96eab3b272",
+        "test/unit/validators/governance_slash_env_owned.test.js": "f7b09e34fdecf336",
         "test/unit/validators/provider_registry.test.js": "7c8d5277a4612fc4",
         "test/unit/validators/provider_registry_01_anchored_config.test.js": "a5fd5617e01b2106",
         "test/unit/validators/provider_registry_02_stake_floor_mirror.test.js": "5e5f9157623a7972",
@@ -13367,8 +13374,8 @@
       }
     },
     "test:all": {
-      "fileCount": 966,
-      "titleCount": 9231,
+      "fileCount": 967,
+      "titleCount": 9234,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14320,6 +14327,7 @@
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
         "test/unit/validators/governance/slash_proposals_rpc_controller.test.js": "8504ec96eab3b272",
+        "test/unit/validators/governance_slash_env_owned.test.js": "f7b09e34fdecf336",
         "test/unit/validators/provider_registry.test.js": "7c8d5277a4612fc4",
         "test/unit/validators/provider_registry_01_anchored_config.test.js": "a5fd5617e01b2106",
         "test/unit/validators/provider_registry_02_stake_floor_mirror.test.js": "5e5f9157623a7972",
