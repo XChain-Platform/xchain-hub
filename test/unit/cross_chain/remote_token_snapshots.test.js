@@ -82,6 +82,9 @@ function registerAgreementTests(){
         }
     });
 
+}
+
+function registerSnapshotBlockTests(){
     it('rejects a forged snapshot_block that the follower tip does not support', async function(){
         const leader = remote.buildRemoteTokenSnapshot(
             NETWORK, SNAPSHOT_BLOCK - 145, 'DOGE', offer());
@@ -315,6 +318,7 @@ function registerPersistenceTests(){
 
 describe('remote token snapshots', function(){
     registerAgreementTests();
+    registerSnapshotBlockTests();
     registerConsensusContractTest();
     registerProductionConsensusTest();
     registerNormalizationTests();
