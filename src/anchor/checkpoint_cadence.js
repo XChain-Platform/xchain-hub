@@ -64,27 +64,40 @@ function assertCanonicalCadence(intervalBlocks, everyN) {
     return drift;
 }
 
-function resolveAnchorEveryN(cfg) {
-    const raw = hubConfig.ANCHOR_CHECKPOINT_EVERY_N || (cfg && cfg.ANCHOR_CHECKPOINT_EVERY_N) || '1';
-    return Math.max(1, parseInt(raw, 10) || 1);
-}
-
 /**
- * BTC blocks between checkpoint cycles, honoured only when strictly positive.
+ * Number of checkpoint cycles between anchors, honoured only when strictly positive.
  *
  * @param {object} [cfg] the hub's p2pConfig (env wins over it, as everywhere else)
  * @returns {number}
  */
-function resolveCheckpointIntervalBlocks(cfg) {
+function resolveAnchorCheckpointEveryN(cfg) {
+    cfg = cfg || {};
+    let raw = hubConfig.ANCHOR_CHECKPOINT_EVERY_N;
+    if (raw === undefined || raw === null || raw === '') raw = cfg.ANCHOR_CHECKPOINT_EVERY_N;
+    return positiveIntConfig(raw, CANONICAL_ANCHOR_CHECKPOINT_EVERY_N, 'ANCHOR_CHECKPOINT_EVERY_N');
+}
+
+/**
+ * Resolve both fleet-uniform cadence knobs and report any canonical drift.
+ *
+ * @param {object} [cfg] the hub's p2pConfig (env wins over it, as everywhere else)
+ * @returns {{checkpointIntervalBlocks: number, anchorEveryNCheckpoints: number}}
+ */
+function resolveCheckpointCadence(cfg) {
     cfg = cfg || {};
     let raw = hubConfig.CHECKPOINT_INTERVAL_BLOCKS;
     if (raw === undefined || raw === null || raw === '') raw = cfg.CHECKPOINT_INTERVAL_BLOCKS;
     const interval = positiveIntConfig(raw, DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, 'CHECKPOINT_INTERVAL_BLOCKS');
-    assertCanonicalCadence(interval, resolveAnchorEveryN(cfg));
-    return interval;
+    const everyN = resolveAnchorCheckpointEveryN(cfg);
+    assertCanonicalCadence(interval, everyN);
+    return { checkpointIntervalBlocks: interval, anchorEveryNCheckpoints: everyN };
+}
+
+function resolveCheckpointIntervalBlocks(cfg) {
+    return resolveCheckpointCadence(cfg).checkpointIntervalBlocks;
 }
 
 module.exports = {
-    resolveCheckpointIntervalBlocks, assertCanonicalCadence, resolveAnchorEveryN,
+    resolveCheckpointCadence, resolveCheckpointIntervalBlocks, resolveAnchorCheckpointEveryN, assertCanonicalCadence,
     DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, CANONICAL_ANCHOR_CHECKPOINT_EVERY_N
 };

@@ -16,8 +16,9 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const logger = require('../../../src/observability').getLogger();
-const { assertCanonicalCadence, resolveCheckpointIntervalBlocks } =
+const { assertCanonicalCadence, resolveAnchorCheckpointEveryN, resolveCheckpointIntervalBlocks } =
     require('../../../src/anchor/checkpoint_cadence.js');
+const StateAnchorPublisher = require('../../../src/anchor/publisher.js');
 
 const ENV = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT'];
 
@@ -62,7 +63,21 @@ describe('checkpoint cadence canonical assertion', function () {
         process.env.CHECKPOINT_INTERVAL_BLOCKS = '12';
         process.env.ANCHOR_CHECKPOINT_EVERY_N = '2';
         expect(resolveCheckpointIntervalBlocks({})).to.equal(12);
+        expect(resolveAnchorCheckpointEveryN({})).to.equal(2);
         expect(warn.callCount).to.equal(1);
         expect(String(warn.firstCall.args[0])).to.include('resolved 12 / 2');
+    });
+
+    it('checks the same sanitized values that the publisher uses', function () {
+        process.env.CHECKPOINT_INTERVAL_BLOCKS = 'invalid';
+        process.env.ANCHOR_CHECKPOINT_EVERY_N = '-4';
+        const publisher = new StateAnchorPublisher({
+            db: { doQuery: async () => [] },
+            p2pConfig: {}
+        });
+
+        expect(publisher.checkpointIntervalBlocks).to.equal(6);
+        expect(publisher.anchorEveryNCheckpoints).to.equal(1);
+        expect(warn.args.map(args => String(args[0])).join('\n')).to.not.include('fleet-canonical cadence');
     });
 });
