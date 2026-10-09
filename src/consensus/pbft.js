@@ -26,13 +26,12 @@
  ********************************************************************/
 
 const crypto = require('crypto');
-const { AsyncLocalStorage } = require('node:async_hooks');
 const swq    = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const hubConfig = require('../config');
-const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('./federation.js');
+const federationRound = require('./pbft/federation_round.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -55,7 +54,6 @@ const DEFAULT_TIMEOUT = 30000; // 30 seconds
 // Same family and default as StateCheckpointEngine.cosignToleranceBlocks and
 // CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks.
 const DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS = 144;
-const federationRoundContext = new AsyncLocalStorage();
 
 // The engine's three operator knobs, read once at construction. A function rather
 // than constructor lines so the constructor stays inside the readability limit;
@@ -161,17 +159,14 @@ class Consensus {
     // peers to diverge from regardless of what the operator declared. Strictly
     // widening: every case minValidators > 1 caught is still caught.
     isFederated() {
-        if (this.minValidators > 1 || this.validatorSet.length > 1) return true;
-        let round = federationRoundContext.getStore();
-        return !!round && isFederatedHubActive(this.hub && this.hub.network, round.btcBlockHeight) &&
-            isFederatedHub(liveFederationSignals(this));
+        return federationRound.isFederated(this);
     }
 
     // isFederated() widened by the live peer and seed signals once the round's
     // anchor height reaches FEDERATED_HUB_ACTIVATION; before it this is the
     // legacy answer unchanged.
     isFederatedAt(btcBlockHeight) {
-        return federationRoundContext.run({ btcBlockHeight }, () => this.isFederated());
+        return federationRound.isFederatedAt(this, btcBlockHeight);
     }
 
     // Fail-closed gate for multi-hub federations. A deterministic snapshot is a
@@ -267,8 +262,7 @@ class Consensus {
             // indexer. So this works whether or not chain-tip-push is wired.
             blockHeight = await this.hub.resolveBtcLatestBlock();
         }
-        let round = federationRoundContext.getStore();
-        if (round) round.btcBlockHeight = blockHeight;
+        federationRound.noteBlockHeight(blockHeight);
         if (!blockHeight) return { snapshot: null, weighted: false, requestedBlockIndex: null };
         let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);
         let snapshot = weighted
@@ -392,20 +386,7 @@ function installParts(target, parts) {
     }
 }
 
-function inFederationRound(method, heightFromArgs) {
-    return function(...args) {
-        let btcBlockHeight = heightFromArgs ? heightFromArgs(args) : null;
-        return federationRoundContext.run({ btcBlockHeight }, () => method.apply(this, args));
-    };
-}
-
-const roundProposePart = Object.assign({}, proposePart, {
-    propose: inFederationRound(proposePart.propose),
-});
-const roundPrePreparePart = Object.assign({}, prePreparePart, {
-    handlePrePrepare: inFederationRound(prePreparePart.handlePrePrepare,
-        args => args[0] && args[0].data && args[0].data.btcBlockHeight),
-});
+const [roundProposePart, roundPrePreparePart] = federationRound.wrapParts(proposePart, prePreparePart);
 
 installParts(Consensus.prototype,
     [roundProposePart, roundPrePreparePart, votesPart, leaderPart, viewChangePart]);
