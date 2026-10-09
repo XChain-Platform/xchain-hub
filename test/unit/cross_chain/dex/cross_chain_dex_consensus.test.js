@@ -371,15 +371,11 @@ function registerDirect1Part4() {
     expect(bus.nodes[0].finalized.length).to.equal(0);
   });
   it('does not finalize when every follower rejects the proposed match', async function () {
-    let bus = rootSuiteBuildMesh(4, { validate: () => false });
-    await rootSuiteStartAll(bus);
+    let bus = rootSuiteBuildMesh(4, { validate: () => false }); await rootSuiteStartAll(bus);
     let mid = 'af'.repeat(32), row = sampleRow(mid);
     await rootSuiteProposeAll(bus, mid, row);
     expect(bus.nodes.every(nd => nd.finalized.length === 0)).to.equal(true);
-    expect(bus.nodes.every(nd => {
-      let pending = nd.consensus.pending.get(mid);
-      return !pending || pending.commits.size === 0;
-    })).to.equal(true);
+    expect(bus.nodes.every(nd => { let p = nd.consensus.pending.get(mid); return !p || p.commits.size === 0; })).to.equal(true);
   });
 }
 function registerDirect1() {
