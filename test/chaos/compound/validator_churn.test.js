@@ -20,15 +20,6 @@ const { VALIDATORS_4, makeValidator } = require('../../helpers/fixtures');
 const { signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
     require('../helpers/pbft_chaos');
 
-// Validator membership may change while a consensus round remains open.
-// An open round must retain the validator snapshot and quorum it started with,
-// while later rounds must observe the updated set for leader selection and votes.
-// These cases exercise additions, removals, and replacements at round boundaries.
-// They also keep the consensus and oracle paths aligned on membership behavior.
-// Messages are signed by fixture identities so admission checks remain active.
-// The hub doubles isolate churn behavior from persistence and network timing.
-// Completion assertions prove accepted churn cannot leave a proposal unresolved.
-
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }

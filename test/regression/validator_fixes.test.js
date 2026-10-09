@@ -33,9 +33,6 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-// The suite combines source-level wiring checks with isolated runtime behavior so each guard stays deterministic and independent of external services.
-// Stubs retain the production method boundaries, keeping failures attributable to the validator setup contract under test.
-
 // -----------------------------------------------------------------
 // REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
 // ESM-only and loads through require(esm), which works unflagged across the
