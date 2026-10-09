@@ -65,6 +65,7 @@ function flush() {
         const eng = new CrossChainDexEngine(hub);
         for (const coin of Object.keys(eng.indexers)) eng.indexers[coin] = { url: 'http://idx/' + coin, key: '' };
         eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 };
+        sinon.stub(eng, 'resolveSnapshotBlock').resolves(20);
         return eng;
     }
 
