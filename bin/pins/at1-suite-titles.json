@@ -9004,6 +9004,12 @@
       "fa9df3e50291405fda7fa1b735406beb9a567a0fbfd648100c6c22e294fc75f4",
       "7caa96c6e5683450d1e35bc9a2c00bdc68ac373bea0eea4d3fcfe3fb0530be39"
     ],
+    "c2959ed7f0014fcc": [
+      "94659415de5171809036cd3abc66e90c6096f4645a6efc178c7bbb0c53a4a820",
+      "0b3912b6f13b49166fb56153d1172df875968a01a28c23d414be2e302281df22",
+      "c8e49879c1a343460eea50da9c93d2350028b4be788a2c8105935cca4d29d62e",
+      "4c2d02e4591afb2bc5f209ab9e3b3dd6c2174e6f1b8a1005ed3ea2d3fab5ff37"
+    ],
     "c2a3f40e24286d3d": [
       "95559dd7c7d87446b042d686f858752feb3e8a967861ad556411423eec164809",
       "53a4b63e6b69a14bc43feccc66a67be6ac7a6fcb216bce9a55ff3f2af303aa2d",
@@ -11502,6 +11508,7 @@
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/checkpoint_cadence_canonical.test.js": "c2959ed7f0014fcc",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
@@ -12442,6 +12449,7 @@
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/checkpoint_cadence_canonical.test.js": "c2959ed7f0014fcc",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
@@ -13411,6 +13419,7 @@
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/checkpoint_cadence_canonical.test.js": "c2959ed7f0014fcc",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
