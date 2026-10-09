@@ -86,7 +86,7 @@
   "movable": [
     "src/coins/fullnodeComment.test.js"
   ],
-  "fileCount": 70,
+  "fileCount": 75,
   "files": [
     "src/attest_leader_silence_skip_activation.js",
     "src/coins/BTC.js",
@@ -97,6 +97,7 @@
     "src/consensus/equivocation_header.js",
     "src/consensus/gate_registry.js",
     "src/consensus/gate_registry/core.js",
+    "src/consensus/gate_registry/hub_rows.js",
     "src/consensus/gate_registry/regtest_env.js",
     "src/consensus/gate_registry/shared_rows.js",
     "src/consensus/gate_registry/shared_rows_1.js",
@@ -107,6 +108,7 @@
     "src/consensus/gates/anchor_reward_gate.js",
     "src/consensus/gates/attest_responsible_widening_gate.js",
     "src/consensus/gates/mirror_admission_gate.js",
+    "src/consensus/gates/mirror_admission_margin_gate.js",
     "src/consensus/gates/price_pair_gate.js",
     "src/consensus/gates/price_scale_gate.js",
     "src/consensus/gates/rollcall_gate.js",
@@ -124,6 +126,7 @@
     "src/sql/anchor_published_archives.sql",
     "src/sql/anchor_published_checkpoints.sql",
     "src/sql/anchor_reward_attestations.sql",
+    "src/sql/archive_price_tombstones.sql",
     "src/sql/attest_published_batches.sql",
     "src/sql/attest_published_requests.sql",
     "src/sql/attestation_fetch_cache.sql",
@@ -138,6 +141,7 @@
     "src/sql/cross_chain_matches.sql",
     "src/sql/governance_proposals.sql",
     "src/sql/governance_votes.sql",
+    "src/sql/list_snapshots.sql",
     "src/sql/oracle_prices.sql",
     "src/sql/oracle_published_rounds.sql",
     "src/sql/oracle_submissions.sql",
@@ -145,6 +149,7 @@
     "src/sql/policy_snapshots.sql",
     "src/sql/price_ingest_watermarks.sql",
     "src/sql/price_snapshots.sql",
+    "src/sql/remote_token_snapshots.sql",
     "src/sql/reorg_attestations.sql",
     "src/sql/slash_proposals.sql",
     "src/sql/state_checkpoints.sql",

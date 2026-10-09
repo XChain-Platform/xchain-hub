@@ -65,7 +65,7 @@ function registerPriceaggregatorRetractfromactionindex1Tests1() {
 
         let result = await agg.retractFromActionIndex('BTC', 500);
 
-        // Tombstone insert, then two DELETE statements
+        // The tombstone insert leads both DELETE statements so replicas observe the retraction before either table is pruned.
         let calls = hub.db.doQuery.getCalls();
         expect(calls.length).to.equal(3);
 

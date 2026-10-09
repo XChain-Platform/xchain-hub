@@ -1566,6 +1566,18 @@
       "8c37002e7fa47e3e3dd76b7f7e186d75d380ba727aa73db50a8d2e0956fa747d",
       "78dbdc589f86a86c513f6369f353983cfdcf96a7a3b6c52dd71baa93cac7483e"
     ],
+    "22285887d49a942e": [
+      "bb201e63b18b65e8e680e363ed152c6411861a5e346532b0cf8d34c1df883d73",
+      "f60548c9a2dbb706fbf949d0e45bb4d8251c91d4eed79a1fc482e9dfcc434c6a",
+      "fd9770c10f4cf7a5e57caf633446b0d05d9b75df49d95231a8cd93e3ca6c0f52",
+      "23ea9cb26862c92bbbe79d8978af9f0464f0837b6202d6a224df597413c03cec",
+      "4ca4769906a78e8221619a770ba7f9f1f0a678d2cc1e8a47d11fc3fc2a826863",
+      "2d0496d2f10412a3c96765ae4ae3cc7e8a750514b9fd59e424c08b7d2a6b62cd",
+      "a9df221e47fbad96ef0547499e023376068d2953c6426c7f2e453f1045564004",
+      "86332d60d1bc473672a0773c00e70d2e6447c43b69092ee71476eabbf46a5579",
+      "911c17dd27c66392810f4ac2870f30f068219a702f2bbaf72a660846a318449e",
+      "657ef02aa7ee05c0a1be04b272fd94067b3ade6d778e20fd5fa33af77e16f455"
+    ],
     "22fe09fae995c037": [
       "550d28b560ef4f5ac50eda32f8fef8268856862b7197142182705eee7b31a85f",
       "1a1a32b31314917128ffc5517713c05eb9b7c1cd5f81a36f0e37682ec3747c2a",
@@ -6046,6 +6058,26 @@
       "6fa2b096b1386d8757cdaac945f315c1b959da20f5d86b8429164a9fd8ad8ba0",
       "275e64e16758e18ff0d6b295a2019d4974c4d5a50166844dce4661eaa07abee2"
     ],
+    "79bc8bca7ac04957": [
+      "9e815c06a21eb6f28885dc52b506d08e9bab37975adc72956776f0416febd1ed",
+      "b814effb85b292d2ccfdde4f2476a847e775aa0a973b0a047d3b373d828831c5",
+      "d03d0269c16d308af32407dac7606616e0048f4a06256c5a49745145ac039483",
+      "355ed28821197533df3739abc41f3817acfb4f48e7b9f28b6207778fc51b4b35",
+      "8575659eef65237c89a34eb69b6046b686db27f287a62072d8275234eaaa7378",
+      "860d905a56466a2050aa1c38f24f3e64a26cc3c583f4af24fae6ff9964321991",
+      "1f5559dc0bc10bcba5a28f89dcb35c52173218c40f40dd13e9d5237d0c3f728c",
+      "865dd27fa1e08177b478d79fb0d50a59d0b2cf5409739511ee21e9888e2d38c7",
+      "70ef865ea2f73fe0009e3abee73216f1f87f9a49dc6c74c39c1c6a7d7b09321b",
+      "5ea1d64b6a16c30dd85e620d9a48aa7171ceb04eedc1081febc3d45301bed203",
+      "a08999c803829fac6e35d08963dfbb94e464f402e86f7fbb75954c38e2d18262",
+      "6fbd22ae7ae714726d689ee74c62f21e6cda241d14d0343498ff44419ce329cc",
+      "a30dc2098ba20b2603ffe59557db16a4ef97d00e45adfb74ef29ad9d0b16dea6",
+      "565125b6ec41e33f08ec704b37477154587747d68b35b437f746c4681b1a43ff",
+      "9622789a7d3595b05a152b7b7505a53db6d08be1c83945ac8a8d81d6c603fb91",
+      "57d70d8ac2a4b531b33307fb68b623b19a8910d5d0f102dfafae5241b272e96f",
+      "1e0deca634b7e57286d80988c354236e8f9e58f3dd5d3b8d4c8088d2392e0d9d",
+      "dd4cd3b9d90443ba1e90eda7295497d75a2476428435c4536ada572e92142adc"
+    ],
     "79ce93722e67f595": [
       "d345172dce7dcb6af8cbb43519b2b2e317d713e1cde086d5800283d648ff1949",
       "c9724724a1e9a30dcc1ae9d85c4b4c2e4784aeb971dfc2d0246a581554db067f",
@@ -6465,18 +6497,6 @@
       "1dadcbf128a92f723c80fb6678334a921309441a46330b3abce9e392c9d70724",
       "cb5037874402ec4c1965d4e857d6dcf7a9588b0ace7844238dadc5ce0f2dea63",
       "88950b75bbcbd5da3c3087ebf9d80929b63d1da97f2415758f6e3947b823efc2"
-    ],
-    "829d3f2cbb2a958b": [
-      "bb201e63b18b65e8e680e363ed152c6411861a5e346532b0cf8d34c1df883d73",
-      "f60548c9a2dbb706fbf949d0e45bb4d8251c91d4eed79a1fc482e9dfcc434c6a",
-      "fd9770c10f4cf7a5e57caf633446b0d05d9b75df49d95231a8cd93e3ca6c0f52",
-      "23ea9cb26862c92bbbe79d8978af9f0464f0837b6202d6a224df597413c03cec",
-      "4ca4769906a78e8221619a770ba7f9f1f0a678d2cc1e8a47d11fc3fc2a826863",
-      "2d0496d2f10412a3c96765ae4ae3cc7e8a750514b9fd59e424c08b7d2a6b62cd",
-      "a9df221e47fbad96ef0547499e023376068d2953c6426c7f2e453f1045564004",
-      "d15a13c5a9084f17472ac6856b083a794a5b9080285617f44595f9ae04a16cac",
-      "911c17dd27c66392810f4ac2870f30f068219a702f2bbaf72a660846a318449e",
-      "657ef02aa7ee05c0a1be04b272fd94067b3ade6d778e20fd5fa33af77e16f455"
     ],
     "82fb26e9339a04b7": [
       "9df6ff0aab359ec643cd282e849f603ba631477603a31ac8093424d0b97c0515",
@@ -9580,25 +9600,6 @@
       "89259a4a51b0d56f3cecd3853cbda42d71001c1fcf429f5ced717eed27ee66bf",
       "80136ee48c162c7de31447d77cf8a237f3bdd2cc241204f031aee9c64d0e727b"
     ],
-    "cc938b1d61d79c1f": [
-      "9e815c06a21eb6f28885dc52b506d08e9bab37975adc72956776f0416febd1ed",
-      "b814effb85b292d2ccfdde4f2476a847e775aa0a973b0a047d3b373d828831c5",
-      "d03d0269c16d308af32407dac7606616e0048f4a06256c5a49745145ac039483",
-      "355ed28821197533df3739abc41f3817acfb4f48e7b9f28b6207778fc51b4b35",
-      "4eec05d2f3e43523e12296a26eeb859f9d3da83cdff211815a34a4657a3bbd59",
-      "8575659eef65237c89a34eb69b6046b686db27f287a62072d8275234eaaa7378",
-      "860d905a56466a2050aa1c38f24f3e64a26cc3c583f4af24fae6ff9964321991",
-      "1f5559dc0bc10bcba5a28f89dcb35c52173218c40f40dd13e9d5237d0c3f728c",
-      "865dd27fa1e08177b478d79fb0d50a59d0b2cf5409739511ee21e9888e2d38c7",
-      "70ef865ea2f73fe0009e3abee73216f1f87f9a49dc6c74c39c1c6a7d7b09321b",
-      "5ea1d64b6a16c30dd85e620d9a48aa7171ceb04eedc1081febc3d45301bed203",
-      "a08999c803829fac6e35d08963dfbb94e464f402e86f7fbb75954c38e2d18262",
-      "6fbd22ae7ae714726d689ee74c62f21e6cda241d14d0343498ff44419ce329cc",
-      "a30dc2098ba20b2603ffe59557db16a4ef97d00e45adfb74ef29ad9d0b16dea6",
-      "565125b6ec41e33f08ec704b37477154587747d68b35b437f746c4681b1a43ff",
-      "9622789a7d3595b05a152b7b7505a53db6d08be1c83945ac8a8d81d6c603fb91",
-      "57d70d8ac2a4b531b33307fb68b623b19a8910d5d0f102dfafae5241b272e96f"
-    ],
     "cc9bb7eda4d0904a": [
       "3dbba907653236f263dfb16eb6f64465ea2d175fce5e220f5933751526083e47",
       "98874e15abe3c6ba093f5767682e81560fb6f3082c015e6312a62cee842e140a",
@@ -11230,6 +11231,11 @@
       "7532f0372013eb6394c8a19b7f8e244d8f411aa4760e147f228053b41cf6980a",
       "6dd8500027e703b0009bd1390c4d2d4310f20258a426277bbdd78657f337ee14"
     ],
+    "f7b09e34fdecf336": [
+      "33f7ea75de7703a63b36ec815264daa29f81ab8b0b323806b79b12375b2ad9c8",
+      "8757fbe8b886d024ab928ab7180913a75c889536b9523cff84fff91a87921583",
+      "e7b9e3ea10b20527ad61bd4b2fc0b0934de37e749138d4abbcc66f49f52359a1"
+    ],
     "f7bbb4514212d6f3": [
       "d49bfd35be6446b731f4e829348fbf91507e2c0de88534b534dec19a1551e4de",
       "e37529ab23c20969256b4ce679cd69ee8e2e310e6e99c20add14fd6cd4af6c1d",
@@ -11330,11 +11336,6 @@
       "c150fc177b75bb01c589b908cabaa056c96caa858e20ebcfe0ccebe4884adf1c",
       "e66fc56a6d8dd680b38f1d9ef4ed7897fc220f7c3f9ec4454d64fbdcc7f2fde5",
       "8d4322a0ec382a635eec80a243a11650290788277f3c4eb9362fccb9c1474a41"
-    ],
-    "f7b09e34fdecf336": [
-      "33f7ea75de7703a63b36ec815264daa29f81ab8b0b323806b79b12375b2ad9c8",
-      "8757fbe8b886d024ab928ab7180913a75c889536b9523cff84fff91a87921583",
-      "e7b9e3ea10b20527ad61bd4b2fc0b0934de37e749138d4abbcc66f49f52359a1"
     ],
     "f953a8b2b85a8ca3": [
       "740dd235c568298428b9f45ffb3e01d0adb24727e72ac6fdf0ff9c15504490b3",
@@ -11538,7 +11539,7 @@
         "ci:regression"
       ],
       "fileCount": 887,
-      "titleCount": 8411,
+      "titleCount": 8412,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11913,7 +11914,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "cc938b1d61d79c1f",
+        "test/unit/consensus/gate_registry.test.js": "79bc8bca7ac04957",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -11940,7 +11941,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "829d3f2cbb2a958b",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
@@ -12482,7 +12483,7 @@
     },
     "test": {
       "fileCount": 887,
-      "titleCount": 8411,
+      "titleCount": 8412,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12857,7 +12858,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "cc938b1d61d79c1f",
+        "test/unit/consensus/gate_registry.test.js": "79bc8bca7ac04957",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -12884,7 +12885,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "829d3f2cbb2a958b",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
@@ -13375,7 +13376,7 @@
     },
     "test:all": {
       "fileCount": 967,
-      "titleCount": 9234,
+      "titleCount": 9235,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13830,7 +13831,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "cc938b1d61d79c1f",
+        "test/unit/consensus/gate_registry.test.js": "79bc8bca7ac04957",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -13857,7 +13858,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "829d3f2cbb2a958b",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
