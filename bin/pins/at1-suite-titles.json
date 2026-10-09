@@ -4935,6 +4935,17 @@
       "0ef9a598a7f6c2e074dee6aab3b6e6a3a3f27787c402f92bf359d06cb8fe0b1a",
       "69d852232f7a8c074d355864d0958998e9061dce9f2eb0b3437d179b0effa90b"
     ],
+    "6651c88002b001a4": [
+      "b4c9fcab359048a74b4a2be185f1c3cced20b15856ab07b3548e757869ccc290",
+      "2ee3e1920a12722bc94eb97caad5440723ba76af4deeec466967f97cee2bb7b3",
+      "422c27bd1934510be43ac8758ec838345e47954f6bb2ce0c941061940e8897f3",
+      "27ad7ef70905cd6c1cce4eab846f41044c48389eed9f1549baaa8ac437f6bd96",
+      "cd5e3694bf2a5631561cd7c794a5fa9d0bebad416bc54964ac9380b5c7686f8b",
+      "b1d061a03ec709848069ac594cb4dc52389c8137126f5eb0e5f374543c526875",
+      "9f8e96fda6e40cd2b3774b377b93f1ea484d24265329ddbeafc15db7f5f0329a",
+      "bef4cc2d9d859c4c6abdc1f9cf38829f02cb5a7548698a5311addcf3afb05d42",
+      "5a3fb0dcedf2187fd52e5b40632f1cc65ae44b1738e739cd9164173a43964ecf"
+    ],
     "665b6a59fc755018": [
       "ad0dc9cc2b38db1acbf3a6786e29071bccaefbe9d3fe5af3ce800985e6f9d4b2",
       "373284e8cd245c843579c55ea27ee27a85c05ec4fab1b2d9dabf9a21b73e9bc8",
@@ -5833,17 +5844,6 @@
       "7d6b4da0f53f3ce57849453dc15652a92c8b83456ff65667769bfa8713fd6abd",
       "0fa756ff6d4db183e78e82f2129a2e14b0c77d6f94caf603887e4b80795e868b",
       "f9b7357bb76eb351187f8a252f8029a10d9d54518edf6ab28d28467fca6808c0"
-    ],
-    "755cb9ed18759b8a": [
-      "6906d33db85e3ff39db8bc7dad9d58d5b4cdb7c36e58aa6ab447740d98a33446",
-      "2ee3e1920a12722bc94eb97caad5440723ba76af4deeec466967f97cee2bb7b3",
-      "422c27bd1934510be43ac8758ec838345e47954f6bb2ce0c941061940e8897f3",
-      "27ad7ef70905cd6c1cce4eab846f41044c48389eed9f1549baaa8ac437f6bd96",
-      "cd5e3694bf2a5631561cd7c794a5fa9d0bebad416bc54964ac9380b5c7686f8b",
-      "b1d061a03ec709848069ac594cb4dc52389c8137126f5eb0e5f374543c526875",
-      "9f8e96fda6e40cd2b3774b377b93f1ea484d24265329ddbeafc15db7f5f0329a",
-      "bef4cc2d9d859c4c6abdc1f9cf38829f02cb5a7548698a5311addcf3afb05d42",
-      "5a3fb0dcedf2187fd52e5b40632f1cc65ae44b1738e739cd9164173a43964ecf"
     ],
     "756e3e33aed6fe12": [
       "c4ddc7711ab63e83bbcb03d7bec228df259fd7cbbbbe4da697c28fcd188e9391",
@@ -12358,7 +12358,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "755cb9ed18759b8a",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -13304,7 +13304,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "755cb9ed18759b8a",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -14279,7 +14279,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "755cb9ed18759b8a",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
