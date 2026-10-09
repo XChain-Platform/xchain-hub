@@ -68,11 +68,11 @@ const { addGate, UNARMED, UNPINNED } = require('./shared_rows.js');
 //     chain; below that gate the legacy create-index read runs and the membership the
 //     federation signs would not be the membership the chain actually held.
 addGate('token_policy_activation.TOKEN_POLICY_INHERITANCE_ACTIVATION', 'height', {
-    mainnet: 9999999999,
+    mainnet: UNARMED,
     'BTC:testnet': 154567, // set by the v0.21.0 freeze height plan
     'LTC:testnet': 4903068, // set by the v0.21.0 freeze height plan
     'DOGE:testnet': 67951140, // set by the v0.21.0 freeze height plan
-    testnet: 9999999999,
+    testnet: UNARMED,
     regtest: 0,
 });
 
@@ -101,7 +101,7 @@ addGate('train_activation.TRAIN_ACTIVATION', 'ruleset', {
     // fleet roll must finish inside (over 6x the 90 minute roll budget), and every testnet
     // bridge height below sits above it on the same BTC clock, so a node lacking this rule
     // set halts before it can grade a bridge action.
-    '0.19.0': { mainnet: 9999999999, testnet: 152787, regtest: 0 },
+    '0.19.0': { mainnet: UNARMED, testnet: 152787, regtest: 0 },
     // The mirror-admission rule set, armed at the v0.20.0 cut: the producer and consumer
     // admission maps and the anchor-attest barrier replace the effective_time binding, so a
     // node without them grades an admission-stamped row under the rule it replaced. Mainnet
@@ -122,8 +122,8 @@ addGate('train_activation.TRAIN_ACTIVATION', 'ruleset', {
     // mirror-admission family below re-slides onto the same instant plus its own 17 h and 6 h
     // offsets. LTC:testnet mirror admission ships disabled on this train and is
     // untouched by this reslide; it arms on a later train.
-    '0.20.0': { mainnet: 9999999999, testnet: 154074, regtest: 0 },
-    '0.21.0': { mainnet: 9999999999, testnet: 154566, regtest: 0 },
+    '0.20.0': { mainnet: UNARMED, testnet: 154074, regtest: 0 },
+    '0.21.0': { mainnet: UNARMED, testnet: 154566, regtest: 0 },
 });
 
 // xchain_bridge_activation
@@ -160,14 +160,14 @@ addGate('train_activation.TRAIN_ACTIVATION', 'ruleset', {
 // action. Regtest is 0 and stays bare, because one regtest number fits every chain and the
 // e2e rail exercises the armed rule from genesis.
 addGate('xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION', 'height', {
-    'BTC:mainnet':  9999999999,
-    'LTC:mainnet':  9999999999,
-    'DOGE:mainnet': 9999999999,
-    mainnet:        9999999999,   // fallback for a coin with no entry above
+    'BTC:mainnet':  UNARMED,
+    'LTC:mainnet':  UNARMED,
+    'DOGE:mainnet': UNARMED,
+    mainnet:        UNARMED,   // fallback for a coin with no entry above
     'BTC:testnet':  152929,       // SIZED 2026-09-16, re-cut 16:33Z: chain_tip 152,716 + 213 (30 h at 508.8 s/blk), about 30.1 h, the origin, last
     'LTC:testnet':  4887898,      // SIZED 2026-09-16, re-cut 16:33Z: chain_tip 4,887,644 + 254 (10 h at 141.8 s/blk), about 10.0 h
     'DOGE:testnet': 67902062,     // SIZED 2026-09-16, re-cut 16:33Z: chain_tip 67,900,748 + 1314 (10 h at 27.4 s/blk), about 10.0 h
-    testnet:        9999999999,   // fallback: a testnet coin with no entry above stays dark
+    testnet:        UNARMED,   // fallback: a testnet coin with no entry above stays dark
     regtest:        0,            // genesis-active so the e2e rail exercises the armed rule
 });
 // Part 5 holds these earlier rows because parts 1 to 4 are near their line limit and have concurrent additions.
@@ -177,14 +177,14 @@ addGate('anchor_fold_activation.ANCHOR_FOLD_ACTIVATION', 'height', { mainnet: UN
 addGate('archive_section_verdict_activation.ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 155001, 'LTC:testnet': 4906040, 'DOGE:testnet': 67962387, testnet: UNARMED, regtest: UNPINNED });
 // list_share_producer_activation: the hub snapshot plane begins producing shared-list versions.
 addGate('list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION', 'height', {
-    mainnet: 9999999999,
+    mainnet: UNARMED,
     testnet: 154777,
     regtest: 0,
 });
 // list_share_consumer_activation: each chain begins applying shared-list versions and references.
 addGate('list_share_consumer_activation.LIST_SHARE_CONSUMER_ACTIVATION', 'height', {
-    mainnet: 9999999999,
-    testnet: 9999999999,
+    mainnet: UNARMED,
+    testnet: UNARMED,
     'BTC:testnet': 154777,
     'LTC:testnet': 4905004,
     'DOGE:testnet': 67956922,
@@ -192,8 +192,8 @@ addGate('list_share_consumer_activation.LIST_SHARE_CONSUMER_ACTIVATION', 'height
 });
 // list_meta_activation: the hub reads it with coin BTC at snapshot_block.
 addGate('list_meta_activation.LIST_META_ACTIVATION', 'height', {
-    mainnet: 9999999999,
-    testnet: 9999999999,
+    mainnet: UNARMED,
+    testnet: UNARMED,
     'BTC:testnet': 155001,
     'LTC:testnet': 4906040,
     'DOGE:testnet': 67962387,

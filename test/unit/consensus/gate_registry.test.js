@@ -172,6 +172,14 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         expect(queued).to.deep.equal(registry.keys());
     });
 
+    it('spells dark thresholds through UNARMED in the migrated shared row files', function () {
+        for (const part of ['shared_rows_1.js', 'shared_rows_5.js']) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            const live = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+            expect(live, part + ' contains a bare UNARMED sentinel').to.not.match(/\b9999999999\b/);
+        }
+    });
+
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
         if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;
         const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
