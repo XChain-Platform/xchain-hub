@@ -16,17 +16,61 @@
 // handler: exit 1 with a raw stack, where the indexer's copy of this same tool exits
 // 2 with one clean line. Driven as a real child process, because the behaviour under
 // test is what Node does with an uncaught throw, which an in-process stub cannot show.
+// The gate refusal is driven through a preload that makes the registry miss one value
+// row in the child, because no real checkout may drop a row.
 
 const { expect } = require('chai');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
 const BIN  = path.resolve(__dirname, '../../../bin/consensus-identity.js');
 const REPO = path.resolve(__dirname, '../../..');
+const SUITE_TITLE_PIN = path.join(REPO, 'bin/pins/at1-suite-titles.json');
+const SIBLING_REFERENCE_PIN = path.join(REPO, 'bin/pins/at1-sibling-reference-map.json');
+const CHECKPOINT_ENGINE_OPTIONS = path.join(REPO, 'src/anchor/checkpoint_engine/options.js');
+const ANCHOR_PUBLISHER_OPTIONS = path.join(REPO, 'src/anchor/publisher/options.js');
+const PIN  = path.join(REPO, 'bin/pins/at1-consensus-identity.json');
+const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
+const REGISTRY = path.join(REPO, 'src/consensus/gate_registry.js');
+// A value row whose carrier exists and exports a non-function, so a registry miss
+// takes loadGateValue's rethrow branch rather than the no-carrier branch.
+const MISSING_ROW_KEY = 'price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION';
+const MISSING_ROW_CARRIER = path.join(REPO, 'src/consensus/gates/price_pair_gate.js');
 
-function run(args) {
-    return spawnSync(process.execPath, [BIN, ...args], { cwd: REPO, encoding: 'utf8' });
+// The variables the child may see. --compare refuses (exit 2) any arming variable
+// that differs from the pin, so a suite that throws between arming and restoring
+// would red this guard for a reason that is not drift. Closed, not a subtraction,
+// so a lever added later cannot ride in.
+const CHILD_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR'];
+
+function childEnv() {
+    const env = {};
+    for (const key of CHILD_ENV_KEYS) {
+        if (process.env[key] !== undefined) env[key] = process.env[key];
+    }
+    return env;
+}
+
+function run(args, preload) {
+    const argv = preload ? ['-r', preload, BIN, ...args] : [BIN, ...args];
+    return spawnSync(process.execPath, argv, { cwd: REPO, encoding: 'utf8', env: childEnv() });
+}
+
+// A preload for the child: the registry's get() misses one value row and answers
+// every other key as shipped. Written to a scratch directory, never under src/.
+function missingRowPreload() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-miss-'));
+    const file = path.join(dir, 'missing_row.js');
+    fs.writeFileSync(file,
+        'const reg = require(' + JSON.stringify(REGISTRY) + ');\n'
+        + 'const realGet = reg.get;\n'
+        + 'reg.get = (k) => {\n'
+        + '    if (k === ' + JSON.stringify(MISSING_ROW_KEY) + ') throw new reg.RegistryMissError(k);\n'
+        + '    return realGet(k);\n'
+        + '};\n');
+    return file;
 }
 
 describe('bin/consensus-identity.js: top-level error handling', function () {
@@ -35,7 +79,19 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
     it('exits 0 and still prints the identity on the healthy path', function () {
         const res = run(['--json']);
         expect(res.status, res.stderr).to.equal(0);
-        expect(() => JSON.parse(res.stdout)).to.not.throw();
+        const identity = JSON.parse(res.stdout);
+        expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_BATCH_HEAD_KEY);
+    });
+
+    it('keeps the committed identity pinned when a registry-only row is added', function () {
+        const res = run(['--compare', PIN]);
+        expect(res.status, res.stderr).to.equal(0);
+        expect(res.stdout).to.equal(`consensus identity holds against ${PIN}\n`);
+    });
+
+    it('matches the committed identity pin on the healthy path', function () {
+        const res = run(['--compare', PIN]);
+        expect(res.status, res.stdout + res.stderr).to.equal(0);
     });
 
     it('exits 2 with one clean stderr line, not a raw stack, on a thrown error', function () {
@@ -68,5 +124,75 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(res.stderr).to.equal('consensus-identity: --out requires a value\n');
         expect(res.stdout).to.equal('');
         expect(fs.existsSync(path.join(REPO, '--assert-no-absent'))).to.equal(false);
+    });
+});
+
+describe('bin/consensus-identity.js: child environment and registry-row refusal', function () {
+    this.timeout(20000);
+
+    it('matches the committed identity pin with an arming variable left set in this process', function () {
+        const key = 'XC_ROLLCALL_REGTEST_ACTIVATION';
+        const had = Object.prototype.hasOwnProperty.call(process.env, key);
+        const previous = process.env[key];
+        process.env[key] = 'armed';
+        try {
+            expect(childEnv()[key]).to.equal(undefined);
+            const res = run(['--compare', PIN]);
+            expect(res.status, res.stdout + res.stderr).to.equal(0);
+            expect(res.stdout).to.equal(`consensus identity holds against ${PIN}\n`);
+        } finally {
+            if (had) process.env[key] = previous;
+            else delete process.env[key];
+        }
+    });
+
+    it('drives a missing value row down the carrier rethrow branch', function () {
+        // A moved fixture would test the no-carrier branch instead, so it fails loudly here.
+        expect(fs.existsSync(MISSING_ROW_CARRIER), MISSING_ROW_CARRIER).to.equal(true);
+        expect(typeof require(MISSING_ROW_CARRIER).PRICE_PAIR_WIDEN_ACTIVATION).to.not.equal('function');
+    });
+
+    it('refuses with exit 2 and one line naming the key when a registry row is missing, flag or no flag', function () {
+        this.timeout(60000);
+        const preload = missingRowPreload();
+        for (const args of [[], ['--json'], ['--json', '--assert-no-absent'], ['--compare', PIN]]) {
+            const res = run(args, preload);
+            const label = `[${args.join(' ')}]`;
+            expect(res.status, `${label}: ${res.stdout}${res.stderr}`).to.equal(2);
+            expect(res.stdout, `${label}: no identity may print over a rules set the build lacks`).to.equal('');
+            expect(res.stderr, label).to.match(/^consensus-identity: /);
+            expect(res.stderr, label).to.include(MISSING_ROW_KEY);
+            expect(res.stderr.trim().split('\n'), `${label}: one clean line, not a stack`).to.have.lengthOf(1);
+            expect(res.stderr, label).to.not.match(/^\s+at /m);
+        }
+    });
+});
+
+describe('at1 suite-title pin metadata', function () {
+    it('keeps the hub source inventory separate from sibling references', function () {
+        const pin = JSON.parse(fs.readFileSync(SIBLING_REFERENCE_PIN, 'utf8'));
+        const cadence = 'src/anchor/checkpoint_cadence.js';
+
+        expect(pin.siblingRepos).to.include('xchain-indexer');
+        expect(pin.pinMetadata.hubSrcFilesAtBaseSha).to.include(cadence);
+        expect(pin.paths).to.not.have.property(cadence);
+        expect(fs.readFileSync(CHECKPOINT_ENGINE_OPTIONS, 'utf8'))
+            .to.include("require('../checkpoint_cadence.js')");
+        expect(fs.readFileSync(ANCHOR_PUBLISHER_OPTIONS, 'utf8'))
+            .to.include("require('../checkpoint_cadence.js')");
+    });
+
+    it('matches each script file map and referenced title sets', function () {
+        const pin = JSON.parse(fs.readFileSync(SUITE_TITLE_PIN, 'utf8'));
+
+        for (const [name, script] of Object.entries(pin.scripts)) {
+            if (!script.files) continue;
+            const references = Object.values(script.files);
+            expect(script.fileCount, `${name} fileCount`).to.equal(references.length);
+            expect(script.titleCount, `${name} titleCount`).to.equal(references.reduce((sum, key) => {
+                expect(pin.titleSets, `${name} title set ${key}`).to.have.property(key);
+                return sum + pin.titleSets[key].length;
+            }, 0));
+        }
     });
 });

@@ -33,6 +33,15 @@
  * no browser sends, so a fat-fingered `*,https://x` grants x and nothing more
  * rather than silently opening the hub's JSON-RPC surface to everyone.
  *
+ * Identical by intent across these six copies (this file is one of them);
+ * an edit to one is an edit to all six:
+ *   xchain-encoder/src/server/cors_origin.js
+ *   xchain-hub/src/api/cors_origin.js
+ *   xchain-indexer/src/api/cors_origin.js
+ *   xchain-sdk/src/utils/cors_origin.js
+ *   xchain-sync/src/http/cors_origin.js
+ *   xchain-utxo-tracker/src/server/cors_origin.js
+ *
  * @param {string|undefined|null} raw - the raw CORS_ORIGIN value
  * @returns {false|string|string[]} `false` (disabled), `'*'` (any), one origin, or an allowlist
  */

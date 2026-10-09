@@ -23,6 +23,10 @@ const INTEGER_KEYS = new Set([
     'id', 'snapshot_block', 'home_list_index', 'list_type', 'seq', 'origin_block'
 ]);
 const NULLABLE_INTS = new Set(['admit_block_btc', 'admit_block_ltc', 'admit_block_doge']);
+const REMOTE_TOKEN_KEYS = [
+    'id', 'snapshot_id', 'snapshot_block', 'network', 'coin', 'tick', 'decimals',
+    'owner', 'source_action_index', 'finalizing_view', 'validator_signatures', 'status'
+];
 
 function archivedValue(key, value){
     if(INTEGER_KEYS.has(key)) return Number(value);
@@ -33,6 +37,14 @@ function archivedValue(key, value){
 }
 
 module.exports = {
+
+    serializeRemoteTokenSnapshot(row){
+        const out = {};
+        for(const key of REMOTE_TOKEN_KEYS) out[key] = archivedValue(key, row[key]);
+        out.decimals = Number(row.decimals);
+        out.source_action_index = Number(row.source_action_index);
+        return out;
+    },
 
     serializeListSnapshot(row){
         const out = {};
@@ -48,6 +60,12 @@ module.exports = {
     async backfillListRows(batchSeq, txid, listIds){
         for(const list of (listIds || []))
             await this.db.updateListSnapshotArchiveBatchSeq(batchSeq, txid, list.snapshot_id);
+    },
+
+    async backfillRemoteTokenRows(batchSeq, txid, tokenIds){
+        for(const token of (tokenIds || []))
+            await this.db.updateRemoteTokenSnapshotArchiveBatchSeq(
+                batchSeq, txid, token.snapshot_id);
     }
 
 };

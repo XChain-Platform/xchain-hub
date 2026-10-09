@@ -70,16 +70,19 @@ installFoldAttestHooks();
 
 module.exports = {
 
-    // Anchor-publish reward: the validator that paid the DOGE earns it. Recorded
-    // on EVERY hub (by the publisher at publish time and by peers from the
-    // signature-verified BUNDLE_DONE / FINALIZED announcements) with blockIndex =
-    // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
-    // hold identical row bytes and the archived rewards section verifies by
-    // re-derivation. recordAnchorReward dedups all paths, including a failover
-    // race that hands the same (round, type) to two different publisher pubkeys,
-    // which it collapses to a single deterministic per-(round,type) winner.
+    // Anchor-publish reward: the validator that paid the DOGE earns it, with blockIndex =
+    // the quorum-agreed snapshot_block of the rewarded checkpoint. BELOW each reward
+    // type's flag-day it is recorded on EVERY hub (by the publisher at publish time and
+    // by peers from the signature-verified BUNDLE_DONE for anchor_bundle, FINALIZED for
+    // anchor_archive), so all hubs hold identical row bytes and the archived rewards
+    // section verifies by re-derivation; recordAnchorReward dedups all paths, including
+    // a failover race that hands the same (round, type) to two different publisher
+    // pubkeys, which it collapses to a single deterministic per-(round,type) winner.
+    // AT/ABOVE the flag-day both mirrors are retired (bundle_done.js, finalized_apply.js):
+    // only an attested publisher records its own hub-local row, and the indexer's winner
+    // reconcile is the only cross-publisher dedup.
     // `network` is the REWARD's network (the checkpoint row's), threaded through
-    // so RewardTracker's derive-vs-push flag-day gate reads the SAME source as
+    // so RewardTracker's flag-day amount gate (resolveAnchorRewardAmount) reads the SAME source as
     // this publisher's payload-build gate: re-deriving it from
     // this.hub.network inside RewardTracker double-credited on an unscoped hub.
     recordReward(rewardType, roundNumber, pubkey, blockIndex, network){
@@ -103,7 +106,7 @@ module.exports = {
     // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
     //
     // The mirror alone is not enough reach: HubDbSync holds ONE hubUrl
-    // (xchain-indexer/src/hub/hub_db_sync.js), the row is written only on the ELECTED publisher,
+    // (xchain-indexer/src/hub/hub_db_sync/instance_state.js), the row is written only on the ELECTED publisher,
     // and the publisher rotates per bundle by hashOrder, so without federation a federation's
     // hubs would hold DISJOINT subsets and an indexer would derive only the subset its own hub
     // published. So the PRODUCER federates: `e` carries the confirmed anchor txid and, on the
@@ -111,8 +114,8 @@ module.exports = {
     // every peer independently re-verifies and writes its own copy. Two notes:
     //   - Do NOT "correct" the sibling sentence in src/sql/anchor_reward_attestations.sql. Its
     //     "exactly like state_checkpoints" is TRUE and scoped to the MIRROR semantics (id-parity
-    //     INSERT IGNORE, never retracted); hub_db_sync.js states the identical property for both
-    //     tables in HUB_STATE_TABLES. It makes no hub-to-hub federation claim, so replacing it
+    //     INSERT IGNORE, never retracted); xchain-indexer/src/hub/hub_db_sync/mirror_tables.js
+    //     states the identical property for both tables in its HUB_STATE_TABLES note. It makes no hub-to-hub federation claim, so replacing it
     //     with one would trade a true sentence for a false one on a consensus table.
     //   - The XANCPUB quorum a receiver re-verifies is the SAME quorum XANCPUB_SIGN already put
     //     on the wire, verified the same way (handleAttestSign). The receiver mints money rows,

@@ -30,8 +30,8 @@
  * judges, queued into the same registry after the block.
  *
  * REGTEST ARMING is applied WHEN A ROW IS READ (shared_rows.js registerRows
- * installs it as the core's read overlay): the block writes the five
- * venue-armed regtest entries UNPINNED, the registry stores that committed
+ * installs it as the core's read overlay): each block row REGTEST_ARMING
+ * lists commits a bare regtest entry, the registry stores that committed
  * table, and every get(), copy(), rows() and activeAt() arms the entry from
  * this process's environment as it stands at that moment. The bare reading is
  * the block literal and the armed reading is the venue's; a test that re-arms
@@ -63,7 +63,7 @@ require('./gate_registry/shared_rows_5.js');
 
 // HUB-ONLY GATES: the rows no other repo twins, queued after the block so the
 // block's order is untouched. Every module SHARED_GATES names is an indexer
-// twin or a shared carrier, so all 39 of the digest's value rows are in the
+// twin or a shared carrier, so all 41 of the digest's value rows are in the
 // block (its other 4 keys are admission FUNCTIONS, read from their carrier);
 // nothing in hub_rows.js is a digest input. The four hub-only activation files
 // keep their literals and are not rows (decision D34); the governance snapshot

@@ -17,9 +17,11 @@
  * Faithful port of the bignumber helpers in xchain-indexer/src/utility.js
  * (mathjs bignumber + decimal.js native compare/floor). The cross-chain DEX
  * order book must compute fill quantities with the SAME arithmetic the indexer
- * uses for its local order book (order_match.js bottleneck-clamp + getPrice /
- * bcmul precision 18 / bcsub precision 64) so a fill the hub finalizes lands the
- * legs and reduces each order's `getOrderAmountsRemaining` consistently. Pin the
+ * uses for its local order book (order_match/index.js computeFillAmounts
+ * bottleneck-clamp + getPrice / bcmul precision 64; order_match/settle.js bcsub
+ * precision 64) so a fill the hub finalizes lands the legs and reduces each
+ * order's `getOrderAmountsRemaining` consistently. The clamp multiply must never
+ * drop to 18: that was a known hub/indexer fill divergence. Pin the
  * same mathjs major as the indexer (15.x, default BigNumber precision 64).
  * These MUST stay byte-equivalent.
  *
@@ -97,10 +99,8 @@ function bcformat(num, decimals){
     return mathjs.format(bcnum(num), {notation: 'fixed', precision: d});
 }
 
-// Minimal-form string, byte-identical to the indexer's utility.js bcstr
-// (bcnum(num).toFixed(), no zero padding): bcstr('1.5') -> '1.5'. Use this
-// wherever output must byte-match indexer-produced amount strings (the SMT
-// canonicalAmount path); use bcformat when a fixed width is required.
+// Minimal-form plain decimal, byte-identical to the indexer's bcstr helper.
+// Unlike String(BigNumber), this never switches to exponent notation.
 function bcstr(num){
     return bcnum(num).toFixed();
 }

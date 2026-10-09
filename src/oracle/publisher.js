@@ -173,8 +173,9 @@ class OraclePublisher {
     // ----- The durable-file primitives -----
     //
     // The queue, the dead-letter file and the round buffer are the three durable
-    // files this class owns, and every write to them is open/write/fsync/close so a
-    // crash cannot leave a half-line behind. They live here rather than with the
+    // files this class owns, and every write to them is open/write/fsync/close. A
+    // crash mid-append can still leave a torn last line, which the queue rebuild
+    // quarantines to the dead-letter file instead of dropping. They live here rather than with the
     // callers because `fs` is what the suites stub through this module.
 
     // Create the queue directory and touch the queue file. Best-effort: an
@@ -220,6 +221,16 @@ class OraclePublisher {
         catch (e) { return null; }
     }
 
+    // Read a durable file whole, or null when it does not exist; any other failure
+    // throws, for the queue rebuild that must tell an empty file from an unread one.
+    readDurableFileStrict(filePath) {
+        try { return fs.readFileSync(filePath, 'utf8'); }
+        catch (e) {
+            if (e && e.code === 'ENOENT') return null;
+            throw e;
+        }
+    }
+
     // Steps 1-3 of the default pipeline: fetch, build, sign. Returns the signed tx hex.
     async buildSignedTx(payload) {
         if (!this.encoder)         throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
@@ -235,7 +246,9 @@ class OraclePublisher {
 
         // 2. Create an unsigned PSBT with the PRICE v0 payload
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
-        // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
+        // so the encoder answers P2SH, a two-transaction lane signBuiltTx refuses: this
+        // built-in pipeline publishes no PRICE, and a hub needs a HUB_SIGNER_MODULE
+        // exporting broadcast(payload) (examples/doge-signer.example.js).
         let selection = this.selectInputs(utxos);
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while the set is inside the encoder's caller-facing

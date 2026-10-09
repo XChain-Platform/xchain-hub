@@ -48,6 +48,9 @@ module.exports = {
         // Lifetime counter of rounds moved to the dead-letter file. Makes a
         // give-up event countable instead of only a console.error.
         this.abandonedCount     = 0;
+        // Lifetime count of unparseable queue lines moved to the dead-letter file
+        // before a rewrite, kept apart from abandonedCount (those are whole rounds).
+        this.corruptQueueLines  = 0;
         // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
         // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
         // so operators can tell an oversized drop apart from an attempts-exhausted abandon.
@@ -181,6 +184,9 @@ module.exports = {
         this.takeoverAttempts  = 0;
         this.takeoverPublished = 0;
         this.takeoverDeferred  = 0;
+        // Takeovers declined because the observation feed is unproven, counted on every
+        // declined window (the decline warning in takeover.js fires once per process).
+        this.takeoverDeclinedUnproven = 0;
         // How long an armed follower waits, once something says a batch for
         // the window may ALREADY be on the wire, before it treats that tx as gone and
         // publishes its own. Mirrors AttestationPublisher's

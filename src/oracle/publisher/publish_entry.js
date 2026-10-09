@@ -69,7 +69,7 @@ module.exports = {
         // intent is recorded: nothing can leave the process on this branch, so it
         // must consume no reservation and leave no crash marker behind.
         if (!canBroadcast) {
-            logger.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
+            logger.warn('OraclePublisher: no broadcast pipeline configured (set HUB_SIGNER_MODULE to a module exporting broadcast(payload), or setBroadcastHook), round ' + entry.round + ' will remain queued');
             entry.attempts++;
             pass.remaining.push(entry);
             return;

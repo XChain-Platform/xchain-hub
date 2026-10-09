@@ -22,13 +22,16 @@
  *
  ********************************************************************/
 
+const { isTransientStatus, redactVendorText } = require('./http');
+
 // A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
 // an outcome the model actually produced. The boundary is the one providers/llm/http.js
-// `isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included);
-// it is restated here rather than imported because it was written in llm/claude_spawn.js,
-// which llm.js requires, where a back-import would be circular. The two definitions are
-// a pair: move one, move the other.
+// `isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included),
+// imported rather than restated: http.js is a leaf that requires only https.
+// Structured status fields and a status the text names as one are judged by it directly;
+// the bare-token list is the narrower scan for a number with no status phrase around it.
 const AVAILABILITY_STATUS_RE = /\b(429|500|502|503|504|529)\b/;
+const STATUS_PHRASE_RE = /\b(?:API Error|HTTP(?:\/\d(?:\.\d)?)?|status(?: code)?)[:\s]+(\d{3})\b/gi;
 const AVAILABILITY_TEXT_RE   = /overloaded|rate.?limit|too many requests|service unavailable|bad gateway|gateway time-?out|upstream connect error|usage limit reached|session limit/i;
 const AVAILABILITY_ERROR_TYPES = ['overloaded_error', 'rate_limit_error'];
 
@@ -42,6 +45,12 @@ const REFUSAL_TEXT_RE = /safeguards flagged|flagged by (?:our|the) safeguards|co
 function statusOf(value) {
     let n = Number(value);
     return Number.isFinite(n) ? n : null;
+}
+
+// Whether the text names a transient HTTP status ("API Error: 522", "HTTP/1.1 503").
+function textNamesTransientStatus(text) {
+    for (const m of text.matchAll(STATUS_PHRASE_RE)) if (isTransientStatus(m[1])) return true;
+    return AVAILABILITY_STATUS_RE.test(text);
 }
 
 // Decide whether a CLI failure reports the VENDOR being unavailable. Reads the
@@ -87,12 +96,12 @@ function cliFailureIsTransient(stdout, stderr) {
     // alongside the error-shaped status fields rather than instead of them (item 7756).
     for (const status of [statusOf(envelope.api_error_status), statusOf(err.api_error_status),
                           statusOf(envelope.status), statusOf(err.status), statusOf(err.code)]) {
-        if (status === 429 || (status >= 500 && status <= 599)) return true;
+        if (status !== null && isTransientStatus(status)) return true;
     }
     const type = String(err.type || envelope.type || envelope.subtype || '').toLowerCase();
     if (AVAILABILITY_ERROR_TYPES.includes(type)) return true;
 
-    return AVAILABILITY_STATUS_RE.test(text) || AVAILABILITY_TEXT_RE.test(text);
+    return textNamesTransientStatus(text) || AVAILABILITY_TEXT_RE.test(text);
 }
 
 // An availability failure: the judge chain may retry it on a different model.
@@ -164,14 +173,14 @@ function closeOutcome(code, stdout, stderr) {
         // happens to be the CLI must not lose the round to the same outage.
         // Everything unrecognized -- auth, 4xx, an exhausted --max-budget-usd,
         // a refusal -- keeps the hard classification.
-        const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : '');
+        const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + redactVendorText(stderr.trim()).slice(0, 400) : '');
         if (cliFailureIsTransient(stdout, stderr)) return transient(msg);
         else                                        return hard(msg);
     }
     let json;
     try { json = JSON.parse(stdout); }
     catch (e) {
-        return hard('claude-spawn: unparseable JSON from CLI: ' + stdout.slice(0, 200));
+        return hard('claude-spawn: unparseable JSON from CLI: ' + redactVendorText(stdout).slice(0, 200));
     }
     const result = (json && typeof json.result === 'string') ? json.result : '';
     if (!result) return emptyResultOutcome(json, stdout);

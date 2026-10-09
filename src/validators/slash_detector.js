@@ -86,19 +86,10 @@ class SlashDetector {
         this.deviationThreshold = resolveDeviationThreshold(hub.p2pConfig);
         this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
 
-        // Sliding window (in rounds) over which missed rounds are counted.
-        // A consecutive-miss counter reset to 0 on ANY participation let a
-        // validator at 1-in-30 participation evade forever;
-        // counting misses over the last N rounds catches sustained low-rate
-        // participation while a fully consecutive streak still fires at the
-        // same round it used to. The window must be at least the threshold or
-        // the offense could never fire, so a smaller override fails fast.
-        this.participationWindowSize = parseInt(hub.p2pConfig.SLASH_PARTICIPATION_WINDOW || String(this.missedRoundsThreshold * 2));
-        if (this.participationWindowSize < this.missedRoundsThreshold) {
-            throw new Error('SLASH_PARTICIPATION_WINDOW (' + this.participationWindowSize +
-                ') is below SLASH_MISSED_ROUNDS_THRESHOLD (' + this.missedRoundsThreshold +
-                '): the non-participation offense could never fire. Set it >= the threshold.');
-        }
+        // Count misses over twice the configured offense threshold. This catches
+        // sustained low-rate participation while keeping the window large enough
+        // for the offense to fire.
+        this.participationWindowSize = this.missedRoundsThreshold * 2;
 
         // Per-validator participation history over the sliding window:
         // Map<pubkey, { history: boolean[] (true = missed, newest last), missed: count }>

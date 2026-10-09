@@ -38,6 +38,18 @@ function isTransientStatus(status) {
     return s === 429 || (s >= 500 && s <= 599);
 }
 
+// Mask credentials a vendor or a proxy can echo in an error body (the literal key
+// just sent, sk- keys, bearer tokens, key/authorization pairs) before the text
+// reaches an Error, a log line or the spend audit. Never throws; redact before cutting.
+function redactVendorText(text, secret) {
+    let s = (text === null || text === undefined) ? '' : String(text);
+    if (typeof secret === 'string' && secret.length >= 8) s = s.split(secret).join('[redacted]');
+    return s
+        .replace(/((?:x-api-key|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)(?:bearer\s+)?[^\s"',;}]+/gi, '$1[redacted]')
+        .replace(/\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi, 'Bearer [redacted]')
+        .replace(/\bsk-[^\s"',;)\]}]+/g, '[redacted]');
+}
+
 // The HTTP status decides whether a response is a completion at all; the body's
 // SHAPE only says which vendor wrote the error. Both transports must ask the status
 // question, because asking the shape question alone (`json.type === 'error' ||
@@ -52,11 +64,11 @@ function isTransientStatus(status) {
 // Returns an error to reject with, or null when the status is a real 2xx. 3xx counts
 // as failure too: https.request does not follow redirects, so a 3xx body is not a
 // completion either.
-function httpStatusError(res, vendorLabel, json, str) {
+function httpStatusError(res, vendorLabel, json, str, secret) {
     if (res.statusCode >= 200 && res.statusCode < 300) return null;
-    let detail = (json && json.error && json.error.message) ? json.error.message
-               : (json && typeof json.message === 'string') ? json.message
-               : 'HTTP ' + res.statusCode + ': ' + String(str).substring(0, 200);
+    let detail = (json && json.error && json.error.message) ? redactVendorText(json.error.message, secret)
+               : (json && typeof json.message === 'string') ? redactVendorText(json.message, secret)
+               : 'HTTP ' + res.statusCode + ': ' + redactVendorText(str, secret).substring(0, 200);
     let err = new Error('llm: ' + vendorLabel + ': ' + detail);
     err.httpStatus = res.statusCode;
     err.transient  = isTransientStatus(res.statusCode);
@@ -81,10 +93,16 @@ function armWallClockDeadline(req, timeoutMs, onDeadline) {
 
 // A resolve/reject pair that settles its promise once: whichever of a response,
 // a socket error, the idle timeout or the wall-clock deadline comes first wins.
-function settleOnce(resolve, reject) {
+// Given the key the call sent, every rejection's message is redacted on the way out.
+function settleOnce(resolve, reject, secret) {
     let settled = false;
     let safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
-    let safeReject  = (e) => { if (!settled) { settled = true; reject(e); } };
+    let safeReject  = (e) => {
+        if (settled) return;
+        settled = true;
+        if (secret !== undefined && e && typeof e.message === 'string') e.message = redactVendorText(e.message, secret);
+        reject(e);
+    };
     return { safeResolve, safeReject };
 }
 
@@ -114,7 +132,7 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
     let data = JSON.stringify(body);
 
     return await new Promise((resolve, reject) => {
-        let { safeResolve, safeReject } = settleOnce(resolve, reject);
+        let { safeResolve, safeReject } = settleOnce(resolve, reject, apiKey);
 
         let req = https.request({
             method:   'POST',
@@ -136,11 +154,11 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
                     // Status first, body shape second: see httpStatusError. Same
                     // rule as the Claude API branch, since this was the same mistake
                     // written twice.
-                    let statusErr = httpStatusError(res, 'OpenAI API', json, str);
+                    let statusErr = httpStatusError(res, 'OpenAI API', json, str, apiKey);
                     if (statusErr) { safeReject(statusErr); return; }
                     if (json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
-                        let err = new Error('llm: OpenAI API: ' + msg);
+                        let err = new Error('llm: OpenAI API: ' + redactVendorText(msg, apiKey));
                         err.httpStatus = res.statusCode;
                         err.transient  = isTransientStatus(res.statusCode);
                         safeReject(err);
@@ -152,7 +170,7 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
                     // A 429/5xx from a gateway/proxy often carries a non-JSON (HTML)
                     // body and lands here; classify by status so it is not misrecorded
                     // as a hard malformed-response error.
-                    let err = new Error('llm: OpenAI API: malformed response (' + str.substring(0, 200) + ')');
+                    let err = new Error('llm: OpenAI API: malformed response (' + redactVendorText(str, apiKey).substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
                     err.transient  = isTransientStatus(res.statusCode);
                     safeReject(err);
@@ -166,4 +184,4 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
     });
 }
 
-module.exports = { isTransientStatus, httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };
+module.exports = { isTransientStatus, redactVendorText, httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };

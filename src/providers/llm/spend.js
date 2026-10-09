@@ -29,6 +29,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const nodeUtil = require('node:util');
+const { redactVendorText } = require('./http');
 
 // Aggregate spend budget (the enforcement half of the audit below)
 //
@@ -205,7 +206,7 @@ class SpendAudit {
             model:     intent.model,
             status:    status,
             usage:     (usage && Object.keys(usage).length) ? usage : null,
-            error:     err ? String(err.message || err).substring(0, 200) : undefined
+            error:     err ? redactVendorText(err.message || err).substring(0, 200) : undefined
         });
     }
 

@@ -40,7 +40,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **State checkpoints and ANCHOR publishing**: `StateCheckpointEngine` quorum-signs per-chain ledger/actions/contract hash checkpoints; `StateAnchorPublisher` elects a leader from the `oracle_publish` snapshot and writes ANCHOR v0/v1/v2 transactions to DOGE with a failover ladder; archive batches carry both DEX matches and XCALL relay rows
 - **MariaDB storage**: 23 relational tables with circuit breaker and exponential backoff
 - **Docker-ready**: Dockerfile for containerized deployment via xchain-node
-- **API authentication**: `X-Api-Key` required for JSON-RPC write methods when `HUB_API_KEY` is set; `getallconfigs` is a separately auth-gated sensitive read (its response carries DB credentials), with `HUB_SENSITIVE_READ_AUTH=0` as an emergency opt-out
+- **API authentication**: `X-Api-Key` required for JSON-RPC write methods when `HUB_API_KEY` is set; `getallconfigs` is a separately auth-gated sensitive read (DB and RPC passwords are redacted unless the call sets `include_secrets`, which needs `HUB_CONFIG_SECRETS_API_KEY`, or `HUB_API_KEY` when that is unset), with `HUB_SENSITIVE_READ_AUTH=0` as an emergency opt-out
 - **Chain registry endpoint**: `GET /api/v1/chain-registry` serves the wallet/SDK bootstrap chain descriptors, Ed25519-signed when the hub has an identity
 
 ## Documentation

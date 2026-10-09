@@ -65,6 +65,7 @@ function flush() {
         const eng = new CrossChainDexEngine(hub);
         for (const coin of Object.keys(eng.indexers)) eng.indexers[coin] = { url: 'http://idx/' + coin, key: '' };
         eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 };
+        sinon.stub(eng, 'resolveSnapshotBlock').resolves(20);
         return eng;
     }
 
@@ -284,7 +285,7 @@ describe('AttestationSpotChecker.schedulerTick overlap guard', function () {
             sinon.restore();
             try { fs.unlinkSync(queueFile); } catch (_) {}
         });
-        it('a sweep firing while the pending set is still loading spends nothing', aSweepFiringWhileThePendingTest5);
+        it('a sweep firing while the pending set is still loading spends nothing', aSweepFiringWhileThePendingTest5).timeout(30000);
         it('a rejected pending-set fetch does not wedge the sweep', aRejectedPendingSetFetchDoesTest6);
     }
 

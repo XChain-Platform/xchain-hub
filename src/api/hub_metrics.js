@@ -220,7 +220,7 @@ function registerStakeShareSeries(registry){
     });
     const headroom = registry.gauge({
         name: 'xchain_stake_share_headroom',
-        help: 'Additional third-party stake this chain/capability can absorb while the two-thirds commit gate stays reachable; negative means it is already lost',
+        help: 'Third-party stake this chain/capability can still absorb before the strict two-thirds commit gate (3*tally > 2*S) is lost; added stake must stay strictly below this value; zero or negative means the gate is already lost',
         labelNames
     });
     const stakesToHalt = registry.gauge({
@@ -276,5 +276,40 @@ function collectStakeShareSeries(hub, { shareRatio, headroom, stakesToHalt, meet
     }
 }
 
+/**
+ * Register the number of governance proposals still voting after the overdue
+ * threshold on an installed registry.
+ *
+ * @param {{registry: ?object}} observability  installObservability() handle.
+ * @param {object} hub  governance is resolved lazily at scrape time.
+ * @returns {boolean} true when the metric was registered.
+ */
+function installHubGovernanceOverdueMetrics(observability, hub){
+    const registry = observability && observability.registry;
+    if(!registry || !hub) return false;
 
-module.exports = { installHubOracleMetrics, installHubStakeShareMetrics };
+    const overdue = registry.gauge({
+        name: 'xchain_governance_overdue_proposals',
+        help: 'governance proposals still in voting past the overdue threshold'
+    });
+    registry.addCollector(() => {
+        overdue.reset();
+        const governance = hub.governance;
+        if(!governance) {
+            overdue.set({}, 0);
+            return;
+        }
+        if(Number.isInteger(governance._overdueCount) && governance._overdueCount >= 0) {
+            overdue.set({}, governance._overdueCount);
+        }
+    });
+
+    return true;
+}
+
+
+module.exports = {
+    installHubOracleMetrics,
+    installHubStakeShareMetrics,
+    installHubGovernanceOverdueMetrics
+};

@@ -58,6 +58,15 @@ function appendPublisherTail(parts, publisher, attestSigs){
         parts.push(String(sig.pubkey).toLowerCase(), String(sig.sig).toLowerCase());
 }
 
+async function resolveFoldBlock(ctx, fallback){
+    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return Number(fallback);
+    try {
+        const resolved = await ctx.hub.resolveDogeLatestBlock();
+        if(resolved == null || !Number.isFinite(Number(resolved))) return null;
+        return Number(resolved);
+    } catch(_e){ return null; }
+}
+
 module.exports = {
 
     // The BUNDLE election key. One election per bundle, so the key binds only what a
@@ -202,14 +211,8 @@ module.exports = {
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
         let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
         let split = this.splitBundle(sections, me, attestTail);
-        let foldBlock = snapshotBlock;
-        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
-            try {
-                let resolved = await this.hub.resolveDogeLatestBlock();
-                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
-            } catch(_e){ foldBlock = snapshotBlock; }
-        }
-        let foldActive = canonicalForms.isAnchorFoldActive(foldBlock, network);
+        const foldBlock = await resolveFoldBlock(this, snapshotBlock);
+        const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
         for(let refused of split.oversize){
             this._bundlesOversize++;
             logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
@@ -239,14 +242,9 @@ module.exports = {
         let skipped  = { rows: 0 };
         for(let [network, sections] of this.groupSectionsByNetwork(rows))
             await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
-        let foldBlock = btcBlock;
-        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
-            try {
-                let resolved = await this.hub.resolveDogeLatestBlock();
-                if(Number.isFinite(Number(resolved))) foldBlock = Number(resolved);
-            } catch(_e){ foldBlock = btcBlock; }
-        }
-        if(this.network && canonicalForms.isAnchorFoldActive(foldBlock, this.network)) this.suppressLegacyArchiveLeg();
+        const foldBlock = await resolveFoldBlock(this, btcBlock);
+        if(this.network && foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
+            this.suppressLegacyArchiveLeg();
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
         // it walked candidates and published none, so the stand-down is visible in the

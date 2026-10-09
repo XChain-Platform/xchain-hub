@@ -292,7 +292,7 @@ module.exports = {
     async flushRefusal(signer){
         if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
             if(!this._loggedNoPipeline){
-                logger.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
+                logger.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set HUB_SIGNER_MODULE to a module exporting broadcast(payload))');
                 this._loggedNoPipeline = true;
             }
             return { anchored: [], archive: 'none', skipped: 'no_pipeline' };

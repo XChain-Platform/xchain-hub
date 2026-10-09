@@ -110,6 +110,7 @@ const { HOME_CHAIN, ORIGIN_CHAINS } = require('./relay/constants.js');
 const snapWrite = require('../lib/capability_snapshot_write.js');
 const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild } = require('../lib/encoder/encoder_reservation.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
@@ -323,11 +324,12 @@ class AttestationRelay {
         address      = address      || this.btcAddress;
         walletSignFn = walletSignFn || this.walletSignFn;
         let txHex;
+        let psbtResult;
         try {
             let utxos = await encoder.getUtxos(address);
             if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
                 throw new Error('no UTXOs available for ' + address);
-            let psbtResult = await encoder.createTx({
+            psbtResult = await encoder.createTx({
                 // Forwarded only while inside the encoder's caller-facing
                 // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
                 // from its own uncapped fetch of this same address
@@ -350,6 +352,9 @@ class AttestationRelay {
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
         } catch(e){
             e._relayPreSend = true;
+            // Hand back the reserved inputs to the encoder that minted them (the origin
+            // chain's on a v4 leg); a no-op when the failure came before create_tx.
+            await abandonBuild(encoder, psbtResult, 'AttestationRelay');
             throw e;
         }
         return await encoder.broadcastTx(txHex);

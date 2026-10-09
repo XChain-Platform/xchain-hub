@@ -66,7 +66,7 @@ const SpendAudit = require('./llm/spend');
 const MetaGates = require('./llm/meta_gates');
 const JudgeAgreement = require('./llm/agree');
 const { parseEnvelope, resolveFetchModel, responseBody } = require('./llm/envelope');
-const { httpStatusError, isTransientStatus, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
+const { httpStatusError, isTransientStatus, redactVendorText, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
 const { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn } = require('./llm/transports');
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
@@ -325,7 +325,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
     let data = JSON.stringify(body);
 
     return await new Promise((resolve, reject) => {
-        let { safeResolve, safeReject } = settleOnce(resolve, reject);
+        let { safeResolve, safeReject } = settleOnce(resolve, reject, apiKey);
 
         let req = https.request({
             method:   'POST',
@@ -348,11 +348,11 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     // Status first, body shape second: see httpStatusError. The
                     // shape check below still runs for a 2xx carrying an error
                     // envelope, which vendors do return.
-                    let statusErr = httpStatusError(res, 'Anthropic API', json, str);
+                    let statusErr = httpStatusError(res, 'Anthropic API', json, str, apiKey);
                     if (statusErr) { safeReject(statusErr); return; }
                     if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
-                        let err = new Error('llm: Anthropic API: ' + msg);
+                        let err = new Error('llm: Anthropic API: ' + redactVendorText(msg, apiKey));
                         err.httpStatus = res.statusCode;
                         err.transient  = isTransientStatus(res.statusCode);
                         safeReject(err);
@@ -364,7 +364,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     // A 429/5xx from a gateway/proxy often carries a non-JSON (HTML)
                     // body and lands here; classify by status so it is not misrecorded
                     // as a hard malformed-response error.
-                    let err = new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')');
+                    let err = new Error('llm: Anthropic API: malformed response (' + redactVendorText(str, apiKey).substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
                     err.transient  = isTransientStatus(res.statusCode);
                     safeReject(err);

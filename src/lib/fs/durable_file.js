@@ -66,4 +66,19 @@ function syncDirectory(fsImpl, dir) {
     }
 }
 
-module.exports = { rewriteFileAtomically };
+// Split JSONL text into the values `accept` keeps and the raw lines it does not
+// (unparseable, null, or refused), so a rewrite can keep or quarantine every line.
+function splitJsonLines(text, accept) {
+    let entries = [];
+    let rejected = [];
+    for (let line of String(text).split('\n')) {
+        if (line.trim().length === 0) continue;
+        let value = null;
+        try { value = JSON.parse(line); } catch (_) { /* a torn or foreign line, kept raw below */ }
+        if (value !== null && accept(value)) entries.push(value);
+        else rejected.push(line);
+    }
+    return { entries: entries, rejected: rejected };
+}
+
+module.exports = { rewriteFileAtomically, splitJsonLines };

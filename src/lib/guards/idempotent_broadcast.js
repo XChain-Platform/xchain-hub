@@ -30,7 +30,9 @@
  *     rejection; see ENCODER_TRANSPORT_FALLBACK below. Nor is a definitive
  *     rejection proof that NO money moved: a multi-phase signer hook can be
  *     rejected on its reveal after its funding transaction is already on chain,
- *     so an error carrying `fundsCommitted` is AMBIGUOUS whatever its shape.
+ *     so an error carrying `fundsCommitted` is AMBIGUOUS whatever its shape. So is
+ *     the encoder's TX_ALREADY_IN_CHAIN reason: the node already holds this exact
+ *     transaction, which is a landed send rather than a rejection.
  *     (Was duplicated verbatim as isAmbiguousSendError in
  *     Oracle/Attest/Anchor/FullNode.)
  *
@@ -84,6 +86,15 @@
 // encoder side, which is a change in that repo.
 const ENCODER_TRANSPORT_FALLBACK = 'Transaction broadcast failed';
 
+// The encoder's broadcast_tx reason for a node that already holds this exact
+// transaction (mempool or chain), carried on EncoderClient's err.rpcData.
+const TX_ALREADY_IN_CHAIN = 'TX_ALREADY_IN_CHAIN';
+
+// True when the node answered that it already holds the transaction just sent.
+function isAlreadyKnownTx(e){
+    return !!(e && e.rpcData && e.rpcData.reason === TX_ALREADY_IN_CHAIN);
+}
+
 function isAmbiguousSendError(e){
     if (!e) return false;
     // Read BEFORE every message and status rule, because it outranks all of them. A
@@ -96,6 +107,9 @@ function isAmbiguousSendError(e){
     // definition and the caller must dead-letter rather than rebuild. The hook sets the
     // flag; nothing else in the hub does.
     if (e.fundsCommitted) return true;
+    // The node already holds this transaction, so its fee may be paid: take the
+    // possibly-landed path, never a rebuild, whatever the message or status says.
+    if (isAlreadyKnownTx(e)) return true;
     // A pipeline tags neverSent only on a failure before its send step, so a retry cannot double-spend.
     if (e.neverSent === true) return false;
     let message = String(e.message || '');
@@ -123,6 +137,7 @@ function isNeverSentError(e){
     // isAmbiguousSendError: a multi-phase signer hook can carry a funded phase-one
     // transaction on chain and still surface a 4xx or an ECONNREFUSED on its reveal.
     if (e.fundsCommitted) return false;
+    if (isAlreadyKnownTx(e)) return false;                             // the node holds it
     if (e.neverSent === true) return true;                             // failed before the send step
     if (e.response && Number(e.response.status) < 500) return true;   // refused before processing
     let code = String(e.code || '');
@@ -199,4 +214,4 @@ async function broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag,
     return result || {};
 }
 
-module.exports = { isAmbiguousSendError, isNeverSentError, AtMostOnce, broadcastOnce };
+module.exports = { isAmbiguousSendError, isNeverSentError, isAlreadyKnownTx, AtMostOnce, broadcastOnce };

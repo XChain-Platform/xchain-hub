@@ -490,7 +490,8 @@ continuation chunks) is unchanged.
 |---|---|---|---|
 | `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
 | `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
-| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and the cadence latch advances it by exactly one interval per round: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and an on-time round lands exactly one interval after the last: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. The ordinal cycles the residues in at most N-1 rounds only while rounds stay on time: a round that lands late (its slot holder offline) latches the later tip and can skip the eligible residue, so for N > 1 the anchor delay has no fixed bound. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
+| `XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT` | No | unset | Set to `1` to silence the startup warning logged when `CHECKPOINT_INTERVAL_BLOCKS` or `ANCHOR_CHECKPOINT_EVERY_N` differs from the fleet-canonical values (`6` and `1`). Both are fleet-uniform and feed a deterministic anchor-eligibility predicate, so a hub on other values anchors different checkpoints than its peers; use only for a deliberate non-default fleet. Log-only, never fatal. |
 | `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
@@ -615,8 +616,8 @@ offer/call is eligible for matching). Each variable also resolves from
 | `XDEX_MIN_CONFIRMATIONS_<COIN>` | No | per-coin (BTC `6`, LTC `12`, DOGE `60`) | Per-coin confirmation depth (e.g. `XDEX_MIN_CONFIRMATIONS_DOGE`). Takes precedence over the flat variable. Consensus-affecting, and clamped up to the per-coin default on mainnet and testnet exactly as the flat knob is. |
 | `XDEX_ROUND_TIMEOUT_MS` | No | `120000` | How long a cross-chain round may sit before it is treated as timed out. Also bounds how far the mirror height watermark may trail: a round still open past this is what the watermark's round-abandon rule discards. |
 | `XDEX_ROUND_MAX_LIFETIME_MS` | No | `XDEX_ROUND_TIMEOUT_MS` × 4 | Hard ceiling on a round's total lifetime, after which it is abandoned however many retries remain. Keeps the height watermark's trail bounded in code rather than by convention. |
-| `XDEX_SEED_LOCAL_VALIDATOR` | Regtest only | `false` | `1`/`true` seeds `capability_snapshots` with this hub's own identity so single-node regtest stacks can finalize without an indexer-backed snapshot. Ignored off regtest. |
-| `XDEX_SNAPSHOT_BLOCK` | Regtest only | _unset_ | Fixed deterministic snapshot-block anchor for regtest drills (also read by `StateCheckpointEngine` / `CrossChainCallEngine`). Ignored off regtest. |
+| `XDEX_SEED_LOCAL_VALIDATOR` | Regtest only | `false` | `1` (env var or configs row), or boolean `true` in p2pConfig, seeds `capability_snapshots` with this hub's own identity so single-node regtest stacks can finalize without an indexer-backed snapshot. The env string `true` is not honored. Ignored off regtest. |
+| `XDEX_SNAPSHOT_BLOCK` | Regtest only | _unset_ | Fixed deterministic snapshot-block anchor for regtest drills, read by `CrossChainDexEngine`, `StateCheckpointEngine`, `CrossChainCallEngine`, `CrossChainBridgeEngine` and `ListShareEngine` through one shared gate. Ignored off regtest. |
 
 ## Genesis / regtest binding
 
@@ -737,6 +738,7 @@ BTC indexer's `getrollcallabsences`, where they are authoritative.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GOV_VOTING_PERIOD` | No | `604800000` (7 days) | Proposal voting period (ms). |
+| `GOVERNANCE_OVERDUE_MS` | No | `7200000` (2 hours) | Time after voting ends before a still-voting proposal is considered overdue (ms). |
 | `GOVERNANCE_TALLY_INTERVAL` | No | `60000` | Vote tally interval (ms). |
 
 ## HTTP attestation provider (`http_get`)

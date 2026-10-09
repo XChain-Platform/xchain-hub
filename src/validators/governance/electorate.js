@@ -24,7 +24,7 @@
  *
  ********************************************************************/
 
-const { GOV_SNAPSHOT_MAX_VALIDATORS, GOV_SNAPSHOT_MAX_BYTES, GOV_SNAPSHOT_ACTIVATION } = require('./rules.js');
+const { GOV_SNAPSHOT_MAX_VALIDATORS, GOV_SNAPSHOT_MAX_BYTES, GOV_SNAPSHOT_ACTIVATION, GOV_TALLY_FAILOVER_ACTIVATION } = require('./rules.js');
 
 module.exports = {
 
@@ -36,6 +36,19 @@ module.exports = {
     isSnapshotLockActive() {
         let net       = this.hub && this.hub.network;
         let threshold = GOV_SNAPSHOT_ACTIVATION[net];
+        if (threshold === null || threshold === undefined) return false;
+        let raw    = this.hub ? this.hub._latestBlockIndex : null;
+        let latest = (raw !== null && raw !== undefined) ? Number(raw) : null;
+        if (latest === null || !Number.isInteger(latest)) return false;
+        return latest >= threshold;
+    },
+
+    // True once ranked tally failover is in effect: the network's height is
+    // pinned and this hub's best observed BTC block has reached it. Unpinned
+    // network or no observed tip => OFF.
+    isTallyFailoverActive() {
+        let net       = this.hub && this.hub.network;
+        let threshold = GOV_TALLY_FAILOVER_ACTIVATION[net];
         if (threshold === null || threshold === undefined) return false;
         let raw    = this.hub ? this.hub._latestBlockIndex : null;
         let latest = (raw !== null && raw !== undefined) ? Number(raw) : null;

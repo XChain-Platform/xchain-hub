@@ -54,6 +54,7 @@ const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const snapWrite              = require('../lib/capability_snapshot_write.js');
 const hubConfig = require('../config');
+const { resolveRegtestSnapshotSeams } = require('../lib/regtest_snapshot_seams.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -64,8 +65,30 @@ const matchPart    = require('./dex/match.js');
 const finalizePart = require('./dex/finalize.js');
 const validatePart = require('./dex/validate.js');
 const plumbingPart = require('./dex/plumbing.js');
+const remoteTokens = require('./remote_token_snapshots.js');
+
+class RemoteTokenConsensus extends CrossChainDexConsensus {
+    async propose(snapshotId, context){
+        return super.propose(snapshotId, {
+            row: context.match,
+            snapshot: context.snapshot
+        });
+    }
+
+    emit(type, event, ...rest){
+        if(type !== 'match:finalized' || !event || !event.row)
+            return super.emit(type, event, ...rest);
+        const matched = Object.assign({}, event, { match: event.row });
+        delete matched.row;
+        return super.emit(type, matched, ...rest);
+    }
+}
 
 class CrossChainDexEngine extends EventEmitter {
+
+    static get RemoteTokenConsensus(){
+        return RemoteTokenConsensus;
+    }
 
     constructor(hub){
         super();
@@ -89,10 +112,9 @@ class CrossChainDexEngine extends EventEmitter {
         // set) so a stray env var or configs-table row never reaches the SIGNED snapshot
         // anchor or the seeded validator on mainnet/testnet. Mirrors StateCheckpointEngine.
         this.network = (hub && hub.network) ? hub.network : '';
-        let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-                                       cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         // Per-coin indexer JSON-RPC endpoints for the matching view (federation read
         // methods need the api key): <COIN>_INDEXER_URL, <COIN>_INDEXER_API_KEY.
@@ -120,6 +142,8 @@ class CrossChainDexEngine extends EventEmitter {
             this._inflight.delete(String(ev.matchId));
         });
 
+        this.initRemoteTokenSnapshots(RemoteTokenConsensus);
+
         this._pollTimer = null;
         this._matching  = false;   // poll self-overlap guard, see discoverAndMatch()
     }
@@ -144,14 +168,18 @@ class CrossChainDexEngine extends EventEmitter {
         }
         await this.rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
+        await this.remoteTokenConsensus.start();
         this._pollTimer = setInterval(() => {
             this.discoverAndMatch().catch(err => logger.error(nodeUtil.format('CrossChainDex: tick error:', err && err.message)));
+            this.publishRemoteTokenSnapshots().catch(err => logger.error(nodeUtil.format(
+                'CrossChainDex: remote token publication error:', err && err.message)));
         }, this.pollMs);
         logger.info('Cross-chain DEX engine started (poll ' + this.pollMs + 'ms)');
     }
 
     async stop(){
         if(this._pollTimer){ clearInterval(this._pollTimer); this._pollTimer = null; }
+        await this.remoteTokenConsensus.stop();
         await this.consensus.stop();
     }
 
@@ -165,10 +193,10 @@ class CrossChainDexEngine extends EventEmitter {
         if(!priced) return null;
         let { maker, taker, ownership, takerGivePrice, takerGetPrice, takerRem, makerRem } = priced;
 
-        // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
+        // Bottleneck clamp (indexer order_match/index.js computeFillAmounts), orderInfo = taker / matchInfo = maker.
         let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
         let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
-        // PRECISION 64, matching order_match.js:197/202 exactly.
+        // PRECISION 64, matching both clamp bcmul calls in order_match/index.js computeFillAmounts.
         //
         // These two multiplications ran at precision 18 while the indexer's identical
         // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above
@@ -347,7 +375,8 @@ class CrossChainDexEngine extends EventEmitter {
 }
 
 installParts(CrossChainDexEngine.prototype, [
-    ledgerPart, matchPart, finalizePart, validatePart, plumbingPart
+    ledgerPart, matchPart, finalizePart, validatePart, plumbingPart,
+    remoteTokens.enginePart
 ]);
 
 module.exports = CrossChainDexEngine;

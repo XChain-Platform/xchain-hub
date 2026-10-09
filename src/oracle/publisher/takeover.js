@@ -74,6 +74,9 @@ module.exports = {
         // ambiguity double-pays DOGE and puts a duplicate batch on chain, so a hub
         // with an unproven feed declines every takeover and says so once.
         if (!(await this.observationFeedProven())) {
+            // Count every decline (a DB error in the proof check lands here too), so the
+            // polled status can tell a deaf feed from failover that was never needed.
+            this.takeoverDeclinedUnproven = (this.takeoverDeclinedUnproven || 0) + 1;
             if (!this._takeoverDarkWarned) {
                 this._takeoverDarkWarned = true;
                 logger.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
