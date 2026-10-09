@@ -23,6 +23,7 @@
 'use strict';
 
 const nodeUtil = require('node:util');
+const { splitJsonLines } = require('../../lib/fs/durable_file.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -67,13 +68,50 @@ module.exports = {
         return [entry.round];
     },
 
-    // Read all queue entries (used by processQueue and on restart)
+    // Read all queue entries (used by processQueue and on restart). An unreadable
+    // queue reads as empty here; only the rebuild needs the difference (readQueueState).
     readQueue() {
-        let raw = this.readDurableFile(this.queuePath);
-        if (raw === null) return [];
-        return raw.split('\n').filter(line => line.trim().length > 0).map(line => {
-            try { return JSON.parse(line); } catch (e) { return null; }
-        }).filter(e => e !== null);
+        let state = this.readQueueState();
+        return state ? state.entries : [];
+    },
+
+    // Read the queue strictly: a missing file is an empty queue, and any other read
+    // failure is logged and returns null, so a rewrite never mistakes it for empty.
+    readQueueState() {
+        let raw;
+        try {
+            raw = this.readDurableFileStrict(this.queuePath);
+        } catch (e) {
+            logger.error(nodeUtil.format('OraclePublisher: failed to read the durable queue at %s:', this.queuePath, e));
+            return null;
+        }
+        if (raw === null) return { entries: [], rejected: [] };
+        return splitJsonLines(raw, () => true);
+    },
+
+    // Copy the queue lines that do not parse (a torn append, a hand edit) into the
+    // dead-letter file before a rewrite drops them. Returns the lines that could not
+    // be copied, which the rewrite keeps verbatim, so none leaves the disk unrecorded.
+    quarantineQueueLines(lines) {
+        if (!lines || lines.length === 0) return [];
+        let kept = lines.filter(raw => !this.quarantineQueueLine(raw));
+        this.corruptQueueLines = (this.corruptQueueLines || 0) + lines.length - kept.length;
+        logger.error('OraclePublisher: ' + lines.length + ' unparseable line(s) on the durable queue at ' +
+            this.queuePath + '; moved ' + (lines.length - kept.length) + ' to ' + this.deadLetterPath +
+            ' and kept ' + kept.length + ' on the queue. Operator: inspect them for a round to replay.');
+        return kept;
+    },
+
+    // Append one raw queue line to the dead-letter file. True once it is fsync'd there.
+    quarantineQueueLine(raw) {
+        let record = JSON.stringify({ raw: raw, reason: 'unparseable queue line', deadLetteredAt: Date.now() }) + '\n';
+        try {
+            this.appendDurableLine(this.deadLetterPath, record);
+            return true;
+        } catch (e) {
+            logger.error(nodeUtil.format('OraclePublisher: failed to quarantine a queue line to %s:', this.deadLetterPath, e));
+            return false;
+        }
     },
 
     // Rewrite the queue with the given entries (used after successful publishes).
@@ -81,10 +119,12 @@ module.exports = {
     // dequeue side must NOT swallow a failure: on false the just-published rounds are
     // still on the durable queue, so the caller keeps its in-process dedup guard armed
     // (preventing re-broadcast) and surfaces the failure loudly for operator repair.
-    rewriteQueue(entries) {
-        let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
+    // rawLines are carried through verbatim after the entries.
+    rewriteQueue(entries, rawLines) {
+        let lines = entries.map(e => JSON.stringify(e)).concat(rawLines || []);
+        let text  = lines.join('\n') + (lines.length > 0 ? '\n' : '');
         try {
-            this.rewriteDurableFile(this.queuePath, lines);
+            this.rewriteDurableFile(this.queuePath, text);
             return true;
         } catch (e) {
             logger.error(nodeUtil.format('OraclePublisher: failed to rewrite queue:', e));

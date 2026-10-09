@@ -25,6 +25,7 @@ const { positiveIntConfig } = require('../../lib/config_int.js');
 const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
 const { ALLOWED_CHAINS } = require('./constants.js');
 const hubConfig = require('../../config');
+const { resolveRegtestSnapshotSeams } = require('../../lib/regtest_snapshot_seams.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -105,10 +106,9 @@ module.exports = {
         // checkpoint canonical and the seeded validator joins the federation set, so a
         // stray env var or configs-table row must never reach them on mainnet/testnet.
         // Honored ONLY on regtest; NaN/false everywhere else (fail closed to the real set).
-        let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-                                       cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         // Per-coin indexer JSON-RPC endpoints (same env surface as CrossChainDexEngine).
         this.indexers = {};

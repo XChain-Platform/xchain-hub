@@ -79,6 +79,7 @@ const snapWrite              = require('../lib/capability_snapshot_write.js');
 const { DEFAULT_RELAY_MARGIN_BLOCKS } = require('../lib/relay_margin.js');
 
 const hubConfig = require('../config');
+const { resolveRegtestSnapshotSeams } = require('../lib/regtest_snapshot_seams.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -122,10 +123,9 @@ class CrossChainCallEngine extends EventEmitter {
         // set) so a stray env var or configs-table row never reaches the SIGNED snapshot
         // anchor or the seeded validator on mainnet/testnet. Mirrors StateCheckpointEngine.
         this.network = (hub && hub.network) ? hub.network : '';
-        let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-                                       cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         // Per-coin indexer JSON-RPC endpoints (same idiom as CrossChainDexEngine).
         this.indexers = {};

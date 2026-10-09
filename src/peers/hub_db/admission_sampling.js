@@ -141,9 +141,13 @@ class HubDbAdmissionSampling {
                     e && e.message ? e.message : e)));
         }
         if (this._admissionTimer) return true;
+        // Skip a tick while the previous pass is still running, the house single-flight rule
+        // for hub polls: two passes in flight would write the persisted floor out of order.
         let tick = () => {
-            this.sampleAdmission().catch((e) =>
-                logger.error(nodeUtil.format('HubDbBroadcaster: admission watermark sample failed:', e && e.message ? e.message : e)));
+            if (this._admissionSampling) return;
+            this._admissionSampling = this.sampleAdmission().catch((e) =>
+                logger.error(nodeUtil.format('HubDbBroadcaster: admission watermark sample failed:', e && e.message ? e.message : e)))
+                .finally(() => { this._admissionSampling = null; });
         };
         this._admissionTimer = setInterval(tick, this.admissionSampleMs);
         if (this._admissionTimer.unref) this._admissionTimer.unref();

@@ -25,6 +25,7 @@ const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const coins                  = require('../coins');
 const hubConfig              = require('../config');
+const { resolveRegtestSnapshotSeams } = require('../lib/regtest_snapshot_seams.js');
 const nodeUtil               = require('node:util');
 const { getLogger }          = require('../observability');
 const logger                 = getLogger();
@@ -60,12 +61,9 @@ class ListShareEngine extends EventEmitter {
         this.pollMs = parseInt(hubConfig.XBRIDGE_POLL_MS || cfg.XBRIDGE_POLL_MS || DEFAULT_POLL_MS);
         this.confirmations = coins.resolveConfirmations(cfg, this.network);
 
-        const isRegtest = this.network === 'regtest';
-        this._snapshotBlockOverride = isRegtest
-            ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator = isRegtest &&
-            (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-             cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         this.indexers = {};
         for(const coin of ALLOWED_CHAINS){

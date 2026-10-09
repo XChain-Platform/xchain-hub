@@ -113,3 +113,53 @@ oraclePublisherTests('rewriteQueue()', function () {
     });
 
 });
+
+
+// ── the rebuild persists only what it read ───────────────────────────────
+
+const ioError = (code) => Object.assign(new Error(code + ': injected'), { code });
+const lastWrite = () => fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+
+oraclePublisherTests('readQueueState()', function () {
+    it('reads a missing queue as empty and any other read failure as null', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.throws(ioError('ENOENT'));
+        expect(pub.readQueueState()).to.deep.equal({ entries: [], rejected: [] });
+        fsMock.readFileSync.throws(ioError('EIO'));
+        expect(pub.readQueueState()).to.equal(null);
+        expect(pub.readQueue()).to.deep.equal([]);
+    });
+});
+
+oraclePublisherTests('rebuildQueueAfterPass() over an unreadable or corrupt queue', function () {
+    it('skips the rewrite and keeps the dedup guard armed when the fresh read fails', function () {
+        let pub = new OraclePublisher(makeHub());
+        pub._publishedRounds.mark(1);
+        fsMock.readFileSync.throws(ioError('EIO'));
+        pub.rebuildQueueAfterPass([{ round: 1 }, { round: 2 }], [{ round: 2 }]);
+        expect(fsMock.renameSync.called, 'the queue file is never replaced').to.equal(false);
+        expect(fsMock.writeSync.called).to.equal(false);
+        expect(pub._publishedRounds.has(1)).to.equal(true);
+    });
+
+    it('moves an unparseable line to the dead-letter file before the rewrite drops it', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns('GARBAGE{"round":3\n' + JSON.stringify({ round: 2 }) + '\n');
+        pub.rebuildQueueAfterPass([{ round: 1 }], []);
+        let deadLetter = fsMock.openSync.getCalls().filter(c => c.args[0] === pub.deadLetterPath);
+        expect(deadLetter).to.have.length(1);
+        let record = JSON.parse(fsMock.writeSync.firstCall.args[1]);
+        expect(record.raw).to.equal('GARBAGE{"round":3');
+        expect(pub.getStats().corruptQueueLines).to.equal(1);
+        expect(lastWrite()).to.equal(JSON.stringify({ round: 2 }) + '\n');
+    });
+
+    it('keeps an unparseable line verbatim on the queue when the dead-letter write fails', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns('GARBAGE\n' + JSON.stringify({ round: 2 }) + '\n');
+        fsMock.openSync.callsFake((file) => { if (file === pub.deadLetterPath) throw ioError('EACCES'); return 99; });
+        pub.rebuildQueueAfterPass([{ round: 1 }], []);
+        expect(lastWrite()).to.equal(JSON.stringify({ round: 2 }) + '\nGARBAGE\n');
+        expect(pub.corruptQueueLines).to.equal(0);
+    });
+});
