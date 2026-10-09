@@ -171,6 +171,8 @@ class PeerInbound {
         if (envelope.sender === this.validatorAddr) {
             if (ws._peerAddr === null) {
                 ws.close(1000, 'self-connection');
+            } else if (knownAddr) {
+                this.dropSelfPeer(ws, knownAddr);
             }
             return;
         }
@@ -223,6 +225,17 @@ class PeerInbound {
                 this.send(peer.ws, serialized);
             }
         }
+    }
+
+    dropSelfPeer(ws, addr) {
+        const peer = this.peers.get(addr);
+        if (!peer || peer.ws !== ws) return;
+        peer.selfConnection = true;
+        peer.state = 'self';
+        if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
+        this.peers.delete(addr);
+        logger.warn('P2P: outbound dial to ' + addr + ' reached this hub itself; dropping connection');
+        ws.close(1000, 'local listener');
     }
 
     registerInboundPeer(ws, addr) {
