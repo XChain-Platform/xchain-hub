@@ -22,12 +22,8 @@
  ********************************************************************/
 
 const http = require('http');
-const assert = require('node:assert/strict');
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
-const os = require('node:os');
-const net = require('node:net');
-const dns = require('node:dns').promises;
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -75,92 +71,6 @@ function acceptInboundSocket(pm, ws, req) {
     ws.on('error', (e) => logger.error(nodeUtil.format('Inbound peer error:', e)));
 }
 
-function splitHostPort(addr) {
-    const m = /^(?:wss?:\/\/)?(?:\[([^\]]+)\]|([\w.\-]+)):(\d+)$/.exec(String(addr || ''));
-    return m ? { host: (m[1] || m[2]).toLowerCase(), port: parseInt(m[3], 10) } : null;
-}
-
-function normalizeIp(addr) {
-    const value = String(addr || '').split('%')[0].toLowerCase();
-    return value.startsWith('::ffff:') ? value.slice(7) : value;
-}
-
-function localAddresses() {
-    const out = new Set(['127.0.0.1', '::1', 'localhost']);
-    for (const list of Object.values(os.networkInterfaces())) {
-        for (const i of list || []) out.add(normalizeIp(i.address));
-    }
-    return out;
-}
-
-async function resolveAddresses(host, lookup) {
-    if (net.isIP(host)) return new Set([normalizeIp(host)]);
-    if (host === 'localhost') return new Set(['127.0.0.1', '::1']);
-    const found = await (lookup || dns.lookup)(host, { all: true });
-    const records = Array.isArray(found) ? found : [found];
-    return new Set(records.map(r => normalizeIp(r && r.address)).filter(Boolean));
-}
-
-function listenerEndpoint(pm) {
-    const bound = pm.httpServer && typeof pm.httpServer.address === 'function'
-        ? pm.httpServer.address()
-        : null;
-    return {
-        host: bound && bound.address ? bound.address : (pm.config.P2P_HOST || '0.0.0.0'),
-        port: parseInt(bound && bound.port, 10) || parseInt(pm.config.P2P_PORT, 10) || 10001
-    };
-}
-
-async function listenerAddresses(pm, lookup) {
-    const host = String(listenerEndpoint(pm).host).toLowerCase();
-    if (host === '0.0.0.0' || host === '::') return localAddresses();
-    return resolveAddresses(host, lookup);
-}
-
-async function isOwnListener(pm, addr, lookup) {
-    const seed = splitHostPort(addr);
-    if (!seed) return false;
-    if (seed.port !== listenerEndpoint(pm).port) return false;
-    const own = splitHostPort(pm.validatorAddr);
-    if (own && own.host === seed.host && own.port === seed.port) return true;
-    try {
-        const resolved = await resolveAddresses(seed.host, lookup);
-        const listeners = await listenerAddresses(pm, lookup);
-        if ([...resolved].some(address => listeners.has(address))) return true;
-        if (!own || own.port !== seed.port) return false;
-        const advertised = await resolveAddresses(own.host, lookup);
-        return [...resolved].some(address => advertised.has(address));
-    } catch (e) {
-        return false;
-    }
-}
-
-async function dialSeedPeers(pm) {
-    // A hub with no SEED_NODES dials nobody and joins no gossip mesh, while
-    // running and looking healthy. Fall back to the bootstrap peers.
-    // regtest gets none: a local venue must never dial public seeds.
-    let seeds = pm.config.SEED_NODES || [];
-    if (seeds.length === 0) {
-        const defaults = pm.constructor.bootstrapSeeds(pm.config.HUB_NETWORK);
-        if (defaults.length) {
-            seeds = defaults;
-            logger.info('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
-                        ' default bootstrap seed(s) for ' + pm.config.HUB_NETWORK);
-        }
-    }
-    for (const addr of seeds) {
-        if (await pm.isOwnListener(addr, pm.seedLookup)) {
-            logger.info('PeerManager: seed ' + addr + ' is this hub\'s own listener; not dialing');
-            continue;
-        }
-        if (!pm.running) return;
-        pm.connectToPeer(addr);
-        // Record seed in DB (fire and forget). validator_id is the peer's own addr,
-        // not ours; we are recording the peer, not ourselves.
-        pm.recordPeer(addr, addr, true);
-    }
-}
-
 // The outbound socket handlers: they own the peer record this dial created.
 function wireOutboundSocket(pm, addr, peer, ws) {
     ws.on('open', () => {
@@ -201,14 +111,6 @@ function wireOutboundSocket(pm, addr, peer, ws) {
 }
 
 class PeerConnections {
-
-    isOwnListener(addr, lookup) {
-        return isOwnListener(this, addr, lookup);
-    }
-
-    dialSeedPeers() {
-        return dialSeedPeers(this);
-    }
 
     recordValidatorFeedUrl(validatorAddr, feedUrl) {
         if (!validatorAddr || !feedUrl) return false;
@@ -400,31 +302,3 @@ class PeerConnections {
 }
 
 module.exports = PeerConnections;
-
-if (typeof globalThis.describe === 'function' && typeof globalThis.it === 'function') {
-    globalThis.describe('PeerConnections self-dial invariant', function () {
-        globalThis.it('never dials a seed that resolves to its own listener', async function () {
-            let dialed = 0;
-            const pm = {
-                config: {
-                    HUB_NETWORK: 'mainnet',
-                    P2P_HOST: '127.0.0.1',
-                    P2P_PORT: 10001,
-                    SEED_NODES: ['ws://seed-alias.example:10001']
-                },
-                constructor: { bootstrapSeeds: () => [] },
-                validatorAddr: 'ws://listener.example:10001',
-                httpServer: { address: () => ({ address: '127.0.0.1', port: 10001 }) },
-                running: true,
-                seedLookup: async () => [{ address: '127.0.0.1', family: 4 }],
-                isOwnListener: PeerConnections.prototype.isOwnListener,
-                connectToPeer: () => { dialed++; },
-                recordPeer: () => {}
-            };
-
-            await PeerConnections.prototype.dialSeedPeers.call(pm);
-
-            assert.equal(dialed, 0);
-        });
-    });
-}

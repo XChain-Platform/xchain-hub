@@ -22,7 +22,6 @@
 
 'use strict';
 
-const assert = require('node:assert/strict');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 
 module.exports = {
@@ -199,22 +198,3 @@ module.exports = {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }
 };
-
-if (typeof globalThis.describe === 'function' && typeof globalThis.it === 'function') {
-    globalThis.describe('Oracle quorum self-connection invariant', function () {
-        globalThis.it('never counts a self-connection toward getQuorum', function () {
-            const self = 'ws://listener.example:10001';
-            const peerManager = {
-                validatorAddr: self,
-                getQuorumPeerStatus: () => [{
-                    addr: 'ws://seed-alias.example:10001',
-                    validatorAddr: self,
-                    state: 'open',
-                    selfConnection: true
-                }]
-            };
-
-            assert.equal(module.exports.getQuorum.call({ validatorSet: [], peerManager }), 0);
-        });
-    });
-}

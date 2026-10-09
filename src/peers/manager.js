@@ -28,6 +28,7 @@ const { positiveIntConfig } = require('../lib/config_int.js');
 // so it reads the engine's own activation source rather than a copy of it.
 const rollcallActivation = require('../consensus/gates/rollcall_gate.js');
 const PeerConnections = require('./gossip/connections.js');
+const PeerSelfSeed    = require('./gossip/self_seed.js');
 const PeerMessages    = require('./gossip/messages.js');
 const PeerInbound     = require('./gossip/inbound.js');
 const PeerRules       = require('./gossip/rules.js');
@@ -374,7 +375,7 @@ class PeerManager extends EventEmitter {
 // Installed from the part files rather than written in the class body above:
 // each part holds one behaviour of this class, and its members land here with
 // the descriptors a class body would give them.
-for (const Part of [PeerConnections, PeerMessages, PeerInbound, PeerRules, PeerUpkeep]) {
+for (const Part of [PeerConnections, PeerSelfSeed, PeerMessages, PeerInbound, PeerRules, PeerUpkeep]) {
     for (const [from, to] of [[Part.prototype, PeerManager.prototype], [Part, PeerManager]]) {
         for (const key of Object.getOwnPropertyNames(from)) {
             if (key === 'constructor' || key === 'length' || key === 'name' || key === 'prototype') continue;
