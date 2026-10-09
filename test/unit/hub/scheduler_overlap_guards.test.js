@@ -65,6 +65,7 @@ function flush() {
         const eng = new CrossChainDexEngine(hub);
         for (const coin of Object.keys(eng.indexers)) eng.indexers[coin] = { url: 'http://idx/' + coin, key: '' };
         eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 };
+        sinon.stub(eng, 'resolveSnapshotBlock').resolves(20);
         return eng;
     }
 
@@ -113,8 +114,8 @@ function flush() {
     async function aRejectedBookFetchDoesNotTest3() {
         const eng = makeEngine();
         const finalize = sinon.stub(eng, 'finalizeMatch').resolves();
-        // resolveSnapshotBlock is awaited inside finalizeMatch; the throw we want comes
-        // from findMatches, which runs after the books land and is not caught per-coin.
+        // The throw we want comes from findMatches, which runs after the books land and
+        // is not caught per-coin.
         eng.fetchOpenOffers = async (coin) => book(coin);
         const boom = sinon.stub(eng, 'findMatches').throws(new Error('matcher blew up'));
 
