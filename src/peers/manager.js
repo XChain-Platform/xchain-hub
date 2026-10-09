@@ -81,6 +81,7 @@ const UNCONDITIONAL_SUBSCRIBERS = Object.freeze([
     'Consensus', 'CrossChainDexConsensus',
     'CrossChainDexConsensus:XBRIDGE_TRANSFER', 'CrossChainDexConsensus:XCALL_RELAY',
     'CrossChainDexConsensus:XLISTSHARE_SNAPSHOT', 'CrossChainDexConsensus:XPOLICY_SNAPSHOT',
+    'CrossChainDexConsensus:XREMOTE_TOKEN',
     'CrossChainEngine', 'FullNodeChallengeRound',
     'Governance', 'OracleBatchSigner', 'OracleConsensus', 'OracleRound', 'ReorgHandler',
     'RetractionConsensus', 'StateAnchorPublisher', 'StateCheckpointEngine'

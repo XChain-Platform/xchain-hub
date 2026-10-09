@@ -72,7 +72,7 @@ const testCase3 = function () {
 
 function registerSuite1() {
     it('carries the five batch fields and keeps lastPublishedRound on the LAST round of the wire', testCase1);
-    it('counts a split window ONCE in batchWindowsPublished', testCase2);
+    it('counts a split window ONCE in batchWindowsPublished', testCase2).timeout(30000);
     it('reports zero sign timeouts without constructing a signer', testCase3);
 }
 

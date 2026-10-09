@@ -82,7 +82,7 @@ const ah                     = require('../../../../src/lib/admission_height.js'
     }
 
     function honestColumns(overrides) {
-        const map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: OWN_BTC, DOGE: OWN_DOGE }, 'cross_chain_matches');
+        const map = ah.admitBlocks(['BTC', 'DOGE'], { BTC: OWN_BTC, DOGE: OWN_DOGE }, 'cross_chain_matches', 'regtest');
         return Object.assign(ah.admitBlocksToColumns(map), overrides || {});
     }
 
