@@ -24,7 +24,7 @@
 
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard = require('../../lib/spend_guard.js');
-const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
+const { resolveCheckpointCadence } = require('../checkpoint_cadence.js');
 const { DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const hubConfig = require('../../config');
@@ -265,12 +265,12 @@ module.exports = {
         // Both knobs are already required to be fleet-uniform, and checkpoint_seq is
         // consensus data, so the predicate stays deterministic fleet-wide. At the
         // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
-        this.anchorEveryNCheckpoints = Math.max(1,
-            parseInt(hubConfig.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
+        const checkpointCadence = resolveCheckpointCadence(cfg);
+        this.anchorEveryNCheckpoints = checkpointCadence.anchorEveryNCheckpoints;
         // The engine's own cadence step (StateCheckpointEngine.js), resolved through the
         // one shared function it also calls so the two cannot drift. Always positive: a
         // zero divisor makes the SQL MOD NULL, which would silently select nothing.
-        this.checkpointIntervalBlocks = resolveCheckpointIntervalBlocks(cfg);
+        this.checkpointIntervalBlocks = checkpointCadence.checkpointIntervalBlocks;
     },
 
     initDogePipeline(cfg){

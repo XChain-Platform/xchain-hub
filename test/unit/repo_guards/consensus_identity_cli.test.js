@@ -25,6 +25,9 @@ const { spawnSync } = require('child_process');
 const BIN  = path.resolve(__dirname, '../../../bin/consensus-identity.js');
 const REPO = path.resolve(__dirname, '../../..');
 const SUITE_TITLE_PIN = path.join(REPO, 'bin/pins/at1-suite-titles.json');
+const SIBLING_REFERENCE_PIN = path.join(REPO, 'bin/pins/at1-sibling-reference-map.json');
+const CHECKPOINT_ENGINE_OPTIONS = path.join(REPO, 'src/anchor/checkpoint_engine/options.js');
+const ANCHOR_PUBLISHER_OPTIONS = path.join(REPO, 'src/anchor/publisher/options.js');
 const PIN  = path.join(REPO, 'bin/pins/at1-consensus-identity.json');
 const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
 
@@ -87,6 +90,19 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
 });
 
 describe('at1 suite-title pin metadata', function () {
+    it('keeps the hub source inventory separate from sibling references', function () {
+        const pin = JSON.parse(fs.readFileSync(SIBLING_REFERENCE_PIN, 'utf8'));
+        const cadence = 'src/anchor/checkpoint_cadence.js';
+
+        expect(pin.siblingRepos).to.include('xchain-indexer');
+        expect(pin.pinMetadata.hubSrcFilesAtBaseSha).to.include(cadence);
+        expect(pin.paths).to.not.have.property(cadence);
+        expect(fs.readFileSync(CHECKPOINT_ENGINE_OPTIONS, 'utf8'))
+            .to.include("require('../checkpoint_cadence.js')");
+        expect(fs.readFileSync(ANCHOR_PUBLISHER_OPTIONS, 'utf8'))
+            .to.include("require('../checkpoint_cadence.js')");
+    });
+
     it('matches each script file map and referenced title sets', function () {
         const pin = JSON.parse(fs.readFileSync(SUITE_TITLE_PIN, 'utf8'));
 
