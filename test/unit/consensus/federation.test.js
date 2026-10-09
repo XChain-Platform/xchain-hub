@@ -1,11 +1,8 @@
 'use strict';
 
 const { expect } = require('chai');
+const Consensus = require('../../../src/consensus/pbft');
 const { isFederatedHub } = require('../../../src/consensus/federation');
-
-function pbftIsFederated(minValidators, validators) {
-    return minValidators > 1 || validators.length > 1;
-}
 
 describe('consensus/federation isFederatedHub', () => {
     const rows = [
@@ -38,7 +35,10 @@ describe('consensus/federation isFederatedHub', () => {
                 for (const peers of [[], [{}]]) {
                     for (const seedNodes of [[], ['s:1']]) {
                         const hub = isFederatedHub({ minValidators: min, validators, peers, seedNodes });
-                        const base = pbftIsFederated(min, validators);
+                        const base = Consensus.prototype.isFederated.call({
+                            minValidators: min,
+                            validatorSet: validators,
+                        });
                         if (base) expect(hub).to.equal(true);
                         if (hub && !base) widened++;
                     }
