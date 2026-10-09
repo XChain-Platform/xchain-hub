@@ -18,12 +18,19 @@ const http              = require('node:http');
 const path              = require('node:path');
 const ws                = require('ws');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 const { siblingCheckout } = require('../../../helpers/sibling_checkout.js');
-const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
-    path.resolve(__dirname, '../../../../../xchain-indexer');
-const INDEXER_SYNC_PATH = path.join(INDEXER_ROOT, 'src', 'hub', 'hub_db_sync.js');
-const HubDbSync = siblingCheckout(__dirname, INDEXER_SYNC_PATH).usable ? require(INDEXER_SYNC_PATH) : null;
+const INDEXER_ROOTS = process.env.XCHAIN_INDEXER_DIR
+    ? [process.env.XCHAIN_INDEXER_DIR]
+    : [
+        path.resolve(__dirname, '../../../../../xchain-indexer'),
+        path.resolve(__dirname, '../../../../../../../../xchain-indexer')
+    ];
+const INDEXER_SYNC_PATH = INDEXER_ROOTS
+    .map(root => path.join(root, 'src', 'hub', 'hub_db_sync.js'))
+    .find(candidate => siblingCheckout(__dirname, candidate).usable);
+const HubDbSync = INDEXER_SYNC_PATH ? require(INDEXER_SYNC_PATH) : null;
 const WebSocketServer = ws.WebSocketServer || ws.Server;
 
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', {
@@ -86,7 +93,7 @@ async function closeServer(server) {
 function requireIndexer(context) {
     if (HubDbSync) return;
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_SYNC_PATH);
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_ROOTS.join(', '));
     context.skip();
 }
 
@@ -133,7 +140,7 @@ function serveSnapshots(fixture, req, res) {
     fixture.snapshotRequests.push(sinceId);
     const rows = fixture.hubRows.filter(row => Number(row.id) > sinceId);
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {} }));
+    res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {}, schema_version: HUB_SCHEMA_VERSION }));
 }
 
 function trackConnection(fixture, conn, req) {
