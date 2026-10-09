@@ -29,6 +29,10 @@ const CONSENSUS = [
     'src/XChainHub.js', 'src/observability/', 'bin/pins/', 'bin/lib/',
     'bin/consensus-identity.js', 'bin/check-frozen-set.js',
 ];
+const NON_CONSENSUS_PINS = new Set([
+    'bin/pins/at1-suite-titles.json',
+    'bin/pins/suite-title-renames.json',
+]);
 const WIDEN = ['test/setup/', 'test/helpers/', 'test/fixtures/'];
 const ALWAYS = [];
 const GROUPS = [
@@ -71,8 +75,9 @@ function groupFor(file) {
 }
 
 function isConsensusPath(file, consensusPrefixes = CONSENSUS) {
-    return consensusPrefixes.some((prefix) => file.startsWith(prefix))
-        || /^src\/[^/]+_activation\.js$/.test(file);
+    return !NON_CONSENSUS_PINS.has(file)
+        && (consensusPrefixes.some((prefix) => file.startsWith(prefix))
+            || /^src\/[^/]+_activation\.js$/.test(file));
 }
 
 function lines(value) {

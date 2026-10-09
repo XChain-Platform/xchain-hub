@@ -26,6 +26,7 @@
 'use strict';
 
 const assert = require('assert');
+const fs     = require('fs');
 const path   = require('path');
 
 const titles = require('../suite-title-map.js');
@@ -49,6 +50,13 @@ describe('bin/suite-title-map.js', function () {
             assert.ok(SCRIPT_NAMES.includes('ci:security'));
             assert.ok(SCRIPT_NAMES.includes('ci:regression'),
                 'the venue runs these, so a glob that stopped collecting here must be visible');
+        });
+
+        it('runs the standalone pin comparison from ci:full', () => {
+            const script = fs.readFileSync(
+                path.resolve(__dirname, '../ci-full.sh'), 'utf8');
+            assert.match(script,
+                /run_tier "suite-title pin" node bin\/suite-title-map\.js \\\n+  --compare bin\/pins\/at1-suite-titles\.json \\\n+  --rename-map bin\/pins\/suite-title-renames\.json/);
         });
     });
 });
