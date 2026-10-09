@@ -1,10 +1,14 @@
 'use strict';
 
+const sinon = require('sinon');
 const { expect } = require('chai');
 const registry = require('../../../src/consensus/gate_registry.js');
 const { isFederatedHubActive, liveFederationSignals } = require('../../../src/consensus/federation');
+const Consensus = require('../../../src/consensus/pbft');
 const membership = require('../../../src/cross_chain/attest/membership.js');
+const finalizeRoundMethods = require('../../../src/oracle/consensus/finalize_round.js');
 const finalization = require('../../../src/oracle/round/finalization.js');
+const { createMockHub } = require('../../helpers/mockHub.js');
 
 const KEY = 'consensus/federation.FEDERATED_HUB_ACTIVATION';
 
@@ -85,10 +89,72 @@ function registerOracleTests() {
         const stored = await run(engine({ peers: [{ state: 'open' }], network: 'mainnet' }), 'mainnet');
         expect(stored).to.deep.equal(['finalize']);
     });
+
+    it('makes finalizeRound skip a null snapshot when only an open peer proves federation', async () => {
+        const stored = [];
+        const ctx = Object.assign(engine({ peers: [{ state: 'open' }] }), {
+            finalized: new Set(), minSubmissions: 1, _singleSourceRounds: 0,
+            oracleRound: { getSubmissions: () => new Map([['self', { prices: [] }]]) },
+            computeMinRoundSources: finalizeRoundMethods.computeMinRoundSources,
+            hasDeterministicSnapshot: () => false,
+            isEmptyFederationSnapshot: () => false,
+            storeSkippedRound: (...args) => { stored.push(args); return Promise.resolve(); },
+        });
+
+        await finalizeRoundMethods.finalizeRound.call(ctx, 2, 10, 100);
+
+        expect(stored).to.have.length(1);
+        expect(stored[0][3]).to.equal('no deterministic capability snapshot');
+    });
+}
+
+function registerPbftTests() {
+    let hub;
+    let consensus;
+
+    beforeEach(() => {
+        hub = createMockHub({ network: 'regtest' });
+        hub.resolveBtcLatestBlock.resolves(10);
+        hub.capabilitySnapshot = {
+            getActiveValidatorSnapshot: sinon.stub().resolves(null),
+            getActiveWeightSnapshot: sinon.stub().resolves(null),
+            getQuorum: sinon.stub().returns(0),
+        };
+        hub._peerManager.getPeerStatus.returns([{ state: 'open' }]);
+        consensus = new Consensus(hub);
+        consensus.setValidatorSet([{ addr: 'ws://leader:10001', pubkey: 'aa' }]);
+    });
+
+    afterEach(() => sinon.restore());
+
+    it('makes propose refuse a null snapshot when only an open peer proves federation', async () => {
+        let error;
+        try { await consensus.propose({ setting: true }); } catch (err) { error = err; }
+
+        expect(error && error.message).to.match(/without a deterministic validator snapshot/);
+        expect(hub.applyConfig.called).to.equal(false);
+        expect(hub._peerManager.broadcast.called).to.equal(false);
+    });
+
+    it('makes the follower refuse the same null snapshot without broadcasting PREPARE', async () => {
+        sinon.stub(consensus, 'isKnownSender').returns(true);
+        const config = { setting: true };
+        await consensus.handlePrePrepare({
+            sender: 'ws://leader:10001', sig_pubkey: 'aa',
+            data: {
+                seq: 1, view: 0, config, configDigest: consensus.digest(config),
+                btcBlockHeight: 10,
+            },
+        });
+
+        expect(consensus.pendingProposals.has(1)).to.equal(false);
+        expect(hub._peerManager.broadcast.called).to.equal(false);
+    });
 }
 
 describe('consensus/federation FEDERATED_HUB_ACTIVATION gate', () => {
     registerGateTests();
     describe('cross-chain resolveQuorum', registerCrossChainTests);
     describe('oracle scheduleFinalization', registerOracleTests);
+    describe('PBFT round guards', registerPbftTests);
 });
