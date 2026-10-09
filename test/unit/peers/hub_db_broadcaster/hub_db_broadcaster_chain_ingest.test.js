@@ -18,6 +18,7 @@ const http              = require('node:http');
 const path              = require('node:path');
 const ws                = require('ws');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 const { siblingCheckout } = require('../../../helpers/sibling_checkout.js');
 const INDEXER_ROOT = process.env.XCHAIN_INDEXER_DIR ||
@@ -133,7 +134,7 @@ function serveSnapshots(fixture, req, res) {
     fixture.snapshotRequests.push(sinceId);
     const rows = fixture.hubRows.filter(row => Number(row.id) > sinceId);
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {} }));
+    res.end(JSON.stringify({ rows: rows, watermark: 1700000000, heights: {}, schema_version: HUB_SCHEMA_VERSION }));
 }
 
 function trackConnection(fixture, conn, req) {
