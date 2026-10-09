@@ -24,6 +24,15 @@ function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
+// These cases distinguish the mutable validator set from the immutable round
+// snapshot. Membership changes affect leader selection and quorum calculations
+// for later rounds, but an open round must retain the membership and quorum it
+// captured at proposal time. The signed envelopes below prove that old members
+// can finish that round after a removal, while a newly added member participates
+// only after the next snapshot includes it. The rapid-churn case separately
+// exercises live quorum arithmetic at the small-set boundaries where the
+// majority floor differs from the usual Byzantine quorum formula.
+
 function registerBeforeEachHook() {
 
     beforeEach(function () {
