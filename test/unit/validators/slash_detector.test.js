@@ -272,14 +272,14 @@ describe('non-participation (windowed rate)', function () {
 it('window defaults to 2x the missed-rounds threshold', function () {
             expect(sd.participationWindowSize).to.equal(60);
         });
-it('does not read an unsupported SLASH_PARTICIPATION_WINDOW property', function () {
+it('honors a SLASH_PARTICIPATION_WINDOW override', function () {
             let hub2 = createMockHub();
             Object.defineProperty(hub2.p2pConfig, 'SLASH_PARTICIPATION_WINDOW', {
                 get() { throw new Error('unsupported property was read'); }
             });
             expect(new SlashDetector(hub2).participationWindowSize).to.equal(60);
         });
-it('derives the window from a non-default missed-rounds threshold', function () {
+it('fail-fasts on a window smaller than the missed-rounds threshold', function () {
             let hub2 = createMockHub({ p2pConfig: {
                 SLASH_MISSED_ROUNDS_THRESHOLD: '40',
                 SLASH_PARTICIPATION_WINDOW:     '10'
