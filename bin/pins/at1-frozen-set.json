@@ -86,7 +86,7 @@
   "movable": [
     "src/coins/fullnodeComment.test.js"
   ],
-  "fileCount": 75,
+  "fileCount": 72,
   "files": [
     "src/attest_leader_silence_skip_activation.js",
     "src/coins/BTC.js",
@@ -126,7 +126,6 @@
     "src/sql/anchor_published_archives.sql",
     "src/sql/anchor_published_checkpoints.sql",
     "src/sql/anchor_reward_attestations.sql",
-    "src/sql/archive_price_tombstones.sql",
     "src/sql/attest_published_batches.sql",
     "src/sql/attest_published_requests.sql",
     "src/sql/attestation_fetch_cache.sql",
@@ -141,7 +140,6 @@
     "src/sql/cross_chain_matches.sql",
     "src/sql/governance_proposals.sql",
     "src/sql/governance_votes.sql",
-    "src/sql/list_snapshots.sql",
     "src/sql/oracle_prices.sql",
     "src/sql/oracle_published_rounds.sql",
     "src/sql/oracle_submissions.sql",
@@ -149,7 +147,6 @@
     "src/sql/policy_snapshots.sql",
     "src/sql/price_ingest_watermarks.sql",
     "src/sql/price_snapshots.sql",
-    "src/sql/remote_token_snapshots.sql",
     "src/sql/reorg_attestations.sql",
     "src/sql/slash_proposals.sql",
     "src/sql/state_checkpoints.sql",
