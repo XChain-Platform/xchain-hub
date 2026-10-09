@@ -76,3 +76,12 @@ addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'heigh
     testnet: UNARMED,
     regtest: UNARMED,
 });
+
+// consensus/federation
+// Federation test for the fail-closed snapshot rule. Below the activation
+// height a round decides whether it is federated from the live quorum alone, so
+// a hub with open peers or configured seeds but an empty validator set reads as
+// standalone and may size a quorum from its own view. At/above it the round is
+// also federated when isFederatedHub says so, which only ever widens the test.
+// Armed on regtest only until the operator names a testnet and mainnet height.
+addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });

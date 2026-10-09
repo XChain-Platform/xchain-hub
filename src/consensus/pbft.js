@@ -31,6 +31,7 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const hubConfig = require('../config');
+const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('./federation.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -159,6 +160,15 @@ class Consensus {
     // widening: every case minValidators > 1 caught is still caught.
     isFederated() {
         return this.minValidators > 1 || this.validatorSet.length > 1;
+    }
+
+    // isFederated() widened by the live peer and seed signals once the round's
+    // anchor height reaches FEDERATED_HUB_ACTIVATION; before it this is the
+    // legacy answer unchanged.
+    isFederatedAt(btcBlockHeight) {
+        if (this.isFederated()) return true;
+        return isFederatedHubActive(this.hub && this.hub.network, btcBlockHeight) &&
+            isFederatedHub(liveFederationSignals(this));
     }
 
     // Fail-closed gate for multi-hub federations. A deterministic snapshot is a

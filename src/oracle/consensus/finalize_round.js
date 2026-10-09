@@ -28,6 +28,7 @@ const { takeSeat }      = require('./seats.js');
 const { nominalRoundSeconds } = require('./round_time/round_time.js');
 const { roundTimeGateActive } = require('./round_time_gate.js');
 const { singleSourcePairs } = require('./source_diversity.js');
+const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('../../consensus/federation.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -122,6 +123,15 @@ function weightedSnapshotVerdict(round, weighted, snapshot) {
     return null;
 }
 
+// True when this hub must treat the round as federated: a live peer quorum, or,
+// once FEDERATED_HUB_ACTIVATION is reached at the round's anchor, any open peer,
+// configured seed or multi-validator set.
+function roundIsFederated(btcBlockHeight) {
+    if (this.getQuorum() > 0) return true;
+    return isFederatedHubActive(this.hub && this.hub.network, btcBlockHeight) &&
+        isFederatedHub(liveFederationSignals(this));
+}
+
 // The two federation guards a round clears before anything aggregates: the skip reason,
 // or null to go on.
 function snapshotSkip(round, btcBlockHeight, snapshot) {
@@ -139,7 +149,7 @@ function snapshotSkip(round, btcBlockHeight, snapshot) {
     // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
     // not a new one. Genuine single-node / regtest bootstrap (getQuorum() === 0)
     // keeps the self-finalize path, same federation test as the empty-set guard below.
-    if (!this.hasDeterministicSnapshot(snapshot) && this.getQuorum() > 0) {
+    if (!this.hasDeterministicSnapshot(snapshot) && roundIsFederated.call(this, btcBlockHeight)) {
         logger.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
             btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
             'hub\'s live validator set, which peers do not share.');

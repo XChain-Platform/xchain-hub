@@ -24,6 +24,11 @@
 
 'use strict';
 
+const hubConfig = require('../config');
+const gateRegistry = require('./gate_registry.js');
+
+const GATE_KEY = 'consensus/federation.FEDERATED_HUB_ACTIVATION';
+
 function count(value) {
     if (Array.isArray(value)) return value.length;
     if (Number.isInteger(value) && value > 0) return value;
@@ -44,4 +49,25 @@ function isFederatedHub({ minValidators, validators, peers, seedNodes } = {}) {
     return seedCount(seedNodes) > 0;
 }
 
-module.exports = { isFederatedHub };
+// Whether the widened federation test governs a round pinned at `height`. The
+// height is the round's own BTC anchor, so every hub reads the same answer for
+// the same round; a missing or unparseable height reads as inactive.
+function isFederatedHubActive(network, height) {
+    return gateRegistry.activeAt(GATE_KEY,
+        String(network || '').toLowerCase(), null, height, null);
+}
+
+// The four signals read off a live engine: its configured floor, its validator
+// set, its open peers and the configured seeds.
+function liveFederationSignals(engine) {
+    const manager = engine.peerManager;
+    const status = manager && typeof manager.getPeerStatus === 'function' ? manager.getPeerStatus() : [];
+    return {
+        minValidators: engine.minValidators,
+        validators: engine.validatorSet,
+        peers: status.filter(p => p && p.state === 'open'),
+        seedNodes: hubConfig.SEED_NODES,
+    };
+}
+
+module.exports = { isFederatedHub, isFederatedHubActive, liveFederationSignals };
