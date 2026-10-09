@@ -34,10 +34,6 @@
     },
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
-    },
-    "test/unit/validators/slash_detector.test.js": {
-      "honors a SLASH_PARTICIPATION_WINDOW override": "does not read an unsupported SLASH_PARTICIPATION_WINDOW property",
-      "fail-fasts on a window smaller than the missed-rounds threshold": "derives the window from a non-default missed-rounds threshold"
     }
   }
 }
