@@ -81,6 +81,33 @@ function registerAgreementTests(){
                 remote.deriveRemoteTokenSnapshotId(changed), row.snapshot_id, key);
         }
     });
+
+    it('rejects a forged snapshot_block that the follower tip does not support', async function(){
+        const leader = remote.buildRemoteTokenSnapshot(
+            NETWORK, SNAPSHOT_BLOCK - 145, 'DOGE', offer());
+        const engine = Object.assign({
+            network: NETWORK,
+            resolveSnapshotBlock: async () => SNAPSHOT_BLOCK,
+            findOpenOffer: async () => offer()
+        }, remote.enginePart);
+
+        assert.strictEqual(remote.remoteTokenProposalAgrees(leader, offer()), true);
+        assert.strictEqual(await engine.validateRemoteTokenSnapshot(leader), false);
+    });
+
+    it('accepts a snapshot_block at the follower tip tolerance boundary', async function(){
+        const leader = remote.buildRemoteTokenSnapshot(
+            NETWORK, SNAPSHOT_BLOCK - 144, 'DOGE', offer());
+        const engine = Object.assign({
+            network: NETWORK,
+            resolveSnapshotBlock: async () => SNAPSHOT_BLOCK,
+            findOpenOffer: async () => offer()
+        }, remote.enginePart);
+
+        assert.strictEqual(await engine.validateRemoteTokenSnapshot(leader), true);
+        assert.strictEqual(
+            remote.remoteTokenSnapshotBlockOk(leader.snapshot_block, null), false);
+    });
 }
 
 function registerConsensusContractTest(){

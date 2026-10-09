@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
+const { SNAPSHOT_BLOCK_TOLERANCE } = require('./bridge/constants.js');
 const logger = getLogger();
 
 const MAX_TOKEN_DECIMALS = 18;
@@ -115,6 +116,13 @@ function remoteTokenProposalAgrees(row, offer){
     );
     return observed !== null &&
         canonicalRemoteTokenSnapshot(observed) === canonicalRemoteTokenSnapshot(row);
+}
+
+function remoteTokenSnapshotBlockOk(snapshotBlock, followerSnapshotBlock){
+    const proposed = canonicalInteger(snapshotBlock);
+    const observed = canonicalInteger(followerSnapshotBlock);
+    return proposed !== null && observed !== null &&
+        Math.abs(proposed - observed) <= SNAPSHOT_BLOCK_TOLERANCE;
 }
 
 function remoteTokenRowsFromBooks(network, snapshotBlock, offersByCoin){
@@ -221,6 +229,8 @@ const enginePart = {
     async validateRemoteTokenSnapshot(row){
         if(!remoteTokenRowShapeOk(row)) return false;
         if(String(row.network) !== String(this.network)) return false;
+        const followerSnapshotBlock = await this.resolveSnapshotBlock();
+        if(!remoteTokenSnapshotBlockOk(row.snapshot_block, followerSnapshotBlock)) return false;
         const offer = await this.findOpenOffer(
             String(row.coin).toUpperCase(), Number(row.source_action_index));
         return remoteTokenProposalAgrees(row, offer);
@@ -275,6 +285,7 @@ module.exports = {
     remoteTokenProposalAgrees,
     remoteTokenRowShapeOk,
     remoteTokenRowsFromBooks,
+    remoteTokenSnapshotBlockOk,
     tokenObservation,
     enginePart
 };
