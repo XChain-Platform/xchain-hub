@@ -18,7 +18,6 @@ const { createMockHub } = require('../../../../helpers/mockHub');
 
 // Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)
 // buildPriceV0Payload. Tests sign these exact bare-JSON bytes for fixtures whose
-// mainnet BTC anchor remains below its activation height;
 // EQUIV header gate is off;
 // btc_block_height still rides in the signed content (#4232).
 function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
