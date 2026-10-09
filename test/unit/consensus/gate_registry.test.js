@@ -171,6 +171,35 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
         expect(queued).to.deep.equal(registry.keys());
     });
+});
+
+describe('src/consensus/gate_registry.js: the shared layout', function () {
+
+    it('spells dark thresholds through UNARMED in the migrated shared row files', function () {
+        const targets = {
+            'shared_rows_1.js': [
+                'archive_rollback_author_scope_activation.ARCHIVE_ROLLBACK_AUTHOR_SCOPE_ACTIVATION',
+            ],
+            'shared_rows_5.js': [
+                'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION',
+                'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION',
+                'list_share_consumer_activation.LIST_SHARE_CONSUMER_ACTIVATION',
+                'list_meta_activation.LIST_META_ACTIVATION',
+            ],
+        };
+        for (const [part, keys] of Object.entries(targets)) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            for (const key of keys) {
+                const start = text.indexOf("addGate('" + key + "'");
+                const end = text.indexOf('\n});', start);
+                const live = text.slice(start, end + 4).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+                expect(start, part + ' contains ' + key).to.not.equal(-1);
+                expect(end, part + ' terminates ' + key).to.not.equal(-1);
+                expect(live, part + ':' + key + ' contains a bare UNARMED sentinel').to.not.match(/\b9999999999\b/);
+                expect(live, part + ':' + key + ' uses UNARMED').to.match(/\bUNARMED\b/);
+            }
+        }
+    });
 
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
         if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;

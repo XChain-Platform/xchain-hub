@@ -34,9 +34,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 43 entries, and contains the gates the last trains append', function () {
+    it('is sorted, has 45 entries, and contains the gates the last trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(43, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(45, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -61,6 +61,8 @@ function registerGateInventoryTest() {
             'mirror_admission_activation.decodeAdmitBlocks',
             'mirror_admission_activation.isAdmissionEra',
             'mirror_admission_activation.admissionCanonicalField',
+            'mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION',
+            'mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS',
             // The token leg gate this hub loads per bridge leg.
             'token_bridge_activation.TOKEN_BRIDGE_ACTIVATION',
             'anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION',
@@ -105,7 +107,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('227f96529070d083038a3695fb863c4ab08611864b9dfcc1b619f75ec67c91d8',
+                .to.equal('ceb49c010893f8a5d8bb632536b0b3873ae4e6cc6d16b3557134c6d503c4840d',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -143,7 +145,7 @@ function registerGateOrderingTest() {
             .to.deep.equal(['mirror_admission_activation', 'anchor_reward_activation', 'mirror_admission_activation',
                 'token_bridge_activation', 'anchor_bundle_order_activation', 'oracle_price_age_hourly_activation',
                 'oracle_hourly_window_activation', 'oracle_round_time_activation', 'price_scale_activation',
-                'list_share_producer_activation', 'list_meta_activation']);
+                'list_share_producer_activation', 'list_meta_activation', 'mirror_admission_margin_activation']);
     });
 }
 
