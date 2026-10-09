@@ -38,6 +38,8 @@ const proxyquire   = require('proxyquire');
 // ESM-only and loads through require(esm), which works unflagged across the
 // supported Node 22 line (see mariadb_node_floor_falsified.test.js), so the
 // engines range stays at the Node 22 major.
+// The regression pins both ends of that contract: the package range remains the full
+// major, and CommonJS imports keep loading the driver through the database module at runtime.
 // -----------------------------------------------------------------
 function registerSuitePart1() {
     describe('REG-VAL-001: mariadb is require()-loadable on the supported runtime', function () {
