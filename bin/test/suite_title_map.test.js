@@ -52,18 +52,11 @@ describe('bin/suite-title-map.js', function () {
                 'the venue runs these, so a glob that stopped collecting here must be visible');
         });
 
-        it('pins the suites that were absent from the failed standalone map', () => {
-            const pin = JSON.parse(fs.readFileSync(
-                path.resolve(__dirname, '../pins/at1-suite-titles.json'), 'utf8'));
-            const files = pin.scripts.test.files;
-            for (const name of [
-                'test/unit/lib/regtest_snapshot_seams.test.js',
-                'test/unit/peers/hub_db/admission_sampling_single_flight.test.js',
-                'test/unit/providers/llm/cli_outcome_status_phrase.test.js',
-            ]) {
-                assert.ok(files[name], `${name} must remain represented in the standalone suite pin`);
-                assert.ok(pin.titleSets[files[name]], `${name} must reference a pinned title set`);
-            }
+        it('runs the standalone pin comparison from ci:full', () => {
+            const script = fs.readFileSync(
+                path.resolve(__dirname, '../ci-full.sh'), 'utf8');
+            assert.match(script,
+                /run_tier "suite-title pin" node bin\/suite-title-map\.js \\\n+  --compare bin\/pins\/at1-suite-titles\.json \\\n+  --rename-map bin\/pins\/suite-title-renames\.json/);
         });
     });
 });
