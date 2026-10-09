@@ -166,6 +166,9 @@ class Governance extends EventEmitter {
 
         this.validateChangeBounds(parameter, currentValue, proposedValue);
 
+        if (parameter === 'SLASH_DEVIATION_THRESHOLD' || parameter === 'SLASH_MISSED_ROUNDS_THRESHOLD')
+            throw new Error(parameter + ' governance changes are disabled: the env owns this parameter');
+
         // Pre-launch pin (#4352): refuse to create a CAPABILITY_*_MIN_STAKE proposal. The
         // indexer's on-chain acceptance re-derives quorum from a frozen configs/<COIN>.js
         // constant, so a hub governance MIN_STAKE change would fork the federation from the
