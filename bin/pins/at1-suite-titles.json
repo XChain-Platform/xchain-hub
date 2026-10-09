@@ -7387,6 +7387,10 @@
     "9ababd39aa20214e": [
       "9ababd39aa20214eebc082a91db098c98061d9c4d8ca423ab3dec53649b8c844"
     ],
+    "9abbc9ea296d97ed": [
+      "0e978d0715a044712e4a90e723072feb8dbea9147b55e6f6d67ca6b19e0ee783",
+      "c6335a3600603cd8ad6a5182491c46dd1f8f9f4b315623a6379e482be3f8a56a"
+    ],
     "9abc481fa050426a": [
       "75f438faafba8c8c963a5bc232471be052acb2e9b6b5128e53b52330e16d8414",
       "4d364d09fbe12346e13062456543857691400a129f28ae4d9583c17c881f6582",
@@ -12094,6 +12098,7 @@
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
+        "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",
         "test/unit/hub/hub_schema_version.test.js": "356fd8cf0a93b5c9",
         "test/unit/hub/hub_schema_version_list_snapshots.test.js": "87845959f31c9fdc",
         "test/unit/hub/indexer_http/indexer_http.test.js": "f8ac6e2646a28d48",
@@ -13039,6 +13044,7 @@
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
+        "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",
         "test/unit/hub/hub_schema_version.test.js": "356fd8cf0a93b5c9",
         "test/unit/hub/hub_schema_version_list_snapshots.test.js": "87845959f31c9fdc",
         "test/unit/hub/indexer_http/indexer_http.test.js": "f8ac6e2646a28d48",
@@ -14013,6 +14019,7 @@
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
+        "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",
         "test/unit/hub/hub_schema_version.test.js": "356fd8cf0a93b5c9",
         "test/unit/hub/hub_schema_version_list_snapshots.test.js": "87845959f31c9fdc",
         "test/unit/hub/indexer_http/indexer_http.test.js": "f8ac6e2646a28d48",
