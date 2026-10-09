@@ -86,7 +86,7 @@
   "movable": [
     "src/coins/fullnodeComment.test.js"
   ],
-  "fileCount": 72,
+  "fileCount": 71,
   "files": [
     "src/attest_leader_silence_skip_activation.js",
     "src/coins/BTC.js",
@@ -97,7 +97,6 @@
     "src/consensus/equivocation_header.js",
     "src/consensus/gate_registry.js",
     "src/consensus/gate_registry/core.js",
-    "src/consensus/gate_registry/hub_rows.js",
     "src/consensus/gate_registry/regtest_env.js",
     "src/consensus/gate_registry/shared_rows.js",
     "src/consensus/gate_registry/shared_rows_1.js",
