@@ -173,8 +173,9 @@ class OraclePublisher {
     // ----- The durable-file primitives -----
     //
     // The queue, the dead-letter file and the round buffer are the three durable
-    // files this class owns, and every write to them is open/write/fsync/close so a
-    // crash cannot leave a half-line behind. They live here rather than with the
+    // files this class owns, and every write to them is open/write/fsync/close. A
+    // crash mid-append can still leave a torn last line, which the queue rebuild
+    // quarantines to the dead-letter file instead of dropping. They live here rather than with the
     // callers because `fs` is what the suites stub through this module.
 
     // Create the queue directory and touch the queue file. Best-effort: an
@@ -218,6 +219,16 @@ class OraclePublisher {
     readDurableFile(filePath) {
         try { return fs.readFileSync(filePath, 'utf8'); }
         catch (e) { return null; }
+    }
+
+    // Read a durable file whole, or null when it does not exist; any other failure
+    // throws, for the queue rebuild that must tell an empty file from an unread one.
+    readDurableFileStrict(filePath) {
+        try { return fs.readFileSync(filePath, 'utf8'); }
+        catch (e) {
+            if (e && e.code === 'ENOENT') return null;
+            throw e;
+        }
     }
 
     // Steps 1-3 of the default pipeline: fetch, build, sign. Returns the signed tx hex.

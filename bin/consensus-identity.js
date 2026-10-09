@@ -36,6 +36,13 @@
  *                             bin/pins/carrier-logic.json, the token-stream pin
  *                             of every gate carrier's LOGIC. Read from the pin,
  *                             not the tree: the pin's own guard measures the tree.
+ *                             Answers "same logic?" for THIS repo only: each repo
+ *                             pins its own carrier membership (the rule in
+ *                             bin/lib/carrier_logic_pin_ops.js, keyed by package
+ *                             name), so the indexer's and sync's values differ
+ *                             from this one by design and are never compared with
+ *                             it. Cross-repo agreement is held per shared id by
+ *                             test (c) of test/unit/repo_guards/carrier_logic_pin.test.js.
  *
  * WHY THE GATES MAP IS PINNED AND NOT JUST THE DIGEST, and this is the whole
  * reason this script exists rather than a one-line hash. Two digests that differ
