@@ -20,17 +20,6 @@ const { VALIDATORS_4, makeValidator } = require('../../helpers/fixtures');
 const { signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
     require('../helpers/pbft_chaos');
 
-// Lock each open consensus round to the validator identities and quorum captured
-// before its proposal, even when the live federation changes membership while
-// votes are arriving.
-
-// Exercise additions, removals, and replacements across round boundaries so
-// later rounds prove that leader selection, quorum sizing, and vote admission
-// use the next snapshot without rewriting an open round.
-
-// Keep signed fixture envelopes and isolated hub doubles in the path so peer
-// admission stays active without persistence or network timing affecting churn.
-
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }

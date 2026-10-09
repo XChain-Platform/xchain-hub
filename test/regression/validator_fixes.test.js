@@ -33,10 +33,6 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
-// Pin the runtime boundary at both imports: the supported Node major must load
-// the driver directly and through the database module under CommonJS on every
-// supported release without flags.
-
 // -----------------------------------------------------------------
 // REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
 // ESM-only and loads through require(esm), which works unflagged across the
