@@ -24,6 +24,7 @@ const feature19messageSubscriberRosterRca = require('../../../../src/consensus/g
 const feature19messageSubscriberRosterRollcallRound = require('../../../../src/rollcall/round.js');
 const feature19messageSubscriberRosterAttestationRelay = require('../../../../src/attestation/relay.js');
 const feature19messageSubscriberRosterCrossChainCallEngine = require('../../../../src/cross_chain/call_engine.js');
+const feature19messageSubscriberRosterCrossChainDexEngine = require('../../../../src/cross_chain/dex_engine.js');
 const {
   spawnSync: feature19messageSubscriberRosterSpawnSync
 } = require('child_process');
@@ -107,17 +108,15 @@ const feature19messageSubscriberRosterBranches = [['regtest with nothing armed',
 function registerFeature19messageSubscriberRosterPart1() {
   it('a regtest venue with no activation height credits no roll-call listener', function () {
     this.timeout(10000);
-    // 19 is what lane L6e counted attaching at a real regtest boot: the 14
-    // singleton subscribers plus the five CrossChainDexConsensus channels.
     expect(feature19messageSubscriberRosterRegtestRosterWith(null)).to.deep.equal({
-      n: 19,
+      n: 20,
       rollcall: false
     });
   });
   it('arming the regtest venue adds exactly one, and it is the roll-call listener', function () {
     this.timeout(10000);
     expect(feature19messageSubscriberRosterRegtestRosterWith('armed')).to.deep.equal({
-      n: 20,
+      n: 21,
       rollcall: true
     });
   });
@@ -178,6 +177,22 @@ function registerFeature19messageSubscriberRosterPart2() {
     // renamed channel fails here instead of drifting away from the roster.
     const channel = String(engine.consensus.types.PROPOSE).replace(/_PROPOSE$/, '');
     expect(PeerManager.messageSubscribers(cfg, process.env)).to.include('CrossChainDexConsensus:' + channel);
+  });
+
+  it('the remote-token channel is credited because the DEX engine attaches one', async function () {
+    const cfg = feature19messageSubscriberRosterHubConfig({ HUB_NETWORK: 'regtest' });
+    const target = new PeerManager(cfg, rootSuiteDbStub);
+    const engine = new feature19messageSubscriberRosterCrossChainDexEngine(
+      feature19messageSubscriberRosterStubHub(cfg, target));
+    const before = target.listenerCount('message');
+    await engine.remoteTokenConsensus.start();
+    const after = target.listenerCount('message');
+    await engine.remoteTokenConsensus.stop();
+    expect(after - before).to.equal(1);
+    expect(target.listenerCount('message')).to.equal(before);
+    const channel = String(engine.remoteTokenConsensus.types.PROPOSE).replace(/_PROPOSE$/, '');
+    expect(PeerManager.messageSubscribers(cfg, process.env)).to.include(
+      'CrossChainDexConsensus:' + channel);
   });
 
   // Each configuration branch, driven the way a leak would be seen: a full set
