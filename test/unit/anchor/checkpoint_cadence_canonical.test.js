@@ -39,13 +39,13 @@ describe('checkpoint cadence canonical assertion', function () {
     });
 
     it('warns and names each drifting knob', function () {
-        expect(assertCanonicalCadence(12, 1)).to.deep.equal(['CHECKPOINT_INTERVAL_BLOCKS']);
+        expect(assertCanonicalCadence(13, 1)).to.deep.equal(['CHECKPOINT_INTERVAL_BLOCKS']);
         expect(assertCanonicalCadence(6, 3)).to.deep.equal(['ANCHOR_CHECKPOINT_EVERY_N']);
         expect(assertCanonicalCadence(7, 2)).to.deep.equal(['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N']);
 
         expect(warn.callCount).to.equal(3);
         expect(String(warn.getCall(0).args[0])).to.include('CHECKPOINT_INTERVAL_BLOCKS');
-        expect(String(warn.getCall(0).args[0])).to.include('resolved 12 / 1');
+        expect(String(warn.getCall(0).args[0])).to.include('resolved 13 / 1');
         expect(String(warn.getCall(1).args[0])).to.include('ANCHOR_CHECKPOINT_EVERY_N');
         expect(String(warn.getCall(1).args[0])).to.include('resolved 6 / 3');
         expect(String(warn.getCall(2).args[0])).to.include('CHECKPOINT_INTERVAL_BLOCKS and ANCHOR_CHECKPOINT_EVERY_N');
