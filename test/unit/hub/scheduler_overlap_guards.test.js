@@ -114,8 +114,8 @@ function flush() {
     async function aRejectedBookFetchDoesNotTest3() {
         const eng = makeEngine();
         const finalize = sinon.stub(eng, 'finalizeMatch').resolves();
-        // The throw we want comes from findMatches, which runs after the books land and
-        // is not caught per-coin.
+        // resolveSnapshotBlock is awaited inside finalizeMatch; the throw we want comes
+        // from findMatches, which runs after the books land and is not caught per-coin.
         eng.fetchOpenOffers = async (coin) => book(coin);
         const boom = sinon.stub(eng, 'findMatches').throws(new Error('matcher blew up'));
 
