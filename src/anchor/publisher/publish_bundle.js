@@ -270,7 +270,8 @@ module.exports = {
             logger.info('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
                         snapshotBlock + '; reward push skipped');
         } else if(attested || !ar.isAnchorRewardActive(snapshotBlock, network)){
-            // ONE anchor_bundle reward per bundle, round_reference = SNAPSHOT_BLOCK (D3, D21).
+            // ONE anchor_bundle reward and ONE attestation per (network, SNAPSHOT_BLOCK),
+            // even when the byte-budget split emits multiple bundles (D3, D21).
             this.recordReward('anchor_bundle', snapshotBlock, me, snapshotBlock, network);
             if(attested)
                 this.deferRewardAttestation({
