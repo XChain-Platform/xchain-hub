@@ -12,7 +12,9 @@
  *
  **********************************************************************/
 
-module.exports = {
+const remoteTokenSnapshots = require('./remote_token_snapshots.js');
+
+module.exports = Object.assign({
 
     async insertListSnapshot(row){
         const cols = this.constructor.LIST_SNAPSHOT_COLUMNS;
@@ -75,4 +77,4 @@ module.exports = {
             'WHERE snapshot_id = ? AND batch_seq IS NULL',
             [batchSeq, txid, snapshotId]);
     }
-};
+}, remoteTokenSnapshots);
