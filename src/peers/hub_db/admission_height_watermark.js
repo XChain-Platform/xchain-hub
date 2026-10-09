@@ -22,7 +22,7 @@
 
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../../lib/admission_height.js');
-const { admitMarginBlocks } = require('../../consensus/gates/mirror_admission_gate.js');
+const { rowMarginBlocks } = require('../../consensus/gates/mirror_admission_margin_gate.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_XDEX_ROUND_TIMEOUT_MS,
         DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const hubConfig = require('../../config');
@@ -42,8 +42,8 @@ const hubConfig = require('../../config');
  * for `table` that OPENED while this hub observed an admission tip for c at or
  * below h has TERMINATED: finalized and broadcast, or abandoned. That sentence is
  * exactly the completeness a height-keyed barrier certifies, and the barrier
- * comparison (heights[table][C] >= B - ADMIT_MARGIN_BLOCKS[table]) is it
- * rearranged.
+ * comparison (heights[table][C] >= B - rowMarginBlocks(table, C, network, B))
+ * is it rearranged.
  *
  * THE RULE THAT ADVANCES IT, and why it needs no per-round registry. Tip
  * observations are monotonic, so if this hub first observed tip v at instant t_v,
@@ -341,12 +341,15 @@ class AdmissionHeightWatermark {
             if(map === null) return null;
         }
         let claimed = this.heights(nowMs)[t] || {};
-        let margin  = admitMarginBlocks(t);
         for(let c of Object.keys(map)){
             let w = claimed[c];
             if(typeof w !== 'number') continue;   // no claim for this chain: nothing to be late against
             let admitBlock = Number(map[c]);
             if(!Number.isSafeInteger(admitBlock)) continue;
+            // The row's own stamped height selects its margin era. Using the chain's
+            // current era here would reinterpret an older row after activation and could
+            // reject a round the watermark never claimed had terminated.
+            let margin = rowMarginBlocks(t, c, this.network, admitBlock);
             if(admitBlock - margin <= w)
                 return { chain: c, reason: 'round abandoned', watermark: w, admitBlock: admitBlock };
         }
