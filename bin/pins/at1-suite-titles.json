@@ -6088,7 +6088,8 @@
       "18d006251a4e110d7eceef22240c52b0914449e449211fdbc003e79cfac9c17c",
       "f971dedd37bab99375f2ba84eb484ef49ec0068c4cc782da01246154fe094e90"
     ],
-    "79f860a7adcf5671": [
+    "6651c88002b001a4": [
+      "b4c9fcab359048a74b4a2be185f1c3cced20b15856ab07b3548e757869ccc290",
       "2ee3e1920a12722bc94eb97caad5440723ba76af4deeec466967f97cee2bb7b3",
       "422c27bd1934510be43ac8758ec838345e47954f6bb2ce0c941061940e8897f3",
       "27ad7ef70905cd6c1cce4eab846f41044c48389eed9f1549baaa8ac437f6bd96",
@@ -11545,7 +11546,7 @@
         "ci:regression"
       ],
       "fileCount": 888,
-      "titleCount": 8416,
+      "titleCount": 8417,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12351,7 +12352,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "79f860a7adcf5671",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -12490,7 +12491,7 @@
     },
     "test": {
       "fileCount": 888,
-      "titleCount": 8416,
+      "titleCount": 8417,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13296,7 +13297,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "79f860a7adcf5671",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -13384,7 +13385,7 @@
     },
     "test:all": {
       "fileCount": 968,
-      "titleCount": 9239,
+      "titleCount": 9240,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14270,7 +14271,7 @@
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "79f860a7adcf5671",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "6651c88002b001a4",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
