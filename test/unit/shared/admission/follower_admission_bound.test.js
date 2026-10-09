@@ -121,7 +121,7 @@ let tipCalls;
 
     // The map an honest leader on the same tips would stamp, in the row's column form.
     function honestColumns(overrides) {
-        const map = armedAh.admitBlocks(['BTC', 'DOGE'], { BTC: OWN_BTC, DOGE: OWN_DOGE }, 'cross_chain_calls');
+        const map = armedAh.admitBlocks(['BTC', 'DOGE'], { BTC: OWN_BTC, DOGE: OWN_DOGE }, 'cross_chain_calls', 'regtest');
         return Object.assign(armedAh.admitBlocksToColumns(map), overrides || {});
     }
 

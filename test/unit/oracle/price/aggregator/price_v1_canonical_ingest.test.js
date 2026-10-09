@@ -25,8 +25,7 @@ const NETWORKS = [
 ];
 
 async function receivePrice(network, sourceChain, value, fee) {
-    const hub = createMockHub();
-    hub.network = network;
+    const hub = createMockHub({ network });
     hub.db.doQuery.callsFake(async (sql) => (/^INSERT INTO oracle_prices/.test(sql) ? {} : []));
 
     const agg = new PriceAggregator(hub);
