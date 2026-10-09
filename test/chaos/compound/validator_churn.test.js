@@ -20,15 +20,6 @@ const { VALIDATORS_4, makeValidator } = require('../../helpers/fixtures');
 const { signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
     require('../helpers/pbft_chaos');
 
-// A live hub locks validator identities and quorum from one federation snapshot
-// before proposing. These experiments inject membership churn rather than an
-// unavailable indexer, so the shared harness supplies that snapshot and keeps
-// the fail-closed federation guard active throughout each transition.
-// The mid-round cases prove additions and removals cannot rewrite an open round.
-// The later cases prove leader selection, quorum sizing, and vote admission use
-// the updated set only after the next round captures its own snapshot.
-// Signed fixture envelopes keep peer admission checks active while testing that boundary.
-
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
