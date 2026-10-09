@@ -17,8 +17,8 @@ const PriceAggregator  = require('../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../helpers/mockHub');
 
 // Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)
-// buildPriceV0Payload. Tests sign these exact bytes. The mockHub has no `network`,
-// so the EQUIV header is OFF (unknown network) and this is the bare-JSON branch;
+// buildPriceV0Payload. Tests sign these exact bare-JSON bytes for fixtures whose
+// EQUIV header gate is off;
 // btc_block_height still rides in the signed content (#4232).
 function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     let sortedPairs = pairs
@@ -49,7 +49,7 @@ function makeValidator() {
 function registerPriceaggregatorRetractfromactionindex1Hooks() {
 
     beforeEach(function () {
-        hub = createMockHub();
+        hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
     });
 
@@ -199,7 +199,7 @@ function registerPriceaggregatorRetractfromactionindex1Tests6() {
         await agg.retractFromActionIndex('BTC', 50, null, 7);
         expect(hub.db.bumpPriceIngestWatermark.calledOnce).to.equal(true);
         // (source_chain, retraction_generation, from_action_index, network)
-        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 7, 50, '']);
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 7, 50, 'mainnet']);
     });
 
     it('HUB-RETRACT-4: records the watermark even on a 0-row delete (the stale push may not have arrived yet)', async function () {

@@ -220,7 +220,7 @@ function makeValidator() {
 function registerPriceaggregatorReceivevalidatedbatch1Hooks() {
 
     beforeEach(function () {
-        hub = createMockHub();
+        hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
         hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(snapshotOf(V)) };
         sinon.stub(console, 'log');

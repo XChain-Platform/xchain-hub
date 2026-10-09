@@ -30,8 +30,7 @@ describe('PriceAggregator.receiveOraclePrice() PRICE v1 canonical gate on the wr
     beforeEach(function () {
         saved = Object.assign({}, table);
         Object.assign(table, { testnet: 9999999999, 'BTC:testnet': INSTANT, 'LTC:testnet': INSTANT, 'DOGE:testnet': INSTANT });
-        hub = createMockHub();
-        hub.network = 'testnet';
+        hub = createMockHub({ network: 'testnet' });
         agg = new PriceAggregator(hub);
     });
 
