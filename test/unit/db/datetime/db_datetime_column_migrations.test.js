@@ -88,16 +88,17 @@ describe('runDatetimeColumnMigrations()', function () {
 });
 
 describe('Database.prototype.runMigrations()', function () {
-    it('runs all four migration steps in order', async function () {
+    it('runs every migration step and then asserts the mirror keys in order', async function () {
         const calls = [];
         const fakeDb = {
             runRewardKeyMigrations:              sinon.stub().callsFake(async () => calls.push('reward')),
             runCapabilityAndCheckpointMigrations: sinon.stub().callsFake(async () => calls.push('capability')),
             runColumnAndFenceMigrations:          sinon.stub().callsFake(async () => calls.push('column')),
-            runDatetimeColumnMigrations:          sinon.stub().callsFake(async () => calls.push('datetime'))
+            runDatetimeColumnMigrations:          sinon.stub().callsFake(async () => calls.push('datetime')),
+            assertMirrorKeysWide:                  sinon.stub().callsFake(async () => calls.push('assert'))
         };
         await Database.prototype.runMigrations.call(fakeDb);
 
-        expect(calls).to.deep.equal(['reward', 'capability', 'column', 'datetime']);
+        expect(calls).to.deep.equal(['reward', 'capability', 'column', 'datetime', 'assert']);
     });
 });

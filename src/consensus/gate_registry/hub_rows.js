@@ -76,3 +76,8 @@ addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'heigh
     testnet: UNARMED,
     regtest: UNARMED,
 });
+
+// consensus/federation
+// Extends federation detection beyond live quorum at the anchor height.
+// Armed on regtest only pending coordinated network activation.
+addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });

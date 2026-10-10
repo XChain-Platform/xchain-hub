@@ -80,6 +80,7 @@ const bootstrapMixin        = require('./schema/bootstrap.js');
 const keyMigrationsMixin    = require('./schema/keys.js');
 const columnMigrationsMixin = require('./schema/columns.js');
 const migrationStepsMixin   = require('./schema/migrations.js');
+const mirrorKeysMixin       = require('./schema/mirror_keys.js');
 const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
 const nodeUtil = require('node:util');
@@ -217,6 +218,7 @@ class Database {
         await this.runCapabilityAndCheckpointMigrations();
         await this.runColumnAndFenceMigrations();
         await this.runDatetimeColumnMigrations();
+        await this.assertMirrorKeysWide();
     }
 
     async getConnection(){
@@ -376,6 +378,7 @@ installMixins(Database.prototype, [
     keyMigrationsMixin,
     columnMigrationsMixin,
     migrationStepsMixin,
+    mirrorKeysMixin,
     transactionMixin
 ]);
 
