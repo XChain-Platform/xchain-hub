@@ -3410,6 +3410,14 @@
       "7ec5722490c8b2bc9ed553d8d4cbd42453e86224bb9ae9d5ff9a44dadcb29fb4",
       "4640bd7373f231e11ef51b2e1278edb5d49824beb4023423dde2a31704f6e229"
     ],
+    "468707442f80793b": [
+      "9710fe01a899a5ce9e3608ade72ec344cd10754dc8dd9519d7b81aee5bd03ae9",
+      "999571a63556f96d4770bc730a2d8107e515f4d34d62bce8d2810e463a8273d4",
+      "753ad5885d5a092c6093c012edc8356688f005c9e96d4a5cf3563904a2a45924",
+      "0b12652e152bf649acf12997ec6d978df7ba961a1319ca10322276dd8ec2e5a3",
+      "0027e9b90306217ff65cd1549dd5a1e3f9a1cc60ffa85231aded0f216a177f05",
+      "1d0e2771557a75d955710cd53fa410b19fee3e471a883824f85c9ded535222ea"
+    ],
     "46a9fe141bdfcea0": [
       "230a804a296f2429ecee6b8a29452ff22f7cc10ad7ea6ca14f85dc922edc6bc8",
       "5f527f139fc709c6b94c3391b24c11edacdab7fa7f3b63e677e6b98044690baa",
@@ -4632,13 +4640,6 @@
       "d1e36eae118a92e6e3afd25c394ec0bd1c9192eb23f66acd67f869a6f8893b63",
       "5050afef53aac13fb5148c92568ae08a23631cce4bd09852a5774a2965096a88",
       "957842452fca258adc6c2e28bc7fe839595a3e7211fbdf68ab228e71bd43db4d"
-    ],
-    "60792b3775ba3987": [
-      "9710fe01a899a5ce9e3608ade72ec344cd10754dc8dd9519d7b81aee5bd03ae9",
-      "753ad5885d5a092c6093c012edc8356688f005c9e96d4a5cf3563904a2a45924",
-      "0b12652e152bf649acf12997ec6d978df7ba961a1319ca10322276dd8ec2e5a3",
-      "0027e9b90306217ff65cd1549dd5a1e3f9a1cc60ffa85231aded0f216a177f05",
-      "1d0e2771557a75d955710cd53fa410b19fee3e471a883824f85c9ded535222ea"
     ],
     "60a1529a2763b077": [
       "eb851f8862adda5cd59817e386e80365f971c0e440cec48cc36118cf8a0aa20b",
@@ -11638,7 +11639,7 @@
         "ci:regression"
       ],
       "fileCount": 896,
-      "titleCount": 8493,
+      "titleCount": 8494,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12185,7 +12186,7 @@
         "test/unit/db/retry/db_with_transaction.test.js": "4a9ceed1d3241654",
         "test/unit/db/schema/db_admission_columns_required.test.js": "034f23759c57aaab",
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
-        "test/unit/db/schema/mirror_keys_assert.test.js": "60792b3775ba3987",
+        "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",
@@ -12591,7 +12592,7 @@
     },
     "test": {
       "fileCount": 896,
-      "titleCount": 8493,
+      "titleCount": 8494,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13138,7 +13139,7 @@
         "test/unit/db/retry/db_with_transaction.test.js": "4a9ceed1d3241654",
         "test/unit/db/schema/db_admission_columns_required.test.js": "034f23759c57aaab",
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
-        "test/unit/db/schema/mirror_keys_assert.test.js": "60792b3775ba3987",
+        "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",
@@ -13493,7 +13494,7 @@
     },
     "test:all": {
       "fileCount": 976,
-      "titleCount": 9316,
+      "titleCount": 9317,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14120,7 +14121,7 @@
         "test/unit/db/retry/db_with_transaction.test.js": "4a9ceed1d3241654",
         "test/unit/db/schema/db_admission_columns_required.test.js": "034f23759c57aaab",
         "test/unit/db/schema/db_list_metadata_migration.test.js": "d827d23b2e19f38c",
-        "test/unit/db/schema/mirror_keys_assert.test.js": "60792b3775ba3987",
+        "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/hub_mirror_schema_version_stamped.test.js": "9abbc9ea296d97ed",

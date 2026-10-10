@@ -22,6 +22,7 @@ const WIDE_KEYS = {
 function makeDb(overrides = {}){
     const connection = {
         query: sinon.stub().callsFake(async (sql, args) => {
+            if(sql.includes('information_schema.tables')) return [{ present: 1 }];
             const columns = overrides[args[1]] || WIDE_KEYS[args[1]] || [];
             return columns.map(column => ({ col: column, non_unique: 0 }));
         }),
@@ -93,6 +94,19 @@ async function refusesNonUniqueMirrorKey() {
     expect(connection.release.calledOnce).to.equal(true);
 }
 
+async function acceptsMissingTablesBeforeBootstrap() {
+    const { db, connection } = makeDb();
+    connection.query.callsFake(async sql => {
+        if(sql.includes('information_schema.tables')) return [];
+        return [];
+    });
+
+    await mirrorKeys.assertMirrorKeysWide.call(db);
+
+    expect(connection.query.callCount).to.equal(4);
+    expect(connection.release.calledOnce).to.equal(true);
+}
+
 async function releasesConnectionAfterCatalogueFailure() {
     const { db, connection } = makeDb();
     connection.query.rejects(new Error('catalogue unavailable'));
@@ -112,5 +126,6 @@ describe('assertMirrorKeysWide()', function () {
     it('refuses startup when the capability snapshot key is still narrow', refusesNarrowCapabilitySnapshotKey);
     it('refuses startup when the attestation response key is absent', refusesAbsentAttestationResponseKey);
     it('refuses startup when a named mirror key is not unique', refusesNonUniqueMirrorKey);
+    it('allows runMigrations before the mirror tables exist', acceptsMissingTablesBeforeBootstrap);
     it('releases the connection when the catalogue read fails', releasesConnectionAfterCatalogueFailure);
 });

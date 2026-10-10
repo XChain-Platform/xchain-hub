@@ -48,6 +48,15 @@ module.exports = {
                 if(unique && columns.length === key.columns.length &&
                     columns.every((column, index) => column === key.columns[index])) continue;
 
+                if(columns.length === 0){
+                    const tables = await db.query(
+                        "SELECT 1 AS present FROM information_schema.tables " +
+                        "WHERE table_schema = ? AND table_name = ? LIMIT 1",
+                        [this.dbName, key.table]
+                    );
+                    if(!tables || tables.length === 0) continue;
+                }
+
                 throw new Error('Refusing to start: UNIQUE KEY ' + key.name + ' on ' + key.table +
                     ' must cover (' + key.columns.join(', ') + '); found ' +
                     (columns.length > 0 ? '(' + columns.join(', ') + ')' : 'no index') +
