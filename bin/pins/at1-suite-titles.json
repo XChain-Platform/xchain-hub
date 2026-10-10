@@ -11631,7 +11631,7 @@
         "ci:regression"
       ],
       "fileCount": 895,
-      "titleCount": 8485,
+      "titleCount": 8488,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12583,7 +12583,7 @@
     },
     "test": {
       "fileCount": 895,
-      "titleCount": 8485,
+      "titleCount": 8488,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13484,7 +13484,7 @@
     },
     "test:all": {
       "fileCount": 975,
-      "titleCount": 9308,
+      "titleCount": 9311,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
