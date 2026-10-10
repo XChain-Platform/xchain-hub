@@ -176,7 +176,7 @@ oraclePublisherTests('processQueue()', function () {
 
 oraclePublisherTests('processQueue()', function () {
 
-    it('keeps entries queued and warns once when no broadcast hook is configured', async function () {
+    it('logs warning when no broadcast pipeline is configured', async function () {
         let first  = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
         let second = { round: 2, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
         fsMock.readFileSync.returns(JSON.stringify(first) + '\n' + JSON.stringify(second) + '\n');
