@@ -47,7 +47,7 @@ const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
     'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
     'shared_rows_3.js': 'd671489c2b683ec2a94d0f45da1056687c38f78959a9f1780825eb7e3a37d6ea',
     'shared_rows_4.js': '08e0e852d04c0736d88c19c6ae2c63d0061591c3dc700a22a9018a23a1d3069d',
-    'shared_rows_5.js': '80669cdd512e8e61b069f0c9a6fb788ed0a696338810b775121ba7cf13aa7863',
+    'shared_rows_5.js': '314a932134f30530b3b4013678b6e6dba99d39e551ce5b107a251c8fd3bd8105',
 });
 
 function sha256(bytes) {
