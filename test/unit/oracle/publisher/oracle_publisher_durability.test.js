@@ -177,13 +177,29 @@ oraclePublisherTests('processQueue()', function () {
 oraclePublisherTests('processQueue()', function () {
 
     it('logs warning when no broadcast pipeline is configured', async function () {
-        let entry = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
-        fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+        let first  = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+        let second = { round: 2, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+        fsMock.readFileSync.returns(JSON.stringify(first) + '\n' + JSON.stringify(second) + '\n');
         let hub = makeHub();
         let pub = new OraclePublisher(hub);
-        // No broadcastFn, no encoder, no walletSignFn
+        pub.encoder = {
+            getUtxos: sinon.stub().resolves([{ txid: 'a', vout: 0, value: 5000000000, confirmations: 10 }]),
+            createTx: sinon.stub().resolves({ psbt: 'must-not-build', encoding: 'P2SH' })
+        };
+        pub.walletSignFn = sinon.stub().resolves('must-not-sign');
         pub.getBalanceFn = sinon.stub().resolves(50);
-        await pub.processQueue();  // must not throw
+        let warn = sinon.spy(console, 'warn');
+
+        await pub.processQueue();
+        await pub.processQueue();
+
+        expect(pub.encoder.createTx.called, 'the refused P2SH pipeline must not be requested').to.be.false;
+        expect(pub.walletSignFn.called, 'nothing may be signed').to.be.false;
+        expect(warn.getCalls().filter(call => call.args.join(' ').includes('no broadcast hook configured'))).to.have.length(1);
+        let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+        let queued = rewritten.trim().split('\n').map(line => JSON.parse(line));
+        expect(queued.map(entry => entry.round)).to.deep.equal([1, 2]);
+        expect(queued.map(entry => entry.attempts)).to.deep.equal([0, 0]);
     });
 
 });
@@ -382,4 +398,3 @@ oraclePublisherTests('start() durable-marker hydration', function () {
     });
 
 });
-
