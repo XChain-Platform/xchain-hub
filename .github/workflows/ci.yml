@@ -270,24 +270,104 @@ jobs:
         run: npm run coverage:check
 
   # Suite-title pin: every collected test title, per npm script, must still be
-  # collected. mocha --dry-run loads the spec files without running a body, so no
-  # database or sibling checkout is needed. Declared standalone (no needs: ci) so
-  # a stale pin reads as its own red job and never hides the gate's result; the
-  # rename map carries the moves a restructure declares.
+  # collected. mocha --dry-run does not run test bodies, but loading the suite
+  # declarations resolves sibling modules, so the declared sibling roster must
+  # be present in the same layout as the landing venue. Declared standalone (no
+  # needs: ci) so a stale pin reads as its own red job and never hides the gate's
+  # result; the rename map carries the moves a restructure declares.
   suite-title-pin:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: xchain-hub
+
+      - name: Check out xchain-documentation
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-documentation
+          path: xchain-documentation
+
+      - name: Check out xchain-explorer
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-explorer
+          path: xchain-explorer
+
+      - name: Check out xchain-indexer
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-indexer
+          path: xchain-indexer
+
+      - name: Check out xchain-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sdk
+          path: xchain-sdk
+
+      - name: Check out xchain-wallet
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-wallet
+          ssh-key: ${{ secrets.XCHAIN_WALLET_DEPLOY_KEY }}
+          path: xchain-wallet
+
+      - name: Check out xchain-vm
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-vm
+          path: xchain-vm
+
+      - name: Check out xchain-decoder
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-decoder
+          path: xchain-decoder
+
+      - name: Check out xchain-encoder
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-encoder
+          path: xchain-encoder
+
+      - name: Check out xchain-utxo-tracker
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-utxo-tracker
+          path: xchain-utxo-tracker
+
+      - name: Check out xchain-sync
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sync
+          path: xchain-sync
+
+      - name: Verify complete sibling checkout roster
+        working-directory: xchain-hub
+        run: |
+          while IFS= read -r sibling; do
+            case "$sibling" in
+              ""|\#*) continue ;;
+            esac
+            if ! git -C "../$sibling" rev-parse --show-toplevel >/dev/null 2>&1; then
+              echo "::error::Missing declared sibling checkout: $sibling"
+              exit 1
+            fi
+          done < .ci-siblings
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: "22.22.3"
           cache: npm
+          cache-dependency-path: xchain-hub/package-lock.json
 
       - name: Install dependencies
+        working-directory: xchain-hub
         run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Collected suite titles vs the committed pin
+        working-directory: xchain-hub
         run: node bin/suite-title-map.js --compare bin/pins/at1-suite-titles.json --rename-map bin/pins/suite-title-renames.json
