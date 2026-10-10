@@ -34,77 +34,83 @@ function makeDb(overrides = {}){
     return { db, connection };
 }
 
-describe('assertMirrorKeysWide()', function () {
-    it('accepts both unique mirror keys only when all widened columns are present in order', async function () {
-        const { db, connection } = makeDb();
+async function acceptsWideUniqueKeys() {
+    const { db, connection } = makeDb();
+    await mirrorKeys.assertMirrorKeysWide.call(db);
+
+    expect(connection.query.callCount).to.equal(2);
+    expect(connection.query.firstCall.args[0]).to.contain('non_unique');
+    expect(connection.query.firstCall.args[1]).to.deep.equal(
+        ['hub_test', 'capability_snapshots', 'uq_cap_snap']);
+    expect(connection.query.secondCall.args[1]).to.deep.equal(
+        ['hub_test', 'attestation_responses', 'uq_attest_response']);
+    expect(connection.release.calledOnce).to.equal(true);
+}
+
+async function refusesNarrowCapabilitySnapshotKey() {
+    const { db, connection } = makeDb({
+        capability_snapshots: ['snapshot_block', 'capability', 'signing_pubkey']
+    });
+
+    let thrown = null;
+    try {
         await mirrorKeys.assertMirrorKeysWide.call(db);
+    } catch(error) { thrown = error; }
 
-        expect(connection.query.callCount).to.equal(2);
-        expect(connection.query.firstCall.args[0]).to.contain('non_unique');
-        expect(connection.query.firstCall.args[1]).to.deep.equal(
-            ['hub_test', 'capability_snapshots', 'uq_cap_snap']);
-        expect(connection.query.secondCall.args[1]).to.deep.equal(
-            ['hub_test', 'attestation_responses', 'uq_attest_response']);
-        expect(connection.release.calledOnce).to.equal(true);
-    });
+    expect(thrown).to.be.an('error');
+    expect(thrown.message).to.match(/Refusing to start/);
+    expect(thrown.message).to.match(/capability_snapshots/);
+    expect(thrown.message).to.match(/source/);
+    expect(connection.release.calledOnce).to.equal(true);
+}
 
-    it('refuses startup when the capability snapshot key is still narrow', async function () {
-        const { db, connection } = makeDb({
-            capability_snapshots: ['snapshot_block', 'capability', 'signing_pubkey']
-        });
+async function refusesAbsentAttestationResponseKey() {
+    const { db, connection } = makeDb({ attestation_responses: [] });
 
-        let thrown = null;
-        try {
-            await mirrorKeys.assertMirrorKeysWide.call(db);
-        } catch(error) { thrown = error; }
+    let thrown = null;
+    try {
+        await mirrorKeys.assertMirrorKeysWide.call(db);
+    } catch(error) { thrown = error; }
 
-        expect(thrown).to.be.an('error');
-        expect(thrown.message).to.match(/Refusing to start/);
-        expect(thrown.message).to.match(/capability_snapshots/);
-        expect(thrown.message).to.match(/source/);
-        expect(connection.release.calledOnce).to.equal(true);
-    });
+    expect(thrown).to.be.an('error');
+    expect(thrown.message).to.match(/attestation_responses/);
+    expect(thrown.message).to.match(/no index/);
+    expect(connection.release.calledOnce).to.equal(true);
+}
 
-    it('refuses startup when the attestation response key is absent', async function () {
-        const { db, connection } = makeDb({ attestation_responses: [] });
+async function refusesNonUniqueMirrorKey() {
+    const { db, connection } = makeDb();
+    connection.query.onSecondCall().resolves(
+        WIDE_KEYS.attestation_responses.map(column => ({ col: column, non_unique: 1 })));
 
-        let thrown = null;
-        try {
-            await mirrorKeys.assertMirrorKeysWide.call(db);
-        } catch(error) { thrown = error; }
+    let thrown = null;
+    try {
+        await mirrorKeys.assertMirrorKeysWide.call(db);
+    } catch(error) { thrown = error; }
 
-        expect(thrown).to.be.an('error');
-        expect(thrown.message).to.match(/attestation_responses/);
-        expect(thrown.message).to.match(/no index/);
-        expect(connection.release.calledOnce).to.equal(true);
-    });
+    expect(thrown).to.be.an('error');
+    expect(thrown.message).to.match(/not unique/);
+    expect(connection.release.calledOnce).to.equal(true);
+}
 
-    it('refuses startup when a named mirror key is not unique', async function () {
-        const { db, connection } = makeDb();
-        connection.query.onSecondCall().resolves(
-            WIDE_KEYS.attestation_responses.map(column => ({ col: column, non_unique: 1 })));
+async function releasesConnectionAfterCatalogueFailure() {
+    const { db, connection } = makeDb();
+    connection.query.rejects(new Error('catalogue unavailable'));
 
-        let thrown = null;
-        try {
-            await mirrorKeys.assertMirrorKeysWide.call(db);
-        } catch(error) { thrown = error; }
+    let thrown = null;
+    try {
+        await mirrorKeys.assertMirrorKeysWide.call(db);
+    } catch(error) { thrown = error; }
 
-        expect(thrown).to.be.an('error');
-        expect(thrown.message).to.match(/not unique/);
-        expect(connection.release.calledOnce).to.equal(true);
-    });
+    expect(thrown).to.be.an('error');
+    expect(thrown.message).to.equal('catalogue unavailable');
+    expect(connection.release.calledOnce).to.equal(true);
+}
 
-    it('releases the connection when the catalogue read fails', async function () {
-        const { db, connection } = makeDb();
-        connection.query.rejects(new Error('catalogue unavailable'));
-
-        let thrown = null;
-        try {
-            await mirrorKeys.assertMirrorKeysWide.call(db);
-        } catch(error) { thrown = error; }
-
-        expect(thrown).to.be.an('error');
-        expect(thrown.message).to.equal('catalogue unavailable');
-        expect(connection.release.calledOnce).to.equal(true);
-    });
+describe('assertMirrorKeysWide()', function () {
+    it('accepts both unique mirror keys only when all widened columns are present in order', acceptsWideUniqueKeys);
+    it('refuses startup when the capability snapshot key is still narrow', refusesNarrowCapabilitySnapshotKey);
+    it('refuses startup when the attestation response key is absent', refusesAbsentAttestationResponseKey);
+    it('refuses startup when a named mirror key is not unique', refusesNonUniqueMirrorKey);
+    it('releases the connection when the catalogue read fails', releasesConnectionAfterCatalogueFailure);
 });
