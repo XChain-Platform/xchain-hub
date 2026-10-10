@@ -61,21 +61,21 @@ module.exports = {
             ? entry.wire
             : this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
-        // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
-        let broadcaster = this.broadcastFn || ((p) => this.defaultBroadcast(p));
-        let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
-
-        // Decline an unwired pipeline BEFORE any budget is claimed and before any
-        // intent is recorded: nothing can leave the process on this branch, so it
-        // must consume no reservation and leave no crash marker behind.
-        if (!canBroadcast) {
-            logger.warn('OraclePublisher: no broadcast pipeline configured (set HUB_SIGNER_MODULE to a module exporting broadcast(payload), or setBroadcastHook), round ' + entry.round + ' will remain queued');
-            entry.attempts++;
+        // PRICE is a two-phase P2SH publish. The built-in encoder pipeline can only
+        // send its funding transaction and therefore refuses the build before the
+        // wallet hook. Only an operator-wired broadcast hook owns both phases.
+        // Decline before claiming budget or recording intent, and do not burn an
+        // attempt for a standing deployment condition.
+        if (typeof this.broadcastFn !== 'function') {
+            if (!this._loggedNoBroadcastHook) {
+                this._loggedNoBroadcastHook = true;
+                logger.warn('OraclePublisher: no broadcast hook configured; HUB_SIGNER_MODULE must export broadcast(payload) because every PRICE publish is a two-phase P2SH action the built-in encoder pipeline refuses. Queued rounds will remain queued');
+            }
             pass.remaining.push(entry);
             return;
         }
 
-        await this.reserveAndBroadcast(entry, entryRounds, payload, broadcaster, pass);
+        await this.reserveAndBroadcast(entry, entryRounds, payload, this.broadcastFn, pass);
     },
 
     // The two in-memory suppressors, both of which mean this entry must be dropped
