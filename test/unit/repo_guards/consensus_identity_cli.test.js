@@ -33,6 +33,8 @@ const CHECKPOINT_ENGINE_OPTIONS = path.join(REPO, 'src/anchor/checkpoint_engine/
 const ANCHOR_PUBLISHER_OPTIONS = path.join(REPO, 'src/anchor/publisher/options.js');
 const PIN  = path.join(REPO, 'bin/pins/at1-consensus-identity.json');
 const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
+const ATTEST_RELAY_RESPONSE_DEADLINE_KEY =
+    'attest_relay_response_deadline_activation.ATTEST_RELAY_RESPONSE_DEADLINE_ACTIVATION';
 const BRIDGE_ROW_FIELDS_TERMINAL_KEY =
     'bridge_row_fields_terminal_activation.BRIDGE_ROW_FIELDS_TERMINAL_ACTIVATION';
 const REGISTRY = path.join(REPO, 'src/consensus/gate_registry.js');
@@ -83,6 +85,7 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(res.status, res.stderr).to.equal(0);
         const identity = JSON.parse(res.stdout);
         expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_BATCH_HEAD_KEY);
+        expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_RELAY_RESPONSE_DEADLINE_KEY);
         expect(identity.consensus_rules_gates).to.not.have.property(BRIDGE_ROW_FIELDS_TERMINAL_KEY);
     });
 
