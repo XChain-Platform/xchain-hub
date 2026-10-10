@@ -344,6 +344,19 @@ jobs:
           repository: XChain-Platform/xchain-sync
           path: xchain-sync
 
+      - name: Verify complete sibling checkout roster
+        working-directory: xchain-hub
+        run: |
+          while IFS= read -r sibling; do
+            case "$sibling" in
+              ""|\#*) continue ;;
+            esac
+            if ! git -C "../$sibling" rev-parse --show-toplevel >/dev/null 2>&1; then
+              echo "::error::Missing declared sibling checkout: $sibling"
+              exit 1
+            fi
+          done < .ci-siblings
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
