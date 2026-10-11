@@ -91,7 +91,7 @@ function registerPinnedDigestTest() {
     // the environment: a venue process launched armed has a different, equally correct digest,
     // and a pin that moved with a drill lever would be a test of the launcher. The pinned value
     // is the fleet's: every shipped process reads the unarmed maps.
-    it('digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut, and again when LTC:testnet mirror admission shipped null under dq4 (a))', function () {
+    it('digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut, and again when LTC:testnet mirror admission shipped null under dq4 (a), and again when the v0.23.0 cut armed testnet)', function () {
         // Every gate module that still has a logic file, not just the admission one: the
         // family's arming lever is shared, so the anchor-attest gate resolves from the same
         // variable and a cached copy of it would keep a drill's heights in the digest after
@@ -107,7 +107,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('ceb49c010893f8a5d8bb632536b0b3873ae4e6cc6d16b3557134c6d503c4840d',
+                .to.equal('ac3e2e16d3500d1de7c6fd5bee77ebc6590451c1a21e3d858d24c08b00028425',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }

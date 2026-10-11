@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-11
+
+### Added
+- Added the governance tally failover gate with ranked takeover, result request catch-up and overdue proposal alerts.
+- Added cross-chain offer list enforcement and the pure DEX offer list rules behind an unarmed gate.
+- Added remote token snapshot publication and attested remote token consensus matches.
+- Added chain-specific admission margins that stamp admission heights with the hub network.
+- Published landed rows from the clear frontier behind a hub activation.
+- Added a freshness-gated pushed BTC tip reader so oracle rounds route through fresh BTC tips.
+
+### Changed
+- Locked the reorg quorum to federation snapshots and made self-dial exclusion identity-safe.
+- Converged held mirror rows to the lowest-ranked valid signer set and emitted a canonical finalized signer set.
+- Single-flighted hub database catch-up walks and backed off with jitter after an indexer rate limit.
+- Armed ANCHOR_EMPTY_FOLD_REJECT_ACTIVATION on BTC:testnet at 156230.
+- Armed ANCHOR_EMPTY_FOLD_REJECT_ACTIVATION on LTC:testnet at 4912984.
+- Armed ANCHOR_EMPTY_FOLD_REJECT_ACTIVATION on DOGE:testnet at 67989993.
+- Armed COOLDOWN_MATURITY_ESCROW_REVERSAL_ACTIVATION on BTC:testnet at 156230.
+- Armed COOLDOWN_MATURITY_ESCROW_REVERSAL_ACTIVATION on LTC:testnet at 4912984.
+- Armed COOLDOWN_MATURITY_ESCROW_REVERSAL_ACTIVATION on DOGE:testnet at 67989993.
+- Armed DISPENSER_REFILL_POLICY_ACTIVATION on BTC:testnet at 156230.
+- Armed DISPENSER_REFILL_POLICY_ACTIVATION on LTC:testnet at 4912984.
+- Armed DISPENSER_REFILL_POLICY_ACTIVATION on DOGE:testnet at 67989993.
+- Armed ATTEST_RELAY_RESPONSE_DEADLINE_ACTIVATION on BTC:testnet at 1791804379.
+- Armed ATTEST_RELAY_RESPONSE_DEADLINE_ACTIVATION on LTC:testnet at 1791804379.
+- Armed ATTEST_RELAY_RESPONSE_DEADLINE_ACTIVATION on DOGE:testnet at 1791804379.
+- Armed BRIDGE_ROW_FIELDS_TERMINAL_ACTIVATION on BTC:testnet at 156230.
+- Armed BRIDGE_ROW_FIELDS_TERMINAL_ACTIVATION on LTC:testnet at 4912984.
+- Armed BRIDGE_ROW_FIELDS_TERMINAL_ACTIVATION on DOGE:testnet at 67989993.
+- Armed ADMIT_CHAIN_MARGIN_ACTIVATION on DOGE:testnet at 67989993.
+- Armed ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION on BTC:testnet at 156230.
+- Armed ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION on LTC:testnet at 4912984.
+- Armed ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION on DOGE:testnet at 67989993.
+- Armed GOV_TALLY_FAILOVER_ACTIVATION on testnet at 156230.
+- Armed BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION on BTC:testnet at 156230.
+- Armed BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION on LTC:testnet at 4912984.
+- Armed BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION on DOGE:testnet at 67989993.
+- Armed LANDING_CLEAR_FRONTIER_ACTIVATION on BTC:testnet at 156230.
+- Armed LANDING_CLEAR_FRONTIER_ACTIVATION on LTC:testnet at 4912984.
+- Armed LANDING_CLEAR_FRONTIER_ACTIVATION on DOGE:testnet at 67989993.
+- Armed REORG_SNAPSHOT_ACTIVATION on testnet at 156230.
+- Armed CROSS_CHAIN_OFFER_LIST_ENFORCEMENT on BTC:testnet at 156230.
+- Armed CROSS_CHAIN_OFFER_LIST_ENFORCEMENT on LTC:testnet at 4912984.
+- Armed CROSS_CHAIN_OFFER_LIST_ENFORCEMENT on DOGE:testnet at 67989993.
+- Armed FEDERATED_HUB_ACTIVATION on BTC:testnet at 156230.
+- Armed FEDERATED_HUB_ACTIVATION on LTC:testnet at 4912984.
+- Armed FEDERATED_HUB_ACTIVATION on DOGE:testnet at 67989993.
+
+### Fixed
+- Bound drained reward txids to their tuple and failed closed when the binding evidence is absent.
+- Repaired direct batch proposal gaps from answering peers and required complete batch windows before signing.
+- Stopped relayed gossip from recording feed URLs and a standalone hub from counting itself as a peer.
+
 ## [0.22.7] - 2026-10-06
 
 ### Fixed

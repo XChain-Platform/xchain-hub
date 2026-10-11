@@ -23,10 +23,17 @@ function engine({ quorum = 0, peers = [], validatorSet = [], network = 'regtest'
 }
 
 function registerGateTests() {
-    it('is armed on regtest only', () => {
-        expect(registry.get(KEY)).to.deep.equal({
-            mainnet: registry.UNARMED, testnet: registry.UNARMED, regtest: 0,
-        });
+    // The testnet height is read off the registry, so a re-slide of the cut
+    // height needs no edit here.
+    it('is armed on regtest from genesis and on testnet at its cut height', () => {
+        const row = registry.get(KEY);
+        expect(row.mainnet).to.equal(registry.UNARMED);
+        expect(row.regtest).to.equal(0);
+        expect(Number.isSafeInteger(row.testnet) && row.testnet > 1 && row.testnet < registry.UNARMED).to.equal(true);
+        expect(isFederatedHubActive('testnet', 1)).to.equal(false);
+        expect(isFederatedHubActive('testnet', row.testnet - 1)).to.equal(false);
+        expect(isFederatedHubActive('testnet', row.testnet)).to.equal(true);
+        expect(isFederatedHubActive('testnet', row.testnet + 1)).to.equal(true);
     });
 
     it('reads active from the anchor height, not from wall clock', () => {
