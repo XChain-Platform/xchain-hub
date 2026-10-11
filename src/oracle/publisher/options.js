@@ -204,6 +204,11 @@ module.exports = {
         // windowIndex -> ms timestamp of this hub's OWN ambiguous send for that window
         // (the dead-letter branch in processQueue). Insertion-ordered and bounded.
         this._ambiguousWindows = new Map();
+        // windowIndex -> ms timestamp of the FIRST takeover of that window that passed
+        // the election but has not yet reached enqueueWindowWires (missed quorum, a
+        // coverage hole, no signer). Cleared when the wires enqueue or the window is
+        // seen on chain. Insertion-ordered and bounded, like _ambiguousWindows.
+        this._takeoverUnlanded = new Map();
     },
 
     initChainingState(cfg) {
