@@ -14,6 +14,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const ReorgHandler = require('../../../../src/anchor/reorg_handler');
 const gateRegistry = require('../../../../src/consensus/gate_registry.js');
+const snapshotLock = require('../../../../src/anchor/reorg_handler/snapshot_lock.js');
 const { createMockHub } = require('../../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7 } = require('../../../helpers/fixtures');
 
@@ -51,16 +52,31 @@ function clearRounds(handler) {
     }
 }
 
-function registerSnapshotFormationTests() {
+// The testnet height is read off the registry, so a re-slide of the cut height
+// needs no edit here.
+function registerActivationTests() {
     it('reads its activation from the hub gate registry', function () {
         const key = 'anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION';
-        expect(gateRegistry.get(key)).to.deep.equal({
-            mainnet: gateRegistry.UNARMED,
-            testnet: gateRegistry.UNARMED,
-            regtest: 0
-        });
+        const row = gateRegistry.get(key);
+        expect(row.mainnet).to.equal(gateRegistry.UNARMED);
+        expect(row.regtest).to.equal(0);
+        expect(Number.isSafeInteger(row.testnet) && row.testnet > 1 && row.testnet < gateRegistry.UNARMED).to.equal(true);
+        expect(snapshotLock.REORG_SNAPSHOT_ACTIVATION).to.deep.equal(row);
     });
 
+    it('is active on testnet from its armed height and inactive at height 1', function () {
+        const armed = snapshotLock.REORG_SNAPSHOT_ACTIVATION.testnet;
+        expect(snapshotLock.isReorgSnapshotRatified('testnet')).to.equal(true);
+        expect(snapshotLock.isReorgSnapshotActive(1, 'testnet')).to.equal(false);
+        expect(snapshotLock.isReorgSnapshotActive(armed - 1, 'testnet')).to.equal(false);
+        expect(snapshotLock.isReorgSnapshotActive(armed, 'testnet')).to.equal(true);
+        expect(snapshotLock.isReorgSnapshotActive(armed + 1, 'testnet')).to.equal(true);
+        expect(snapshotLock.isReorgSnapshotRatified('mainnet')).to.equal(false);
+        expect(snapshotLock.isReorgSnapshotActive(armed, 'mainnet')).to.equal(false);
+    });
+}
+
+function registerSnapshotFormationTests() {
     it('locks different live validator lists to one stamped federation quorum', async function () {
         const left = snapshotHub(VALIDATORS_4[0], VALIDATORS_4);
         const right = snapshotHub(VALIDATORS_4[1], VALIDATORS_4);
@@ -148,6 +164,7 @@ describe('reorg snapshot lock', function () {
         sinon.restore();
     });
 
+    registerActivationTests();
     registerSnapshotFormationTests();
     registerPrepareVoteTests();
 });
