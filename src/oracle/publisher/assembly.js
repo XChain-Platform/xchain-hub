@@ -130,8 +130,13 @@ module.exports = {
             if (pruned === 0) this.scheduleTakeover(windowIndex, myRank, leaderRank, pubkeys.length);
             return null;
         }
-        if (takeover) this.takeoverAttempts++;
-        else this._leaderRounds++;
+        if (takeover) {
+            this.takeoverAttempts++;
+            // Passed the election; stays counted as unlanded until enqueueWindowWires.
+            this.noteTakeoverUnlanded(windowIndex);
+        } else {
+            this._leaderRounds++;
+        }
         return { myRank: myRank, leaderRank: leaderRank, publisherCount: pubkeys.length };
     },
 
@@ -160,6 +165,7 @@ module.exports = {
     // makes the window survive a crash between signing and broadcast.
     async enqueueWindowWires(windowIndex, first, last, wires, election, takeover) {
         if (takeover) {
+            this._takeoverUnlanded.delete(windowIndex);
             this.takeoverPublished++;
             logger.warn('OraclePublisher: TAKING OVER window [' + first + ',' + last + '] from its ' +
                 'silent leader (rank ' + election.leaderRank + '); this hub is rank ' + election.myRank +

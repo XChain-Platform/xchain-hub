@@ -93,6 +93,7 @@ async function followerOf(opts) {
                 for (let r = 0; r < 12; r++) snapshots.push({ round_number: r, status: 'finalized' });
                 let h = makePublisher({
                     publishers: [ME, PEER1, PEER2],
+                    signerOpts: opts.signerOpts,
                     db:  makeDb({ snapshots: snapshots }),
                     cfg: Object.assign({ ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS: '2' }, opts.cfg || {})
                 });
@@ -125,6 +126,9 @@ const testCase6 = async function () {
                 expect(h.broadcasts).to.have.length(1);
                 expect(h.p.getStats().takeoverPublished).to.equal(1);
                 expect(h.p.getStats().takeoverDeclinedUnproven).to.equal(0);
+                // It reached enqueueWindowWires, so nothing is left unlanded.
+                expect(h.p.getStats().takeoverUnlandedWindows).to.equal(0);
+                expect(h.p.getStats().takeoverOldestUnlandedWindow).to.equal(null);
                 // The wire is a batch over window 1's rounds, exactly what the leader
                 // would have sent: same rounds, same canonical shape.
                 let entry = readJsonl(h.queuePath).concat(h.broadcasts);
@@ -309,6 +313,33 @@ function registerSuite3() {
     it('never CONSTRUCTS a signer just to answer the ambiguity question', testCase19);
 }
 
+// A takeover that passes the election and then misses quorum produces no wire.
+const testCase22 = async function () {
+                let h = await followerOf({ landed: 99, signerOpts: { met: false } });
+                await h.p.assembleWindow(1);
+                expect(await h.p.attemptTakeover(1)).to.equal(true);
+                expect(h.broadcasts).to.have.length(0);
+                let s = h.p.getStats();
+                expect(s.takeoverAttempts).to.equal(1);
+                expect(s.takeoverPublished).to.equal(0);
+                expect(s.takeoverUnlandedWindows).to.equal(1);
+                expect(s.takeoverOldestUnlandedWindow).to.equal(1);
+                await h.p.attemptTakeover(1);   // same window again, not a second one
+                s = h.p.getStats();
+                expect([s.takeoverAttempts, s.takeoverUnlandedWindows]).to.deep.equal([2, 1]);
+            };
+
+const testCase23 = async function () {
+                let h = await followerOf({ landed: 99, signerOpts: { met: false } });
+                await h.p.assembleWindow(1);
+                await h.p.attemptTakeover(1);
+                expect(h.p.getStats().takeoverUnlandedWindows).to.equal(1);
+                // The leader's batch landed after all: the takeover is no longer owed.
+                h.p.noteBatchLanded(6, 11);
+                let s = h.p.getStats();
+                expect([s.takeoverUnlandedWindows, s.takeoverOldestUnlandedWindow]).to.deep.equal([0, null]);
+            };
+
 const testCase20 = async function () {
                 let h = await followerOf({ landed: 99 });
                 await h.p.assembleWindow(1);
@@ -327,6 +358,8 @@ function registerSuite2() {
     it('never schedules a takeover of its OWN window', testCase10);
     describe('the ambiguous-send cooldown', registerSuite3);
     it('stop() clears pending takeover timers', testCase20);
+    it('counts a takeover that passed the election but never reached the queue as unlanded', testCase22);
+    it('drops an unlanded takeover once its window lands on chain', testCase23);
 }
 
 const testCase21 = async function () {
