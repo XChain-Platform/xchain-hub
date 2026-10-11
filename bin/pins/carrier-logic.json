@@ -27,7 +27,7 @@
     },
     "consensus_rules_digest": {
       "path": "src/consensus_rules_digest.js",
-      "hash": "2847f3f69ac4280baa67d70562c63f210cc6c3d27b1713bf92cbfb4601994c91",
+      "hash": "4de1110b4bcdcc39f62664dfa843501536fec6065a585eeda60825dab1d26245",
       "twins": [
         "xchain-indexer"
       ],
@@ -785,6 +785,13 @@
       "to": "2847f3f69ac4280baa67d70562c63f210cc6c3d27b1713bf92cbfb4601994c91",
       "reason": "add chain-specific mirror admission margin rows",
       "date": "2026-10-09"
+    },
+    {
+      "id": "consensus_rules_digest",
+      "from": "2847f3f69ac4280baa67d70562c63f210cc6c3d27b1713bf92cbfb4601994c91",
+      "to": "4de1110b4bcdcc39f62664dfa843501536fec6065a585eeda60825dab1d26245",
+      "reason": "admit only unit-bearing registry rows into the active gate set",
+      "date": "2026-10-11"
     }
   ]
 }
