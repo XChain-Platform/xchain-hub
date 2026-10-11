@@ -29,9 +29,6 @@ const logger = getLogger();
 // Bound on the ambiguous-send memo. Each entry only has to outlive one
 // takeoverAmbiguousCooldownMs, so this is generous by orders of magnitude.
 const AMBIGUOUS_WINDOW_MEMO_MAX = 256;
-// Bound on the unlanded-takeover memo. An entry outlives its window only while the
-// window keeps failing to assemble, so this caps a status field, not correctness.
-const TAKEOVER_UNLANDED_MEMO_MAX = 256;
 
 module.exports = {
 
@@ -188,12 +185,12 @@ module.exports = {
     // Remember that a takeover of this window passed the election, so getStats can
     // report one that then stalled before enqueueWindowWires. The FIRST pass is kept:
     // a re-attempt of a window that keeps failing must not make it look fresh.
+    // Deliberately uncapped: evicting an entry would undercount takeoverUnlandedWindows
+    // and could hide the very window takeoverOldestUnlandedWindow exists to name. Entries
+    // leave on enqueueWindowWires, when the window lands or is seen on chain, and on stop().
     noteTakeoverUnlanded(windowIndex) {
         if (!Number.isFinite(windowIndex) || this._takeoverUnlanded.has(windowIndex)) return;
         this._takeoverUnlanded.set(windowIndex, Date.now());
-        while (this._takeoverUnlanded.size > TAKEOVER_UNLANDED_MEMO_MAX) {
-            this._takeoverUnlanded.delete(this._takeoverUnlanded.keys().next().value);
-        }
     },
 
     // The window whose unlanded takeover passed the election longest ago, or null.

@@ -87,6 +87,13 @@ const testCase4 = function () {
             h.p.stop();
             expect(h.p.getStats().takeoverUnlandedWindows).to.equal(0);
             expect(h.p.getStats().takeoverOldestUnlandedWindow).to.equal(null);
+            // No cap: well past any memo bound, every window is counted and the
+            // first one to stall is still the one reported as oldest.
+            for (let w = 1000; w < 1600; w++) h.p.noteTakeoverUnlanded(w);
+            s = h.p.getStats();
+            expect(s.takeoverUnlandedWindows).to.equal(600);
+            expect(s.takeoverOldestUnlandedWindow).to.equal(1000);
+            h.p.stop();
         };
 
 function registerSuite1() {

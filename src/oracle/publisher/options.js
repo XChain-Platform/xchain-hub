@@ -205,7 +205,8 @@ module.exports = {
         // (the dead-letter branch in processQueue). Insertion-ordered and bounded.
         this._ambiguousWindows = new Map();
         // windowIndex -> ms of the first takeover past the election that has not reached
-        // enqueueWindowWires. Cleared on enqueue or when the window lands; bounded.
+        // enqueueWindowWires. Cleared on enqueue, when the window lands, or on stop();
+        // uncapped so the takeoverUnlanded* stats stay exact.
         this._takeoverUnlanded = new Map();
     },
 
