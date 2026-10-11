@@ -30,7 +30,13 @@ const INDEXER_ROOTS = process.env.XCHAIN_INDEXER_DIR
 const INDEXER_SYNC_PATH = INDEXER_ROOTS
     .map(root => path.join(root, 'src', 'hub', 'hub_db_sync.js'))
     .find(candidate => siblingCheckout(__dirname, candidate).usable);
-const HubDbSync = INDEXER_SYNC_PATH ? require(INDEXER_SYNC_PATH) : null;
+// An indexer cloned without its node_modules cannot load; that skips the
+// mirror cases below instead of aborting the whole mocha run.
+let indexerLoadError = null;
+const HubDbSync = (() => {
+    if (!INDEXER_SYNC_PATH) return null;
+    try { return require(INDEXER_SYNC_PATH); } catch (err) { indexerLoadError = err; return null; }
+})();
 const WebSocketServer = ws.WebSocketServer || ws.Server;
 
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', {
@@ -93,7 +99,9 @@ async function closeServer(server) {
 function requireIndexer(context) {
     if (HubDbSync) return;
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_ROOTS.join(', '));
+        throw new Error(indexerLoadError
+            ? 'XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror failed to load: ' + indexerLoadError.message
+            : 'XCHAIN_REQUIRE_SIBLINGS=1 but the indexer mirror is missing at ' + INDEXER_ROOTS.join(', '));
     context.skip();
 }
 
