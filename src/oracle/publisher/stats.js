@@ -105,11 +105,8 @@ module.exports = {
             // Nonzero means a leader went silent and this hub declined to cover it on a deaf
             // feed (takeoverArmed alone cannot tell that from failover never being needed).
             takeoverDeclinedUnproven:     this.takeoverDeclinedUnproven,
-            // Takeovers that passed the election but never reached enqueueWindowWires
-            // (missed quorum, a coverage hole, no signer). takeoverAttempts minus
-            // takeoverPublished cannot say this: it also counts re-attempts of one
-            // window. A window index that stays put across polls is a takeover wedged
-            // before the queue, which nothing on chain will ever show.
+            // Takeovers past the election that never reached enqueueWindowWires. An oldest
+            // window that stays put across polls is a takeover wedged before the queue.
             takeoverUnlandedWindows:      this._takeoverUnlanded.size,
             takeoverOldestUnlandedWindow: this.oldestUnlandedTakeoverWindow(),
             takeoverAmbiguousCooldownMs:  this.takeoverAmbiguousCooldownMs
