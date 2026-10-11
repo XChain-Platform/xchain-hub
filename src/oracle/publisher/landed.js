@@ -74,6 +74,7 @@ module.exports = {
             this._windows.delete(w);
             let takeover = this._takeoverTimers.get(w);
             if (takeover) { clearTimeout(takeover); this._takeoverTimers.delete(w); }
+            this._takeoverUnlanded.delete(w);
         }
         if (pruned > 0) {
             this.landedBatchPrunedRounds += pruned;
