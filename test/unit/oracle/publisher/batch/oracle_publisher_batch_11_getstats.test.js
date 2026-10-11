@@ -70,10 +70,30 @@ const testCase3 = function () {
             expect(h.p._ownedBatchSigner).to.equal(null);
         };
 
+const testCase4 = function () {
+            let h = makePublisher({ publishers: [ME, PEER1, PEER2] });
+            let s = h.p.getStats();
+            expect(s.takeoverUnlandedWindows).to.equal(0);
+            expect(s.takeoverOldestUnlandedWindow).to.equal(null);
+
+            h.p.noteTakeoverUnlanded(5);
+            h.p.noteTakeoverUnlanded(3);
+            // Re-noting keeps the FIRST pass, so a window that keeps failing stays oldest.
+            h.p.noteTakeoverUnlanded(5);
+            s = h.p.getStats();
+            expect(s.takeoverUnlandedWindows).to.equal(2);
+            expect(s.takeoverOldestUnlandedWindow).to.equal(5);
+
+            h.p.stop();
+            expect(h.p.getStats().takeoverUnlandedWindows).to.equal(0);
+            expect(h.p.getStats().takeoverOldestUnlandedWindow).to.equal(null);
+        };
+
 function registerSuite1() {
     it('carries the five batch fields and keeps lastPublishedRound on the LAST round of the wire', testCase1);
     it('counts a split window ONCE in batchWindowsPublished', testCase2).timeout(30000);
     it('reports zero sign timeouts without constructing a signer', testCase3);
+    it('reports takeoverUnlandedWindows and takeoverOldestUnlandedWindow', testCase4);
 }
 
 function registerOuterSuite11() {

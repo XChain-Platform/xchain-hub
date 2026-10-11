@@ -29,6 +29,9 @@ const logger = getLogger();
 // Bound on the ambiguous-send memo. Each entry only has to outlive one
 // takeoverAmbiguousCooldownMs, so this is generous by orders of magnitude.
 const AMBIGUOUS_WINDOW_MEMO_MAX = 256;
+// Bound on the unlanded-takeover memo. An entry outlives its window only while the
+// window keeps failing to assemble, so this caps a status field, not correctness.
+const TAKEOVER_UNLANDED_MEMO_MAX = 256;
 
 module.exports = {
 
@@ -63,9 +66,13 @@ module.exports = {
         let first = windowIndex * this.batchWindowRounds;
         let last  = first + this.batchWindowRounds - 1;
 
-        // 1. The leader published after all. Nothing to do; prune our copy.
-        if (await this.pruneObservedWindow(first, last) > 0) return false;
-        if (await this.windowObservedOnChain(first, last)) return false;
+        // 1. The leader published after all. Nothing to do; prune our copy, and a
+        // takeover of ours that never reached the queue is no longer owed.
+        if (await this.pruneObservedWindow(first, last) > 0 ||
+            await this.windowObservedOnChain(first, last)) {
+            this._takeoverUnlanded.delete(windowIndex);
+            return false;
+        }
 
         // 2. FAIL CLOSED when this hub has never observed ANY batch on chain. The
         // observation feed is the indexer pushing landed PRICE actions back to this
@@ -176,6 +183,26 @@ module.exports = {
         while (this._ambiguousWindows.size > AMBIGUOUS_WINDOW_MEMO_MAX) {
             this._ambiguousWindows.delete(this._ambiguousWindows.keys().next().value);
         }
+    },
+
+    // Remember that a takeover of this window passed the election, so getStats can
+    // report one that then stalled before enqueueWindowWires. The FIRST pass is kept:
+    // a re-attempt of a window that keeps failing must not make it look fresh.
+    noteTakeoverUnlanded(windowIndex) {
+        if (!Number.isFinite(windowIndex) || this._takeoverUnlanded.has(windowIndex)) return;
+        this._takeoverUnlanded.set(windowIndex, Date.now());
+        while (this._takeoverUnlanded.size > TAKEOVER_UNLANDED_MEMO_MAX) {
+            this._takeoverUnlanded.delete(this._takeoverUnlanded.keys().next().value);
+        }
+    },
+
+    // The window whose unlanded takeover passed the election longest ago, or null.
+    oldestUnlandedTakeoverWindow() {
+        let oldest = null, oldestAt = Infinity;
+        for (let [w, at] of this._takeoverUnlanded) {
+            if (at < oldestAt) { oldest = w; oldestAt = at; }
+        }
+        return oldest;
     },
 
     // Put the deferred takeover back on the clock. Deliberately not scheduleTakeover:
