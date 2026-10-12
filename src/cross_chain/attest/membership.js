@@ -25,6 +25,7 @@ const hubConfig = require('../../config');
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { isAdmissibleSigner, provenPubkey } = require('../../lib/chain_signer_admission.js');
+const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('../../consensus/federation.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -174,7 +175,9 @@ module.exports = {
             : null;
         if (snapshot) return this.hub.capabilitySnapshot.getQuorum(snapshot);
         let live = this.getQuorum(sourceChain, destChain);
-        if (live > 0) {
+        let federated = live > 0 || (isFederatedHubActive(this.hub.network, btcBlockHeight) &&
+            isFederatedHub(liveFederationSignals(this)));
+        if (federated) {
             throw new Error('CrossChain: refusing to resolve quorum without a deterministic ' +
                 'cross_chain snapshot while federated (block ' + btcBlockHeight + '); the indexer ' +
                 'capability snapshot is unavailable and falling back to the local validator set ' +

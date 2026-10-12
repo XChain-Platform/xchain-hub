@@ -23,7 +23,7 @@
 
 'use strict';
 
-const { ENCODER_MAX_UTXO_COUNT } = require('../../lib/encoder_utxo_forward.js');
+const { ENCODER_MAX_UTXO_COUNT } = require('../../lib/encoder/encoder_utxo_forward.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();

@@ -1399,6 +1399,7 @@ describe('llm provider, judge fallback chain', function () { this.timeout(20000)
     registerJudgeChainUnreachableTests(PROPOSALS);
     registerSpentBudgetSuite(PROPOSALS);
     registerJudgeChainOutcomeTests(PROPOSALS);
+    registerThinkingClaudeJudgeBudgetTests(PROPOSALS);
     registerJudgeChainTruncationTests(PROPOSALS);
     registerJudgeChainHardErrorTests(PROPOSALS);
     registerJudgeChainBudgetTests(PROPOSALS);
@@ -1555,6 +1556,32 @@ function registerJudgeChainOutcomeTests(PROPOSALS) {
             const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini' });
             expect(winner).to.exist;
             expect(seenBudget).to.equal(2048);
+        });
+    });
+}
+
+function registerThinkingClaudeJudgeBudgetTests(PROPOSALS) {
+    // A Claude judge that thinks by default spends thinking tokens out of max_tokens,
+    // so at the 256 chat budget it stops at max_tokens with no text block and the
+    // round ends judge_truncation. It gets the same reasoning budget fetch() grants it.
+    it('sends the reasoning judge budget, and no temperature, for a thinking Claude judge', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            let seenBudget, seenTemperature;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => {
+                    seenBudget = body.max_tokens; seenTemperature = body.temperature;
+                    return body.model === 'claude-sonnet-5';
+                })
+                .reply(200, () => seenBudget > 256
+                    ? { content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"equivalent": true, "canonical_index": 1}' }],
+                        stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }
+                    : { content: [{ type: 'thinking', thinking: '' }],
+                        stop_reason: 'max_tokens', usage: { input_tokens: 1, output_tokens: 256 } });
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-sonnet-5' });
+            expect(winner).to.exist;
+            expect(seenBudget).to.equal(2048);
+            expect(seenTemperature).to.equal(undefined);
         });
     });
 }

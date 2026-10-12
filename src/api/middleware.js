@@ -28,7 +28,11 @@ const { buildRateLimitOptions, isSnapshotRequest, parseSnapshotRpm,
 const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
 const FixedWindowStore = require('./rate_limit_store.js');
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hub_metrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
+const {
+    installHubOracleMetrics,
+    installHubStakeShareMetrics,
+    installHubGovernanceOverdueMetrics
+} = require('./hub_metrics');
 const { authGate, feedPortAllowlist } = require('./auth_gate');
 
 // Returns the observability handle, whose shutdown() the signal handler flushes.
@@ -173,6 +177,9 @@ function installMetrics(app, ctx) {
     // because a federation drifting toward the two-thirds gate finalizes perfectly
     // normal rounds right up to the staker that ends them.
     installHubStakeShareMetrics(observability, hub);
+
+    // Governance state starts later, so the collector resolves it at scrape time.
+    installHubGovernanceOverdueMetrics(observability, hub);
     return observability;
 }
 

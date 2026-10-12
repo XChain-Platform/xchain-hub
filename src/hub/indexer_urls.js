@@ -20,6 +20,7 @@
  ********************************************************************/
 
 const { axiosFor } = require('./indexer_http.js');
+const coins = require('../coins');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -152,8 +153,9 @@ class IndexerUrls {
         let configs;
         try { configs = await this.db.getAllConfigs(); }
         catch (err) { logger.error(nodeUtil.format('XChainHub: failed to resolve ' + coin + ' indexer URL from configs:', err)); return null; }
-        const COIN_CONFIG_KEY = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
-        let cc = configs && configs[COIN_CONFIG_KEY[coin] || coin.toLowerCase()];
+        // Key the configs tree by the coin registry's full name, the same key the configs
+        // writer stores under, so a chain added to the registry resolves with no edit here.
+        let cc = configs && configs[coins.COIN_FULL_NAME[coin] || coin.toLowerCase()];
         if(!cc) return null;
         // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
         let urlFor = (netConfig) => {

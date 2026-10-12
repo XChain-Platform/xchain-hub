@@ -7,7 +7,7 @@
  *
  **********************************************************************
  *
- * Unit tests: src/lib/two_phase_guard.js
+ * Unit tests: src/lib/guards/two_phase_guard.js
  *
  * The built-in defaultBroadcast pipelines do one create_tx, one walletSign and
  * one broadcastTx. On the encoder's P2SH/P2WSH lane that answer is the FUNDING
@@ -30,7 +30,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { assertSingleTxEncoding } = require('../../../../src/lib/two_phase_guard.js');
+const { assertSingleTxEncoding } = require('../../../../src/lib/guards/two_phase_guard.js');
 
 // Every pipeline that builds a PSBT itself and hands it to the wallet hook.
 const CALL_SITES = [
@@ -108,7 +108,7 @@ function registerAcceptedEncodingTests() {
         for (const rel of CALL_SITES) {
             const src = fs.readFileSync(path.resolve(__dirname, '../../../../', rel), 'utf8');
             // A pipeline inside a feature directory reaches the guard through '../lib/'.
-            assert.ok(/require\(['"]\.\.?\/lib\/two_phase_guard\.js['"]\)/.test(src),
+            assert.ok(/require\(['"]\.\.?\/lib\/guards\/two_phase_guard\.js['"]\)/.test(src),
                 rel + ' does not require the shared two-phase guard');
             const guardAt = src.indexOf('assertSingleTxEncoding(');
             // The AWAITED call, not a comment or a hook-setter mention of the name.

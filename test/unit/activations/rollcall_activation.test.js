@@ -45,6 +45,7 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
 const local = require('../../../src/consensus/gates/rollcall_gate.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 // Sibling resolution, same convention as price_pair_activation.test.js: an
 // explicit env path for CI (actions/checkout cannot write above the workspace),
 // falling back to the dev sibling layout. Absent -> skip, unless CI demands it.
@@ -330,11 +331,7 @@ function loadWithEnv(value){
         }
         function parityWithTheXchainIndexerTwinSuite34() {
             before(function () {
-                if (!fs.existsSync(TWIN_PATH)) {
-                    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
-                    this.skip();
-                }
+                skipOrFail(this, siblingCheckout(__dirname, TWIN_PATH), 'the indexer twin guard');
             });
             it('is byte-identical to xchain-indexer/src/consensus/gates/rollcall_gate.js', isByteIdenticalToXchainIndexerTest35);
             it('agrees with the twin on every consensus value', agreesWithTheTwinOnEveryTest36);

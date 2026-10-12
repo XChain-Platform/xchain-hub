@@ -187,6 +187,9 @@ function persistCounterFields() {
         // only to whoever is tailing the hub log.
         submissionsPruneFailures:          this.submissionsPruneFailures,
         lastSubmissionsPruneFailureRound:  this.lastSubmissionsPruneFailureRound,
+        // Stake-feed lookup faults on the unregistered-peer audit path, count-only.
+        stakeWeightLookupFailures:         this.stakeWeightLookupFailures,
+        lastStakeWeightLookupFailureRound: this.lastStakeWeightLookupFailureRound,
         consecutiveSkippedRounds: this.consecutiveSkippedRounds
     };
 }

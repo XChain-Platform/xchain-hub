@@ -292,13 +292,16 @@ function testRapidViewIncrementsProduceValidLeaders() {
     expect(leader).to.equal(VALIDATORS_4[1]);
 }
 function testVIEWCHANGEBelowQuorumDoesNotAdvanceView() {
-    // N=4, quorum=3. Send only 2 VIEW_CHANGE votes
+    // N=4, quorum=3, from the round context a federated hub tallies against. Send only 2 votes
+    consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
     consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
     consensus.handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
     // Need 3 votes, only have 2 → view unchanged
     expect(consensus.view).to.equal(0);
 }
 function testVIEWCHANGEAtQuorumAdvancesView() {
+    // Round context for seq 5: a federated hub without one declines to tally at all.
+    consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: false, validators: [], memberPubkeys: null });
     consensus.handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
     consensus.handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: 5 } });
     consensus.handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });

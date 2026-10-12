@@ -82,6 +82,11 @@ function counters() {
                 name: 'xchain_crashes_total',
                 help: 'Uncaught exceptions and unhandled rejections',
                 labelNames: ['kind']
+            }),
+            restampFailures: registry.counter({
+                name: 'xchain_pbft_restamp_failures_total',
+                help: 'View-change effective_time restamps that read no usable margin, by reason',
+                labelNames: ['reason']
             })
         };
     }
@@ -243,6 +248,39 @@ function noteCheckpointStalled({ chains, block, reason, stalls } = {}) {
     } catch { return null; }
 }
 
+// Every way a view-change restamp can fail to read a margin. Closed for the same
+// reason as DROP_REASONS: the label set stays bounded whatever the error says.
+const RESTAMP_FAILURE_REASONS = new Set([
+    'threw',      // effectiveTimeMarginS threw synchronously
+    'rejected',   // its promise rejected
+    'missing',    // it answered null or undefined (no policy pair for the row)
+    'invalid'     // it answered a non-finite or non-positive margin
+]);
+
+/**
+ * Record a rotated leader that could not restamp a stale effective_time, and so
+ * holds its re-proposal for the round timer instead of sending a row every
+ * follower's RELAY_MIN_FUTURE_S floor refuses.
+ *
+ * @param {object} d
+ * @param {string} d.reason   one of RESTAMP_FAILURE_REASONS
+ * @param {string} [d.round]  the round's match id, a log field only
+ * @param {number} [d.view]   the view the leader assumed, a log field only
+ * @param {string} [d.cause]  the error text, a log field only
+ */
+function noteRestampFailed({ reason, round, view, cause } = {}) {
+    const safeReason = RESTAMP_FAILURE_REASONS.has(reason) ? reason : 'unknown_reason';
+    try { counters().restampFailures.inc({ reason: safeReason }, 1); }
+    catch { /* a diagnostic must never be the thing that breaks failover */ }
+    try {
+        const fields = { reason: safeReason };
+        if (round !== undefined && round !== null) fields.round = round;
+        if (view !== undefined && view !== null) fields.view = view;
+        if (cause) fields.cause = cause;
+        return getLogger().warn('PBFT_RESTAMP_FAILED', fields);
+    } catch { return null; }
+}
+
 /** Record a clean shutdown, so a restart can be told from a crash. */
 function noteShutdown(signal) {
     try { return getLogger().warn('SHUTDOWN', { signal: signal || 'unknown' }); }
@@ -256,8 +294,9 @@ function resetDiagnostics() {
 }
 
 module.exports = {
-    noteDrop, noteRoundLost, notePeerReject, noteShutdown, noteCheckpointStalled, installCrashHandlers,
+    noteDrop, noteRoundLost, notePeerReject, noteShutdown, noteCheckpointStalled, noteRestampFailed,
+    installCrashHandlers,
     stampRemoteIp, remoteIpOf, REMOTE_IP,
-    DROP_REASONS, DEDUPE_MAX_KEYS, DEDUPE_WINDOW_MS,
+    DROP_REASONS, RESTAMP_FAILURE_REASONS, DEDUPE_MAX_KEYS, DEDUPE_WINDOW_MS,
     resetDiagnostics
 };

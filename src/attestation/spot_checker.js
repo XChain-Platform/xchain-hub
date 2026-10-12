@@ -82,7 +82,9 @@ const DEFAULT_STATS_RETENTION_MS  = 90 * 24 * 60 * 60 * 1000;
 
 // Cadence and give-up age for the re-judge sweep; the queue they bound, and the
 // reasons worth retrying, live in spot_checker/judge.js.
-const DEFAULT_REJUDGE_MAX_AGE_MS = 30 * 60 * 1000;       // 30m, then give up and drop
+// Keep the give-up age above the LLM spend window (1h default) plus one sweep, or a
+// budget_exhausted hold is dropped before the window can roll and free the judge.
+const DEFAULT_REJUDGE_MAX_AGE_MS = 2 * 60 * 60 * 1000;   // 2h, then give up and drop
 const DEFAULT_REJUDGE_SWEEP_MS   = 5 * 60 * 1000;        // 5m between re-judge passes
 
 class AttestationSpotChecker {
@@ -117,7 +119,7 @@ class AttestationSpotChecker {
 
         // Spot-checks whose judge was unavailable, held for re-judging.
         // Map<requestIdLower, { providerId, expectedPattern, publishedBody, meta,
-        //                       signatures, blockIndex, attempts, firstSeen }>
+        //                       signatures, blockIndex, attempts, firstSeen, lastReason }>
         this._pendingReJudge = new Map();
         this.rejudgeSweepMs  = parseInt(cfg.SPOT_CHECK_REJUDGE_SWEEP_MS)  || DEFAULT_REJUDGE_SWEEP_MS;
         this.rejudgeMaxAgeMs = parseInt(cfg.SPOT_CHECK_REJUDGE_MAX_AGE_MS) || DEFAULT_REJUDGE_MAX_AGE_MS;

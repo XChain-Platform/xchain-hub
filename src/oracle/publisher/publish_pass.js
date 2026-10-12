@@ -145,15 +145,16 @@ module.exports = {
     // pass actually resolved (published, dead-lettered, or dropped as already-sent),
     // and carry everything else through untouched.
     // Built as `remaining` PLUS the mid-pass arrivals, never as a filter over the
-    // fresh read alone: readQueue swallows a read failure as an empty list, and a
-    // rebuild derived only from it would then truncate the queue and lose every
-    // round this pass meant to retry. This shape is never worse than the old blind
-    // rewrite, only strictly more inclusive.
+    // fresh read alone. A fresh read that FAILS skips the rewrite outright, since a
+    // rebuild without it would erase every mid-pass arrival, and a line that does not
+    // parse is quarantined to the dead-letter file rather than silently dropped.
     rebuildQueueAfterPass(entries, remaining) {
+        let fresh = this.readQueueState();
+        if (fresh === null) return this.refuseUnreadRebuild();
         let seen     = new Set(remaining.map(e => e.round));
         let resolved = new Set(entries.map(e => e.round).filter(r => !seen.has(r)));
         let rebuilt  = remaining.slice();
-        for (let e of this.readQueue()) {
+        for (let e of fresh.entries) {
             if (resolved.has(e.round) || seen.has(e.round)) continue;
             seen.add(e.round);
             rebuilt.push(e);
@@ -166,7 +167,7 @@ module.exports = {
         // published rounds remain on the queue file: keep the guard armed (it prevents
         // the re-broadcast) and surface the failure so an operator repairs the queue
         // before a restart drops the in-memory guard.
-        let rewritten = this.rewriteQueue(rebuilt);
+        let rewritten = this.rewriteQueue(rebuilt, this.quarantineQueueLines(fresh.rejected));
         if (rewritten) {
             this._publishedRounds.clear();
         } else {
@@ -176,6 +177,16 @@ module.exports = {
                 'queue file is repaired would re-broadcast already-published rounds (duplicate DOGE spend). ' +
                 'Fix the queue file writability now.');
         }
+    },
+
+    // Skip a rebuild whose fresh read failed, the same stance as a failed rewrite: the
+    // queue file stays as it was and the dedup guard stays armed against re-broadcast.
+    refuseUnreadRebuild() {
+        logger.error('OraclePublisher: CRITICAL - the durable queue at ' + this.queuePath + ' could not be read ' +
+            'after publishing, so the rebuild was skipped and no queued round was lost. Published rounds remain ' +
+            'on the queue; the in-process dedup guard prevents re-broadcast for this process lifetime, but a ' +
+            'restart before the queue file is repaired would re-broadcast them (duplicate DOGE spend). Fix the ' +
+            'queue file readability now.');
     },
 
     // Bound the durable marker table. Runs after the rewrite so the queue-floor

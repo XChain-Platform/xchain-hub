@@ -77,6 +77,15 @@ function makePub(plan) {
     pub.indexers.DOGE = { url: 'http://doge.indexer.invalid', key: '' };
     pub.dogeConfirmations = 60;
     pub.verifyAnchorOnChain = async () => 'verified';
+    pub.indexerCall = async () => ({
+        exists: true,
+        anchors: [{
+            version: 0, status: 'valid', checkpoint_network: CP_ROW.network,
+            publisher: 'ab'.repeat(32), snapshot_block: CP_ROW.snapshot_block,
+            action_index: 0, confirmations: 60
+        }],
+        truncated: false
+    });
     const federated = [];
     pub.federateRewardAttestation = (...a) => { federated.push(a); };
     return { pub, inserts, broadcast, resyncs, federated, selects: () => selectAttempt };

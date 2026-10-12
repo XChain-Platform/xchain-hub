@@ -21,21 +21,19 @@
 
 'use strict';
 
-const { getLogger } = require('../../observability');
-const logger = getLogger();
-
 module.exports = {
 
     // Return operator-visible checkpoint health: last finalized height per chain
     // and a process-lifetime count of rounds that timed out below quorum.
     // Mirrors getcrosschaincallstats / getattestationstats.
     async getStats(){
-        let rows = [];
-        try {
-            rows = await this.db.findStateCheckpointsByNetwork(this.network);
-        } catch(e){
-            logger.warn('StateCheckpointEngine: getStats query failed: ' + (e && e.message));
-        }
+        // A read fault propagates so the RPC layer reports an error; swallowing it
+        // would return an empty last_finalized_by_chain, which reads as no finalized heights.
+        // A db handle with no reader at all (a bare engine wired before the table
+        // layer) has no heights to report; only a reader that throws is a fault.
+        const rows = typeof this.db.findStateCheckpointsByNetwork === 'function'
+            ? await this.db.findStateCheckpointsByNetwork(this.network)
+            : [];
         let last_finalized_by_chain = {};
         for(let r of rows){
             last_finalized_by_chain[r.chain] = {
@@ -57,6 +55,11 @@ module.exports = {
             // this is the fence holding rather than damage; it still reports a proposer
             // that put two payloads on the wire at one sequence.
             seq_double_sign_refusals: this._seqDoubleSignRefusals,
+            // Requests this hub declined to co-sign, by reason. A rising indexer_read_failed or
+            // indexer_no_block means its own indexer cannot confirm checkpoints, so it is not
+            // co-signing and the quorum margin is smaller than the validator count suggests.
+            cosign_declines:          Object.assign({}, this._cosignDeclines),
+            last_cosign_decline_reason: this._lastCosignDeclineReason,
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.

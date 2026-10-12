@@ -55,17 +55,25 @@
  * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
  * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
  * shared "still pending" signal, so a late rank-0 and an early rank-1 can both
- * publish). The on-chain state never diverges: both build byte-identical
- * commitments, and the anchor-reward rail does NOT inflate: recordAnchorReward
- * deterministically keeps a single reward per (checkpoint_seq, reward_type)
- * across distinct publisher pubkeys (see below), so the only residual cost of
- * the race is the duplicate DOGE tx fee. One validator publishes the whole
+ * publish). The checkpoint state never diverges: both carry the same quorum-agreed
+ * checkpoint sections, though the two transactions are NOT byte-identical, since
+ * every wire ends in its own publisher tail (the publisher's pubkey and its own
+ * XANCPUB attestation list). The anchor-reward rail does NOT inflate, and where the
+ * dedup happens depends on the reward flag-day. Below it, every hub mirrors the
+ * reward from the signed BUNDLE_DONE / FINALIZED announcement and recordAnchorReward
+ * keeps a single reward per (checkpoint_seq, reward_type) across distinct publisher
+ * pubkeys (see below). At/above it that mirror is retired, each publisher's hub
+ * holds only its own validator_rewards row, and the indexer's winner reconcile
+ * (reconcileAnchorRewardWinner) is the ONLY cross-publisher dedup; do not weaken it
+ * on the belief that the hub collapses failover duplicates. Either way the only
+ * residual cost of the race is the duplicate DOGE tx fee. One validator publishes the whole
  * bundle in a cycle, FROM ITS OWN DOGE WALLET, and the election rotates that
  * work across the federation cycle by cycle. Each successful publish records an
  * `anchor_bundle` / `anchor_archive` reward on the validator_rewards rail (oracle-round
- * pattern; recordAnchorReward collapses failover-race duplicates to a single
- * deterministic per-(round,type) winner, best-effort push to the BTC indexer
- * for COLLECT). The v1 archive round elects a single leader the same way with a
+ * pattern; below the flag-day recordAnchorReward collapses failover-race duplicates
+ * to a single deterministic per-(round,type) winner). That row is hub-local: the hub
+ * never pushes a reward to an indexer, which derives the COLLECT-spendable reward
+ * from the on-chain attestation itself. The v1 archive round elects a single leader the same way with a
  * per-election-block key. Signer resolution, balance checks and the DOGE
  * broadcast pipeline mirror OraclePublisher (the DB is
  * the durable queue: pending checkpoints are rows with anchor_txid IS NULL,
@@ -84,11 +92,11 @@ const EncoderClient     = require('../peers/encoder_client.js');
 const SpendGuard        = require('../lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./quorum_network.js');
-const { isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
+const { isAmbiguousSendError } = require('../lib/guards/idempotent_broadcast.js');
 const { sumUtxosCoins, summarizeUtxoConfirmations } = require('../lib/utxo_balance.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
-const { abandonBuild }           = require('../lib/encoder_reservation.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild }           = require('../lib/encoder/encoder_reservation.js');
 const { resolveCheckpointIntervalBlocks } = require('./checkpoint_cadence.js');
 const ValidatorIdentity = require('../validators/identity.js');
 const StateCheckpointEngine = require('./checkpoint_engine.js');
@@ -119,12 +127,12 @@ const archiveAttestMethods         = require('./publisher/archive/attest.js');
 const archiveRoundMethods          = require('./publisher/archive/round.js');
 const archiveSelectionMethods      = require('./publisher/archive/selection.js');
 const archiveBuildMethods          = require('./publisher/archive/build.js');
-const archiveBridgePolicyMethods   = require('./publisher/archive/bridge_policy_rows.js');
-const archiveListSnapshotMethods   = require('./publisher/archive/list_snapshot_rows.js');
-const archiveListSnapshotVerifyMethods = require('./publisher/archive/list_snapshot_verify.js');
-const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy_verify.js');
-const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price_rows.js');
-const archiveCheckpointPriceVerifyMethods = require('./publisher/archive/checkpoint_price_verify.js');
+const archiveBridgePolicyMethods   = require('./publisher/archive/bridge_policy/bridge_policy_rows.js');
+const archiveListSnapshotMethods   = require('./publisher/archive/list/list_snapshot_rows.js');
+const archiveListSnapshotVerifyMethods = require('./publisher/archive/list/list_snapshot_verify.js');
+const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy/bridge_policy_verify.js');
+const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_rows.js');
+const archiveCheckpointPriceVerifyMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_verify.js');
 const bundleDoneMethods            = require('./publisher/bundle_done.js');
 const lookupMethods                = require('./publisher/lookups.js');
 const archiveSignMethods           = require('./publisher/archive/sign.js');
@@ -222,7 +230,7 @@ class StateAnchorPublisher {
         this.refuseWhenNoConfirmedInput(utxos, allowUnconfirmed);
         // utxos forwarded only while inside the encoder's caller-facing
         // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects from
-        // its own uncapped fetch of this same address (lib/encoder_utxo_forward.js).
+        // its own uncapped fetch of this same address (lib/encoder/encoder_utxo_forward.js).
         let psbtResult = await signer.encoder.createTx({
             utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH',
             // See allowUnconfirmedInputs in the constructor: each anchor stands on its
@@ -235,12 +243,12 @@ class StateAnchorPublisher {
         // them back or this address is unavailable to every other publisher until the TTL
         // expires. Scoped strictly to the pre-broadcast section below: past the send,
         // holding the inputs is what stops a second build double-spending a transaction
-        // that may already have landed. See lib/encoder_reservation.js.
+        // that may already have landed. See lib/encoder/encoder_reservation.js.
         let txHex;
         try {
             // Refuse phase 1 of a two-transaction encoding before anything is signed: this
             // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
-            // ANCHOR no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+            // ANCHOR no indexer can decode and strand the carrier value (lib/guards/two_phase_guard.js).
             assertSingleTxEncoding(psbtResult, 'StateAnchorPublisher');
             txHex = await signer.walletSignFn(psbtResult.psbt);
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');

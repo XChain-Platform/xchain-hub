@@ -32,6 +32,7 @@ const path   = require('path');
 
 const swq   = require('../../../src/consensus/stake_weighted_quorum.js');
 const equiv = require('../../../src/consensus/equivocation_header.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const LOCAL_DIR = path.join(__dirname, '..', '..', '..', 'src');
 // Resolve the canonical xchain-documentation repo. Prefer an explicit path: GitHub CI
@@ -49,8 +50,6 @@ try {
     equivVec      = require(path.join(VEC_DIR, 'equivocation_header.json'));
     activationVec = require(path.join(VEC_DIR, 'activation_predicates.json'));
 } catch(e){ /* sibling xchain-documentation absent */ }
-
-const CANON_PRESENT = fs.existsSync(CANON_DIR);
 
 // Every copy now shares ONE signature: meetsStakeThreshold(validators, signers),
 // and every copy exports totalStake(). No per-repo adapter remains.
@@ -143,7 +142,9 @@ describe('consensus-primitive conformance: activation predicate vectors @regress
 });
 
 describe('consensus-primitive conformance: byte-identity to canonical source @regression', function(){
-    before(function(){ if(!CANON_PRESENT){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but canonical reference-impl dir not found at ' + CANON_DIR); this.skip(); } });
+    before(function(){
+        if (!skipOrFail(this, siblingCheckout(__dirname, CANON_DIR), 'the sibling parity guard')) return;
+    });
 
     // The three carriers sit under consensus/ on both sides since W5 (the same tail in
     // every repo), so the compare is a raw byte compare; a canonical copy not yet at
@@ -151,11 +152,7 @@ describe('consensus-primitive conformance: byte-identity to canonical source @re
     ['stake_weighted_quorum.js', 'equivocation_header.js', 'snapshot_reorg_buffer.js'].forEach(function(f){
         it(f + ' is byte-identical to xchain-documentation/protocol/reference-impl/consensus', function(){
             const canonPath = path.join(CANON_DIR, 'consensus', f);
-            if(!fs.existsSync(canonPath)){
-                if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical copy is not at its W5 path ' + canonPath);
-                this.skip();
-                return;
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, canonPath), 'the sibling parity guard')) return;
             const local = fs.readFileSync(path.join(LOCAL_DIR, 'consensus', f), 'utf8');
             const canon = fs.readFileSync(canonPath, 'utf8');
             assert.strictEqual(local, canon,

@@ -42,6 +42,10 @@ const REJUDGE_MAX_ATTEMPTS       = 5;
 // so re-asking returns the same neutral verdict; those keep today's drop.
 const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable', 'budget_exhausted', 'judge_timeout'];
 
+// Transient reasons that never dial a judge (agree() returns before any paid call), so a
+// re-judge pass that ends on one is free and must not spend the record's attempt budget.
+const NON_DIALING_INCONCLUSIVE = ['provider_paused', 'budget_exhausted'];
+
 module.exports = {
 
     // Called via the consensus 'request:finalized' event. Looks up the
@@ -224,12 +228,14 @@ module.exports = {
                 if (now - rec.firstSeen > this.rejudgeMaxAgeMs || rec.attempts >= REJUDGE_MAX_ATTEMPTS) {
                     this._pendingReJudge.delete(rid);
                     logger.warn('AttestationSpotChecker: giving up on deferred spot-check ' + rid.substring(0, 16) +
-                                 '... after ' + rec.attempts + ' attempt(s); no evidence recorded');
+                                 '... after ' + rec.attempts + ' attempt(s) (last reason=' +
+                                 (rec.lastReason || 'none') + '); no evidence recorded');
                     continue;
                 }
-                rec.attempts++;
+                // Count an attempt only when a judge was asked and failed; a missing provider
+                // or a paused/out-of-budget judge leaves the record to the age bound instead.
                 let provider = this.providerRegistry && this.providerRegistry.getModule(rec.providerId);
-                if (!provider || typeof provider.agree !== 'function') continue;
+                if (!provider || typeof provider.agree !== 'function') { rec.lastReason = 'no_provider'; continue; }
                 let outcome = {};
                 let verdict;
                 try {
@@ -238,11 +244,15 @@ module.exports = {
                         { body: Buffer.from(String(rec.expectedPattern || ''), 'utf8'), meta: rec.meta }
                     ], { outcome }));
                 } catch (e) {
+                    rec.attempts++;
+                    rec.lastReason = 'threw';
                     logger.warn('AttestationSpotChecker: re-judge threw for ' + rid.substring(0, 16) + '...: ' +
                                  (e && e.message ? e.message : e));
                     continue;
                 }
                 if (!verdict && outcome.inconclusive) {
+                    rec.lastReason = String(outcome.reason);
+                    if (NON_DIALING_INCONCLUSIVE.indexOf(rec.lastReason) < 0) rec.attempts++;
                     // Still could not judge. A reason that is no longer transient can
                     // never change, so stop holding the record rather than burning the
                     // remaining attempts on it.

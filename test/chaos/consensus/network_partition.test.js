@@ -14,43 +14,21 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const crypto     = require('crypto');
 const Consensus  = require('../../../src/consensus/pbft');
-const { createMockHub }                    = require('../../helpers/mockHub');
-const { VALIDATORS_4, makeFederationSnapshot }                     = require('../../helpers/fixtures');
-const { buildEnvelope }                    = require('../../helpers/testPeerNetwork');
-const { runExperiment, waitForCondition }  = require('../helpers/chaosRunner');
-const { waitUntil }                        = require('../../helpers/waitUntil');
+const { createMockHub } = require('../../helpers/mockHub');
+const { VALIDATORS_4 }  = require('../../helpers/fixtures');
+const { waitUntil }     = require('../../helpers/waitUntil');
+const { SNAPSHOT_BLOCK, signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
+    require('../helpers/pbft_chaos');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
-// Give a chaos hub the deterministic federation snapshot a real federated hub
-// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
-// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
-// with a NULL snapshot now correctly refuses to propose. These experiments
-// inject a PARTITION, not an indexer outage, so they must clear that guard to
-// reach the behaviour they measure. Quorum is stubbed to what getQuorum()
-// returns for the set under test, leaving each experiment's arithmetic
-// unchanged; the genuinely peerless hub below keeps its empty validator set and
-// stays on the single-node path either way.
-function wireFederationSnapshot(hub, quorum) {
-    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
-    hub.capabilitySnapshot = {
-        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
-        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
-        getQuorum:                  sinon.stub().returns(quorum)
-    };
-    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
-    return snapshot;
-}
-
-
-
 let hub, pm, consensus;
 function registerBeforeEachHook() {
 
     beforeEach(function () {
-        hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        hub = createValidatorHub(VALIDATORS_4[0]);
         pm  = hub._peerManager;
         consensus = new Consensus(hub);
         consensus.validatorSet = VALIDATORS_4;
@@ -77,7 +55,7 @@ function registerIsolatedNodeTimesOutAndInitiatesTest() {
 
     it('isolated node times out and initiates view change', async function () {
         consensus.timeout = 200;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
 
         await consensus.start();
 
@@ -102,9 +80,10 @@ function registerMajorityClusterContinuesWhenOneNodeTest() {
 
     it('majority cluster continues when one node is isolated', async function () {
         // Validator-2 as system under test; validator-1 (leader) sends PRE_PREPARE
-        let hub2 = createMockHub({ validatorAddr: VALIDATORS_4[1].addr });
+        let hub2 = createValidatorHub(VALIDATORS_4[1]);
         let consensus2 = new Consensus(hub2);
         consensus2.validatorSet = VALIDATORS_4;
+        wireFederationSnapshot(hub2, 3); // N=4 -> quorum 3
         consensus2.timeout = 500;
 
         await consensus2.start();
@@ -114,28 +93,30 @@ function registerMajorityClusterContinuesWhenOneNodeTest() {
 
         // Leader (validators[0]) sends PRE_PREPARE for seq 4. At view 0,
         // (4+0)%4 = 0, so validators[0] is the legitimate rotation leader.
-        hub2._peerManager.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 4, view: 0, configDigest: digest, config: config
-        }, VALIDATORS_4[0].addr));
+        hub2._peerManager.emit('message', signedEnvelope('PBFT_PRE_PREPARE', {
+            seq: 4, view: 0, configDigest: digest, config: config, btcBlockHeight: SNAPSHOT_BLOCK
+        }, VALIDATORS_4[0]));
+        await waitForRound(consensus2, 4);
 
         // Validator 3 sends PREPARE (quorum = 3 for N=4)
-        hub2._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub2._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         // With prepares from validators 0, 1, 2 = 3, quorum met
         let proposal = consensus2.pendingProposals.get(4);
         expect(proposal).to.exist;
         expect(proposal.prepares.size).to.be.gte(3);
+        expect(hub2._peerManager.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
 
         // COMMITs from validators 0, 2
-        hub2._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub2._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[0].addr));
+        }, VALIDATORS_4[0]));
 
-        hub2._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub2._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         await waitUntil(() => hub2.applyConfig.calledOnce, { label: 'the majority cluster to apply the config' });
 
@@ -168,7 +149,7 @@ function registerPartitionHealsLatePREPARECOMMITStillTest() {
 
     it('partition heals: late PREPARE/COMMIT still processed', async function () {
         consensus.timeout = 5000;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         await consensus.start();
 
         let config = { key: 'delayed' };
@@ -178,30 +159,27 @@ function registerPartitionHealsLatePREPARECOMMITStillTest() {
         let promise = consensus.propose(config).then(() => { done = true; });
 
         // seq is now 4; initially only 1 PREPARE (self), not enough
-        // seq is now 4; initially only 1 PREPARE (self), not enough
-        await waitUntil(() => {
-            let p = consensus.pendingProposals.get(4);
-            return p && p.prepares.size >= 1;
-        }, { label: 'the proposal round to open with only the self PREPARE' });
+        let proposal = await waitForRound(consensus, 4);
+        expect(proposal.prepares.size).to.equal(1);
         expect(done).to.be.false;
 
         // "Partition heals": delayed PREPAREs arrive
-        pm.emit('message', buildEnvelope('PBFT_PREPARE', {
+        pm.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        pm.emit('message', buildEnvelope('PBFT_PREPARE', {
+        pm.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         // COMMITs arrive
-        pm.emit('message', buildEnvelope('PBFT_COMMIT', {
+        pm.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        pm.emit('message', buildEnvelope('PBFT_COMMIT', {
+        pm.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         await promise;
         expect(done).to.be.true;
@@ -212,6 +190,7 @@ function registerPartitionHealsLatePREPARECOMMITStillTest() {
 function registerStaleSequenceRejectedAfterPartitionRecoveryTest() {
 
     it('stale sequence rejected after partition recovery', async function () {
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         await consensus.start();
         consensus.lastAppliedSeq = 10;
 
@@ -220,9 +199,17 @@ function registerStaleSequenceRejectedAfterPartitionRecoveryTest() {
 
         // sender is the legit (seq 5, view 0) leader. The stale-seq guard
         // (not the identity guard) is what rejects it.
-        pm.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 5, view: 0, configDigest: digest, config: config
-        }, VALIDATORS_4[1].addr));
+        pm.emit('message', signedEnvelope('PBFT_PRE_PREPARE', {
+            seq: 5, view: 0, configDigest: digest, config: config, btcBlockHeight: SNAPSHOT_BLOCK
+        }, VALIDATORS_4[1]));
+
+        // A fresh seq from its own rotation leader (13 % 4 = 1) opens a round over
+        // the same wiring, so the stale seq above is refused by the seq guard alone.
+        let fresh = { key: 'fresh' };
+        pm.emit('message', signedEnvelope('PBFT_PRE_PREPARE', {
+            seq: 13, view: 0, configDigest: makeDigest(fresh), config: fresh, btcBlockHeight: SNAPSHOT_BLOCK
+        }, VALIDATORS_4[1]));
+        await waitForRound(consensus, 13);
 
         // Should be rejected; no proposal created
         expect(consensus.pendingProposals.has(5)).to.be.false;

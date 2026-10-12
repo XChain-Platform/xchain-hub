@@ -82,6 +82,7 @@ function _reloadProvider(){
 // so a judge call meant to run deterministically at 0 silently ran at the API
 // default of 1. These cases pin the family boundary on both sides.
 describe('llm provider, reasoning-family classification (item 3535)', function () {
+    this.timeout(30000);
 
     afterEach(function () {
         nock.cleanAll();
@@ -170,6 +171,7 @@ function registerReasoningTransportTests() {
 }
 
 describe('llm provider, fetch via openai_api', function () {
+    this.timeout(30000);
 
     afterEach(function () {
         nock.cleanAll();

@@ -67,7 +67,14 @@ module.exports = {
             // never a large number, when no poll has ever succeeded, so a consumer
             // cannot mistake a hub that just booted for one that has been stalled.
             poll_rpc_error_count:        this.pollRpcErrorCount,
-            last_successful_poll_age_ms: this.lastPollOkAt === null ? null : (Date.now() - this.lastPollOkAt)
+            last_successful_poll_age_ms: this.lastPollOkAt === null ? null : (Date.now() - this.lastPollOkAt),
+            // How long the feed has gone without a usable poll, counted from the last success or,
+            // before any, from the first attempt; null only when no poll was ever attempted.
+            // Unlike the age above it stays a number across a restart into an ongoing outage.
+            poll_unsuccessful_for_ms:    this.pollUnsuccessfulForMs(),
+            // Failures that never reached a JSON-RPC answer, split so the cause is readable.
+            poll_transport_error_count:  this.pollTransportErrorCount,
+            poll_auth_error_count:       this.pollAuthErrorCount
         };
         // Expose the non-ok publication-throttle ring health so an
         // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries
@@ -76,6 +83,13 @@ module.exports = {
             this.consensusRingStats(stats);
         }
         return stats;
+    },
+
+    // Milliseconds since the last usable poll, or since the first attempt when none has
+    // succeeded yet; null when this process never attempted one (observer-only, no URL).
+    pollUnsuccessfulForMs(){
+        let since = this.lastPollOkAt !== null ? this.lastPollOkAt : this.firstPollAttemptAt;
+        return (since === null || since === undefined) ? null : Date.now() - since;
     },
 
     // The consensus-side ring occupancy, reported through the round manager

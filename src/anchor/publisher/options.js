@@ -24,8 +24,9 @@
 
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard = require('../../lib/spend_guard.js');
-const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
+const { resolveCheckpointCadence } = require('../checkpoint_cadence.js');
 const { DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
+const { positiveIntConfig } = require('../../lib/config_int.js');
 const hubConfig = require('../../config');
 
 module.exports = {
@@ -73,7 +74,10 @@ module.exports = {
         this.batchSize     = parseInt(hubConfig.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
         this.maxBatch      = parseInt(hubConfig.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
         this.chunkMaxBytes = parseInt(hubConfig.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
-        this.roundTimeoutMs = parseInt(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || DEFAULT_ANCHOR_ROUND_TIMEOUT_MS);
+        // Resolve the round timeout exactly as the admission watermark does (a 0, negative or
+        // garbage value would fire every attest/archive round timer at once and stall anchoring).
+        this.roundTimeoutMs = positiveIntConfig(hubConfig.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS,
+            DEFAULT_ANCHOR_ROUND_TIMEOUT_MS, 'ANCHOR_ROUND_TIMEOUT_MS');
         this.chunkRetryDelayMs = parseInt(hubConfig.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
     },
 
@@ -111,13 +115,14 @@ module.exports = {
         // (1h..24h) preserves both bounds; below the DOGE burial window it burns
         // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
         // Never a divergence risk in either direction: concurrent unlocked
-        // publishers build byte-identical archives (see rankUnlocked).
+        // publishers build identical archive bodies, per-publisher tail aside (see rankUnlocked).
         //
         // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
         // anchors to a STALLED batch, so its `since` grows without bound. On the v0
         // CHECKPOINT BUNDLE leg the newest ELIGIBLE checkpoint tracks the live BTC
-        // tip, so `since` is bounded by CHECKPOINT_INTERVAL_BLOCKS *
-        // ANCHOR_CHECKPOINT_EVERY_N, i.e. 6 at the defaults. Rank 1 needs `since` >=
+        // tip, so `since` is normally bounded by CHECKPOINT_INTERVAL_BLOCKS *
+        // ANCHOR_CHECKPOINT_EVERY_N, i.e. 6 at the defaults (late rounds stretch it; see
+        // initCheckpointCadence). Rank 1 needs `since` >=
         // 36, so at the default cadence NO rank above 0 is ever eligible and a bundle
         // has no failover at all; its liveness rests on per-cycle re-election plus
         // each hub's independent 24h timer, and a missed cycle costs one snapshot its
@@ -132,7 +137,10 @@ module.exports = {
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
-        this.electionToleranceBlocks = parseInt(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
+        // Require a strictly positive tolerance: it divides in rankUnlocked (0 unlocks every rank
+        // at once) and bounds the follower anti-spam check (NaN would make that check never fire).
+        this.electionToleranceBlocks = positiveIntConfig(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS ||
+            cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS, 36, 'ANCHOR_ELECTION_TOLERANCE_BLOCKS');
         // Failover wake. The ladder above only unlocks a rank when
         // something RE-EVALUATES it, and rank is evaluated only inside flush(); with
         // flush on the 24h interval plus size triggers, the "ranks 1-3 get a slot
@@ -241,24 +249,28 @@ module.exports = {
         // anchor-every-checkpoint behaviour.
         //
         // Eligibility is a CHECKPOINT ORDINAL, not the raw seq. checkpoint_seq is the
-        // round's BTC snapshot_block (deriveCheckpointSeq), and the cadence latch
-        // advances it by exactly CHECKPOINT_INTERVAL_BLOCKS per round
+        // round's BTC snapshot_block (deriveCheckpointSeq), and an on-time round lands
+        // exactly CHECKPOINT_INTERVAL_BLOCKS after the last one
         // (StateCheckpointEngine.tick), so `seq % N` is NOT a 1-in-N sample: it is a
         // residue class pinned by the first checkpoint after the latch is seeded.
         // Whenever N shares a factor with the interval (N=2 or 3 against the default 6)
         // every round lands in the same residue, so the federation either anchors every
         // cadence or anchors NOTHING, permanently and with no eligible row to log about.
-        // Dividing by the interval first gives an ordinal that advances by 1 per round,
-        // so the residues cycle: the worst case is N-1 rounds of delay, never a halt.
+        // Dividing by the interval first gives an ordinal that advances by 1 per on-time
+        // round, so the residues cycle: N-1 rounds of delay while rounds stay on time.
+        // That bound is not hard. tick latches the tip it actually fired at, so a round
+        // that lands late (slot holder offline, a tick spanning blocks) can move the
+        // ordinal by 2 and step over the eligible residue; for N>1 a run of late rounds
+        // can stretch the delay past N-1 rounds, and no fixed bound holds.
         // Both knobs are already required to be fleet-uniform, and checkpoint_seq is
         // consensus data, so the predicate stays deterministic fleet-wide. At the
         // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
-        this.anchorEveryNCheckpoints = Math.max(1,
-            parseInt(hubConfig.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
+        const checkpointCadence = resolveCheckpointCadence(cfg);
+        this.anchorEveryNCheckpoints = checkpointCadence.anchorEveryNCheckpoints;
         // The engine's own cadence step (StateCheckpointEngine.js), resolved through the
         // one shared function it also calls so the two cannot drift. Always positive: a
         // zero divisor makes the SQL MOD NULL, which would silently select nothing.
-        this.checkpointIntervalBlocks = resolveCheckpointIntervalBlocks(cfg);
+        this.checkpointIntervalBlocks = checkpointCadence.checkpointIntervalBlocks;
     },
 
     initDogePipeline(cfg){

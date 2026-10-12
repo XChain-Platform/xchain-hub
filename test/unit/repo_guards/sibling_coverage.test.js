@@ -44,6 +44,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
+const { siblingCheckout } = require('../../helpers/sibling_checkout.js');
 
 const REPO_ROOT    = path.join(__dirname, '..', '..', '..');
 const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');
@@ -105,7 +106,7 @@ function resolve(entry) {
 // which is the exact silence this file exists to break.
 function inspect(entry) {
     const { dir, via } = resolve(entry);
-    let present = fs.existsSync(dir) && fs.existsSync(path.join(dir, entry.marker));
+    let present = siblingCheckout(__dirname, dir).usable && fs.existsSync(path.join(dir, entry.marker));
     let source  = via;
     if (!present) {
         for (const key of entry.altEnvs || []) {

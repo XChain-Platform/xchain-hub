@@ -12,12 +12,12 @@ const { expect } = require('chai');
 const fs = require('node:fs');
 const path = require('node:path');
 const swq = require('../../../src/consensus/stake_weighted_quorum.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 // Resolve the docs sibling the way the conformance gate and the sibling-coverage census do.
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const SIBLING_ROOT = process.env.XCHAIN_SIBLING_ROOT || path.join(REPO_ROOT, '..');
 const DOCS_DIR = process.env.XCHAIN_DOCS_DIR || path.join(SIBLING_ROOT, 'xchain-documentation');
-const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
 // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
@@ -159,10 +159,7 @@ function registerStakeUtilityTests() {
             // Skip only when the docs sibling is absent in a permissive single-repo run; a strict
             // run (XCHAIN_REQUIRE_SIBLINGS=1) fails on absence, and a present canon that throws fails.
             const canonPath = path.join(DOCS_DIR, 'protocol', 'constants.js');
-            if (!fs.existsSync(canonPath)) {
-                if (REQUIRE_SIBLINGS) throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the canonical xchain-documentation/protocol/constants.js is absent at ' + canonPath);
-                return this.skip();
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, canonPath), 'the canonical constants.js activation parity check')) return;
             // Keep this case even though the heights also live in gate_registry/shared_rows_3.js:
             // the conformance gate byte-compares only the carrier files, which read the map from the
             // registry, and the registry's cross-repo backstop is gate_registry.test.js's twin compare.

@@ -22,7 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
-const { sortedListRows, listCapabilityWants } = require('./list_rows_select.js');
+const { sortedListRows, listCapabilityWants } = require('./list/list_rows_select.js');
 const { canonicalBatchCrc } = require('../fold/wrapper_canonical.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -85,9 +85,9 @@ module.exports = {
     // Failover-ladder check shared by leader election and follower verification:
     // rank 0 may publish immediately; each further rank unlocks after another
     // ANCHOR_ELECTION_TOLERANCE_BLOCKS past the anchor point. Concurrent
-    // unlocked publishers build byte-identical archives (both verify against
-    // the same quorum-agreed rows), so a race is duplicate-tx waste, not a
-    // divergence hazard.
+    // unlocked publishers build archives with identical bodies (both verify against
+    // the same quorum-agreed rows; only the wire's per-publisher tail differs), so
+    // a race is duplicate-tx waste, not a divergence hazard.
     rankUnlocked(order, pubkey, sinceBlocks){
         let rank = order.indexOf(String(pubkey || '').toLowerCase());
         if(rank < 0) return false;
@@ -169,6 +169,9 @@ module.exports = {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes; archived
     // sets are a convenience, the chain remains the root of trust.
+    // Coverage selector: the capability sets archived are exactly the (block, capability)
+    // pairs the quorum-agreed inputs reference; hub-mirror rows outside quorumRows are
+    // never consulted.
     async buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards, quorumRows){
         calls   = calls   || [];
         rewards = rewards || [];

@@ -93,9 +93,9 @@ function batchSnapshotRows(r, sourceChain, head, verified, fence, createdAt, adm
     return insertedRows;
 }
 
-// ONE multi-row INSERT PER ROUND, not one for the whole batch: the hub
-// Database has no transaction API, so a single statement is the atomicity
-// tool, and the unit that must never be observed torn is the round (a
+// ONE multi-row INSERT PER ROUND, not one for the whole batch: a single
+// statement is the atomicity tool, with no db.withTransaction needed,
+// and the unit that must never be observed torn is the round (a
 // getfeequote reader must not see some pairs of round N beside others of
 // round N-1). Across rounds a partial batch is fine, because each stored
 // round is independently complete and the rest arrive on the next attempt.

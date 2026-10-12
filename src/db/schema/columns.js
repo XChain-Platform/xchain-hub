@@ -135,7 +135,13 @@ module.exports = {
     // no backfill and a node that has not crossed the flag day is byte-identical to today.
     // No index: the barrier compares a per-table watermark, not this column, and the
     // consuming selects already have their own covering keys.
+    //
+    // Every MIRRORED admission column is required: the writers and snapshot reads name them
+    // at every height, so a hub missing one fails startup rather than advertise
+    // HUB_SCHEMA_VERSION over a row shape it cannot write. anchor_reward_attestations stays
+    // best-effort, since its column is hub-only, unwritten and not part of the mirror.
     async migrateAdmissionColumns(){
+        const HUB_ONLY = new Set(['anchor_reward_attestations']);
         const TABLES = {
             cross_chain_matches:        ['btc', 'ltc', 'doge'],
             cross_chain_calls:          ['btc', 'ltc', 'doge'],
@@ -148,14 +154,15 @@ module.exports = {
         };
         for(let table of Object.keys(TABLES))
             for(let chain of TABLES[table])
-                await this.migrateAddNullableColumn(table, 'admit_block_' + chain, 'BIGINT UNSIGNED DEFAULT NULL');
+                await this.migrateAddNullableColumn(table, 'admit_block_' + chain, 'BIGINT UNSIGNED DEFAULT NULL',
+                    !HUB_ONLY.has(table));
 
         // oracle_prices takes ONE unqualified column, not the per-chain map. It is the only
         // unsigned rail: no signatures, no canonical, nothing to stamp a map into. Its height
         // is the PUBLISHING chain's, which source_chain already names, so the barrier certifies
         // it against heights[oracle_prices][source_chain] rather than against the reading
         // chain's own B, and every chain reads the row without needing an entry of its own.
-        await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL');
+        await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL', true);
 
         await this.migrateAddNullableColumn('list_snapshots', 'name',
             'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true);
@@ -193,9 +200,8 @@ module.exports = {
                     'ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + columnDef, e));
                 throw e;
             }
-            logger.error(nodeUtil.format('MIGRATION FAILED: ' + table + '.' + column + ' is absent. Until it exists this hub ' +
-                'cannot stamp an admission height for that table, so above the mirror admission activation it ' +
-                'will REFUSE to finalize those rows. Run by hand: ALTER TABLE `' + table + '` ADD COLUMN `' +
+            logger.error(nodeUtil.format('MIGRATION FAILED: optional column ' + table + '.' + column +
+                ' is absent; startup continues without it. Run by hand: ALTER TABLE `' + table + '` ADD COLUMN `' +
                 column + '` ' + columnDef, e));
         } finally {
             await db.release();

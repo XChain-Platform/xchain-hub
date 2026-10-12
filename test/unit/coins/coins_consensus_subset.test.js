@@ -35,7 +35,7 @@ const coins      = require('../../../src/coins');
         'network',                                 // redundant with the (tick, network) hash key
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
         'chainGenesisHash',                        // identifies the ENDPOINT's chain, not how bytes are read; pinning one must not move CONSENSUS_CONFIG_PIN
-        'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
+        'FEE_PAYMENT_MODE',                        // declared mode, not a runtime decider; outside the subset so a divergent bundle cannot verify clean
         // wireFormat was listed here as "not hashed" until it was folded INTO
         // consensusSubset() on 2026-07-28. The guard `continue`s on membership, so the
         // stale entry was silent and, worse, load-bearing in the wrong direction: had

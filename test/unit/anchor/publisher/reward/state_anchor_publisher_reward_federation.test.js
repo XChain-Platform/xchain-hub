@@ -75,14 +75,24 @@ function payloadFrom(pub, sender, signers, over) {
     return d;
 }
 
-const onChain = (over) => Object.assign({
-    exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
-    confirmations: 60, txid: TXID,
-    block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
-    actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-    // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
-    state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
-}, over || {});
+function onChain(publisher, over) {
+    const result = Object.assign({
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+        confirmations: 60, txid: TXID,
+        block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+        actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
+        // A v0 bundle is root-bearing, so verifyAnchorOnChain byte-matches the roots too.
+        state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
+    }, over || {});
+    result.anchors = result.exists && result.txid === TXID ? [{
+        version: result.version, status: result.status,
+        checkpoint_network: CP_ROW.network, publisher: publisher,
+        snapshot_block: CP_ROW.snapshot_block, action_index: 0,
+        confirmations: result.confirmations
+    }] : [];
+    result.truncated = false;
+    return result;
+}
 
 const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
 
@@ -99,6 +109,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
 
     registerPublisherFederationCases();
     registerReceiverProofCases();
+    registerReceiverMembershipRefusalCases();
     registerReceiverRefusalCases();
     registerReceiverPairingCases();
 });
@@ -120,7 +131,7 @@ function registerPublisherFederationCases() {
         });
         expect(sent.filter(m => m.type === XANCREWARD).length, 'nothing federated while unconfirmed').to.equal(0);
 
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(me);
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'the row is written locally first').to.equal(1);
         const msg = sent.find(m => m.type === XANCREWARD);
@@ -141,7 +152,7 @@ function registerPublisherFederationCases() {
             snapshotBlock: CP_ROW.snapshot_block, publisher: me,
             attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }]
         });
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(me);
         await pub.drainDeferredRewardAttest();
         const ins = inserts(queries)[0];
         expect(ins.sql).to.contain('doge_anchor_txid');
@@ -160,7 +171,7 @@ function registerReceiverProofCases() {
         expect(pub._deferredRewardAttest.size, 'queued behind its own mined-anchor proof').to.equal(1);
         expect(inserts(queries).length, 'nothing written on receipt alone').to.equal(0);
 
-        pub.indexerCall = async () => onChain();
+        pub.indexerCall = async () => onChain(relayer.getPubkeyHex().toLowerCase());
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length, 'written once this hub proved the anchor itself').to.equal(1);
         expect(sent.filter(m => m.type === XANCREWARD).length, 'a receiver never re-broadcasts').to.equal(0);
@@ -172,7 +183,9 @@ function registerReceiverProofCases() {
         const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
         await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
         expect(pub._deferredRewardAttest.size, 'the quorum was valid, so it queued').to.equal(1);
-        pub.indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
+        pub.indexerCall = async () => ({
+            exists: false, checkpoint_anchored: false, anchors: [], truncated: false
+        });
         await pub.drainDeferredRewardAttest();
         expect(inserts(queries).length).to.equal(0);
     });
@@ -187,8 +200,8 @@ function registerReceiverProofCases() {
     });
 }
 
-// Every quorum, membership, signature and shape refusal on the receiver.
-function registerReceiverRefusalCases() {
+// Every quorum and membership refusal on the receiver.
+function registerReceiverMembershipRefusalCases() {
     it('refuses a message whose XANCPUB quorum does not verify against the RECEIVER\'s own set', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
@@ -218,7 +231,10 @@ function registerReceiverRefusalCases() {
         });
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
+}
 
+// Every signature and shape refusal on the receiver.
+function registerReceiverRefusalCases() {
     it('refuses a message whose transport signature does not verify (a tampered tuple)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
@@ -227,6 +243,21 @@ function registerReceiverRefusalCases() {
         d.round_reference = d.round_reference + 1;              // signed over the ORIGINAL tuple
         await pub.handleRewardAttestation({ data: d });
         expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    // The bundle XANCPUB canonical does not sign round_reference, so a member relayer that
+    // RE-SIGNS the transport over a moved value still carries a valid quorum.
+    it('refuses a bundle reward whose round_reference is not its snapshot_block, even re-signed', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        const signers = [relayer, pub.identity];
+        await pub.handleRewardAttestation({
+            data: payloadFrom(pub, relayer, signers, { round_reference: CP_ROW.snapshot_block + 1 })
+        });
+        expect(pub._deferredRewardAttest.size, 'a moved round_reference queues nothing').to.equal(0);
+        await pub.handleRewardAttestation({ data: payloadFrom(pub, relayer, signers) });
+        expect(pub._deferredRewardAttest.size, 'the same quorum at round_reference = snapshot_block queues').to.equal(1);
     });
 
     it('refuses a malformed txid, an unattested ANCHOR version, and a mismatched reward_type', async function () {

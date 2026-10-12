@@ -25,6 +25,16 @@
 const mathjs = require('mathjs');
 const { LEVELS, fmt, stakeWord, pct, marginBands } = require('./levels.js');
 
+// The top-up that restores a lost gate, given deficit = -headroom (>= 0). Operator
+// stake also raises S, so 3*(ours+d) > 2*(S+d) needs d > 2*deficit; cutting
+// third-party stake t needs only t > deficit. Both bounds are strict.
+function recoveryPhrase(deficit) {
+    if (mathjs.isZero(deficit))
+        return 'Any additional operator stake (or any reduction in third-party stake) restores the gate.';
+    return 'More than ' + fmt(mathjs.multiply(deficit, 2)) + ' more operator stake (or more than ' +
+        fmt(deficit) + ' less third-party stake) restores the gate.';
+}
+
 // The gate test, the headroom and the severity, over exact bignumbers. Split out
 // so a PROJECTION (what happens if someone stakes X) is scored by the same code
 // as a live reading: a "what if" that used its own arithmetic would eventually
@@ -63,8 +73,7 @@ function classifyMargin(args) {
         level  = LEVELS.HALTED;
         reason = 'operator stake holds ' + held + ', which is NOT above the two-thirds commit gate ' +
             '(3*tally > 2*S). Rounds cannot reach commit quorum on operator signatures alone: they ' +
-            'finalize only if community stake signs too. ' + fmt(mathjs.unaryMinus(headroom)) +
-            ' more operator stake (or that much less third-party stake) restores the gate.';
+            'finalize only if community stake signs too. ' + recoveryPhrase(mathjs.unaryMinus(headroom));
     } else if (stakesToHalt === null) {
         level  = LEVELS.OK;
         reason = 'operator stake holds ' + held + ', above the two-thirds commit gate, with ' +

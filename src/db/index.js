@@ -38,20 +38,6 @@
  *
  ********************************************************************/
 
-// Runtime floor, asserted above the require it protects. The pinned mariadb 3.5.x
-// line is ESM-only ("type": "module"), and require() loads ESM without a flag only
-// from Node 22.12.0; below that the next line throws a bare ERR_REQUIRE_ESM that
-// names neither the Node version nor the reason. engines.node cannot enforce this
-// (npm only warns, and nothing in the tree sets engine-strict), so the check lives
-// here, where the failure actually happens.
-const [NODE_MAJOR, NODE_MINOR] = String(process.versions.node).split('.').map(Number);
-if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
-    throw new Error('xchain-hub requires Node >= 22.12.0 (running ' + process.versions.node +
-        '): the pinned mariadb 3.5.x driver is ESM-only and require() can load ESM without ' +
-        'a flag only from Node 22.12. Upgrade the runtime (see .nvmrc), or start Node with ' +
-        '--experimental-require-module.');
-}
-
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');
@@ -66,15 +52,13 @@ const ark     = require('../anchor/anchor_reward_key.js');
 const anchorMixin              = require('./anchor.js');
 const attestationMixin         = require('./attestation.js');
 const bridgeTransfersMixin     = require('./bridge_transfers.js');
-const capabilitySnapshotsMixin = require('./capability_snapshots.js');
+const snapshotsMixin           = require('./snapshots/index.js');
 const configsMixin             = require('./configs.js');
 const consensusStateMixin      = require('./consensus_state.js');
 const crossChainMixin          = require('./cross_chain.js');
 const governanceMixin          = require('./governance.js');
-const listSnapshotsMixin       = require('./list_snapshots.js');
 const oracleMixin              = require('./oracle.js');
 const p2pPeersMixin            = require('./p2p_peers.js');
-const policySnapshotsMixin     = require('./policy_snapshots.js');
 const pricesMixin              = require('./prices/index.js');
 const priceArchiveMixin        = require('./prices/archive_bookkeeping.js');
 const reorgAttestationsMixin   = require('./reorg_attestations.js');
@@ -85,8 +69,8 @@ const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
 // The class's own plumbing, split out of this file by behaviour and installed the
 // same way, non-enumerably, by the same installMixins() below. These are NOT table
-// families: they are bring-up, the two migration-helper families and the step list
-// runMigrations() walks, so they live under schema/, which has no index.js, rather
+// families: they are bring-up, the two migration-helper families, the step list
+// runMigrations() walks and withTransaction, so they live under schema/, which has no index.js, rather
 // than beside the families: db_prototype_install.test.js and the mockHub scanner
 // read every `<family>.js` and `<family>/index.js` and would take a plumbing method
 // for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
@@ -96,6 +80,8 @@ const bootstrapMixin        = require('./schema/bootstrap.js');
 const keyMigrationsMixin    = require('./schema/keys.js');
 const columnMigrationsMixin = require('./schema/columns.js');
 const migrationStepsMixin   = require('./schema/migrations.js');
+const mirrorKeysMixin       = require('./schema/mirror_keys.js');
+const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -111,15 +97,13 @@ const MIXINS = [
     anchorMixin,
     attestationMixin,
     bridgeTransfersMixin,
-    capabilitySnapshotsMixin,
+    snapshotsMixin,
     configsMixin,
     consensusStateMixin,
     crossChainMixin,
     governanceMixin,
-    listSnapshotsMixin,
     oracleMixin,
     p2pPeersMixin,
-    policySnapshotsMixin,
     pricesMixin,
     priceArchiveMixin,
     reorgAttestationsMixin,
@@ -234,6 +218,7 @@ class Database {
         await this.runCapabilityAndCheckpointMigrations();
         await this.runColumnAndFenceMigrations();
         await this.runDatetimeColumnMigrations();
+        await this.assertMirrorKeysWide();
     }
 
     async getConnection(){
@@ -392,7 +377,9 @@ installMixins(Database.prototype, [
     bootstrapMixin,
     keyMigrationsMixin,
     columnMigrationsMixin,
-    migrationStepsMixin
+    migrationStepsMixin,
+    mirrorKeysMixin,
+    transactionMixin
 ]);
 
 module.exports = Database;

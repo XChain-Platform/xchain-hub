@@ -328,6 +328,15 @@ module.exports = {
             ATTESTATION_RESPONSE_MIRROR_COLUMNS.map(c => (row[c] === undefined ? null : row[c])));
     },
 
+    // Swaps the signer set of one mirrored response row, only while it still holds the
+    // signature list the caller read, so two concurrent replacements cannot interleave.
+    async updateAttestationResponseSignerSet(network, requestId, effectiveTime, heldSignatures, signerPubkeys, signatures) {
+        return this.doQuery(
+            'UPDATE attestation_responses SET signer_pubkeys = ?, signatures = ? ' +
+            'WHERE network = ? AND request_id = ? AND effective_time = ? AND signatures = ?',
+            [signerPubkeys, signatures, network, requestId, effectiveTime, heldSignatures]);
+    },
+
     // Reads one mirrored response row back by its natural key, id included.
     // Moved here from src/attestation/response_mirror.js:446 and :793, which issued the
     // same statement.

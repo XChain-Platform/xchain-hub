@@ -71,30 +71,6 @@ function acceptInboundSocket(pm, ws, req) {
     ws.on('error', (e) => logger.error(nodeUtil.format('Inbound peer error:', e)));
 }
 
-// Dial the configured seeds, or the network default bootstrap peers when the
-// operator configured none.
-function dialSeedPeers(pm, host) {
-    // A hub with no SEED_NODES dials nobody and joins no gossip mesh, while
-    // running and looking healthy. Fall back to the bootstrap peers.
-    // regtest gets none: a local venue must never dial public seeds.
-    let seeds = pm.config.SEED_NODES || [];
-    if (seeds.length === 0) {
-        const defaults = pm.constructor.bootstrapSeeds(pm.config.HUB_NETWORK);
-        if (defaults.length) {
-            // Never dial ourselves: one of the five IS one of the five.
-            seeds = defaults.filter(a => !host || host === '0.0.0.0' ? true : !a.includes(host));
-            logger.info('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
-                        ' default bootstrap seed(s) for ' + pm.config.HUB_NETWORK);
-        }
-    }
-    for (let addr of seeds) {
-        pm.connectToPeer(addr);
-        // Record seed in DB (fire and forget). validator_id is the peer's own addr,
-        // not ours; we are recording the peer, not ourselves.
-        pm.recordPeer(addr, addr, true);
-    }
-}
-
 // The outbound socket handlers: they own the peer record this dial created.
 function wireOutboundSocket(pm, addr, peer, ws) {
     ws.on('open', () => {
@@ -192,7 +168,7 @@ class PeerConnections {
         });
 
         this.running = true;
-        dialSeedPeers(this, host);
+        await this.dialSeedPeers();
 
         this.startHeartbeat();
         this.startDedupPruner();

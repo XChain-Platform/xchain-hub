@@ -34,6 +34,7 @@ const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
@@ -48,7 +49,6 @@ const HUB_PARTS    = ['hub_rows.js'];
 const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
 const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
 const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
-const STRICT       = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
 
 // Every converted carrier that still has a logic module, by registry stem and the
 // file it lives in since W5: the 7 gate twins under src/consensus/gates/, the
@@ -163,6 +163,16 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
     });
 
+    it('spells every dark threshold in the hub-only rows through UNARMED, never as a run of nines', function () {
+        // Eight or more nines also catches a sentinel with a digit dropped, which would arm at a reachable height.
+        for (const part of HUB_PARTS) {
+            const live = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8')
+                .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+            const offenders = live.split('\n').filter((line) => /9{8,}/.test(line));
+            expect(offenders, part + ' writes the sentinel as a number').to.deep.equal([]);
+        }
+    });
+
     it('registers every queued row: the part files name exactly the keys the registry holds', function () {
         const queued = [];
         for (const part of PARTS.concat(HUB_PARTS)) {
@@ -171,13 +181,38 @@ describe('src/consensus/gate_registry.js: the layout', function () {
         }
         expect(queued).to.deep.equal(registry.keys());
     });
+});
+
+describe('src/consensus/gate_registry.js: the shared layout', function () {
+
+    it('spells dark thresholds through UNARMED in the migrated shared row files', function () {
+        const targets = {
+            'shared_rows_1.js': [
+                'archive_rollback_author_scope_activation.ARCHIVE_ROLLBACK_AUTHOR_SCOPE_ACTIVATION',
+            ],
+            'shared_rows_5.js': [
+                'xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION',
+                'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION',
+                'list_share_consumer_activation.LIST_SHARE_CONSUMER_ACTIVATION',
+                'list_meta_activation.LIST_META_ACTIVATION',
+            ],
+        };
+        for (const [part, keys] of Object.entries(targets)) {
+            const text = fs.readFileSync(path.join(PARTS_DIR, part), 'utf8');
+            for (const key of keys) {
+                const start = text.indexOf("addGate('" + key + "'");
+                const end = text.indexOf('\n});', start);
+                const live = text.slice(start, end + 4).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+                expect(start, part + ' contains ' + key).to.not.equal(-1);
+                expect(end, part + ' terminates ' + key).to.not.equal(-1);
+                expect(live, part + ':' + key + ' contains a bare UNARMED sentinel').to.not.match(/\b9999999999\b/);
+                expect(live, part + ':' + key + ' uses UNARMED').to.match(/\bUNARMED\b/);
+            }
+        }
+    });
 
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
-        if (!fs.existsSync(path.join(INDEXER_PARTS, 'shared_rows_1.js'))) {
-            if (STRICT) expect.fail('xchain-indexer sibling at ' + INDEXER_PARTS + ' carries no registry part files (set XCHAIN_INDEXER_DIR at a converted checkout)');
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;
         const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
         expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });

@@ -27,6 +27,8 @@ function loadModule() {
         existsSync:    sinon.stub().returns(true),
         writeFileSync: sinon.stub(),
         openSync:      sinon.stub().returns(99),
+        renameSync:    sinon.stub(),
+        unlinkSync:    sinon.stub(),
         writeSync:     sinon.stub(),
         fsyncSync:     sinon.stub(),
         closeSync:     sinon.stub(),
@@ -127,6 +129,9 @@ function defaultPipelinePub() {
     pub.dogeAddress   = 'DwhateverAddress';
     pub.dogePubkeyHex = '02' + 'a'.repeat(64);
     pub.getBalanceFn  = sinon.stub().resolves(50);
+    // Queue processing now requires an explicit broadcast hook. This adapter keeps
+    // these unit tests focused on the default pipeline's failure classification.
+    pub.setBroadcastHook((payload) => pub.defaultBroadcast(payload));
     return pub;
 }
 
@@ -352,4 +357,3 @@ oraclePublisherTests('ambiguous send handling (item 2675)', function () {
     });
 
 });
-

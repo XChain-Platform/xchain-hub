@@ -60,6 +60,8 @@ function registerSuitePart1() {
                     getSnapshot: async () => ({ validators: VALIDATORS_4.slice() }),
                     getQuorum:   () => 3
                 };
+                // The follower bounds the stamped height against its own BTC tip.
+                hub.resolveBtcLatestBlock = async () => 900000;
 
                 // btcBlockHeight is the leader-stamped snapshot block; without
                 // it the follower resolves no snapshot and fails closed.

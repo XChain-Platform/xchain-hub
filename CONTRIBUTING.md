@@ -34,7 +34,7 @@ xchain-hub/
 
 ### Prerequisites
 
-- **Node.js 22.12 or newer** (22.x only). The platform pins Node 22 fleet-wide: the `mariadb` driver is ESM-only, and `require()` loads ESM without a flag only from **22.12.0**, so 22.0-22.11 fail at hub boot with `ERR_REQUIRE_ESM` even though `npm install` succeeded. Newer majors are not validated against the stack. `engines.node` declares `>=22.12.0`; `.nvmrc` says `22`, which resolves to the newest installed 22.x, so `nvm install 22` is the safe path.
+- **Node.js 22** (22.x only). The platform pins Node 22 fleet-wide, and newer majors are not validated against the stack. `engines.node` declares `>=22.0.0 <23` with no minor floor: the pinned `mariadb` driver's `require` export is a real CommonJS file, so it loads on every 22.x without `require(esm)` (see `test/regression/mariadb_node_floor_falsified.test.js`). `.nvmrc` says `22`, which resolves to the newest installed 22.x, so `nvm install 22` is the safe path.
 - **MariaDB** reachable from the hub host for anything beyond unit tests.
 - For integration and e2e runs, a running XChain stack (indexer, at least one coin node). The `xchain-regtest-miner` plus a regtest stack is the easiest local path.
 
@@ -111,6 +111,7 @@ CI is the smoke + unit gate. Before opening a PR:
 2. Update `CHANGELOG.md` with a terse entry for your change.
 3. Make sure `git status` is clean apart from intended changes (no `node_modules/`, no editor leftovers, no `.env`).
 4. Open the PR with a clear title and a description of what changed and why.
+5. Tick the Contributor License Agreement box in the PR template. The CLA Assistant bot records your signature once against your GitHub account, covering all XChain Platform repositories, and its `license/cla` check must pass before merge. The agreement is at <https://docs.xchain.io/legal/cla>.
 
 For non-security bugs, open an issue at <https://github.com/XChain-Platform/xchain-hub/issues/new>. For security bugs, see [`SECURITY.md`](./SECURITY.md).
 

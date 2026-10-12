@@ -147,9 +147,11 @@ class AttestationBatchPublisher {
     // write skipped markers for a table empty by design.
     // Read off the activation map itself rather than off a height, because the window
     // is a clock and has no block to evaluate the height gate against.
+    // Treat the UNARMED sentinel as unarmed, as the registry's own activeAt does: it means
+    // "named, never fires", so arming windows below it would only write skipped markers.
     isArmedNetwork(){
         let entry = gateRegistry.get(ATTEST_RESPONSE_MIRROR_KEY)[this.network];
-        return entry !== null && entry !== undefined;
+        return Number.isFinite(entry) && entry < gateRegistry.UNARMED;
     }
 
     async start(){

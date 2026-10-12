@@ -17,6 +17,7 @@ const path = require('path');
 const crd  = require('../../../src/consensus_rules_digest.js');
 const PeerManager = require('../../../src/peers/manager.js');
 const ValidatorIdentity = require('../../../src/validators/identity.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const INDEXER_COPY = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus_rules_digest.js');
 function registerDigestBasics() {
@@ -136,12 +137,7 @@ function registerDigestParityTests() {
     // The property the whole feature rests on: a hub and an indexer share no source
     // file, so only a VALUE-based digest can be compared between them.
     it('matches the indexer copy exactly, across two repos with no shared file', function () {
-        if (!fs.existsSync(INDEXER_COPY)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('xchain-indexer sibling checkout missing: ' + INDEXER_COPY);
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, INDEXER_COPY), 'the indexer twin guard')) return;
         const idx = require(INDEXER_COPY);
         const mine = crd.computeConsensusRulesDigest();
         const theirs = idx.computeConsensusRulesDigest();

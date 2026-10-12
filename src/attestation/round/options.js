@@ -185,6 +185,15 @@ module.exports = {
         // the default cadence that is a line every few seconds forever; log the first
         // occurrence and then at most one per pollMs-scaled window.
         this._pollRpcWarnAt    = 0;
+        // Transport and auth failures (no usable HTTP answer, or a 401/403), counted apart
+        // from the rejections above so an operator can tell a key mismatch from an indexer
+        // that is down. Monotonic for the process life, like pollRpcErrorCount.
+        this.pollTransportErrorCount = 0;
+        this.pollAuthErrorCount      = 0;
+        // When this process first tried a poll, past the observer-only and URL checks.
+        // Null on an observer-only hub. It anchors poll_unsuccessful_for_ms, so a hub that
+        // never once reached its indexer reads as failing rather than as just booted.
+        this.firstPollAttemptAt      = null;
     }
 
 };

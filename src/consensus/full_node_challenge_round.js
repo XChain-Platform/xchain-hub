@@ -49,9 +49,10 @@
 
 const axios             = require('axios');
 const ValidatorIdentity = require('../validators/identity.js');
-const { isAmbiguousSendError } = require('../lib/idempotent_broadcast.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { isAmbiguousSendError } = require('../lib/guards/idempotent_broadcast.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild } = require('../lib/encoder/encoder_reservation.js');
 const activation        = require('../lib/fullnode_activation.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
@@ -334,7 +335,7 @@ class FullNodeChallengeRound {
                 // Forwarded only while inside the encoder's caller-facing
                 // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
                 // from its own uncapped fetch of this same address
-                // (lib/encoder_utxo_forward.js).
+                // (lib/encoder/encoder_utxo_forward.js).
                 utxos:    forwardableUtxos(utxos, 'FullNodeChallengeRound'),
                 // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
                 // field, so it must be the base58check address, not the raw hex pubkey.
@@ -348,14 +349,22 @@ class FullNodeChallengeRound {
             // create_tx answers with `psbt` (plus `revealPsbt` for TAPROOT) and never
             // psbtHex/hex, so the old alternates could only ever mask a missing PSBT by
             // handing undefined to the wallet signer.
-            if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
-            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
-            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
-            // NODEPROOF verdict no indexer can decode and strand the carrier value
-            // (lib/two_phase_guard.js).
-            assertSingleTxEncoding(built, 'FullNodeChallengeRound');
-            let txHex = await this.walletSignFn(built.psbt);
-            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+            // Every abandon below hands the reserved inputs back; the send stays outside
+            // (lib/encoder/encoder_reservation.js).
+            let txHex;
+            try {
+                if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+                // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+                // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
+                // NODEPROOF verdict no indexer can decode and strand the carrier value
+                // (lib/guards/two_phase_guard.js).
+                assertSingleTxEncoding(built, 'FullNodeChallengeRound');
+                txHex = await this.walletSignFn(built.psbt);
+                if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+            } catch(e){
+                await abandonBuild(this.encoder, built, 'FullNodeChallengeRound');
+                throw e;
+            }
             return await this.encoder.broadcastTx(txHex);
         }
         throw new Error('no broadcast pipeline (set broadcast hook, or encoder + wallet-sign + BTC_ADDRESS)');

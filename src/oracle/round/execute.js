@@ -121,8 +121,13 @@ module.exports = {
             // synchronously. Left UNSET when this resolve throws, so a hub that could
             // not determine its own network fails the gate closed rather than guessing.
             this.currentBtcNetwork = network;
-            let btcTip = await this.db.getChainTip('BTC', network);
+            let btcTip = typeof this.hub.resolveFreshPushedBtcTip === 'function'
+                ? await this.hub.resolveFreshPushedBtcTip(network)
+                : await this.db.getChainTip('BTC', network);
             if (btcTip) {
+                let ageS = Math.floor(Date.now() / 1000) - Number(btcTip.blockTime);
+                logger.info('Oracle: round reference block using pushed BTC tip (height ' +
+                    btcTip.blockHeight + ') ' + (Number.isFinite(ageS) ? ageS + 's old' : 'with unknown age'));
                 applyPushedChainTip.call(this, btcTip);
             } else {
                 let directHeight = null, directCause = null;
@@ -188,15 +193,17 @@ function advanceRoundNumber() {
 // Anchor the round on a chain tip the indexer pushed into the hub DB.
 function applyPushedChainTip(btcTip) {
     this.currentBtcBlockHeight         = btcTip.blockHeight;
-    this.currentBtcBlockTime           = btcTip.blockTime;
+    // A pushed row without a usable header time anchors on the wall clock, the
+    // same as the direct-height path, rather than carrying a junk value forward.
+    let tipTimeUsable                  = Number.isSafeInteger(btcTip.blockTime) && btcTip.blockTime > 0;
+    this.currentBtcBlockTime           = tipTimeUsable ? btcTip.blockTime : Math.floor(Date.now() / 1000);
     this.lastSuccessfulChainTipFetchAt = Date.now();
     this.chainTipFetchFailures         = 0;
     this.chainTipFallbackActive        = false;
     // Record the pushed tip's own block time so diagnostics can age it. A
     // present-but-frozen row (indexer catch-up suppressing pushes) clears
     // every fetch counter above but leaves this block time stale.
-    this.anchorTipBlockTime = (typeof btcTip.blockTime === 'number' && btcTip.blockTime > 0)
-        ? btcTip.blockTime : null;
+    this.anchorTipBlockTime = tipTimeUsable ? btcTip.blockTime : null;
 }
 
 // Anchor the round on the hub's own direct indexer read.

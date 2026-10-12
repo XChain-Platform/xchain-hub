@@ -24,11 +24,18 @@
  *
  ********************************************************************/
 
+// One anchor-reward INSERT for both the autocommit and the in-transaction write, so the
+// two column lists cannot drift apart.
+const INSERT_ANCHOR_REWARD = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
+                     VALUES (?, ?, ?, ?, ?, ?)`;
+
 module.exports = {
-    // Deletes from validator_rewards.
+    // Deletes the unarchived rows of one logical anchor from validator_rewards. Takes the
+    // CONNECTION first: its only caller supersedes inside db.withTransaction, so the
+    // delete and the winner's insert commit or roll back together.
     // Moved here from src/anchor/reward_tracker.js:212.
-    async deleteValidatorReward(roundNumber, rewardType, qualifier) {
-        return this.doQuery('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
+    async deleteValidatorReward(conn, roundNumber, rewardType, qualifier) {
+        return conn.query('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
     },
 
     // Reads rows from validators.
@@ -220,8 +227,13 @@ module.exports = {
     // no-op, and the cross-pubkey collapse is decided by the caller before this runs.
     // Moved here from src/anchor/reward_tracker.js:214.
     async createValidatorAnchorReward(validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier) {
-        return this.doQuery(`INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
-                     VALUES (?, ?, ?, ?, ?, ?)`, [validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier]);
+        return this.doQuery(INSERT_ANCHOR_REWARD, [validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier]);
+    },
+
+    // The same insert on the caller's transaction connection: the superseding winner's row,
+    // written after deleteValidatorReward on that connection.
+    async createSupersedingValidatorAnchorReward(conn, validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier) {
+        return conn.query(INSERT_ANCHOR_REWARD, [validatorPubkey, roundNumber, rewardType, amount, blockIndex, roundQualifier]);
     },
 
     // Reads one row from validator_rewards: what one validator is owed but has not claimed.

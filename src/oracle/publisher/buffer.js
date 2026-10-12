@@ -127,7 +127,7 @@ module.exports = {
         }).filter(e => e !== null && Number.isFinite(Number(e.round)));
     },
 
-    // Truncating rewrite, used only by the two pruning paths. Returns false on a write
+    // Atomic rewrite (rewriteDurableFile), used by the pruning paths. Returns false on a write
     // failure; the in-memory Map is the authority for this process either way, so a
     // failed prune costs disk, never correctness.
     rewriteBufferFile(entries) {

@@ -23,7 +23,7 @@
 'use strict';
 
 // The signed canonical. MUST byte-match the consumer rebuild in
-// hub_db_sync.js (xchain-indexer + xchain-explorer vendored copy).
+// hub_db_sync/retractions.js canonicalRetraction() (xchain-indexer + xchain-explorer vendored copy).
 function canonicalRetraction(evt){
     let to  = (evt.to_action_index       !== undefined && evt.to_action_index       !== null) ? String(evt.to_action_index)       : '';
     let gen = (evt.retraction_generation !== undefined && evt.retraction_generation !== null) ? String(evt.retraction_generation) : '';

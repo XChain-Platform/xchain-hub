@@ -4,18 +4,31 @@ const { expect } = require('chai');
 const { foldArchiveCanonical } = require('../../../../../src/anchor/publisher/canonical_forms.js');
 const { extendWrapperCanonicalBase } = require('../../../../../src/anchor/publisher/fold/wrapper_canonical.js');
 
+const { siblingCheckout, skipOrFail } = require('../../../../helpers/sibling_checkout.js');
+
 // Load the sibling indexer verifier only in the monorepo layout; a single-repo checkout lacks it.
+// A symlink into a peer's live main checkout is refused before loading (sibling_checkout.js).
+const IDX_ANCHOR = '../../../../../../xchain-indexer/src/actions/anchor/index.js';
+const anchorVerdict = siblingCheckout(__dirname, IDX_ANCHOR);
 let Anchor = null, anchorErr = null;
-try { Anchor = require('../../../../../../xchain-indexer/src/actions/anchor/index.js'); } catch (e) { anchorErr = e; }
+if (anchorVerdict.usable) try { Anchor = require(IDX_ANCHOR); } catch (e) { anchorErr = e; }
+
+// Same sibling-only loading for the SDK checkpoint verifier.
+const SDK_CHECKPOINT = '../../../../../../xchain-sdk/src/checkpoint.js';
+const sdkVerdict = siblingCheckout(__dirname, SDK_CHECKPOINT);
+let SdkCheckpoint = null, sdkErr = null;
+if (sdkVerdict.usable) try { SdkCheckpoint = require(SDK_CHECKPOINT); } catch (e) { sdkErr = e; }
 
 // Skip without the sibling, but fail in the required-siblings lane (XCHAIN_REQUIRE_SIBLINGS=1).
-function requireIndexer() {
-    if (Anchor) return;
+function requireSibling(mod, name, err, verdict) {
+    if (!skipOrFail(this, verdict, 'the ' + name + ' signing-vector guard')) return;
+    if (mod) return;
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but xchain-indexer anchor is unloadable: ' +
-            (anchorErr && anchorErr.message));
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + name + ' is unloadable: ' + (err && err.message));
     this.skip();
 }
+function requireIndexer() { return requireSibling.call(this, Anchor, 'xchain-indexer anchor', anchorErr, anchorVerdict); }
+function requireSdk() { return requireSibling.call(this, SdkCheckpoint, 'xchain-sdk checkpoint', sdkErr, sdkVerdict); }
 
 // Same literal as the indexer's v3_archive_equiv_canonical.test.js; keep both byte-identical.
 const EXPECTED = 'EQUIV|XCHECKPOINT|BTC|regtest|100007|7|5|0||XCHECKPOINT|BTC|regtest|100007|' +
@@ -80,6 +93,30 @@ describe('folded ANCHOR wrapper signing canonical vector', function () {
         it('a non-wrapper section keeps the batch sequence out of its round id', function () {
             const plain = Anchor.prototype.canonical.call({}, indexerSection(1));
             expect(plain.startsWith('EQUIV|XCHECKPOINT|BTC|regtest|100007|7|0||')).to.equal(true);
+        });
+    });
+
+    describe('against the sibling SDK verifier', function () {
+        before(requireSdk);
+
+        function sdkCheckpoint(fold){
+            return Object.assign(wrapperCheckpoint(), { fold_archive: fold });
+        }
+        const FOLD = { match_batch_seq: 5, match_count: 1, batch_crc32: '8665563e', total_chunks: 1 };
+
+        it('canonicalCheckpoint with fold_archive rebuilds the hub signer preimage', function () {
+            const hub = foldArchiveCanonical(wrapperCheckpoint(), 5, 1, '8665563e', 1);
+            expect(SdkCheckpoint.canonicalCheckpoint(sdkCheckpoint(FOLD))).to.equal(hub);
+            expect(hub).to.equal(EXPECTED);
+        });
+
+        it('rebuilds the hub bytes for an upper-case batch CRC', function () {
+            const fold = Object.assign({}, FOLD, { batch_crc32: '8665563E' });
+            expect(SdkCheckpoint.canonicalCheckpoint(sdkCheckpoint(fold))).to.equal(EXPECTED);
+        });
+
+        it('without fold_archive the SDK form differs from the hub wrapper preimage', function () {
+            expect(SdkCheckpoint.canonicalCheckpoint(sdkCheckpoint(null))).to.not.equal(EXPECTED);
         });
     });
 });

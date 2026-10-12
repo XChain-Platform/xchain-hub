@@ -82,6 +82,19 @@ describe('bin/ci_fast_select.js', function () {
         }
     });
 
+    it('keeps suite-title metadata out of consensus widening', () => {
+        for (const file of [
+            'bin/pins/at1-suite-titles.json',
+            'bin/pins/suite-title-renames.json',
+        ]) {
+            assert.deepStrictEqual(plan([file]), {
+                consensus: false,
+                reasons: [],
+                tests: [],
+            });
+        }
+    });
+
     it('maps documentation changes to no tests', () => {
         assert.deepStrictEqual(plan(['README.md']), { consensus: false, reasons: [], tests: [] });
     });

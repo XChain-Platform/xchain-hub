@@ -63,9 +63,13 @@ module.exports = {
         let first = windowIndex * this.batchWindowRounds;
         let last  = first + this.batchWindowRounds - 1;
 
-        // 1. The leader published after all. Nothing to do; prune our copy.
-        if (await this.pruneObservedWindow(first, last) > 0) return false;
-        if (await this.windowObservedOnChain(first, last)) return false;
+        // 1. The leader published after all. Nothing to do; prune our copy, and a
+        // takeover of ours that never reached the queue is no longer owed.
+        if (await this.pruneObservedWindow(first, last) > 0 ||
+            await this.windowObservedOnChain(first, last)) {
+            this._takeoverUnlanded.delete(windowIndex);
+            return false;
+        }
 
         // 2. FAIL CLOSED when this hub has never observed ANY batch on chain. The
         // observation feed is the indexer pushing landed PRICE actions back to this
@@ -74,6 +78,9 @@ module.exports = {
         // ambiguity double-pays DOGE and puts a duplicate batch on chain, so a hub
         // with an unproven feed declines every takeover and says so once.
         if (!(await this.observationFeedProven())) {
+            // Count every decline (a DB error in the proof check lands here too), so the
+            // polled status can tell a deaf feed from failover that was never needed.
+            this.takeoverDeclinedUnproven = (this.takeoverDeclinedUnproven || 0) + 1;
             if (!this._takeoverDarkWarned) {
                 this._takeoverDarkWarned = true;
                 logger.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
@@ -173,6 +180,26 @@ module.exports = {
         while (this._ambiguousWindows.size > AMBIGUOUS_WINDOW_MEMO_MAX) {
             this._ambiguousWindows.delete(this._ambiguousWindows.keys().next().value);
         }
+    },
+
+    // Remember that a takeover of this window passed the election, so getStats can
+    // report one that then stalled before enqueueWindowWires. The FIRST pass is kept:
+    // a re-attempt of a window that keeps failing must not make it look fresh.
+    // Deliberately uncapped: evicting an entry would undercount takeoverUnlandedWindows
+    // and could hide the very window takeoverOldestUnlandedWindow exists to name. Entries
+    // leave on enqueueWindowWires, when the window lands or is seen on chain, and on stop().
+    noteTakeoverUnlanded(windowIndex) {
+        if (!Number.isFinite(windowIndex) || this._takeoverUnlanded.has(windowIndex)) return;
+        this._takeoverUnlanded.set(windowIndex, Date.now());
+    },
+
+    // The window whose unlanded takeover passed the election longest ago, or null.
+    oldestUnlandedTakeoverWindow() {
+        let oldest = null, oldestAt = Infinity;
+        for (let [w, at] of this._takeoverUnlanded) {
+            if (at < oldestAt) { oldest = w; oldestAt = at; }
+        }
+        return oldest;
     },
 
     // Put the deferred takeover back on the clock. Deliberately not scheduleTakeover:

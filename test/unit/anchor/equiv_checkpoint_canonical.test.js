@@ -41,24 +41,25 @@ const GOLDEN = require('../../fixtures/anchor_canonical_vectors.json');
 // otherwise turn both blocks into permanent pendings on a green run. So there the
 // missing sibling is a hard failure, matching ConsensusPrimitiveConformance.test.js
 // and the indexer's coins-conformance / anchorRewardActivationParity guards.
-let sdkCheckpoint = null, sdkLight = null, Anchor = null, AnchorRecovery = null;
-let sdkErr = null, lightErr = null, anchorErr = null, recoveryErr = null;
-try { sdkCheckpoint = require('../../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
-try { sdkLight = require('../../../../xchain-sdk/src/protocol/light_client.js'); } catch (e) { lightErr = e; }
-try { Anchor = require('../../../../xchain-indexer/src/actions/anchor/index.js'); } catch (e) { anchorErr = e; }
-try { AnchorRecovery = require('../../../../xchain-indexer/bin/recovery.js'); } catch (e) { recoveryErr = e; }
+// A sibling symlinked into a peer's live main checkout is refused before it loads (sibling_checkout.js).
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
+function loadSibling(p) {
+    const v = siblingCheckout(__dirname, p);
+    try { return { v, mod: v.usable ? require(p) : null }; } catch (err) { return { v, mod: null, err }; }
+}
+const SIBLINGS = [loadSibling('../../../../xchain-sdk/src/checkpoint.js'), loadSibling('../../../../xchain-sdk/src/protocol/light_client.js'),
+    loadSibling('../../../../xchain-indexer/src/actions/anchor/index.js'), loadSibling('../../../../xchain-indexer/bin/recovery.js')];
+const [sdkCheckpoint, sdkLight, Anchor, AnchorRecovery] = SIBLINGS.map((s) => s.mod);
 const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
 // before() hook shared by every sibling-gated block: escalate to a throw when the
 // required-siblings lane is active, otherwise skip. Named so the failure message
-// says which sibling failed to load and why.
+// says which sibling was refused or failed to load, and why.
 function requireSiblings() {
+    const refused = SIBLINGS.find((s) => !s.v.usable);
+    if (refused && !skipOrFail(this, refused.v, 'the XCHECKPOINT three-way parity guard')) return;
     if (haveSiblings) return;
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
-        const missing = [];
-        if (!sdkCheckpoint)  missing.push('xchain-sdk/src/checkpoint.js (' + (sdkErr && sdkErr.message) + ')');
-        if (!sdkLight)       missing.push('xchain-sdk/src/protocol/light_client.js (' + (lightErr && lightErr.message) + ')');
-        if (!Anchor)         missing.push('xchain-indexer/src/actions/anchor/index.js (' + (anchorErr && anchorErr.message) + ')');
-        if (!AnchorRecovery) missing.push('xchain-indexer/bin/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
+        const missing = SIBLINGS.filter((s) => !s.mod).map((s) => s.v.path + ' (' + (s.err && s.err.message) + ')');
         throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the XCHECKPOINT cross-service parity siblings are unloadable: '
             + missing.join('; '));
     }

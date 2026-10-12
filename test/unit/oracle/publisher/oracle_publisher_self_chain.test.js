@@ -260,6 +260,7 @@ function registerThroughAPublishPassSuite2Part1() {
     };
     p.encoder = throughAPublishPassSuite2DustAwareEncoder(state);
     p.setWalletSignHook(async () => 'ff'.repeat(120));
+    p.setBroadcastHook(payload => p.defaultBroadcast(payload));
     throughAPublishPassSuite2Seed({
       queuePath
     }, [101, 102, 103]);
@@ -287,6 +288,7 @@ function registerThroughAPublishPassSuite2Part2() {
     };
     p.encoder = throughAPublishPassSuite2DustAwareEncoder(state);
     p.setWalletSignHook(async () => 'ff'.repeat(120));
+    p.setBroadcastHook(payload => p.defaultBroadcast(payload));
     throughAPublishPassSuite2Seed({
       queuePath
     }, [201]);

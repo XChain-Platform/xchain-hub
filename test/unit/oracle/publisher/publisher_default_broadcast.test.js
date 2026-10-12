@@ -29,7 +29,7 @@ const OraclePublisher      = require('../../../../src/oracle/publisher');
 // The canned answer deliberately omits `encoding`, which the REAL create_tx always
 // reports. That omission is what keeps the argument-shape cases below reachable:
 // against a faithful P2SH answer the pipeline now refuses to sign at all
-// (src/lib/two_phase_guard.js), because the P2SH lane is two transactions and this
+// (src/lib/guards/two_phase_guard.js), because the P2SH lane is two transactions and this
 // pipeline can only broadcast the first. The refusal is exercised against a faithful
 // answer in the last describe block, so the simplification here narrows what these
 // cases cover without hiding the contract.

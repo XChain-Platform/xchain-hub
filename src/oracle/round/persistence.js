@@ -24,30 +24,64 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// Place a sender as member, non_member or unresolved at the round's block. No feed, no
+// key, or a feed without the lookup keeps the original refusal (non_member).
+async function stakeMembership(feed, blockIndex, senderPubkey) {
+    if (!senderPubkey || !feed || typeof feed.membership !== 'function') return { status: 'non_member' };
+    try {
+        let status = await feed.membership('price', blockIndex, senderPubkey);
+        if (status !== 'unresolved') return { status: status };
+        return { status: status, reason: 'stake-weight snapshot unavailable at block ' + blockIndex };
+    } catch (e) {
+        return { status: 'unresolved', reason: 'stake-weight lookup failed: ' + ((e && e.message) ? e.message : e) };
+    }
+}
+
 module.exports = {
 
     // Audit-row fallback for a sender the registry does not know. Qualifying stake at
-    // the round's block boundary stands in for the missing registry row; anything the
-    // feed cannot place there keeps the original refusal, so an unknown key still
-    // writes no placeholder row and still names its remedy.
+    // the round's block boundary stands in for the missing registry row; a key the
+    // resolved snapshot lacks keeps the original refusal and its remedy, while a feed
+    // fault is counted and named as one. Neither writes a placeholder row.
     //
     // Async and self-catching because handleMessage is a synchronous handler: this is
     // fire-and-forget exactly like the registered-sender persist beside it, and an
     // indexer fault must cost an audit row rather than the round.
     async persistFromStakeWeight(round, envelope, prices, senderPubkey) {
         let feed = this.hub && this.hub.stakeWeightFeed;
-        try {
-            if (senderPubkey && feed && typeof feed.isQualified === 'function' &&
-                await feed.isQualified('price', this.currentBtcBlockHeight, senderPubkey)) {
-                await this.persistSubmissions(round, envelope.sender, prices, senderPubkey);
-                return;
-            }
-        } catch (e) {
-            logger.warn('Oracle: stake-weight lookup failed for sender ' + envelope.sender +
-                ' on round ' + round + ': ' + ((e && e.message) ? e.message : e));
+        let placed = await stakeMembership(feed, this.currentBtcBlockHeight, senderPubkey);
+        if (placed.status === 'member') {
+            await this.persistStakeQualified(round, envelope.sender, prices, senderPubkey);
+            return;
+        }
+        if (placed.status === 'unresolved') {
+            this.onStakeWeightLookupFailure(round, envelope.sender, placed.reason);
+            return;
         }
         logger.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
             ' (call syncvalidators to register the peer)');
+    },
+
+    // Persist a stake-qualified peer's row outside the lookup, so a persist fault is
+    // counted as a persist failure and never read as a missing registry row.
+    async persistStakeQualified(round, sender, prices, senderPubkey) {
+        try {
+            await this.persistSubmissions(round, sender, prices, senderPubkey);
+        } catch (e) {
+            logger.error(nodeUtil.format('Oracle: Error persisting submission:', e));
+            this.failedSubmissionPersists += prices.length;
+            this.lastSubmissionPersistFailureRound = round;
+            this.lastSubmissionPersistFailureCount = prices.length;
+        }
+    },
+
+    // Count a stake-feed fault and name it, instead of sending the operator to
+    // syncvalidators for a peer that registering would not help.
+    onStakeWeightLookupFailure(round, sender, reason) {
+        this.stakeWeightLookupFailures++;
+        this.lastStakeWeightLookupFailureRound = round;
+        logger.warn('Oracle: skipping DB persist for sender ' + sender + ' on round ' + round +
+            ': ' + reason + ' (stake feed or indexer fault; registering the peer will not help)');
     },
 
     // Persist price submissions to the database

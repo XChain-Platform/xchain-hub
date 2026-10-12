@@ -63,15 +63,17 @@ class RewardTracker {
     async distributeRewards(round, participants, btcBlockHeight) {
         if (!participants || participants.length === 0) return;
 
-        // Sanity-gate the configured budget only; the split below never touches
-        // this float.
-        let totalReward = parseFloat(this.rewardPerRound);
-        if (!Number.isFinite(totalReward) || totalReward <= 0)
+        // Verify the budget is a positive plain decimal, checked on the same string the
+        // bcmath split reads (never parseFloat, which passes '10abc' that bcdiv rejects).
+        let budget = String(this.rewardPerRound);
+        if (!/^\d+(\.\d+)?$/.test(budget) || !bcmath.bcgt(budget, '0'))
             throw new Error('Invalid reward amount: ' + this.rewardPerRound);
 
-        let validParticipants = participants.filter(pk =>
-            typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
-        );
+        // Canonical set: lowercase, deduplicated, sorted. A case-variant or repeated
+        // key would otherwise inflate the divisor and make equal rounds split unequally.
+        let validParticipants = [...new Set(participants
+            .filter(pk => typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk))
+            .map(pk => pk.toLowerCase()))].sort();
         if (validParticipants.length === 0) return;
 
         // Split the budget the way the indexer derives the consensus rows
@@ -81,7 +83,7 @@ class RewardTracker {
         // satoshi off the 1.66666666 the chain credits.
         let perValidator = bcmath.bcformat(
             bcmath.bcmulfloor(
-                bcmath.bcdiv(this.rewardPerRound, String(validParticipants.length), 18), '1', 8
+                bcmath.bcdiv(budget, String(validParticipants.length), 18), '1', 8
             ), 8);
 
         for (let pubkey of validParticipants) {
@@ -96,12 +98,13 @@ class RewardTracker {
 
     // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
     // rewardType: 'anchor_bundle' / 'anchor_archive'; roundNumber: snapshot_block /
-    // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
-    // (the publisher at publish time; peers from the signature-verified
-    // BUNDLE_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
-    // snapshot_block of the rewarded checkpoint, so all hubs record identical
-    // row bytes and the ANCHOR archive's rewards section verifies by
-    // re-derivation.
+    // batch_seq. The publisher that paid the DOGE earns it. Below each reward type's
+    // flag-day it is called on EVERY hub (the publisher at publish time; peers from the
+    // signature-verified BUNDLE_DONE/FINALIZED announcements); at/above it those peer
+    // mirrors are retired and only the publisher calls it, for a hub-local row.
+    // blockIndex MUST be the quorum-agreed snapshot_block of the rewarded checkpoint,
+    // so hubs that do record it hold identical row bytes and the ANCHOR archive's
+    // rewards section verifies by re-derivation.
     //
     // One logical anchor → exactly ONE reward, even across DISTINCT publisher
     // pubkeys. The table's UNIQUE KEY includes validator_pubkey, so a bare INSERT
@@ -110,9 +113,11 @@ class RewardTracker {
     // same (round_number, reward_type) and BOTH rows would land, minting the
     // reward twice and inflating the COLLECT rail. We collapse them
     // deterministically: the lexicographically smallest pubkey keeps the credit.
-    // Every hub computes the identical winner from the same set of rows, so the
-    // surviving row stays byte-identical fleet-wide (the ANCHOR archive's
-    // re-derivation invariant holds and recovery restores a single reward). A row
+    // Below the flag-day every hub computes the identical winner from the same set
+    // of rows, so the surviving row stays byte-identical fleet-wide (the ANCHOR
+    // archive's re-derivation invariant holds and recovery restores a single reward).
+    // At/above it a hub sees only its own publish, so this collapse dedups same-hub
+    // writes only, and the indexer's winner reconcile is the cross-publisher dedup. A row
     // that has already ridden an on-chain archive (batch_seq IS NOT NULL) is
     // immutable and is never displaced. Retries / re-flushes / multi-hub recording
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
@@ -182,13 +187,18 @@ class RewardTracker {
             let minIncumbent = existing.map(r => String(r.validator_pubkey).toLowerCase()).sort()[0];
             if (minIncumbent <= lcPubkey) return;
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
-            // supersedes the local-only incumbent(s); every hub makes the same call.
-            await this.db.deleteValidatorReward(roundNumber, rewardType, qualifier)
-                .catch(e => { logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)); throw e; });
+            // supersedes the local-only incumbent(s); every hub makes the same call. The
+            // delete and our insert share one transaction: a failed insert rolls the
+            // delete back, so the incumbent stays rather than this hub holding no row.
+            await this.db.withTransaction(async conn => {
+                await this.db.deleteValidatorReward(conn, roundNumber, rewardType, qualifier);
+                await this.db.createSupersedingValidatorAnchorReward(conn, lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier);
+            }).catch(e => { logger.error(nodeUtil.format('Error consolidating anchor reward for ' + lcPubkey + ':', e)); throw e; });
+        } else {
+            // Rethrow like the read: a lost insert must not log the success line below.
+            await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
+                .catch(e => { logger.error(nodeUtil.format('Error recording anchor reward for ' + lcPubkey + ':', e)); throw e; });
         }
-
-        await this.db.createValidatorAnchorReward(lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier)
-            .catch(e => logger.error(nodeUtil.format('Error recording anchor reward for ' + lcPubkey + ':', e)));
 
         logger.info('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 

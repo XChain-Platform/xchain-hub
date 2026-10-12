@@ -25,6 +25,7 @@ const { positiveIntConfig } = require('../../lib/config_int.js');
 const { resolveCheckpointIntervalBlocks } = require('../checkpoint_cadence.js');
 const { ALLOWED_CHAINS } = require('./constants.js');
 const hubConfig = require('../../config');
+const { resolveRegtestSnapshotSeams } = require('../../lib/regtest_snapshot_seams.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -33,6 +34,9 @@ const logger = getLogger();
 // CrossChainCallEngine's snapshot_block bound. See the comment on
 // this.cosignToleranceBlocks in initCosignTolerance for why this is deliberately NOT electionToleranceBlocks.
 const CHECKPOINT_COSIGN_TOLERANCE_BLOCKS = 144;
+
+const LIVE_NETWORKS = ['mainnet', 'testnet'];
+const MIN_LIVE_CONFIRMATIONS = 6;
 
 module.exports = {
 
@@ -52,6 +56,12 @@ module.exports = {
         // the regtest venue setting), so it takes a non-negative guard rather than positiveIntConfig.
         this.confirmations  = parseInt(hubConfig.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
         if(!(this.confirmations >= 0)) this.confirmations = 6;
+        // A shallow checkpoint on a live network signs a block a reorg can still undo, so
+        // the floor is enforced there and only regtest may go below it.
+        if(LIVE_NETWORKS.includes(this.network) && this.confirmations < MIN_LIVE_CONFIRMATIONS){
+            throw new Error('CHECKPOINT_CONFIRMATIONS=' + this.confirmations + ' is below the minimum of ' +
+                            MIN_LIVE_CONFIRMATIONS + ' on ' + this.network);
+        }
     },
 
     initCosignTolerance(cfg){
@@ -96,10 +106,9 @@ module.exports = {
         // checkpoint canonical and the seeded validator joins the federation set, so a
         // stray env var or configs-table row must never reach them on mainnet/testnet.
         // Honored ONLY on regtest; NaN/false everywhere else (fail closed to the real set).
-        let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-                                       cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         // Per-coin indexer JSON-RPC endpoints (same env surface as CrossChainDexEngine).
         this.indexers = {};
@@ -152,6 +161,13 @@ module.exports = {
         // at that sequence. Nothing honest puts two payloads on the wire at one sequence;
         // the SECOND PAYLOAD log lines name the blocks.
         this._seqDoubleSignRefusals = 0;
+        // Follower co-sign declines by reason (noteCosignDecline). A member whose own indexer
+        // cannot confirm checkpoints stops co-signing, and while the rest still reach quorum
+        // nothing else shows the margin shrinking. Zero-filled so the stats shape is fixed.
+        this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, off_cadence: 0,
+                                 indexer_read_failed: 0, indexer_no_block: 0 };
+        this._lastCosignDeclineReason = null;
+        this._cosignDeclineLoggedAt   = {};   // per-reason warn throttle, on the cadence-stall window
     },
 
     initCadenceMeters(cfg){

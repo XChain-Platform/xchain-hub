@@ -138,6 +138,7 @@ class AttestationRound {
         if(this._pollRunning) return;
         this._pollRunning = true;
         try {
+        if(this.firstPollAttemptAt === null) this.firstPollAttemptAt = Date.now();
         let url = await this.resolveBtcIndexerUrl();
         if(!url) return;
 

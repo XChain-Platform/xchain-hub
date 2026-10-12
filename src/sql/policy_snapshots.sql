@@ -8,13 +8,13 @@
 -- highest seq. capability_snapshots is deliberately NOT the precedent; its rows are
 -- unsigned set membership.
 --
--- db.verifyTables() picks this file up by directory scan at boot (src/db.js
--- verifyTables), so no table list needs the name.
+-- db.verifyTables() picks this file up by directory scan at boot
+-- (src/db/schema/bootstrap.js verifyTables), so no table list needs the name.
 --
--- TODO(L6): as with bridge_transfers, the GET /hub-db/snapshot/policy_snapshots route in
--- xchain-hub/src/api.js is NOT written here; L6 owns that file and each snapshot route is
--- a ~20-line express handler (api.js:2041 state_checkpoints is the shape for an
--- append-only table), not a one-line registration.
+-- Read surface, kept out of this file because it is a full handler: the
+-- GET /hub-db/snapshot/policy_snapshots bootstrap page a reconnecting mirror fills from
+-- lives in src/api/rest/hub_db_snapshot.js, shaped on the state_checkpoints page there
+-- (the append-only precedent), and stamps HUB_SCHEMA_VERSION like every snapshot page.
 DROP TABLE IF EXISTS policy_snapshots;
 CREATE TABLE policy_snapshots (
     id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (since_id)

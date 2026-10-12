@@ -12,6 +12,7 @@
 
 const { expect } = require('chai');
 const constants  = require('../../../src/constants');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 function getOracleBandMirrors() {
     return {
@@ -37,13 +38,7 @@ function findRepoRoot(fs, path) {
 function assertIndexerConfigMatchesBothLanes(ctx, fs, path) {
     const REPO_ROOT = findRepoRoot(fs, path);
     const abs = path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'config.js');
-    if (!fs.existsSync(abs)) {
-        if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-            throw new Error('price-lane parity gate cannot run: xchain-indexer/src/config.js ' +
-                'missing at ' + abs + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
-        ctx.skip();
-        return;
-    }
+    if (!skipOrFail(ctx, siblingCheckout(__dirname, abs), 'the price-lane parity gate')) return;
     const resolved = require.resolve(abs);
     delete require.cache[resolved];
     const cfg = require(resolved).getConfig('BTC', 'mainnet');
@@ -102,9 +97,11 @@ describe('oracle band constants conformance (#1299)', () => {
 // xcall-constants-cross-repo.test.js (whose GUARD_PATHS name only vm/indexer/sdk), so
 // nothing tied the copies together. Anchored HERE rather than replicated as a seventh
 // byte-identical guard: this repo declares the canonical value, so one file can diff
-// every mirror against it and name the stale one. No mirror repo's code reads either
-// constant - they are re-exports for downstream consumers - so a mirror-side edit has
-// no local motive and being caught on the next hub CI run is enough.
+// every mirror against it and name the stale one. Most mirrors only declare and re-export
+// both constants. The exception is xchain-indexer: its consensus price-range gate
+// (src/actions/price/price_zero_validity_gate.js) reads its PRICE_MAX copy, and that repo
+// pins the value in bin/pins/at1-consensus-identity.json, so this test is the cross-repo
+// agreement check rather than the only guard on the indexer copy.
 //
 // xchain-decoder was missing from MIRRORS (and from .ci-siblings) while carrying a
 // byte-identical copy of both values, and its own suite pins neither, so that copy was
@@ -127,14 +124,8 @@ describe('oracle band constants agree across the mirror repos (#3886)', function
     // default (standalone clones), and hard-fails wherever XCHAIN_REQUIRE_SIBLINGS=1
     // declares the siblings were provided on purpose, so bin/ci-all.sh can never pass
     // this green-by-skip.
-    const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
     function siblingOrSkip(ctx, absPath, what) {
-        if (fs.existsSync(absPath)) return true;
-        if (REQUIRE_SIBLINGS)
-            throw new Error('oracle band constants gate cannot run: ' + what + ' missing at ' +
-                absPath + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
-        ctx.skip();
-        return false;
+        return skipOrFail(ctx, siblingCheckout(__dirname, absPath), 'the oracle band constants gate (' + what + ')');
     }
 
     // Fresh read per call: a module cached by an earlier suite would hide an on-disk edit.

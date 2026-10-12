@@ -128,10 +128,30 @@ function registerFeature1constructorPart2() {
     b.stop();
   });
 }
+function registerFeature1constructorPart3() {
+  // Consumers adopt at most 300000 ms and drop a socket idle for 3x that, so a slower
+  // advertised cadence would make every mirror terminate a healthy quiet socket.
+  it('clamps WS_WATERMARK_INTERVAL_MS to the ceiling consumers adopt, and warns', function () {
+    let warn = sinon.stub(console, 'warn');
+    let b = new HubDbBroadcaster({ WS_WATERMARK_INTERVAL_MS: '1200000' });
+    expect(b.watermarkIntervalMs).to.equal(300000);
+    expect(b.watermarkLateThresholdMs).to.equal(600000);
+    expect(warn.getCalls().some((c) => c.args.join(' ').includes('WS_WATERMARK_INTERVAL_MS 1200000'))).to.equal(true);
+    b.stop();
+  });
+  it('keeps a WS_WATERMARK_INTERVAL_MS at the ceiling or below it unchanged', function () {
+    for (let [knob, want] of [['300000', 300000], ['500', 500]]) {
+      let b = new HubDbBroadcaster({ WS_WATERMARK_INTERVAL_MS: knob });
+      expect(b.watermarkIntervalMs).to.equal(want);
+      b.stop();
+    }
+  });
+}
 function registerFeature1constructor() {
   describe('constructor', function () {
     registerFeature1constructorPart1();
     registerFeature1constructorPart2();
+    registerFeature1constructorPart3();
   });
 }
 function registerFeature2addSubscriberPart1() {

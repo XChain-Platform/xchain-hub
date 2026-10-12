@@ -16,7 +16,7 @@ const CrossChainBridgeEngine = require('../../../../src/cross_chain/bridge_engin
 const registry = require('../../../../src/consensus/gate_registry.js');
 const policyPoll = require('../../../../src/cross_chain/bridge/policy_poll.js');
 const validate = require('../../../../src/cross_chain/bridge/validate.js');
-const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy_verify.js');
+const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy/bridge_policy_verify.js');
 const { policyHash } = require('../../../../src/cross_chain/bridge/policy_hash.js');
 
 const SNAPSHOT_BLOCK = 150;
@@ -25,7 +25,10 @@ const REF = 'DOGE:2701';
 const BLOCK_LIST = ['blocked'];
 const SRC = path.resolve(__dirname, '../../../../src');
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
-const { bridgePolicyHash } = require(path.join(INDEXER_DIR, 'src', 'api', 'rpc', 'token_policy.js'));
+const TOKEN_POLICY = path.join(INDEXER_DIR, 'src', 'api', 'rpc', 'token_policy.js');
+// Loaded on first use so a checkout with no sibling still collects this file; the suite
+// skips unless XCHAIN_REQUIRE_SIBLINGS=1 declares the sibling supplied.
+function bridgePolicyHash(...args){ return require(TOKEN_POLICY).bridgePolicyHash(...args); }
 
 function expectedHash(ref = REF){
     return policyHash(null, BLOCK_LIST, false, { allow: ref, block: null });
@@ -190,6 +193,11 @@ function registerArchiveTests(){
 }
 
 describe('bridge policy list sharing by reference', function(){
+    before(function(){
+        if(require('fs').existsSync(TOKEN_POLICY)) return;
+        if(process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling checkout is missing');
+        this.skip();
+    });
     afterEach(function(){
         sinon.restore();
     });

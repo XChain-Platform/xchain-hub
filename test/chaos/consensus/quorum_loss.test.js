@@ -16,32 +16,13 @@ const crypto     = require('crypto');
 const Consensus       = require('../../../src/consensus/pbft');
 const OracleConsensus = require('../../../src/oracle/consensus');
 const OracleRound     = require('../../../src/oracle/round');
-const { createMockHub }    = require('../../helpers/mockHub');
-const { VALIDATORS_4, makeFederationSnapshot, SAMPLE_PRICES } = require('../../helpers/fixtures');
+const { VALIDATORS_4, SAMPLE_PRICES, makeCapabilitySnapshotStub } = require('../../helpers/fixtures');
 const { waitUntil }        = require('../../helpers/waitUntil');
-const { buildEnvelope }    = require('../../helpers/testPeerNetwork');
+const { signedEnvelope, createValidatorHub, wireFederationSnapshot, waitForRound } =
+    require('../helpers/pbft_chaos');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
-}
-
-// Give a chaos hub the deterministic federation snapshot a real federated hub
-// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
-// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
-// with a NULL snapshot now correctly refuses to propose. These experiments
-// inject QUORUM LOSS, not an indexer outage, so they must clear that guard to
-// reach the behaviour they measure. Quorum is stubbed to what getQuorum()
-// returns for the set under test, leaving each experiment's arithmetic
-// unchanged.
-function wireFederationSnapshot(hub, quorum) {
-    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
-    hub.capabilitySnapshot = {
-        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
-        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
-        getQuorum:                  sinon.stub().returns(quorum)
-    };
-    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
-    return snapshot;
 }
 
 function registerBeforeEachHook() {
@@ -64,10 +45,10 @@ function registerPBFTProposalTimesOutWhenQuorumTest() {
 
     it('PBFT proposal times out when quorum is unreachable', async function () {
         // N=4, quorum=3; only 1 peer responds → insufficient
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         // seq=3 → nextSeq=4 → leader=validators[0]
         con.seq = 3;
         con.timeout = 200;
@@ -79,11 +60,12 @@ function registerPBFTProposalTimesOutWhenQuorumTest() {
         let digest = makeDigest(config);
 
         let promise = con.propose(config);
+        await waitForRound(con, 4);
 
         // Only 1 additional PREPARE (self + 1 = 2, need 3)
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         let err;
         try {
@@ -104,10 +86,10 @@ function registerPBFTProposalTimesOutWhenQuorumTest() {
 function registerConfigNotAppliedWhenPREPAREQuorumTest() {
 
     it('config not applied when PREPARE quorum met but COMMIT quorum lost', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         con.seq = 3;
         con.timeout = 300;
         hub.db.doQuery.resolves([]);
@@ -118,20 +100,22 @@ function registerConfigNotAppliedWhenPREPAREQuorumTest() {
         let digest = makeDigest(config);
 
         let promise = con.propose(config);
+        await waitForRound(con, 4);
 
         // Enough PREPAREs (self + 2 = 3)
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
+        expect(hub._peerManager.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
 
         // Only 1 additional COMMIT (self + 1 = 2, need 3)
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         let err;
         try {
@@ -141,6 +125,7 @@ function registerConfigNotAppliedWhenPREPAREQuorumTest() {
         }
 
         expect(err).to.exist;
+        expect(err.message).to.include('2 commits');
         expect(hub.applyConfig.called).to.be.false;
 
         con.stop();
@@ -150,7 +135,7 @@ function registerConfigNotAppliedWhenPREPAREQuorumTest() {
 function registerOracleConsensusSkipsRoundWhenQuorumTest() {
 
     it('oracle consensus skips round when quorum unreachable', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let oracle = new OracleRound(hub);
         let oracleCon = new OracleConsensus(hub, oracle);
         oracleCon.validatorSet = VALIDATORS_4;
@@ -179,25 +164,30 @@ function registerOracleLeaderProposesButQuorumNeverTest() {
 
     it('oracle leader proposes but quorum never reached → timeout', async function () {
         // Round 4: leader = validators[4 % 4] = validators[0] (this node)
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let oracle = new OracleRound(hub);
         let oracleCon = new OracleConsensus(hub, oracle);
         oracleCon.validatorSet = VALIDATORS_4;
         oracleCon.finalizationTimeout = 200;
+        // Block-locked price snapshot over the same four members (quorum 3): a
+        // federated oracle skips a round it cannot anchor, before any PROPOSE.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_4);
 
         await oracleCon.start();
 
+        // Two member submissions clear the default ORACLE_MIN_SUBMISSIONS floor;
+        // each is keyed to snapshot membership by its proven signing key.
         oracle.currentRound = 4;
-        oracle.submissions.set(4, new Map([
-            [VALIDATORS_4[0].addr, { prices: SAMPLE_PRICES, sources: 2, timestamp: Date.now() }]
-        ]));
+        oracle.submissions.set(4, new Map(VALIDATORS_4.slice(0, 2).map(v =>
+            [v.addr, { prices: SAMPLE_PRICES, sources: 2, timestamp: Date.now(), pubkey: v.pubkey }])));
 
         await oracleCon.finalizeRound(4);
 
         // Leader proposed
-        expect(hub._peerManager.broadcast.called).to.be.true;
+        await waitUntil(() => hub._peerManager.broadcast.called, { label: 'the oracle leader PROPOSE' });
         let broadcastType = hub._peerManager.broadcast.getCall(0).args[0];
         expect(broadcastType).to.equal('ORACLE_PROPOSE');
+        expect(oracleCon.pendingRounds.has(4)).to.be.true;
 
         // Wait for finalization timeout
         // Wait for the finalization timeout to clean the round up.
@@ -213,7 +203,7 @@ function registerOracleLeaderProposesButQuorumNeverTest() {
 function registerViewChangeAlsoFailsWhenQuorumTest() {
 
     it('view change also fails when quorum is lost', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
         hub.db.doQuery.resolves([]);
@@ -226,12 +216,13 @@ function registerViewChangeAlsoFailsWhenQuorumTest() {
         expect(con.pendingViewChanges.has(1)).to.be.true;
 
         // Only 1 additional vote (self + 1 = 2, need 3)
-        hub._peerManager.emit('message', buildEnvelope('PBFT_VIEW_CHANGE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_VIEW_CHANGE', {
             view: 1, seq: 1
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         let votes = con.pendingViewChanges.get(1);
         expect(votes.size).to.equal(2);
+        expect(hub._peerManager.broadcast.calledWith('PBFT_NEW_VIEW')).to.be.false;
 
         con.stop();
     });
@@ -240,10 +231,10 @@ function registerViewChangeAlsoFailsWhenQuorumTest() {
 function registerQuorumRestoredProposalSucceedsAfterPeersTest() {
 
     it('quorum restored: proposal succeeds after peers reconnect', async function () {
-        let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
+        let hub = createValidatorHub(VALIDATORS_4[0]);
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
-        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3
         con.seq = 3;
         con.timeout = 5000;
         hub.db.doQuery.resolves([]);
@@ -255,33 +246,32 @@ function registerQuorumRestoredProposalSucceedsAfterPeersTest() {
 
         let done = false;
         let promise = con.propose(config).then(() => { done = true; });
+        let proposal = await waitForRound(con, 4);
 
         // Initially only 1 peer responds (not enough)
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
         // The round is open (self PREPARE recorded) and one peer has been heard from;
         // that is the state the "not done yet" assertion is about.
-        await waitUntil(() => {
-            let p = con.pendingProposals.get(4);
-            return p && p.prepares.size >= 1;
-        }, { label: 'the proposal round to open under a lost quorum' });
+        expect(proposal.prepares.size).to.equal(2);
+        expect(hub._peerManager.broadcast.calledWith('PBFT_COMMIT')).to.be.false;
         expect(done).to.be.false;
 
         // Peer "reconnects"
-        hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         // COMMITs
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[1].addr));
+        }, VALIDATORS_4[1]));
 
-        hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
+        hub._peerManager.emit('message', signedEnvelope('PBFT_COMMIT', {
             seq: 4, configDigest: digest
-        }, VALIDATORS_4[2].addr));
+        }, VALIDATORS_4[2]));
 
         await promise;
         expect(done).to.be.true;

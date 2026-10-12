@@ -51,8 +51,11 @@ const forms = {
     },
 
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
-    // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
-    // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
+    // canonical at/above the CHECKPOINT_COMMITMENT flag-day. This is the hub's only
+    // copy and no other repo imports it: the SDK and sync checkpoint.js, the explorer's
+    // proofs.js and the indexer's bin/recovery.js re-type the same gate and join inline,
+    // and the indexer's ANCHOR FORMAT 0 parse and bridge checkpoint_source.js append the
+    // suffix ungated by design, so an edit here must be mirrored in every one of them.
     checkpointRootSuffix(cp){
         if(!forms.isCheckpointCommitmentActive(cp)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
@@ -87,7 +90,8 @@ const forms = {
     // at most one honest leader per BTC block; so tying seq to snapshot_block guarantees
     // two honest leaders cannot mint divergent payloads under one seq (a shared seq
     // implies a shared snapshot_block implies a shared tip implies one payload). It is
-    // monotonic across cadences (snapshot_block only advances by intervalBlocks), so the
+    // monotonic across cadences (snapshot_block only moves forward, at least intervalBlocks
+    // past the last round's, since tick latches the tip it fired at), so the
     // readers' MAX(checkpoint_seq) supersession and the co-sign replay guard still hold,
     // and it strictly exceeds any legacy COALESCE(MAX)+1 dense seq (a count of prior
     // checkpoints <= snapshot_block/interval), so a mid-upgrade hub never stalls.

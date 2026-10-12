@@ -25,6 +25,8 @@
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND } = require('../../constants.js');
 const bcmath            = require('../../bcmath.js');
 const devband           = require('../../consensus/deviation_band.js');
+const { canonicalPrice } = require('../canonical_price.js');
+const { PRICE_VALUE_RE_CANONICAL } = require('../../consensus/gates/price_scale_gate.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -158,7 +160,17 @@ function historicalRejected(p, reject) {
 
 // One proposed pair against the co-sign bounds: true when the round must be withheld.
 function priceRejected(p, localByPair, canonicalPairs, devThreshold, reject) {
-    let val = parseFloat(p.price);
+    // Verify the price is spelled in the chain's v0 form before reading it as a number:
+    // parseFloat and the bignumber band admit '1e5', '+100' and '0100', which the chain refuses
+    // and which would sink the whole atomic signed batch. Honest bcformat(value, 8) output always
+    // matches; withhold, never rewrite, since the PROPOSE digest covers the array as sent.
+    let canon = canonicalPrice(p.price);
+    if (canon === null || !PRICE_VALUE_RE_CANONICAL.test(canon)) {
+        reject(p.coinPair, 'price ' + String(p.price) + ' is not a canonical decimal spelling',
+            { reason: 'non-canonical-price', proposed: String(p.price) });
+        return true;
+    }
+    let val = parseFloat(canon);
     if (!(Number.isFinite(val) && val > 0 && val < PRICE_MAX)) {
         reject(p.coinPair, 'price ' + p.price + ' outside (0, PRICE_MAX)',
             { reason: 'out-of-range', proposed: String(p.price) });

@@ -280,3 +280,83 @@ function registerSplitSuitePart4() {
 describe('StateCheckpointEngine', function () {
   registerSplitSuitePart4();
 });
+
+// ── Follower co-sign cadence interval ────────────────────────────────────
+// The leader only proposes once its latch is a full interval behind its tip, and the
+// follower must hold the same line, or a slot holder can checkpoint at every block it
+// leads and choose which snapshot_block keys the bundle election.
+
+// A SIGN_REQ for `chain` at `snap`, signed by that block's cadence leader, and a
+// follower whose own tip equals `snap` and whose latch is `latch`.
+function cadenceReq(bus, snap, chain, latch) {
+  let { env, follower } = makeSignReq(bus, snap);
+  let leader = leaderNode(bus, snap);
+  let cp = Object.assign({}, env.data.checkpoint, { chain });
+  env.data.checkpoint = cp;
+  env.data.sig = leader.identity.sign(StateCheckpointEngine.canonicalCheckpoint(cp));
+  follower.hub.resolveBtcLatestBlock = async () => snap;
+  follower.engine._lastCheckpointBtcBlock = latch;
+  return { env, follower };
+}
+async function cosignsAt(snap, latch, opts) {
+  opts = opts || {};
+  let bus = buildMesh(2, { btcBlock: snap, chains: ['BTC', 'LTC'] });
+  let { env, follower } = cadenceReq(bus, snap, opts.chain || 'BTC', latch);
+  if (opts.seedBtcRow) follower.db.checkpoints.push({ chain: 'BTC', network: TIP.network, checkpoint_seq: snap, snapshot_block: snap });
+  let signs = watchCosign(follower);
+  await follower.engine.handleSignReq(env);
+  return { signs, engine: follower.engine };
+}
+function registerCadenceIntervalUnits() {
+  it('declines a correctly slotted SIGN_REQ that lands inside the interval after the latch', async function () {
+    let probe = buildMesh(2, {});
+    let interval = probe.nodes[0].engine.intervalBlocks;
+    let { signs, engine } = await cosignsAt(500, 500 - interval + 2);
+    expect(signs.length, 'an off-cadence round must not be co-signed').to.equal(0);
+    expect(engine._cosignDeclines.off_cadence).to.equal(1);
+    expect(engine._lastCosignDeclineReason).to.equal('off_cadence');
+  });
+  it('co-signs a SIGN_REQ exactly one interval after the latch', async function () {
+    let probe = buildMesh(2, {});
+    let { signs } = await cosignsAt(500, 500 - probe.nodes[0].engine.intervalBlocks);
+    expect(signs.length, 'the on-cadence round is co-signed').to.equal(1);
+  });
+  it('co-signs another chain of the same round after the first chain moved the latch', async function () {
+    let { signs } = await cosignsAt(500, 500, { chain: 'LTC', seedBtcRow: true });
+    expect(signs.length, 'one round carries one SIGN_REQ per chain at one snapshot_block').to.equal(1);
+  });
+  it('declines a SIGN_REQ below the latch, and co-signs when no latch is set', async function () {
+    let below = await cosignsAt(500, 501);
+    expect(below.signs.length, 'a round older than the last checkpoint is stale').to.equal(0);
+    let unset = await cosignsAt(500, null);
+    expect(unset.signs.length, 'a hub with no checkpoint yet keeps co-signing').to.equal(1);
+  });
+}
+function registerCadenceIntervalMesh() {
+  it('a three-validator, three-chain mesh finalizes two on-cadence rounds on every node', async function () {
+    let bus = buildMesh(3, { btcBlock: 100, chains: ['BTC', 'LTC', 'DOGE'] });
+    let interval = bus.nodes[0].engine.intervalBlocks;
+    await startAll(bus);
+    await tickAll(bus);
+    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 3), { label: 'round one on every node' });
+    for (let nd of bus.nodes) nd.hub.resolveBtcLatestBlock = async () => 100 + interval;
+    await tickAll(bus);
+    await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 6), { label: 'round two on every node' });
+    for (let nd of bus.nodes) {
+      let snaps = nd.db.checkpoints.map(r => r.snapshot_block + '|' + r.chain).sort();
+      expect(snaps, 'node ' + nd.i).to.deep.equal(['100|BTC', '100|DOGE', '100|LTC',
+        (100 + interval) + '|BTC', (100 + interval) + '|DOGE', (100 + interval) + '|LTC'].sort());
+      expect(nd.engine._cosignDeclines.off_cadence, 'node ' + nd.i + ' declined nothing').to.equal(0);
+    }
+  });
+}
+describe('StateCheckpointEngine: follower co-sign holds the cadence interval', function () {
+  afterEach(async function () {
+    for (let bus of buses) {
+      for (let nd of bus.nodes) await nd.engine.stop();
+    }
+    buses = [];
+  });
+  registerCadenceIntervalUnits();
+  registerCadenceIntervalMesh();
+});

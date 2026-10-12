@@ -30,6 +30,7 @@ const { get } = require('../../consensus/gate_registry');
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
 const GOV_RESULT  = 'GOV_RESULT';
+const GOV_RESULT_REQ = 'GOV_RESULT_REQ';
 
 // Block-anchored activation for capability MIN_STAKE changes (#3703). Capability snapshots are
 // BTC-anchored, so activation heights are reasoned in BTC blocks. A MIN_STAKE change must not
@@ -57,6 +58,15 @@ const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRES
 // indexes it by network exactly as it did the literal, and a build without
 // the row throws here at load rather than reading the lock as off.
 const GOV_SNAPSHOT_ACTIVATION = get('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION');
+
+// Ranked tally failover: the BTC height per network at/above which a
+// lower-ranked validator may tally a proposal the leader left in voting. The
+// row lives in consensus/gate_registry/hub_rows.js; an unpinned network is off.
+const GOV_TALLY_FAILOVER_ACTIVATION = get('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION');
+
+// Each rank behind the leader waits this many BTC blocks past the voting end
+// before it may tally; a request for a missed result is not re-sent sooner.
+const GOV_TAKEOVER_STEP_BLOCKS = 6;
 
 // Bounds on a persisted/wire snapshot (DoS): a validator set is small, so a
 // snapshot far past these is adversarial padding, not a real electorate.
@@ -123,7 +133,8 @@ function toScaledBigInt(parts, scale){
 }
 
 module.exports = {
-    GOV_PROPOSE, GOV_VOTE, GOV_RESULT,
+    GOV_PROPOSE, GOV_VOTE, GOV_RESULT, GOV_RESULT_REQ,
+    GOV_TALLY_FAILOVER_ACTIVATION, GOV_TAKEOVER_STEP_BLOCKS,
     BTC_BLOCK_MS, ACTIVATION_SAFETY_BUFFER_BLOCKS,
     MAX_INCREASE, MAX_DECREASE, MAX_SLASH_INCREASE, MAX_SLASH_DECREASE, COOLDOWN_DAYS,
     SLASHING_PARAMS,

@@ -34,9 +34,9 @@ const logger = getLogger();
  *
  * The whole set therefore goes in ONE statement. InnoDB rolls a failed statement back
  * whole and, under autocommit, the statement IS the transaction, so the mirror is
- * all-or-nothing without introducing a transaction idiom this repo does not have (its
- * transactionConnection is a per-Db global that would capture unrelated concurrent
- * queries). Do NOT chunk the statement: the set is capped at VALIDATOR_QUERY_LIMIT and
+ * all-or-nothing with no explicit transaction (db.withTransaction serves multi-statement
+ * writes; the per-Db transactionConnection is a global that would capture unrelated
+ * concurrent queries). Do NOT chunk the statement: the set is capped at VALIDATOR_QUERY_LIMIT and
  * each writer refuses an over-cap set outright, so it fits one statement, and chunking
  * would silently reintroduce the partial-commit window this module exists to close.
  *
@@ -132,7 +132,7 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     let chainId = (btcChainId === undefined) ? await resolveBtcChainId(db)
                                              : (btcChainId || null);
 
-    // One statement, in db/capability_snapshots.js: the single-statement shape is
+    // One statement, in db/snapshots/capability_snapshots.js: the single-statement shape is
     // what makes the mirror all-or-nothing, and the reason it must not be chunked
     // is recorded beside the statement itself.
     await db.createCapabilitySnapshots(rows, chainId);

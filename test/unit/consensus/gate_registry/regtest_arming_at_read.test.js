@@ -24,16 +24,37 @@
 // not re-export it.
 
 const assert = require('assert');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const registry = require('../../../../src/consensus/gate_registry.js');
 const { REGTEST_ARMING } = require('../../../../src/consensus/gate_registry/shared_rows.js');
 const core = require('../../../../src/consensus/gate_registry/core.js');
 const hubConfig = require('../../../../src/config.js');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const { createRegistry } = core;
 
 const KEY = 'rollcall_activation.ROLLCALL_ACTIVATION';
 const ENV = 'XC_ROLLCALL_REGTEST_ACTIVATION';
+const SHARED_ROWS_DIR = path.resolve(__dirname, '../../../../src/consensus/gate_registry');
+const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.resolve(__dirname, '../../../../../xchain-indexer');
+const INDEXER_SHARED_ROWS_DIR = path.join(INDEXER_DIR, 'src', 'protocol_changes');
+const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
+    'shared_rows.js': '1db6bd06818eca6fc27a57858ac820592e6dc9e366e87e75be28ea099f8780dc',
+    'shared_rows_1.js': '1ed80849231893f3801d91a2cacc7041b54e26eaa63a680c845dc93aa5e1d278',
+    'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
+    'shared_rows_3.js': 'd671489c2b683ec2a94d0f45da1056687c38f78959a9f1780825eb7e3a37d6ea',
+    'shared_rows_4.js': '08e0e852d04c0736d88c19c6ae2c63d0061591c3dc700a22a9018a23a1d3069d',
+    'shared_rows_5.js': 'dbdace4fbc23a3dfaf1a1383083731d23a266d39efed58ce9b89961bc7221065',
+});
+
+function sha256(bytes) {
+    return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+const ATTEST_BATCH_HEAD_KEY = 'stateHash.ATTEST_BATCH_HEAD_STATE_HASH_ACTIVATION';
 
 function withEnv(value, fn) {
     const saved = process.env[ENV];
@@ -50,6 +71,27 @@ function withEnv(value, fn) {
 function rowOf(key) {
     const hit = registry.rows().find(([k]) => k === key);
     return hit ? hit[1] : undefined;
+}
+
+// The testnet chain heights are read off the registry, so a re-slide of the
+// cut height needs no edit here. The bare testnet key stays dark: only a
+// chain-keyed read reaches the armed height.
+function assertAttestBatchHeadRow() {
+    const row = registry.get(ATTEST_BATCH_HEAD_KEY);
+
+    assert.strictEqual(row.mainnet, registry.UNARMED);
+    assert.strictEqual(row.testnet, registry.UNARMED);
+    assert.strictEqual(row.regtest, 0);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'mainnet', null, 0, 0), false);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', null, 0, 0), false);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'regtest', null, 0, 0), true);
+    for (const coin of ['BTC', 'LTC', 'DOGE']) {
+        const armed = row[coin + ':testnet'];
+        assert.ok(Number.isSafeInteger(armed) && armed > 1 && armed < registry.UNARMED, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, 1, 0), false, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, armed - 1, 0), false, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, armed, 0), true, coin);
+    }
 }
 
 describe('gate_registry: regtest arming is applied at READ time @regression @tier1', function () {
@@ -96,9 +138,27 @@ describe('gate_registry: regtest arming is applied at READ time @regression @tie
         });
     });
 
+    it('keeps the attest batch-head gate dark on mainnet, armed per testnet chain, and active at regtest genesis', assertAttestBatchHeadRow);
+
 });
 
 describe('gate_registry: regtest arming at read, the edges @regression @tier1', function () {
+    it('pins every shared row file to the indexer canonical bytes', function () {
+        for (const [name, expected] of Object.entries(CANONICAL_SHARED_ROWS_SHA256)) {
+            assert.strictEqual(sha256(fs.readFileSync(path.join(SHARED_ROWS_DIR, name))), expected, name);
+        }
+    });
+
+    it('matches the available indexer canonical files byte for byte', function () {
+        const firstCanonical = path.join(INDEXER_SHARED_ROWS_DIR, 'shared_rows.js');
+        if (!skipOrFail(this, siblingCheckout(__dirname, firstCanonical), 'the indexer shared row canonical')) return;
+        for (const name of Object.keys(CANONICAL_SHARED_ROWS_SHA256)) {
+            const local = fs.readFileSync(path.join(SHARED_ROWS_DIR, name));
+            const canonical = fs.readFileSync(path.join(INDEXER_SHARED_ROWS_DIR, name));
+            assert.ok(local.equals(canonical), name + ' differs from the indexer canonical');
+        }
+    });
+
     it('a refused value reads INERT, as regtestHeight says, and warns once per value', async function () {
         const seen = [];
         const onWarning = (w) => { if (w.name === 'RegtestArmingWarning') seen.push(w.message); };

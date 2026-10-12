@@ -181,10 +181,8 @@ module.exports = {
         // math. A second variant of a request this hub holds (a different signed stamp,
         // from a round that finalized under another leader slot) is NOT held, and takes
         // the full verification below like any first delivery.
-        if(await this.alreadyHeld(row)){
-            this.stats.duplicates++;
-            return false;
-        }
+        let held = await this.heldRow(row);
+        if(held) return await this.absorbHeldRow(row, held);
 
         // THE REQUEST IS LOCAL STATE OR IT IS NOTHING. Every height the verification
         // turns on comes from this row, never from the wire: an untrusted hub that
@@ -252,12 +250,12 @@ module.exports = {
         return false;
     },
 
-    // Does this hub already hold the row? One keyed read on the UNIQUE index.
-    async alreadyHeld(row){
+    // The row this hub already holds under the key, or null. One keyed read on the UNIQUE index.
+    async heldRow(row){
         let db = this.hubDb();
-        if(!db || typeof db.doQuery !== 'function') return false;
-        let rows = await db.getAttestationResponse(row.network, row.request_id, row.effective_time);
-        return !!(rows && rows.length);
+        if(!db || typeof db.doQuery !== 'function') return null;
+        let rows = await db.getAttestationResponseMirrorRow(row.network, row.request_id, row.effective_time);
+        return (rows && rows.length) ? rows[0] : null;
     },
 
     // Resolve this hub's OWN v0 request row for a gossiped response, plus the chain

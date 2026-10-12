@@ -46,6 +46,7 @@ const gateRegistry          = require('../../../src/consensus/gate_registry');
 const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const arMod                 = require('../../../src/consensus/gates/anchor_reward_gate.js');
 const { waitUntil }         = require('../../helpers/waitUntil');
+const { DB_METHODS }        = require('../../helpers/mockHub');
 
 // 'mainnet' at snapshot_block 100 is the fully-legacy path (SWQ, EQUIV, the reward
 // flag-days and the royalty leg all activate at/above 961000 there), so the round runs
@@ -96,8 +97,13 @@ function matchCanonical(m){
 // is the match + checkpoint + batch-seq subset of the unit mesh's memDb.
 function memDb(){
     let matches = [], checkpoints = [];
-    return {
+    return { ...DB_METHODS,
         matches, checkpoints,
+        async getNextAnchorBatchSeq(){
+            let max = -1;
+            for(let row of matches) if(row.batch_seq != null && row.batch_seq > max) max = row.batch_seq;
+            return [{ next_seq: max + 1 }];
+        },
         async doQuery(sql, params){
             params = params || [];
             if(sql.startsWith("SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC"))

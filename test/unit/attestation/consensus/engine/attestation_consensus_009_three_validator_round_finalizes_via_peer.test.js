@@ -166,6 +166,8 @@ describe('AttestationConsensus: three-validator round finalizes via peer votes',
 
         expect(finalized).to.have.length(1);
         expect(finalized[0].signatures).to.have.length(3);
+        let pubs = finalized[0].signatures.map(x => x.pubkey);
+        expect(pubs).to.deep.equal(pubs.slice().sort());
     }); });
 
 describe('AttestationConsensus: three-validator round finalizes via peer votes', function () { beforeEach(hookAt28432); afterEach(hookAt28750); it('ignores PROPOSEs from validators outside the responsible set', async function () {

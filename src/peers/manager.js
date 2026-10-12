@@ -28,6 +28,7 @@ const { positiveIntConfig } = require('../lib/config_int.js');
 // so it reads the engine's own activation source rather than a copy of it.
 const rollcallActivation = require('../consensus/gates/rollcall_gate.js');
 const PeerConnections = require('./gossip/connections.js');
+const PeerSelfSeed    = require('./gossip/self_seed.js');
 const PeerMessages    = require('./gossip/messages.js');
 const PeerInbound     = require('./gossip/inbound.js');
 const PeerRules       = require('./gossip/rules.js');
@@ -46,7 +47,7 @@ const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
 // The two request shapes the read-only mirror feed occupies on the P2P port. They
 // MUST stay byte-identical to what the API server mounts (api.js
 // '/hub-db/snapshot' routes, '/hub-db/subscribe' upgrade) and to what the indexer
-// asks for (xchain-indexer src/hub/hub_db_sync.js _httpGet / _connectWebSocket): the
+// asks for (xchain-indexer src/hub/hub_db_sync/transport.js httpGet / connectWebSocket): the
 // same client code reaches a validator over this port and a private hub over the
 // API port, so a path that differs on one side silently disables the mirror.
 const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';
@@ -81,6 +82,7 @@ const UNCONDITIONAL_SUBSCRIBERS = Object.freeze([
     'Consensus', 'CrossChainDexConsensus',
     'CrossChainDexConsensus:XBRIDGE_TRANSFER', 'CrossChainDexConsensus:XCALL_RELAY',
     'CrossChainDexConsensus:XLISTSHARE_SNAPSHOT', 'CrossChainDexConsensus:XPOLICY_SNAPSHOT',
+    'CrossChainDexConsensus:XREMOTE_TOKEN',
     'CrossChainEngine', 'FullNodeChallengeRound',
     'Governance', 'OracleBatchSigner', 'OracleConsensus', 'OracleRound', 'ReorgHandler',
     'RetractionConsensus', 'StateAnchorPublisher', 'StateCheckpointEngine'
@@ -302,6 +304,22 @@ class PeerManager extends EventEmitter {
         this.identity = identity;
     }
 
+    getQuorumPeerStatus() {
+        const status = [];
+        for (const [addr, peer] of this.peers) {
+            if (peer.state !== 'open') continue;
+            if (!peer.validatorAddr || peer.validatorAddr === this.validatorAddr) continue;
+            status.push({
+                addr:          addr,
+                validatorAddr: peer.validatorAddr,
+                state:         peer.state,
+                lastSeen:      peer.lastSeen,
+                inbound:       peer.inbound || false
+            });
+        }
+        return status;
+    }
+
     // Serve the hub's READ-ONLY mirror feed on this same public P2P port, so an
     // indexer reads its capability/price/checkpoint mirror from the validators
     // themselves. A validator exposes ONE public port per network (10001 mainnet,
@@ -357,7 +375,7 @@ class PeerManager extends EventEmitter {
 // Installed from the part files rather than written in the class body above:
 // each part holds one behaviour of this class, and its members land here with
 // the descriptors a class body would give them.
-for (const Part of [PeerConnections, PeerMessages, PeerInbound, PeerRules, PeerUpkeep]) {
+for (const Part of [PeerConnections, PeerSelfSeed, PeerMessages, PeerInbound, PeerRules, PeerUpkeep]) {
     for (const [from, to] of [[Part.prototype, PeerManager.prototype], [Part, PeerManager]]) {
         for (const key of Object.getOwnPropertyNames(from)) {
             if (key === 'constructor' || key === 'length' || key === 'name' || key === 'prototype') continue;
