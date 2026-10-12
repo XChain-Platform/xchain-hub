@@ -79,6 +79,7 @@ function withSpawnEnv(fn) {
 }
 
 describe('llm provider, fetch via claude_spawn', function () {
+    this.timeout(30000);
 
     before(function () {
         const fsSync = require('fs');

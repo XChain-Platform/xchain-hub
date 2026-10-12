@@ -16,8 +16,9 @@
 #
 # bin/ci-full.sh: run EVERY tier this repo's GitHub CI runs, in one process.
 #
-# .github/workflows/ci.yml fans this repo out as five jobs (ci, perf,
-# regression, drift-guards, coverage). The pre-push venue gate used to run only
+# .github/workflows/ci.yml fans this repo out as six jobs (ci, perf,
+# regression, drift-guards, coverage, suite-title-pin). The pre-push venue gate
+# used to run only
 # `npm run ci`, so a push could gate green locally and then go red on GitHub on
 # a job the gate never ran (2026-08-15: exactly that, on three repos at once).
 # This script IS the local twin of the workflow: every job's run-steps,
@@ -105,6 +106,7 @@ ci_tier_deferred() {
 # >>> ci-tier timer (generated block; re-run the tier wirer to update) >>>
 run_tier() {
   ci_tier_deferred "$1" && return 0  # ci-tier guard (generated)
+  if [ "${CI_TIER:-full}" = "fast" ] && [ -n "${FAILED:-}" ]; then echo; echo "ci:full ===== $1 NOT RUN (a push stops at its first red tier, its verdict already red; the full sweep runs it) ====="; return 0; fi  # ci-tier stop (generated)
   local name="$1"; shift
   local __ci_tier_t0=$SECONDS
   echo; echo "ci:full ===== $name ====="
@@ -173,6 +175,9 @@ else
 fi
 
 run_tier "boundary (test:boundary)" npm run test:boundary
+run_tier "fuzz (test:fuzz)" npm run test:fuzz
+run_tier "chaos (test:chaos)" npm run test:chaos
+run_tier "smoke (test:smoke)" npm run test:smoke
 
 # --- job: perf -------------------------------------------------------------
 # The workflow gives this job its own MariaDB service container; here the DB is
@@ -205,6 +210,11 @@ run_tier "drift: vendored observability shim vs canonical (six consumers)" \
 # --- job: coverage ---------------------------------------------------------
 run_tier "coverage ratchet (coverage:check)" \
   env XCHAIN_REQUIRE_SIBLINGS=1 npm run coverage:check
+
+# --- job: suite-title-pin --------------------------------------------------
+run_tier "suite-title pin" node bin/suite-title-map.js \
+  --compare bin/pins/at1-suite-titles.json \
+  --rename-map bin/pins/suite-title-renames.json
 
 echo
 # >>> ci-tier summary (generated) >>>

@@ -22,7 +22,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
-const { observedListIds, firstListOutside } = require('./list_observed.js');
+const { observedListIds, firstListOutside } = require('./list/list_observed.js');
 
 module.exports = {
 

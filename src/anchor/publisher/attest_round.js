@@ -199,7 +199,8 @@ module.exports = {
     // rebuild from our own state_checkpoints rows, and we ourselves hold oracle_publish
     // at its snapshot_block. The frozen amount is enforced implicitly: we rebuild the
     // canonical with ar.ANCHOR_REWARD_AMOUNT, so a wire-supplied amount can never be
-    // co-signed.
+    // co-signed. Resolves true only after co-signing, every decline resolves falsy,
+    // and the fold-archive hook gates its own co-sign on that verdict.
     async handleAttestSignReq(envelope){
         let d = envelope.data;
         if(!this.identity || !d || !Array.isArray(d.sections) || d.sections.length === 0) return;
@@ -244,6 +245,7 @@ module.exports = {
         for(let sec of d.sections){
             let local = await this.db.getStateCheckpointByChain(String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq));
             if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
+            if(local[0].anchor_txid != null) return;                       // already anchored: a second publisher must not earn the reward
             mine.push(local[0]);
         }
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
@@ -254,10 +256,9 @@ module.exports = {
         let canonical = this.attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
-        this.peerManager.broadcast(XANCPUB_SIGN, {
-            network: network, snapshot_block: snapshotBlock,
-            sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
-        });
+        this.peerManager.broadcast(XANCPUB_SIGN, { network: network, snapshot_block: snapshotBlock,
+                                                  sig_pubkey: myPubkey, sig: this.identity.sign(canonical) });
+        return true;
     },
 
     async handleAttestSign(envelope){

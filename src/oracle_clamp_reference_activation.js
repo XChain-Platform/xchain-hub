@@ -16,14 +16,14 @@
  *
  * WHAT FLIPS AT THIS HEIGHT. One thing: whether OracleConsensus re-reads the
  * last-finalized clamp reference for the round it is about to judge
- * (_refreshLastFinalizedForRound) before finalizeRound aggregates and before
- * _handlePropose's co-sign gate reads it. Below the height neither call site runs,
+ * (refreshLastFinalizedForRound) before finalizeRound aggregates and before
+ * handlePropose's co-sign gate reads it. Below the height neither call site runs,
  * so the reference has exactly the three writers it had before the alignment
- * landed: the start-up seed, this hub's own _storeSnapshot (plus the push-ingest
+ * landed: the start-up seed, this hub's own storeSnapshot (plus the push-ingest
  * fold that shares its monotonic writer) and the 60 s timed re-seed. At or above
  * it the round-aligned re-read runs unchanged.
  *
- * WHY IT NEEDS A GATE. The reference is what _clampToLastFinalized bounds the
+ * WHY IT NEEDS A GATE. The reference is what clampToLastFinalized bounds the
  * emitted median against and what the no-local-submission co-sign band measures
  * against, so it decides bytes the federation signs. Measured on the guard case:
  * with a reference one round stale an identical submission set clamps to
@@ -37,22 +37,23 @@
  * ACTIVATION PLANE: the ROUND's own BTC block height. finalizeRound gates on the
  * btcBlockHeight it was called with, the same value it hands
  * CapabilitySnapshot.getWeightSnapshot('price', ...) to lock the round's validator
- * set, and the same value stake_weighted_quorum keys on. _handlePropose gates on
+ * set, and the same value stake_weighted_quorum keys on. handlePropose gates on
  * the envelope's btcBlockHeight, which is the field that becomes `blockHeight`
  * for the weighted-quorum gate a few lines below it, so a follower and the leader
  * evaluate one round against one height. Rounds that arrive by push from a source
  * chain carry no BTC height into this path at all: they are folded through
- * noteIngestedPriceRow, never through finalizeRound or _handlePropose, so they
+ * noteIngestedPriceRow, never through finalizeRound or handlePropose, so they
  * touch neither call site and need no plane of their own.
  *
- * The propose-side height is read before the freshness bound that checks it
- * against this hub's own tip. A registered sender can therefore claim a height
- * across the gate and make recipients take the other branch for that round before
- * the PROPOSE is dropped. It buys nothing: the re-read is monotonic and fail-soft,
- * it can only carry the reference forward to rows this hub's own database already
- * holds, and that is exactly the state the 60 s re-seed reaches on its own
- * schedule below the height. There is no reference a forged height can produce
- * that an honest hub could not already have been holding.
+ * ORDER ON THE PROPOSE SIDE. handlePropose bounds the envelope's btcBlockHeight
+ * against this hub's own BTC tip (boundedProposeHeight) BEFORE this gate reads
+ * it, per the operator ruling of 2026-09-11. A PROPOSE whose height is missing,
+ * cannot be checked against our own tip, or sits outside snapshotToleranceBlocks
+ * is dropped before the gate is evaluated or refreshLastFinalizedForRound runs,
+ * so a registered sender cannot pick which side of the gate a recipient takes for
+ * a round by claiming a height the recipient would refuse. The order is required:
+ * moving the gate back above boundedProposeHeight reopens that one-round choice.
+ * The ordering cases in oracle_consensus_clamp_reference.test.js pin it.
  *
  * HEIGHTS.
  *

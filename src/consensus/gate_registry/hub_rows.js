@@ -34,7 +34,7 @@
 
 'use strict';
 
-const { addGate } = require('./shared_rows.js');
+const { addGate, UNARMED, UNPINNED } = require('./shared_rows.js');
 
 // validators/governance/rules
 // R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
@@ -48,3 +48,41 @@ const { addGate } = require('./shared_rows.js');
 // onto the shared pre-freeze train boundary, the one height the rest of that
 // BTC-height cohort now carries; deploy every hub before this era.
 addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainnet: 963000, testnet: 0, regtest: 0 });
+
+// Ranked tally failover: at/above the height a lower-ranked validator may tally
+// a proposal the leader left in voting. Regtest is armed from genesis and
+// testnet from its cut height; mainnet stays unpinned until ratified.
+addGate('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION', 'height', { mainnet: UNPINNED, testnet: 156230, regtest: 0 });
+
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: UNARMED, regtest: 0 });
+
+// peers/hub_db/landing_watermark
+// Landed-from-clear-frontier: at/above the activation, in the landing indexer's
+// block height, the hub publishes landed[chain] from the indexer's
+// price_landing_clear reading whenever it is ahead of hub_push_delivered. Below
+// it, only hub_push_delivered feeds the watermark. Armed on regtest and on each
+// testnet chain; mainnet stays dark until the operator names its height.
+addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: UNARMED, regtest: 0 });
+
+// anchor/reorg_handler/snapshot_lock
+// Reorg rollback rounds stamp a BTC height and derive membership and quorum from
+// its federation snapshot. The wire fields stay dark on mainnet until a
+// coordinated release; testnet carries them from its cut height and regtest
+// exercises them from genesis.
+addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: 156230, regtest: 0 });
+
+// Effective allow/block-list enforcement: armed on testnet, inert on mainnet
+// and regtest until coordinated activation.
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
+    mainnet: UNARMED,
+    'BTC:testnet': 156230,
+    'LTC:testnet': 4912984,
+    'DOGE:testnet': 67989993,
+    testnet: 156230,
+    regtest: UNARMED,
+});
+
+// consensus/federation
+// Extends federation detection beyond live quorum at the anchor height.
+// Armed on regtest and testnet; mainnet waits on coordinated activation.
+addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: 156230, regtest: 0 });

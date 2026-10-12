@@ -14,11 +14,18 @@
  *
  * XChain Hub - Attestation Round Pins
  *
- * Everything a round must fix at the REQUEST's own block before it fetches: the
- * model it fetches with, the model-vendor map and approved list that travel with
- * that id, the PBFT strategy the round will run, and the hub-local fee floor the
- * request has to clear. Two hubs whose governance reloads raced still pin the
- * same values here, because every one of them is read at the request's block.
+ * Everything a round must fix before it fetches. Read at the REQUEST's own block:
+ * the model it fetches with, the model-vendor map and approved list that travel
+ * with that id, and the PBFT strategy the round will run. Two hubs whose
+ * governance reloads raced still pin the same values for those, because each is
+ * read at the request's block.
+ *
+ * NOT read at the request's block: the hub-local fee floor the request has to
+ * clear (min_fee_xchain) comes from the provider def the round fetched under,
+ * which is the live hot-reloadable registry entry at round start, and the
+ * response-byte cap start_round pins comes from that same def. Hubs whose
+ * reloads raced can briefly disagree on whether a request clears the floor,
+ * which can cost a round redundancy (liveness), never a fork.
  *
  ********************************************************************/
 
@@ -130,9 +137,10 @@ module.exports = {
 
     // Hub-local min_fee floor (E1, governance-synced via the provider
     // definition). Below-floor requests are skipped BEFORE any provider
-    // fetch; with every hub applying the same floor the request simply
-    // expires on-chain and the fee refunds. This is economically clean
-    // back-pressure with zero consensus involvement.
+    // fetch; once every hub has applied the same governance change the
+    // request simply expires on-chain and the fee refunds. This is
+    // economically clean back-pressure with zero consensus involvement.
+    // The floor is read from the live def, not at the request's block.
     feeBelowProviderFloor(rid, providerId, providerDef, request){
         let minFee    = (providerDef && !bc.isNull(providerDef.min_fee_xchain)) ? String(providerDef.min_fee_xchain) : '0';
         let reqFeeAmt = (request && !bc.isNull(request.fee_amount)) ? String(request.fee_amount) : '0';

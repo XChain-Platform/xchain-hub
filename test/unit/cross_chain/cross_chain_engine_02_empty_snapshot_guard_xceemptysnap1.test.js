@@ -40,6 +40,7 @@ function registerFeature10emptySnapshotGuardXCEEMPTYSNAP1Part1() {
   it('refuses to PREPARE when the cross_chain snapshot resolves a 0 quorum', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_4);
     rootSuitePm.validatorAddr = VALIDATORS_4[0].addr;
+    rootSuiteHub.resolveBtcLatestBlock = async () => 500; // inside the height bound
     // A snapshot resolves at the round's block but carries NO qualifying validators,
     // so getQuorum → 0 (bootstrap / misconfigured indexer). The follower must refuse.
     rootSuiteHub.capabilitySnapshot = {
@@ -74,6 +75,7 @@ function registerFeature10emptySnapshotGuardXCEEMPTYSNAP1Part2() {
   it('still opens the round when the snapshot resolves a real quorum', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_4);
     rootSuitePm.validatorAddr = VALIDATORS_4[0].addr;
+    rootSuiteHub.resolveBtcLatestBlock = async () => 500; // inside the height bound
     rootSuiteHub.capabilitySnapshot = {
       getSnapshot: sinon.stub().resolves({
         validators: [{}],

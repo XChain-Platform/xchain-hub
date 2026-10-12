@@ -156,7 +156,9 @@ class HubDbSubscribers {
             // the hub's ACTUAL cadence instead of a locally-guessed env default, so an
             // operator raising WS_WATERMARK_INTERVAL_MS on the hub can never make a
             // consumer terminate a healthy socket: the two knobs are linked on the wire,
-            // not by a prose comment. Additive: older consumers ignore the field.
+            // and the hub clamps the value to the ceiling consumers adopt
+            // (WATERMARK_INTERVAL_MAX_MS in hub_db_broadcaster.js), so the wire never
+            // carries a cadence a consumer would refuse. Additive: older consumers ignore the field.
             // `heights` rides the ready frame as well as the heartbeat: without it
             // every reconnect stalls every height-keyed barrier for one watermarkIntervalMs
             // before the first heartbeat arrives, on a path that runs after every dropped

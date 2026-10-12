@@ -17,8 +17,8 @@ const PriceAggregator  = require('../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../helpers/mockHub');
 
 // Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)
-// buildPriceV0Payload. Tests sign these exact bytes. The mockHub has no `network`,
-// so the EQUIV header is OFF (unknown network) and this is the bare-JSON branch;
+// buildPriceV0Payload. Tests sign these exact bare-JSON bytes for fixtures whose
+// EQUIV header gate is off;
 // btc_block_height still rides in the signed content (#4232).
 function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     let sortedPairs = pairs
@@ -57,7 +57,7 @@ function makeValidator() {
 function registerPriceaggregatorIngestFenceRejectionWarning1Hooks() {
 
     beforeEach(function () {
-        hub = createMockHub();
+        hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
         hub.db.getPriceIngestWatermark.resolves({ ...WATERMARK });
         warn  = sinon.stub(console, 'warn');

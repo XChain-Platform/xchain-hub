@@ -23,6 +23,7 @@
 const bc = require('../../bcmath.js');
 const nodeUtil = require('node:util');
 const { ALLOWED_CHAINS } = require('./constants.js');
+const offerLists = require('./offer_lists.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -57,15 +58,34 @@ module.exports = {
             // in what order. Per-coin try/catch is preserved so one slow/failed indexer
             // still yields an empty book for that coin rather than aborting the whole round.
             await Promise.all(ALLOWED_CHAINS.map((coin) => this.loadOfferBook(coin, offersByCoin)));
+            // Avoid list RPCs until the structural matcher finds a crossing pair.
+            if(this.findMatches(offersByCoin).length === 0) return;
+            let snapshotBlock = await this.resolveSnapshotBlock();
+            if(snapshotBlock == null) return;
+            let allOffers = [];
+            for(let coin of ALLOWED_CHAINS) allOffers = allOffers.concat(offersByCoin[coin] || []);
+            await offerLists.prepareOfferLists(this, allOffers, snapshotBlock);
             for(let desc of this.findMatches(offersByCoin)){
                 try {
-                    await this.finalizeMatch(desc);
+                    await this.finalizeMatchAtSnapshot(desc, snapshotBlock);
                 } catch(e){
                     logger.error(nodeUtil.format('CrossChainDex: finalizeMatch error:', e && e.message));
                 }
             }
         } finally {
             this._matching = false;
+        }
+    },
+
+    async finalizeMatchAtSnapshot(desc, snapshotBlock){
+        let hadOwnResolver = Object.prototype.hasOwnProperty.call(this, 'resolveSnapshotBlock');
+        let resolver = this.resolveSnapshotBlock;
+        this.resolveSnapshotBlock = async () => snapshotBlock;
+        try {
+            return await this.finalizeMatch(desc);
+        } finally {
+            if(hadOwnResolver) this.resolveSnapshotBlock = resolver;
+            else delete this.resolveSnapshotBlock;
         }
     },
 
@@ -97,7 +117,11 @@ module.exports = {
             let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
                                       (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
             offersByCoin[coin] = (res && res.orders && net)
-                ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
+                ? res.orders.filter(deepEnough).map(o => Object.assign({
+                    home_coin: coin,
+                    home_network: net,
+                    home_block: latest
+                }, o))
                 : [];
         } catch(e){
             offersByCoin[coin] = [];
@@ -134,6 +158,7 @@ module.exports = {
     tryMatch(a, b){
         if(a.home_coin === b.home_coin) return null;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return null; // never match across networks
+        if(!offerLists.offerPairAllowed(a, b)) return null;
         let aKind = (a.kind === 'order') ? 'order' : 'swap';
         let bKind = (b.kind === 'order') ? 'order' : 'swap';
         if(aKind === 'swap' && bKind === 'swap'){
@@ -143,7 +168,7 @@ module.exports = {
             // the reservation gate. Ownership offers expose amount '1' (see getOpenCrossChain*).
             if(bc.bclte(this.effectiveRemaining(a).give, 0) || bc.bclte(this.effectiveRemaining(b).give, 0)) return null;
             // Single full fill (committed is 0 pre-match → filled_before 0).
-            return this.buildDesc(a, b, 'swap', 'swap', String(a.give_amount), String(b.give_amount));
+            return this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount));
         }
         if(aKind === 'order' && bKind === 'order') return this.tryOrderMatch(a, b);
         return null;                                   // SWAP↔ORDER: carry-forward
@@ -227,8 +252,8 @@ module.exports = {
                          ' (indexer predates the decimals field?) - the hub will not guess tick decimals');
             return null;
         }
-        takerGive = String(bc.bcround(takerGive, takerDecimals));
-        takerGet  = String(bc.bcround(takerGet,  makerDecimals));
+        takerGive = bc.bcstr(bc.bcround(takerGive, takerDecimals));
+        takerGet  = bc.bcstr(bc.bcround(takerGet,  makerDecimals));
         // Zero-drop AFTER quantization, matching order_match.js's order (clamp, round,
         // then drop): dust that rounds to zero is not settled as a fill.
         if(bc.bclte(takerGive, 0) || bc.bclte(takerGet, 0)) return null;
@@ -262,9 +287,9 @@ module.exports = {
         else                          { lo = b; hi = a; loKind = bKind; hiKind = aKind; loFill = bGiveFill; hiFill = aGiveFill; }
         return {
             lo, hi, loKind, hiKind,
-            loFill: String(loFill), hiFill: String(hiFill),
-            loFilledBefore: String(this.committedFor(lo).give),
-            hiFilledBefore: String(this.committedFor(hi).give),
+            loFill: bc.bcstr(loFill), hiFill: bc.bcstr(hiFill),
+            loFilledBefore: bc.bcstr(this.committedFor(lo).give),
+            hiFilledBefore: bc.bcstr(this.committedFor(hi).give),
             network: a.home_network
         };
     },
@@ -323,7 +348,11 @@ module.exports = {
         if(!o) return null;
         if(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
            (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]) return null;   // not deep enough
-        return Object.assign({ home_coin: coin, home_network: String(res.network) }, o);
+        return Object.assign({
+            home_coin: coin,
+            home_network: String(res.network),
+            home_block: latest
+        }, o);
     },
 
     // Fetch a chain's ENTIRE open cross-chain book, paging the indexer's keyset cursor until

@@ -29,6 +29,7 @@
 const { expect } = require('chai');
 const fs   = require('fs');
 const path = require('path');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 // The hub keeps its vendored price copies flat in src/, while the indexer sorted its own tree into feature
 // directories, so the twin's path is no longer the hub's path. Each entry is [hub basename, twin path
@@ -52,11 +53,7 @@ const HUB_SRC = path.join(__dirname, '..', '..', '..', 'src');
 describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regression', function () {
 
     before(function () {
-        if (!fs.existsSync(path.join(INDEXER_DIR, 'src'))) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling was not found at ' + INDEXER_DIR);
-            this.skip();
-        }
+        skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_DIR, 'src')), 'the indexer twin guard');
     });
 
     VENDORED.forEach(function (entry) {
@@ -69,12 +66,7 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
             // a sibling from origin while this file is still only local. A
             // hard read there fails the whole suite for a reason that has nothing to
             // do with drift, and the gate would report it as something else entirely.
-            if (!fs.existsSync(twinPath)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the twin is missing: ' + twinPath);
-                this.skip();
-                return;
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, twinPath), 'the indexer twin guard')) return;
             const hub  = fs.readFileSync(path.join(HUB_SRC, file), 'utf8');
             const twin = fs.readFileSync(twinPath, 'utf8');
             expect(hub).to.equal(twin,

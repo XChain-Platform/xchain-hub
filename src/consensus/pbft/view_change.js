@@ -35,7 +35,8 @@ const logger = getLogger();
 // diverge from the rest of the round under validator churn. Followers
 // still hold the proposal; the node that initiated the view change
 // recovers the context from viewChangeQuorums (its proposal was removed by
-// the triggering timeout). A live count quorum is the last-resort fallback.
+// the triggering timeout). A live count quorum is the last-resort fallback,
+// for non-federated hubs only.
 function viewChangeContext(self, seq) {
     let proposal = self.pendingProposals.get(seq);
     if (proposal && typeof proposal.quorum === 'number') {
@@ -43,6 +44,10 @@ function viewChangeContext(self, seq) {
                  memberPubkeys: proposal.memberPubkeys || null };
     }
     if (self.viewChangeQuorums.has(seq)) return self.viewChangeQuorums.get(seq);
+    // A federated hub with no round context for this seq declines to tally (quorum 0)
+    // rather than count over its own live set, the same fail-closed rule PRE_PREPARE
+    // applies; it catches up through the validated NEW_VIEW path instead.
+    if (self.isFederated()) return { quorum: 0, weighted: false, validators: [], memberPubkeys: null };
     return { quorum: self.getQuorum(), weighted: false, validators: [], memberPubkeys: null };
 }
 

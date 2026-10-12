@@ -44,6 +44,7 @@ const path       = require('path');
 
 const AttestationRelay = require('../../../../src/attestation/relay.js');
 const eq               = require('../../../../src/consensus/equivocation_header.js');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const REQ_ID    = 'd'.repeat(64);
 const PUBKEY_A  = 'a'.repeat(64);
@@ -229,11 +230,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             // The skip is for a bare clone. A run that declared its siblings supplied
             // fails instead, so a dropped indexer checkout cannot leave the canonical
             // uncompared while the suite still reports green.
-            if (!fs.existsSync(attestPath)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling was not found at ' + attestPath);
-                return this.skip();
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, attestPath), 'the sibling parity guard')) return;
 
             const Attest = require(attestPath);
             // Both canonicals touch only this.sha256 and the module-scoped
@@ -283,11 +280,7 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
             const attestPath = process.env.XCHAIN_INDEXER_DIR
                 ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'actions', 'attest', 'index.js')
                 : path.join(__dirname, '..', '..', '..', '..', '..', 'xchain-indexer', 'src', 'actions', 'attest', 'index.js');
-            if (!fs.existsSync(attestPath)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling was not found at ' + attestPath);
-                return this.skip();
-            }
+            if (!skipOrFail(this, siblingCheckout(__dirname, attestPath), 'the sibling parity guard')) return;
 
             const Attest = require(attestPath);
             const ix     = Object.create(Attest.prototype);

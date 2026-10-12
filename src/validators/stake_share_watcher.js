@@ -45,6 +45,7 @@
 const coins = require('../coins');
 const hubConfig = require('../config');
 const { StakeShareMonitor, evaluateStakeShare, normalizeSources, LEVELS } = require('./stake_share_monitor.js');
+const { quorumAfterLosingLargest } = require('./stake_share/lose_one.js');
 const CapabilitySnapshot = require('./capability_snapshot.js');
 const { ConsensusInputMonitor } = require('./consensus_input_monitor.js');
 const { getLogger } = require('../observability');
@@ -110,6 +111,7 @@ class StakeShareWatcher {
             log:        this._log
         });
 
+        this.loseOne  = new Map();
         this._timer   = null;
         this._running = false;
         this.passes   = 0;
@@ -272,7 +274,26 @@ class StakeShareWatcher {
             criticalAtStakes: this.criticalAtStakes
         });
         evaluation.blockIndex = blockIndex;
+        this.recordLoseOne(chain, capability, rows);
         return this.monitor.record(chain, capability, evaluation);
+    }
+
+    // Whether quorum survives losing the largest source, warned on the transition
+    // into failing and once more when it recovers, so a standing failure does not
+    // repeat every poll. The all-up share can read OK while this fails.
+    recordLoseOne(chain, capability, rows) {
+        let key = chain + ':' + capability;
+        let res = quorumAfterLosingLargest(rows);
+        let was = this.loseOne.get(key);
+        this.loseOne.set(key, res);
+        if (!res.usable) return;
+        if (!res.survives && (!was || was.survives !== false)) {
+            this._log('STAKE SHARE LOSE-ONE [' + chain + '/' + capability + ']: the two-thirds gate fails if the ' +
+                'largest staking source (' + res.largestStake + ' of ' + res.totalStake + ') stops signing; the ' +
+                'remaining ' + res.remainingStake + ' is ' + (res.remainingRatio * 100).toFixed(3) + '% of active stake.');
+        } else if (res.survives && was && was.survives === false) {
+            this._log('Stake share lose-one cleared [' + chain + '/' + capability + ']: quorum survives losing the largest source.');
+        }
     }
 
     // The watcher's own CapabilitySnapshot, built on first use. Its monitor is
@@ -308,6 +329,8 @@ class StakeShareWatcher {
         let stats = this.monitor.snapshot();
         // `chains` on the monitor snapshot is the per-chain RESULT map, so the
         // configured list rides under its own name rather than shadowing it.
+        stats.lose_one             = {};
+        for (let [key, res] of this.loseOne) stats.lose_one[key] = res;
         stats.poll_ms              = this.pollMs;
         stats.passes               = this.passes;
         stats.watched_chains       = this.chains.slice();

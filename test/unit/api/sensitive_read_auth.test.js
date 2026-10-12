@@ -11,7 +11,8 @@
 // contact legal@dankest.llc.
 
 // API-key tier enforcement middleware: writes and SENSITIVE_READ_METHODS
-// (getallconfigs, which returns DB credentials) require x-api-key when
+// (getallconfigs, whose DB/RPC passwords are redacted unless the call sets an
+// authorized include_secrets) require x-api-key when
 // HUB_API_KEY is set; the public read tier passes without a key. This is the
 // app-side policy that lets the hub.xchain.io vhost IP-allowlist be retired.
 

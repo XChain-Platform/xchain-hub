@@ -31,6 +31,7 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('../lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('../rollcall/validator_order.js');
 const hubConfig = require('../config');
+const federationRound = require('./pbft/federation_round.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -158,7 +159,14 @@ class Consensus {
     // peers to diverge from regardless of what the operator declared. Strictly
     // widening: every case minValidators > 1 caught is still caught.
     isFederated() {
-        return this.minValidators > 1 || this.validatorSet.length > 1;
+        return federationRound.isFederated(this);
+    }
+
+    // isFederated() widened by the live peer and seed signals once the round's
+    // anchor height reaches FEDERATED_HUB_ACTIVATION; before it this is the
+    // legacy answer unchanged.
+    isFederatedAt(btcBlockHeight) {
+        return federationRound.isFederatedAt(this, btcBlockHeight);
     }
 
     // Fail-closed gate for multi-hub federations. A deterministic snapshot is a
@@ -254,6 +262,7 @@ class Consensus {
             // indexer. So this works whether or not chain-tip-push is wired.
             blockHeight = await this.hub.resolveBtcLatestBlock();
         }
+        federationRound.noteBlockHeight(blockHeight);
         if (!blockHeight) return { snapshot: null, weighted: false, requestedBlockIndex: null };
         let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);
         let snapshot = weighted
@@ -377,6 +386,9 @@ function installParts(target, parts) {
     }
 }
 
-installParts(Consensus.prototype, [proposePart, prePreparePart, votesPart, leaderPart, viewChangePart]);
+const [roundProposePart, roundPrePreparePart] = federationRound.wrapParts(proposePart, prePreparePart);
+
+installParts(Consensus.prototype,
+    [roundProposePart, roundPrePreparePart, votesPart, leaderPart, viewChangePart]);
 
 module.exports = Consensus;

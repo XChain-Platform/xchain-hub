@@ -31,6 +31,7 @@ const fs   = require('fs');
 const path = require('path');
 
 const local = require('../../../src/consensus/gates/price_pair_gate.js');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 // Sibling checkout, same resolution convention as ConsensusPrimitiveConformance:
 // an explicit env path for CI (actions/checkout cannot write above the workspace),
@@ -44,11 +45,7 @@ describe('PRICE v0 pair-name widening flag-day: hub copy @regression', function 
 
     describe('byte-identity with the xchain-indexer twin', function () {
         before(function () {
-            if (!fs.existsSync(TWIN_PATH)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
-                this.skip();
-            }
+            skipOrFail(this, siblingCheckout(__dirname, TWIN_PATH), 'the indexer price_pair_gate.js twin byte identity');
         });
 
         it('is byte-identical to xchain-indexer/src/consensus/gates/price_pair_gate.js', function () {

@@ -319,6 +319,11 @@ function initRoundCounters() {
     this.lastSubmissionPersistFailureRound = null;
     this.lastSubmissionPersistFailureCount = 0;
 
+    // Audit rows dropped because the stake feed could not place an unregistered peer
+    // (snapshot unavailable or lookup threw), kept apart from genuinely unknown keys.
+    this.stakeWeightLookupFailures = 0;
+    this.lastStakeWeightLookupFailureRound = null;
+
     // Same shape for the durable retention sweep, which is fired and not awaited
     // (see executeRoundInner) so its rejection has nowhere else to land: without
     // these the oracle_submissions audit table grows for the process lifetime and

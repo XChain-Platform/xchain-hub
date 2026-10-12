@@ -28,7 +28,7 @@
 const fs                = require('fs');
 const path              = require('path');
 const eq                = require('../equivocation_header.js');
-const { isAmbiguousSendError } = require('../../lib/idempotent_broadcast.js');
+const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -83,7 +83,7 @@ function claimVerdictSpend(self, state, epoch){
     // IS the recorded spend, so record() must never also run for it. check() stays
     // above because reserve() takes no balance argument, so dropping it would
     // silently retire the wallet floor. Same shape RollcallRound.publishPairs and
-    // lib/idempotent_broadcast.broadcastOnce use.
+    // lib/guards/idempotent_broadcast.broadcastOnce use.
     let spendToken = self.spendGuard.reserve();
     if(!spendToken){
         logger.warn('FullNodeChallengeRound: ' + self.spendGuard.noteBlocked() +

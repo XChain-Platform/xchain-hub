@@ -86,9 +86,10 @@ const path          = require('path');
 const EncoderClient = require('../peers/encoder_client.js');
 const OracleBatchSigner = require('./batch_signer.js');
 const ah            = require('../lib/admission_height.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
-const { abandonBuild }           = require('../lib/encoder_reservation.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild }           = require('../lib/encoder/encoder_reservation.js');
+const { rewriteFileAtomically }  = require('../lib/fs/durable_file.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
@@ -172,8 +173,9 @@ class OraclePublisher {
     // ----- The durable-file primitives -----
     //
     // The queue, the dead-letter file and the round buffer are the three durable
-    // files this class owns, and every write to them is open/write/fsync/close so a
-    // crash cannot leave a half-line behind. They live here rather than with the
+    // files this class owns, and every write to them is open/write/fsync/close. A
+    // crash mid-append can still leave a torn last line, which the queue rebuild
+    // quarantines to the dead-letter file instead of dropping. They live here rather than with the
     // callers because `fs` is what the suites stub through this module.
 
     // Create the queue directory and touch the queue file. Best-effort: an
@@ -205,12 +207,10 @@ class OraclePublisher {
         fs.closeSync(fd);
     }
 
-    // Truncating rewrite of a durable file, same fsync discipline.
+    // Atomic rewrite of a durable file (temp file, fsync, rename), so a crash or a
+    // failed write leaves the old file whole. Throws to the caller, like the append.
     rewriteDurableFile(filePath, text) {
-        let fd = fs.openSync(filePath, 'w');
-        fs.writeSync(fd, text);
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
+        rewriteFileAtomically(fs, filePath, text);
     }
 
     // Read a durable file whole, or null when it cannot be read. The callers all
@@ -219,6 +219,16 @@ class OraclePublisher {
     readDurableFile(filePath) {
         try { return fs.readFileSync(filePath, 'utf8'); }
         catch (e) { return null; }
+    }
+
+    // Read a durable file whole, or null when it does not exist; any other failure
+    // throws, for the queue rebuild that must tell an empty file from an unread one.
+    readDurableFileStrict(filePath) {
+        try { return fs.readFileSync(filePath, 'utf8'); }
+        catch (e) {
+            if (e && e.code === 'ENOENT') return null;
+            throw e;
+        }
     }
 
     // Steps 1-3 of the default pipeline: fetch, build, sign. Returns the signed tx hex.
@@ -236,13 +246,15 @@ class OraclePublisher {
 
         // 2. Create an unsigned PSBT with the PRICE v0 payload
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
-        // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
+        // so the encoder answers P2SH, a two-transaction lane signBuiltTx refuses: this
+        // built-in pipeline publishes no PRICE, and a hub needs a HUB_SIGNER_MODULE
+        // exporting broadcast(payload) (examples/doge-signer.example.js).
         let selection = this.selectInputs(utxos);
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while the set is inside the encoder's caller-facing
             // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
             // from its own uncapped fetch of this same address. See
-            // lib/encoder_utxo_forward.js.
+            // lib/encoder/encoder_utxo_forward.js.
             utxos:    forwardableUtxos(selection.utxos, 'OraclePublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address (not the raw hex pubkey).
@@ -288,7 +300,7 @@ class OraclePublisher {
             // whose payload only becomes readable when a reveal spends it, and this pipeline
             // has no reveal: broadcasting it publishes an undecodable PRICE and strands the
             // carrier value. Thrown BEFORE the wallet hook, so nothing is signed and no fee
-            // is spent. See lib/two_phase_guard.js.
+            // is spent. See lib/guards/two_phase_guard.js.
             assertSingleTxEncoding(psbtResult, 'OraclePublisher');
 
             // 3. Sign the PSBT via the operator-provided wallet hook

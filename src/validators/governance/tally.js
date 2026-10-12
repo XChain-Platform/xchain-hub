@@ -14,19 +14,21 @@
  *
  * XChain Hub - the TALLY, as a Governance.prototype mixin.
  *
- * The deterministic leader for a proposal, the expiry sweep that finds proposals
- * whose voting window closed, and the tally itself. Only the leader tallies and
- * broadcasts GOV_RESULT: two hubs tallying independently off differently-delivered
- * gossip would reach contradictory outcomes, which is the split-brain the leader
- * pin removes.
+ * The deterministic leader for a proposal, the ranked expiry sweep that finds
+ * proposals whose voting window closed, and the tally itself.
  *
  ********************************************************************/
 
 const crypto = require('crypto');
 const nodeUtil = require('node:util');
-const { GOV_RESULT, normalizeVoteSeq } = require('./rules.js');
+const governanceRules = require('./rules.js');
+const { GOV_RESULT, normalizeVoteSeq, BTC_BLOCK_MS } = governanceRules;
+const { rankedElectorate, resultSenderEntitled } = require('./takeover_rank.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+const TAKEOVER_STEP_BLOCKS = governanceRules.GOV_TAKEOVER_STEP_BLOCKS || 6;
+const TAKEOVER_STEP_MS = TAKEOVER_STEP_BLOCKS * BTC_BLOCK_MS;
 
 module.exports = {
 
@@ -34,10 +36,11 @@ module.exports = {
     // (modular index into the validator set) but, since governance has no
     // sequential round counter, derives the round from a hash of the immutable
     // proposal_id. Every hub computes the same leader for a given proposal.
-    getProposalLeader(proposalId) {
-        if (this.validatorSet.length === 0) return null;
+    getProposalLeader(proposalId, electorate) {
+        let validators = electorate || this.validatorSet;
+        if (!Array.isArray(validators) || validators.length === 0) return null;
         let round = crypto.createHash('sha256').update(proposalId).digest().readUInt32BE(0);
-        return this.validatorSet[round % this.validatorSet.length];
+        return validators[round % validators.length];
     },
 
     // True if this hub is the deterministic leader responsible for tallying the
@@ -47,6 +50,27 @@ module.exports = {
         if (this.validatorSet.length === 0) return true;
         let leader = this.getProposalLeader(proposalId);
         return !!leader && leader.addr === this.peerManager.validatorAddr;
+    },
+
+    isProposalTallySenderEntitled(proposal, senderAddr, now) {
+        if (!proposal || !proposal.proposal_id) return false;
+        let electorate = this.parseSnapshot(proposal.validator_snapshot);
+        if (!electorate) return false;
+        let leader = this.getProposalLeader(proposal.proposal_id, electorate);
+        if (!leader) return false;
+        let ranked = rankedElectorate(electorate, leader.addr);
+        let failoverActive = typeof this.isTallyFailoverActive === 'function' && this.isTallyFailoverActive();
+        return resultSenderEntitled(
+            ranked, senderAddr, proposal.voting_end,
+            now === undefined ? Date.now() : now,
+            TAKEOVER_STEP_MS, failoverActive
+        );
+    },
+
+    canTallyProposal(proposal, now) {
+        let failoverActive = typeof this.isTallyFailoverActive === 'function' && this.isTallyFailoverActive();
+        if (!failoverActive) return this.isTallyLeader(proposal.proposal_id);
+        return this.isProposalTallySenderEntitled(proposal, this.peerManager.validatorAddr, now);
     },
 
     // Check for proposals whose voting period has ended and tally them
@@ -62,13 +86,10 @@ module.exports = {
             return;
         }
 
+        await this.countOverdueProposals(Date.now(), expired);
+
         for (let proposal of expired) {
-            // Only the deterministic leader for this proposal tallies and
-            // broadcasts the result; followers accept the GOV_RESULT broadcast
-            // as authoritative. This prevents two hubs from independently
-            // tallying with different gossip-delivered vote counts and reaching
-            // contradictory passed/failed conclusions (split-brain).
-            if (!this.isTallyLeader(proposal.proposal_id)) continue;
+            if (!this.canTallyProposal(proposal)) continue;
             try {
                 await this.tallyProposal(proposal);
             } catch (e) {

@@ -7,7 +7,7 @@
  *
  **********************************************************************
  *
- * Unit tests: src/lib/encoder_utxo_forward.js
+ * Unit tests: src/lib/encoder/encoder_utxo_forward.js
  *
  * forwardableUtxos decides what every DOGE publisher hands create_tx as its
  * `utxos` param. Within the encoder's caller-supplied cap the array must go
@@ -26,7 +26,7 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../../../src/lib/encoder_utxo_forward.js');
+const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('../../../../src/lib/encoder/encoder_utxo_forward.js');
 
 // Every default-broadcast pipeline that fetches UTXOs and forwards them.
 const CALL_SITES = [
@@ -97,7 +97,7 @@ function registerForwardingShapeTests() {
         for (const rel of CALL_SITES) {
             const src = fs.readFileSync(path.resolve(__dirname, '../../../../', rel), 'utf8');
             // A publisher inside a feature directory reaches the helper through '../lib/'.
-            assert.ok(/require\(['"]\.\.?\/lib\/encoder_utxo_forward\.js['"]\)/.test(src),
+            assert.ok(/require\(['"]\.\.?\/lib\/encoder\/encoder_utxo_forward\.js['"]\)/.test(src),
                 rel + ' does not require the shared UTXO-forward helper');
             assert.ok(/utxos:\s*forwardableUtxos\(/.test(src),
                 rel + ' builds create_tx utxos without forwardableUtxos(); the encoder cap is unguarded there');

@@ -78,7 +78,8 @@ class PeerUpkeep {
                     if (peer.ws._isAlive === false) {
                         logger.info('Peer ' + addr + ' failed ping/pong; terminating');
                         peer.ws.terminate();
-                        return;
+                        // Next peer, not out of the tick: the rest of the sweep still runs.
+                        continue;
                     }
                     peer.ws._isAlive = false;
                     peer.ws.ping();

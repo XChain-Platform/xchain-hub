@@ -25,6 +25,7 @@
 const canonicalForms = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const { serialPass } = require('./drain_serial.js');
 const { XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE, XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN, XANCREWARD } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -160,8 +161,14 @@ module.exports = {
     // The announcement's authenticity (membership, signature over the txid-bearing
     // canonical, publisher election at the bundle's immutable snapshot_block) was settled
     // at receipt and cannot change; what is re-checked is the ONE thing that does change,
-    // namely whether the bundle is really on DOGE at depth.
-    async drainDeferredBundleDone(){
+    // namely whether the bundle is really on DOGE at depth. Passes never overlap (an
+    // overlapping pass would re-verify and re-apply entries the first is still handling).
+    drainDeferredBundleDone(){
+        return serialPass(this, '_bundleDoneDrain', () => this.runBundleDoneDrain());
+    },
+
+    // One pass of the drain above, over a copy of the queue taken when the pass starts.
+    async runBundleDoneDrain(){
         if(this._deferredBundleDone.size === 0) return;
         for(let [key, entry] of [...this._deferredBundleDone]){
             let d = entry.d;

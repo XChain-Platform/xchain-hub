@@ -51,8 +51,15 @@ const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = req
 // constructor-free instance, avoiding the indexer config/env the constructor
 // would otherwise load. Resolved by monorepo-relative path (same convention as
 // xchain-e2e-test loads xchain-hub internals).
-const IndexerUtility = require(path.resolve(__dirname, '../../../../xchain-indexer/src/utility.js'));
-function indexerMatcher() { return Object.create(IndexerUtility.prototype); }
+const INDEXER_UTILITY = path.resolve(__dirname, '../../../../xchain-indexer/src/utility.js');
+// Loaded on first use so a checkout with no sibling still collects this file; the
+// suite skips at run time unless XCHAIN_REQUIRE_SIBLINGS=1 declares the sibling supplied.
+function indexerMatcher() { return Object.create(require(INDEXER_UTILITY).prototype); }
+function skipWithoutIndexer(ctx) {
+    if (require('fs').existsSync(INDEXER_UTILITY)) return;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the xchain-indexer sibling checkout is missing');
+    ctx.skip();
+}
 
 // Matches the indexer's FIAT_DISPENSER_PRICE_WINDOW default (config.js:154).
 const FIAT_DISPENSER_PRICE_WINDOW = 86400;
@@ -111,6 +118,7 @@ function registerFiatHooks() {
     useSingleValidatorOracleEnv();
 
     before(async function () {
+        skipWithoutIndexer(this);
         try { await testDb.setup(); }
         catch (e) { console.warn('MariaDB unavailable, skipping C3 fiat-oracle tests'); }
         mockApi.setup();

@@ -42,6 +42,14 @@ for (const e of fs.readdirSync(DB_DIR, { withFileTypes: true })) {
 }
 delete DB_METHODS.doQuery;
 
+// Database.withTransaction lives on the class and its real body needs a pool. The double
+// runs the body on a connection whose query is the double's own doQuery, so statements
+// keep their order in the stub. It models NO rollback: atomicity is proven against the
+// real method (test/unit/db/retry/db_with_transaction.test.js) and on a DB venue.
+DB_METHODS.withTransaction = async function (work) {
+    return work({ query: (sql, args) => this.doQuery(sql, args) });
+};
+
 /**
  * Create a mock hub object suitable for injecting into any xchain-hub class.
  * Every dependency is a sinon stub so callers can assert on interactions.
@@ -54,6 +62,7 @@ function createMockHub(overrides = {}) {
     // the SQL sat at the call site.
     let db = Object.assign(Object.create(Database.prototype), {
         doQuery: sinon.stub().resolves([]),
+        withTransaction: DB_METHODS.withTransaction,
         setParam: sinon.stub().resolves(),
         setParams: sinon.stub().resolves(0),
         getConfig: sinon.stub().resolves({}),

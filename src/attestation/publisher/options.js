@@ -25,7 +25,7 @@
 
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard    = require('../../lib/spend_guard.js');
-const { AtMostOnce } = require('../../lib/idempotent_broadcast.js');
+const { AtMostOnce } = require('../../lib/guards/idempotent_broadcast.js');
 const hubConfig = require('../../config');
 const { APPROX_BTC_BLOCK_MS, DEFAULT_FAILOVER_WINDOW_BLOCKS, DEFAULT_FAILOVER_POLL_MS,
         DEFAULT_LEADER_RETRY_MS, DEFAULT_PUBLISHED_RETENTION_MS } = require('./constants.js');
@@ -48,6 +48,10 @@ function initPublisherSpend(self, cfg){
     // finalized response could not be recorded before broadcast; surfaced via
     // getPublisherStats() so it is visible without log-grepping.
     self._enqueueFailures = 0;
+
+    // Count of unusable queue lines moved to the .corrupt.jsonl sibling before a
+    // rewrite, surfaced via getPublisherStats() so a quarantine is never silent.
+    self._corruptQueueLines = 0;
 
     // Append-only, fsync'd audit log of ACTUAL on-chain spends (rid,
     // txid, ts). The WAL queue is a pre-send intent record that is REMOVED on

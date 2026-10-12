@@ -265,6 +265,11 @@ module.exports = {
             'ANCHOR_ANNOUNCE_RETRY_TTL_MS'); // 6 h, ~6x the 60-conf DOGE window
         this.announceQueueMax     = parseInt(hubConfig.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
         this._deferTimer          = null;
+        // One serialPass slot per drain (drain_serial.js), so the timer and flush never
+        // run two passes of the same drain at once.
+        this._bundleDoneDrain     = null;
+        this._finalizedDrain      = null;
+        this._rewardAttestDrain   = null;
         this._rankWakeTimer       = null;   // failover wake, see rankWakeMs
     },
 

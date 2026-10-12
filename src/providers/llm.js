@@ -60,13 +60,13 @@ const SpendGuard = require('../lib/spend_guard.js');
 const hubConfig = require('../config');
 const { getLogger } = require('../observability');
 const logger = getLogger();
-const { FETCH_REASONING_TOKEN_HEADROOM, isReasoningModel, anthropicRejectsSampling, modelCarriesSystemRole } = require('./llm/models');
+const { FETCH_REASONING_TOKEN_HEADROOM, isReasoningModel, needsFetchReasoningHeadroom, anthropicRejectsSampling, modelCarriesSystemRole } = require('./llm/models');
 const LlmSettings = require('./llm/settings');
 const SpendAudit = require('./llm/spend');
 const MetaGates = require('./llm/meta_gates');
 const JudgeAgreement = require('./llm/agree');
 const { parseEnvelope, resolveFetchModel, responseBody } = require('./llm/envelope');
-const { httpStatusError, isTransientStatus, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
+const { httpStatusError, isTransientStatus, redactVendorText, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
 const { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn } = require('./llm/transports');
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
@@ -150,14 +150,15 @@ exports.fetch = async (payload, options) => {
     let model = resolveFetchModel(settings, options);
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || settings.MAX_TOKENS_DEFAULT, settings.MAX_TOKENS_DEFAULT);
-    // Reasoning-family fetch models (o-series / gpt-5, not gpt-5-chat) bill reasoning
+    // Reasoning-family fetch models (o-series / gpt-5 not gpt-5-chat, and the
+    // always-thinking Claude ids) bill reasoning
     // tokens against the completion budget, so the governance-tuned content bound
     // is consumed by reasoning before any attestation content is emitted
     // (finish_reason='length', empty body -> provider_error every round). Mirror
     // agree()'s judge headroom on the fetch path so an approved OpenAI reasoning
     // fallback can actually finalize; add headroom rather than replace so the
     // governance content budget is preserved. Chat-family models are unchanged.
-    if (isReasoningModel(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
+    if (needsFetchReasoningHeadroom(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : settings.DEFAULT_TEMPERATURE;
     // Bound against the vendor that will actually receive the request: Anthropic caps
     // temperature at 1 where OpenAI chat allows 2, and the model is already pinned here,
@@ -324,7 +325,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
     let data = JSON.stringify(body);
 
     return await new Promise((resolve, reject) => {
-        let { safeResolve, safeReject } = settleOnce(resolve, reject);
+        let { safeResolve, safeReject } = settleOnce(resolve, reject, apiKey);
 
         let req = https.request({
             method:   'POST',
@@ -347,11 +348,11 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     // Status first, body shape second: see httpStatusError. The
                     // shape check below still runs for a 2xx carrying an error
                     // envelope, which vendors do return.
-                    let statusErr = httpStatusError(res, 'Anthropic API', json, str);
+                    let statusErr = httpStatusError(res, 'Anthropic API', json, str, apiKey);
                     if (statusErr) { safeReject(statusErr); return; }
                     if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
-                        let err = new Error('llm: Anthropic API: ' + msg);
+                        let err = new Error('llm: Anthropic API: ' + redactVendorText(msg, apiKey));
                         err.httpStatus = res.statusCode;
                         err.transient  = isTransientStatus(res.statusCode);
                         safeReject(err);
@@ -363,7 +364,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     // A 429/5xx from a gateway/proxy often carries a non-JSON (HTML)
                     // body and lands here; classify by status so it is not misrecorded
                     // as a hard malformed-response error.
-                    let err = new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')');
+                    let err = new Error('llm: Anthropic API: malformed response (' + redactVendorText(str, apiKey).substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
                     err.transient  = isTransientStatus(res.statusCode);
                     safeReject(err);

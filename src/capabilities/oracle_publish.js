@@ -39,7 +39,7 @@
  * ALL. Every chunked publish this capability leads (a PRICE round's signature
  * list, an ANCHOR, a ROLLCALL) is a two-phase P2SH encoding, and the hub's
  * built-in pipeline can only broadcast the FUNDING transaction of those two: it
- * fails closed at lib/two_phase_guard.js rather than publishing a payload no
+ * fails closed at lib/guards/two_phase_guard.js rather than publishing a payload no
  * indexer can decode. signer-loader treats `broadcast` as OPTIONAL, so a
  * hand-built module exporting only walletSign loads cleanly, signs everything it
  * is asked to, and publishes nothing, with no error anywhere. The CLI-generated

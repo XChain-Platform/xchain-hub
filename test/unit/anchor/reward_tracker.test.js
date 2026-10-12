@@ -15,6 +15,7 @@ const {
   expect
 } = require('chai');
 const RewardTracker = require('../../../src/anchor/reward_tracker');
+const { getLogger } = require('../../../src/observability');
 const {
   createMockHub
 } = require('../../helpers/mockHub');
@@ -84,6 +85,27 @@ function registerSplitSuitePart2() {
       expect.fail('should throw');
     } catch (e) {
       expect(e.message).to.include('Invalid reward amount');
+    }
+  });
+
+  // The budget check reads the value the way the bcmath split does: a prefix-numeric,
+  // hex or exponent value fails with the reward error, never a mid-split DecimalError.
+  for (let bad of ['10abc', '0x10', '1e1', ' 10', '-1']) {
+    it('rejects the malformed budget ' + JSON.stringify(bad) + ' with no DB writes', async function () {
+      let badHub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: bad } });
+      let rt2 = new RewardTracker(badHub);
+      let err = null;
+      try { await rt2.distributeRewards(1, [hexPk(1)]); } catch (e) { err = e; }
+      expect(err, 'should throw').to.not.equal(null);
+      expect(err.message).to.include('Invalid reward amount');
+      expect(badHub.db.doQuery.called).to.be.false;
+    });
+  }
+  it('keeps accepting plain decimal budgets, including past 8 places', async function () {
+    for (let [budget, each] of [['10', '10.00000000'], ['0.00000001', '0.00000001'], ['10.123456789', '10.12345678']]) {
+      let okHub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: budget } });
+      await new RewardTracker(okHub).distributeRewards(1, [hexPk(1)]);
+      expect(okHub.db.doQuery.getCall(0).args[1][2], budget).to.equal(each);
     }
   });
   it('returns without DB writes when no participant has a valid pubkey', async function () {
@@ -225,11 +247,18 @@ function registerSplitSuitePart5() {
     await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);
     expect(rt2.db.doQuery.called).to.be.false;
   });
-  it('swallows an INSERT failure (idempotent retries)', async function () {
+  // INSERT IGNORE already absorbs a duplicate key, so an error here is a lost write. It
+  // rejects like the read and delete, and the caller (StateAnchorPublisher.recordReward)
+  // logs it, rather than the success line claiming a credit this hub does not hold.
+  it('rejects on an INSERT failure instead of logging the credit as recorded', async function () {
     hub.db.doQuery.onFirstCall().resolves([]);
-    hub.db.doQuery.onSecondCall().rejects(new Error('dup'));
-    await rt.recordAnchorReward('anchor_LTC', 4, hexPk(3), 100); // must not throw
+    hub.db.doQuery.onSecondCall().rejects(new Error('insert down'));
+    let infos = [];
+    let info = sinon.stub(getLogger(), 'info').callsFake(m => infos.push(String(m)));
+    try { await expectRejects(rt.recordAnchorReward('anchor_LTC', 4, hexPk(3), 100)); }
+    finally { info.restore(); }
     expect(hub.db.doQuery.callCount).to.equal(2);
+    expect(infos.filter(m => /^Rewards: anchor_LTC #4/.test(m))).to.have.length(0);
   });
 }
 async function expectRejects(promise) {

@@ -27,11 +27,14 @@
 
 const ValidatorIdentity = require('../../validators/identity.js');
 
-const { XROLLCALL_SIGN } = require('./wire.js');
+const { XROLLCALL_SIGN, XROLLCALL_SYNC } = require('./wire.js');
 
 // How many not-yet-opened epochs' gossip a hub holds. One is the normal case
 // (peers a poll ahead); a few more covers a hub catching up after a stall.
 const EARLY_SIG_EPOCHS = 4;
+
+// Minimum gap between answers to the same sender for the same epoch.
+const SYNC_ANSWER_INTERVAL_MS = 60000;
 
 module.exports = {
 
@@ -41,7 +44,34 @@ module.exports = {
         if(!env || !env.data) return;
         switch(env.type){
             case XROLLCALL_SIGN: return this.onSign(env.data);
+            case XROLLCALL_SYNC: return this.onSyncRequest(env);
         }
+    },
+
+    // A peer that just opened this epoch asks for what we hold. Each pair is
+    // sent as a plain signature message the receiver re-verifies and dedupes.
+    // sendToPeer keys on the peer map, which the envelope sender may not match,
+    // so when no pair reaches the sender directly the answer goes by broadcast.
+    onSyncRequest(env){
+        let epoch  = Number(env && env.data && env.data.epoch);
+        let sender = env && env.sender;
+        if(!Number.isInteger(epoch) || !sender || !this.peerManager) return;
+        let state = this.rounds.get(epoch);
+        if(!state || state.sigs.size === 0) return;
+        if(!(this.lastTip - epoch <= this.acceptWindow)) return;
+
+        let now = Date.now();
+        if(!this._syncAnswered) this._syncAnswered = new Map();
+        let key = sender + ':' + epoch;
+        let last = this._syncAnswered.get(key);
+        if(last !== undefined && now - last < SYNC_ANSWER_INTERVAL_MS) return;
+        for(let [k, t] of this._syncAnswered) if(now - t >= SYNC_ANSWER_INTERVAL_MS) this._syncAnswered.delete(k);
+        this._syncAnswered.set(key, now);
+
+        let pairs = [...state.sigs].map(([pubkey, sig]) => ({ epoch, pubkey, sig }));
+        let direct = 0;
+        for(let p of pairs) if(this.peerManager.sendToPeer(sender, XROLLCALL_SIGN, p)) direct++;
+        if(direct === 0) for(let p of pairs) this.peerManager.broadcast(XROLLCALL_SIGN, p);
     },
 
     onSign(d){

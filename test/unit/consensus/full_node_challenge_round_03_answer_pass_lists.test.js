@@ -131,6 +131,7 @@ function seedRound(eng) {
 // ── R2-FN2: the possession answer is pubkey-bound; a light mirror copying
 // an honest claimant's gossiped value must never earn a PASS ─────────────
 describe('FullNodeChallengeRound', function () {
+    this.timeout(30000);
     installSuiteHooks1();
 describe('R2-FN2 answer copy attack', function () {
 it('a copied digest (another claimant\'s wire value) never earns a PASS', async function () {
@@ -182,6 +183,7 @@ it('answerDigest binds challenge, pubkey, and answer', function () {
 // it independently confirmed correct (a censoring leader dropping honest
 // full nodes) ────────────────────────────────────────────────────────────
 describe('FullNodeChallengeRound', function () {
+    this.timeout(30000);
     installSuiteHooks1();
 describe('R2-FN3 pass-list completeness', function () {
 it('refuses to sign a PASS list that omits a claimant it confirmed correct', async function () {

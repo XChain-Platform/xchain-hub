@@ -85,9 +85,12 @@ function registerOutageForecastTests() {
         expect(r.meetsGate).to.equal(false);
         expect(r.level).to.equal(LEVELS.HALTED);
         expect(r.stakesToHalt).to.equal(0);
-        // (3*125000 - 2*200000)/2 = -12500: 12500 more operator stake restores it.
+        // (3*125000 - 2*200000)/2 = -12500. Operator stake also grows S, so the
+        // top-up must exceed 25000 (137500 of 212500 is still 64.7%); cutting
+        // third-party stake by more than 12500 also restores it.
         expect(r.headroom).to.equal('-12500');
-        expect(r.reason).to.contain('12500');
+        expect(r.reason).to.contain('More than 25000 more operator stake');
+        expect(r.reason).to.contain('more than 12500 less third-party stake');
     });
 }
 
@@ -236,6 +239,7 @@ function registerStakeSizingTests() {
         expect(r.meetsGate).to.equal(false);
         expect(r.level).to.equal(LEVELS.HALTED);
         expect(r.headroom).to.equal('0');
+        expect(r.reason).to.contain('Any additional operator stake');
     });
 }
 

@@ -22,7 +22,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { listIdsOf } = require('./list_rows_select.js');
+const { listIdsOf } = require('./list/list_rows_select.js');
 const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');

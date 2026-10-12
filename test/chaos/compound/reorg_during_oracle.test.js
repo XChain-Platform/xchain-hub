@@ -162,10 +162,12 @@ function registerOracleRoundSubmissionsUnaffectedByReorgTest() {
         oracle.roundStartTime = Date.now();
         oracle.submissions.set(15, new Map());
 
-        // Process a peer submission
+        // Process a peer submission, carrying the signing key PeerManager verified
+        // (submissions are admitted only on a proven key)
         let envelope = {
             type: 'ORACLE_PRICE_SUBMIT',
             sender: VALIDATORS_4[1].addr,
+            sig_pubkey: VALIDATORS_4[1].pubkey,
             timestamp: Date.now(),
             data: {
                 round: 15,
@@ -174,6 +176,7 @@ function registerOracleRoundSubmissionsUnaffectedByReorgTest() {
             }
         };
         oracle.handleMessage(envelope);
+        expect(oracle.getSubmissions(15).size).to.equal(1);
 
         // Process a reorg (on a chain, unrelated to oracle prices)
         await reorgHandler.reportReorg('DOGE', 100000, Date.now() - 120000, 'a'.repeat(64), 'b'.repeat(64));

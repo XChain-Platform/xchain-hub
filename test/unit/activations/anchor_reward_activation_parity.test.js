@@ -32,18 +32,18 @@ const TWIN_PATH    = path.resolve(__dirname, '../../../../xchain-indexer/src/con
 const CANON_PATH   = path.resolve(__dirname, '../../../../xchain-documentation/protocol/constants.js');
 
 const local = require(LOCAL_PATH);
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 describe('anchor_reward_activation parity (hub copy)', function () {
+
+    it('does not describe the retired reward-push RPC as an active path', function () {
+        expect(fs.readFileSync(LOCAL_PATH, 'utf8')).to.not.include('pushvalidatorrewards');
+    });
 
     // A raw byte twin since W5: the header names "the same path in the hub" instead of
     // the other repo's file, so no line is exempt and a drift of any size is a drift.
     it('is byte-identical to the indexer twin', function () {
-        if (!fs.existsSync(TWIN_PATH)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('xchain-indexer sibling checkout missing: ' + TWIN_PATH);
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, TWIN_PATH), 'the indexer twin guard')) return;
         const mine   = fs.readFileSync(LOCAL_PATH, 'utf8').split('\n');
         const theirs = fs.readFileSync(TWIN_PATH, 'utf8').split('\n');
         expect(mine.length, 'the twins differ in line count; something was added on one side only')
@@ -54,12 +54,7 @@ describe('anchor_reward_activation parity (hub copy)', function () {
     });
 
     it('is value-identical to the canonical constants.js for every export canon carries', function () {
-        if (!fs.existsSync(CANON_PATH)) {
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                throw new Error('xchain-documentation sibling checkout missing: ' + CANON_PATH);
-            this.skip();
-            return;
-        }
+        if (!skipOrFail(this, siblingCheckout(__dirname, CANON_PATH), 'the canonical constants check')) return;
         const canon = require(CANON_PATH);
         const PINNED = [
             'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_AMOUNT',

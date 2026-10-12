@@ -58,7 +58,10 @@ function registerBeforeEachHook() {
             setParam: sinon.stub().resolves(),
             getConfig: sinon.stub().resolves({}),
             getAllConfigs: sinon.stub().resolves({}),
-            close: sinon.stub().resolves()
+            close: sinon.stub().resolves(),
+            getFinalizedPriceSnapshotByCoinPair: function (pair) {
+                return dbStub.doQuery('SELECT * FROM price_snapshots WHERE coin_pair = ?', [pair]);
+            }
         };
 
         XChainHub = proxyquire('../../src/XChainHub', {

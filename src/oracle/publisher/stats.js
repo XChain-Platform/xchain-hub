@@ -41,6 +41,7 @@ module.exports = {
             queueDepth:          queueDepth,
             published:           this.publishedCount,
             abandoned:           this.abandonedCount,
+            corruptQueueLines:   this.corruptQueueLines,
             oversizedDrops:      this.oversizedDrops,
             quarantined:         this._quarantinedRounds.size,
             // Marker-table retention: the configured window plus the lifetime prune
@@ -101,6 +102,13 @@ module.exports = {
             // climbs without takeoverPublished ever moving means leaders are broadcasting
             // batches that never mine, which is a fee/mempool problem, not a hub one.
             takeoverDeferred:             this.takeoverDeferred,
+            // Nonzero means a leader went silent and this hub declined to cover it on a deaf
+            // feed (takeoverArmed alone cannot tell that from failover never being needed).
+            takeoverDeclinedUnproven:     this.takeoverDeclinedUnproven,
+            // Takeovers past the election that never reached enqueueWindowWires. An oldest
+            // window that stays put across polls is a takeover wedged before the queue.
+            takeoverUnlandedWindows:      this._takeoverUnlanded.size,
+            takeoverOldestUnlandedWindow: this.oldestUnlandedTakeoverWindow(),
             takeoverAmbiguousCooldownMs:  this.takeoverAmbiguousCooldownMs
         };
     },
@@ -155,6 +163,7 @@ module.exports = {
     // backlog is draining.
     batchRailStats() {
         let windowRounds = this.windowRoundsInForce();
+        this.refreshInForceMaxPriceAge();
         return {
             // PRICE batch rail (spec section 7). batchUnpublishableCount is the
             // machine-checkable half of the loud ceiling: a non-zero value means a
@@ -202,6 +211,8 @@ module.exports = {
     // The cadence contract with the fee gate, in one place, plus the spend guard.
     cadenceStats() {
         let windowRounds = this.windowRoundsInForce();
+        this.refreshInForceMaxPriceAge();
+        let inForce = Number.isFinite(this._inForceMaxPriceAgeSeconds) ? this._inForceMaxPriceAgeSeconds : null;
         return {
             // The cadence contract with the fee gate, in one place.
             // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
@@ -216,12 +227,31 @@ module.exports = {
                     landingReserveMs: this.batchLandingReserveMs });
                 return ms === null ? null : Math.round(ms / 1000);
             })(),
-            oracleMaxPriceAgeSeconds: this.oracleMaxPriceAgeMs === null
-                ? null : Math.round(this.oracleMaxPriceAgeMs / 1000),
+            // The bound getprice enforces right now (tip-aware). Refreshed in the
+            // background by each snapshot, so it reads null until the first refresh
+            // lands or when the hub cannot answer.
+            oracleInForceMaxPriceAgeSeconds: inForce,
+            // Follows the in-force bound once it is known and falls back to the pinned
+            // pre-hourly bound only until then, so the first poll after a restart is the
+            // one reading that can still show the legacy figure.
+            oracleMaxPriceAgeSeconds: inForce !== null ? inForce
+                : (this.oracleMaxPriceAgeMs === null ? null : Math.round(this.oracleMaxPriceAgeMs / 1000)),
             oracleHourlyMaxPriceAgeSeconds: this.oracleHourlyMaxPriceAgeMs === null
                 ? null : Math.round(this.oracleHourlyMaxPriceAgeMs / 1000),
             spendGuard:          this.spendGuard.stats()
         };
+    },
+
+    refreshInForceMaxPriceAge() {
+        let hub = this.hub;
+        if (!hub || typeof hub.oracleMaxAgeSecondsInForce !== 'function' || this._inForceRefreshing) return;
+        this._inForceRefreshing = true;
+        Promise.resolve().then(() => hub.oracleMaxAgeSecondsInForce())
+            .then((seconds) => {
+                this._inForceMaxPriceAgeSeconds = seconds != null && Number(seconds) > 0 ? Number(seconds) : null;
+            })
+            .catch(() => { this._inForceMaxPriceAgeSeconds = null; })
+            .then(() => { this._inForceRefreshing = false; });
     },
 
     windowRoundsInForce() {

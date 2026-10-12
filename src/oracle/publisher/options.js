@@ -25,7 +25,7 @@
 'use strict';
 
 const hubConfig = require('../../config');
-const { AtMostOnce } = require('../../lib/idempotent_broadcast.js');
+const { AtMostOnce } = require('../../lib/guards/idempotent_broadcast.js');
 const SpendGuard    = require('../../lib/spend_guard.js');
 
 // ~10 min. Translates the rank-staggered takeover window from BTC blocks (the
@@ -48,6 +48,9 @@ module.exports = {
         // Lifetime counter of rounds moved to the dead-letter file. Makes a
         // give-up event countable instead of only a console.error.
         this.abandonedCount     = 0;
+        // Lifetime count of unparseable queue lines moved to the dead-letter file
+        // before a rewrite, kept apart from abandonedCount (those are whole rounds).
+        this.corruptQueueLines  = 0;
         // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
         // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
         // so operators can tell an oversized drop apart from an attempts-exhausted abandon.
@@ -181,6 +184,9 @@ module.exports = {
         this.takeoverAttempts  = 0;
         this.takeoverPublished = 0;
         this.takeoverDeferred  = 0;
+        // Takeovers declined because the observation feed is unproven, counted on every
+        // declined window (the decline warning in takeover.js fires once per process).
+        this.takeoverDeclinedUnproven = 0;
         // How long an armed follower waits, once something says a batch for
         // the window may ALREADY be on the wire, before it treats that tx as gone and
         // publishes its own. Mirrors AttestationPublisher's
@@ -198,6 +204,10 @@ module.exports = {
         // windowIndex -> ms timestamp of this hub's OWN ambiguous send for that window
         // (the dead-letter branch in processQueue). Insertion-ordered and bounded.
         this._ambiguousWindows = new Map();
+        // windowIndex -> ms of the first takeover past the election that has not reached
+        // enqueueWindowWires. Cleared on enqueue, when the window lands, or on stop();
+        // uncapped so the takeoverUnlanded* stats stay exact.
+        this._takeoverUnlanded = new Map();
     },
 
     initChainingState(cfg) {

@@ -187,8 +187,8 @@ function registerArchiveTxidCases() {
 function registerCadenceCases() {
     it('ANCHOR_CHECKPOINT_EVERY_N sub-samples by checkpoint ORDINAL, so an odd-seeded cadence still anchors (#6127)', async function () {
         // Decouple on-chain anchoring from checkpoint production. checkpoint_seq is
-        // the round's BTC snapshot_block and the cadence latch advances it by exactly
-        // CHECKPOINT_INTERVAL_BLOCKS (6), so a `seq % 2` predicate is a residue class
+        // the round's BTC snapshot_block and an on-time round lands exactly
+        // CHECKPOINT_INTERVAL_BLOCKS (6) after the last, so a `seq % 2` predicate is a residue class
         // pinned by the seed, not a 1-in-2 sample: seeded odd, as here, EVERY round is
         // ineligible and the federation anchors nothing, forever, with no row for the
         // stand-down log to mention. Eligibility is therefore FLOOR(seq / 6) % N.

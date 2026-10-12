@@ -23,6 +23,7 @@
 const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
 const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { DEX_CANONICAL_INT_FIELDS } = require('./constants.js');
+const offerLists = require('./offer_lists.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -39,6 +40,7 @@ module.exports = {
         if(!a || !b) return false;
         if((a.home_network || '') !== String(row.network || '')) return false;
         if((b.home_network || '') !== String(row.network || '')) return false;
+        await offerLists.prepareOfferLists(this, [a, b], Number(row.snapshot_block));
         // Re-derive the WHOLE match (kind, fill amounts, filled-before offsets, match_id)
         // independently from our own view: offers + our committed ledger. The proposer's
         // a/b are canonical (a_chain <= b_chain), so tryMatch(a, b) keeps lo=a, hi=b.

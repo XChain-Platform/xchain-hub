@@ -27,6 +27,8 @@ function loadModule() {
         existsSync:    sinon.stub().returns(true),
         writeFileSync: sinon.stub(),
         openSync:      sinon.stub().returns(99),
+        renameSync:    sinon.stub(),
+        unlinkSync:    sinon.stub(),
         writeSync:     sinon.stub(),
         fsyncSync:     sinon.stub(),
         closeSync:     sinon.stub(),

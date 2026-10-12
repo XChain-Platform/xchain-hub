@@ -15,13 +15,25 @@ const { expect } = require('chai');
 const nock       = require('nock');
 const PriceFetcher = require('../../../src/oracle/price_fetcher');
 const OracleRound  = require('../../../src/oracle/round');
+const { PRICE_MAX } = require('../../../src/constants');
 const { createMockHub }        = require('../../helpers/mockHub');
 const { runExperiment }        = require('../helpers/chaosRunner');
 const mockApi                  = require('../../helpers/mockExternalApi');
 
+// Peer submissions are admitted only when the envelope carries a proven signing
+// key that the chain or the local registry attributes, so the peer used by the
+// ingest tests is registered under its key and stamps it on the envelope.
+const PEER_ADDR   = 'ws://peer:10001';
+const PEER_PUBKEY = 'dd'.repeat(32);
+
+function createPeerAdmittingHub() {
+    return createMockHub({ validatorPubkeys: new Map([[PEER_ADDR, PEER_PUBKEY]]) });
+}
+
 
 
 let fetcher;
+let oracle;
 function registerBeforeHook() {
 
     before(function () {
@@ -39,10 +51,12 @@ function registerAfterHook() {
 function registerBeforeEachHook() {
 
     beforeEach(function () {
+        oracle = null;
         mockApi.reset();
         fetcher = new PriceFetcher({
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT:  5000
+            PRICE_FETCH_TIMEOUT:  5000,
+            PRICE_FETCH_JITTER_MS: 0
         });
         sinon.stub(console, 'log');
         sinon.stub(console, 'warn');
@@ -53,6 +67,10 @@ function registerBeforeEachHook() {
 function registerAfterEachHook() {
 
     afterEach(function () {
+        if (oracle) {
+            for (let timer of oracle.finalizationTimers.values()) clearTimeout(timer);
+            oracle.finalizationTimers.clear();
+        }
         sinon.restore();
     });
 }
@@ -96,12 +114,12 @@ function registerZeroPricesRejectedTest() {
     });
 }
 
-function registerPricesAbove10MRejectedTest() {
+function registerPricesAtOrAbovePriceMaxRejectedTest() {
 
-    it('prices above 10M rejected', async function () {
+    it('prices at or above PRICE_MAX rejected', async function () {
         mockApi.mockCoinGeckoSuccess({
-            bitcoin:  { usd: 10000001 },
-            litecoin: { usd: 999999999 },
+            bitcoin:  { usd: PRICE_MAX },
+            litecoin: { usd: PRICE_MAX + 1 },
             dogecoin: { usd: 1e18 }
         });
         mockApi.mockCmcSuccess();
@@ -110,7 +128,7 @@ function registerPricesAbove10MRejectedTest() {
         expect(prices).to.have.length(3);
         for (let p of prices) {
             expect(p.sources).to.equal(1);
-            expect(parseFloat(p.price)).to.be.lt(10000000);
+            expect(parseFloat(p.price)).to.be.lt(PRICE_MAX);
         }
     });
 }
@@ -209,8 +227,8 @@ function registerTruncatedJSONResponseHandledAsErrorTest() {
 function registerOracleRoundFiltersMalformedSubmissionsFromTest() {
 
     it('oracle round filters malformed submissions from peers', async function () {
-        let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        let hub = createPeerAdmittingHub();
+        oracle = new OracleRound(hub);
         oracle.currentRound = 5;
         oracle.roundStartTime = Date.now();
         oracle.submissions.set(5, new Map());
@@ -218,7 +236,8 @@ function registerOracleRoundFiltersMalformedSubmissionsFromTest() {
         // Simulate peer submission with invalid prices
         let envelope = {
             type: 'ORACLE_PRICE_SUBMIT',
-            sender: 'ws://peer:10001',
+            sender: PEER_ADDR,
+            sig_pubkey: PEER_PUBKEY,
             timestamp: Date.now(),
             data: {
                 round: 5,
@@ -233,24 +252,27 @@ function registerOracleRoundFiltersMalformedSubmissionsFromTest() {
 
         oracle.handleMessage(envelope);
 
-        // All prices invalid → submission rejected entirely
+        // All prices invalid → submission rejected entirely, by the price filter
+        // rather than by the signer admission gate
         let subs = oracle.submissions.get(5);
-        expect(subs.has('ws://peer:10001')).to.be.false;
+        expect(subs.has(PEER_ADDR)).to.be.false;
+        expect(console.warn.calledWithMatch('zero valid pairs')).to.be.true;
     });
 }
 
 function registerOracleRoundAcceptsValidPricesFromTest() {
 
     it('oracle round accepts valid prices from malformed batch', async function () {
-        let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        let hub = createPeerAdmittingHub();
+        oracle = new OracleRound(hub);
         oracle.currentRound = 5;
         oracle.roundStartTime = Date.now();
         oracle.submissions.set(5, new Map());
 
         let envelope = {
             type: 'ORACLE_PRICE_SUBMIT',
-            sender: 'ws://peer:10001',
+            sender: PEER_ADDR,
+            sig_pubkey: PEER_PUBKEY,
             timestamp: Date.now(),
             data: {
                 round: 5,
@@ -266,8 +288,8 @@ function registerOracleRoundAcceptsValidPricesFromTest() {
         oracle.handleMessage(envelope);
 
         let subs = oracle.submissions.get(5);
-        expect(subs.has('ws://peer:10001')).to.be.true;
-        let sub = subs.get('ws://peer:10001');
+        expect(subs.has(PEER_ADDR)).to.be.true;
+        let sub = subs.get(PEER_ADDR);
         expect(sub.prices).to.have.length(2); // Only BTC and DOGE
     });
 }
@@ -276,7 +298,7 @@ function registerNoNaNInfinityStoredInPriceTest() {
 
     it('no NaN/Infinity stored in price snapshots after malformed data', async function () {
         let hub = createMockHub();
-        let oracle = new OracleRound(hub);
+        oracle = new OracleRound(hub);
 
         // Fetch returns valid data despite malformed source
         sinon.stub(oracle.priceFetcher, 'fetchPrices').resolves([
@@ -304,7 +326,7 @@ describe('Chaos: Malformed Price Data (API-4)', function () {
     registerAfterEachHook();
     registerNegativePricesRejectedValidSourceUsedTest();
     registerZeroPricesRejectedTest();
-    registerPricesAbove10MRejectedTest();
+    registerPricesAtOrAbovePriceMaxRejectedTest();
     registerNaNPricesRejectedTest();
     registerInfinityPricesRejectedTest();
     registerMissingCoinPairFieldsPartialResultsTest();

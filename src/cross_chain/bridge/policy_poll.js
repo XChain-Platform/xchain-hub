@@ -83,8 +83,14 @@ module.exports = {
             pairs.set(key, e);
         };
         let rows = [];
+        // Degrade to the pending legs alone, but say so: an empty list here also leaves a
+        // view-change restamp with no margin for the row's pair.
         try { rows = await this.db.getBridgeTransferChainPairs(network); }
-        catch(e){ rows = []; }
+        catch(e){
+            rows = [];
+            logger.warn('CrossChainBridge: transfer chain-pair read failed for ' + network +
+                        ', using pending legs only: ' + (e && e.message));
+        }
         for(let r of (rows || [])){
             let tick   = String(r.tick);
             let origin = this._tickOrigin.get(network + '|' + tick);

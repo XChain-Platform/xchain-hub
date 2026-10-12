@@ -9,7 +9,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const { buildFeedRpc } = require('../../../src/api/rpc/feed');
 const crossChainDb = require('../../../src/db/cross_chain');
-const capabilityDb = require('../../../src/db/capability_snapshots');
+const capabilityDb = require('../../../src/db/snapshots/capability_snapshots');
 
 const OLD_ID = '01'.repeat(32);
 const NEW_ID = '02'.repeat(32);

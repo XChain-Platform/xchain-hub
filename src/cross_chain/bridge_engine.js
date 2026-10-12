@@ -56,6 +56,7 @@ const ah                     = require('../lib/admission_height.js');
 const CrossChainDexConsensus = require('./dex_consensus.js');
 const coins                  = require('../coins');
 const hubConfig = require('../config');
+const { resolveRegtestSnapshotSeams } = require('../lib/regtest_snapshot_seams.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -123,10 +124,9 @@ class CrossChainBridgeEngine extends EventEmitter {
         // so one no-BTC regtest stack configures the anchor and the seeded validator once.
         // NaN/false on every other network, so a stray env var or configs row can never
         // reach a SIGNED snapshot anchor or seed a validator on mainnet or testnet.
-        let _isRegtest = (this.network === 'regtest');
-        this._snapshotBlockOverride = _isRegtest ? parseInt(hubConfig.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
-        this._seedLocalValidator    = _isRegtest && (hubConfig.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
-                                       cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
+        const seams = resolveRegtestSnapshotSeams(this.network, cfg);
+        this._snapshotBlockOverride = seams.snapshotBlockOverride;
+        this._seedLocalValidator    = seams.seedLocalValidator;
 
         // Per-coin indexer JSON-RPC endpoints, the idiom every cross-chain engine uses.
         this.indexers = {};

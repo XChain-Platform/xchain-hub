@@ -81,8 +81,9 @@ const markers     = require('./publisher/markers.js');
 const retention   = require('./publisher/retention.js');
 const responsible = require('./publisher/responsible.js');
 const sweep       = require('./publisher/sweep.js');
-const { forwardableUtxos } = require('../lib/encoder_utxo_forward.js');
-const { assertSingleTxEncoding } = require('../lib/two_phase_guard.js');
+const { forwardableUtxos } = require('../lib/encoder/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('../lib/guards/two_phase_guard.js');
+const { abandonBuild } = require('../lib/encoder/encoder_reservation.js');
 const hubConfig = require('../config');
 const nodeUtil  = require('node:util');
 const { getLogger } = require('../observability');
@@ -112,6 +113,7 @@ class AttestationPublisher {
             broadcastSucceeded: this._broadcastSucceeded,
             broadcastFailed:    this._broadcastFailed,
             enqueueFailures:    this._enqueueFailures,
+            corruptQueueLines:  this._corruptQueueLines,
             enabled:            this.enabled,
             quarantined:        this._quarantinedRequests.size,   // needs operator replay
             publishedRequestsRetentionMs: this.publishedRequestsRetentionMs,
@@ -208,7 +210,7 @@ class AttestationPublisher {
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while inside the encoder's caller-facing MAX_UTXO_COUNT;
             // past it the param is omitted so the encoder selects from its own
-            // uncapped fetch of this same address (lib/encoder_utxo_forward.js).
+            // uncapped fetch of this same address (lib/encoder/encoder_utxo_forward.js).
             utxos:    forwardableUtxos(utxos, 'AttestationPublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address, not the raw hex pubkey.
@@ -217,13 +219,22 @@ class AttestationPublisher {
             change:   this.btcAddress,
             encoding: 'P2SH'  // response payloads can exceed 80-byte OP_RETURN
         });
-        if (!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
-        // Refuse phase 1 of a two-transaction encoding before anything is signed: this
-        // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
-        // ATTEST no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
-        assertSingleTxEncoding(psbtResult, 'AttestationPublisher');
-        let txHex = await this.walletSignFn(psbtResult.psbt);
-        if (!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        // Hand back the inputs a successful create_tx reserved on any abandon below, and
+        // only here: past broadcast_tx, holding them is what stops a double-spend
+        // (lib/encoder/encoder_reservation.js).
+        let txHex;
+        try {
+            if (!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
+            // ATTEST no indexer can decode and strand the carrier value (lib/guards/two_phase_guard.js).
+            assertSingleTxEncoding(psbtResult, 'AttestationPublisher');
+            txHex = await this.walletSignFn(psbtResult.psbt);
+            if (!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
+        } catch (e) {
+            await abandonBuild(this.encoder, psbtResult, 'AttestationPublisher');
+            throw e;
+        }
         // Everything above is pre-send (build/sign; no money moved). Only broadcast_tx
         // has a side effect, so only ITS failures are classified for ambiguity.
         try {

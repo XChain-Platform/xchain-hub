@@ -23,13 +23,28 @@
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
+const { noteRestampFailed } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// Restamp outcomes. Only RESTAMP_FAILED holds the re-proposal; the other two send it.
+const RESTAMP_NONE = 'none';
+const RESTAMP_APPLIED = 'restamped';
+const RESTAMP_FAILED = 'failed';
+
+// Stamp a usable margin, or record why it was unusable and report the failure.
 function applyEffectiveTimeMargin(pending, currentSecond, margin){
-    let seconds = Number(margin);
-    if(Number.isFinite(seconds) && seconds > 0)
+    let seconds = margin == null ? NaN : Number(margin);
+    if(Number.isFinite(seconds) && seconds > 0){
         pending.row.effective_time = currentSecond + seconds;
+        return RESTAMP_APPLIED;
+    }
+    return restampFailed(pending, margin == null ? 'missing' : 'invalid', String(margin));
+}
+
+function restampFailed(pending, reason, cause){
+    noteRestampFailed({ reason, round: pending.matchId, view: pending.view, cause });
+    return RESTAMP_FAILED;
 }
 
 module.exports = {
@@ -77,23 +92,29 @@ module.exports = {
         this.maybeAssumeLeadership(rid, view);
     },
 
-    // On 2f+1 view-change votes for `view`, the rotated leader announces NEW_VIEW
-    // and re-proposes so the round can make progress under a fresh leader.
+    // Move a stale effective_time back past the follower floor before re-proposing. Returns
+    // an outcome (or a promise of one) and never rejects: the view-change callers drop it.
+    // Engines without effectiveTimeMarginS, and rows that need no restamp, report none.
     restampEffectiveTime(pending){
         let effectiveTime = Number(pending.row && pending.row.effective_time);
-        if(!Number.isFinite(effectiveTime)) return;
+        if(!Number.isFinite(effectiveTime)) return RESTAMP_NONE;
         let currentSecond = typeof this.engine.nowSeconds === 'function'
             ? this.engine.nowSeconds() : Math.floor(new Date().getTime() / 1000);
-        if(effectiveTime - currentSecond >= RELAY_MIN_FUTURE_S) return;
-        if(typeof this.engine.effectiveTimeMarginS !== 'function') return;
+        if(effectiveTime - currentSecond >= RELAY_MIN_FUTURE_S) return RESTAMP_NONE;
+        if(typeof this.engine.effectiveTimeMarginS !== 'function') return RESTAMP_NONE;
         let margin;
         try { margin = this.engine.effectiveTimeMarginS(pending.row); }
-        catch(_){ return; }
+        catch(e){ return restampFailed(pending, 'threw', e && e.message); }
         if(margin && typeof margin.then === 'function')
-            return margin.then(value => applyEffectiveTimeMargin(pending, currentSecond, value)).catch(() => {});
-        applyEffectiveTimeMargin(pending, currentSecond, margin);
+            return margin.then(value => applyEffectiveTimeMargin(pending, currentSecond, value),
+                               e => restampFailed(pending, 'rejected', e && e.message));
+        return applyEffectiveTimeMargin(pending, currentSecond, margin);
     },
 
+    // On 2f+1 view-change votes for `view`, the rotated leader announces NEW_VIEW
+    // and re-proposes so the round can make progress under a fresh leader. A failed
+    // restamp holds both, because every follower's RELAY_MIN_FUTURE_S floor refuses the
+    // stale row; the round timer still rotates the view or abandons the round.
     maybeAssumeLeadership(rid, view){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
@@ -103,10 +124,12 @@ module.exports = {
         let newLeader = this.leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
             let restamp = this.restampEffectiveTime(pending);
-            if(restamp && typeof restamp.then === 'function') return restamp.then(() => {
+            if(restamp && typeof restamp.then === 'function') return restamp.then(outcome => {
+                if(outcome === RESTAMP_FAILED) return;
                 if(pending.finalized || this.pending.get(rid) !== pending || pending.view !== view) return;
                 this.reproposeAsLeader(pending, view);
             });
+            if(restamp === RESTAMP_FAILED) return;
             this.reproposeAsLeader(pending, view);
         }
     },

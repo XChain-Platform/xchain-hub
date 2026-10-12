@@ -27,7 +27,7 @@
 const EncoderClient          = require('../../peers/encoder_client.js');
 const SpendGuard             = require('../../lib/spend_guard.js');
 const CrossChainDexConsensus = require('../../cross_chain/dex_consensus.js');
-const { AtMostOnce } = require('../../lib/idempotent_broadcast.js');
+const { AtMostOnce } = require('../../lib/guards/idempotent_broadcast.js');
 const coins     = require('../../coins');
 const hubConfig = require('../../config');
 const { HOME_CHAIN, ORIGIN_CHAINS, DEFAULT_POLL_MS, DEFAULT_FAILOVER_WINDOW_MS,

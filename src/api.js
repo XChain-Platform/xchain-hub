@@ -112,7 +112,7 @@ const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EX
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
 // cross-origin by several wallet shells at once. parseCorsOrigin is what makes
 // that work - handing `cors` the raw string echoes it verbatim to every caller
-// and is accepted by no browser. See src/lib/corsOrigin.js.
+// and is accepted by no browser. See src/api/cors_origin.js.
 const CORS_ORIGIN        = parseCorsOrigin(hubConfig.CORS_ORIGIN);
 
 // Usage telemetry (anonymous install pings from xchain-node operators).

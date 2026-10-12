@@ -34,7 +34,9 @@
  * indexer-relative path shown (no line numbers where the file has since moved,
  * because a number into a relocated file is worse than no number at all):
  *
- *   cross_chain_matches      db/index.js, hub/hub_db_sync.js           a_chain OR b_chain
+ *   cross_chain_matches      db/index.js,                              a_chain OR b_chain
+ *                            hub/hub_db_sync/barriers/snapshot.js,
+ *                            hub/hub_db_sync/barriers/oracle_match_call.js
  *   cross_chain_calls        db/index.js                               target_chain OR source_chain
  *   bridge_transfers         consensus/bridge_settle.js                dest_chain
  *   policy_snapshots         consensus/bridge_settle.js                no chain clause at all

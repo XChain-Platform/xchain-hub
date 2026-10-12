@@ -24,7 +24,8 @@ const DIGEST         = 'digest-7';
 // set with a locked quorum of three, and which records every broadcast type.
 function buildFollower() {
     let broadcasts = [];
-    let hub = { getPeerManager: () => ({ broadcast: (type) => broadcasts.push(type) }), db: {}, p2pConfig: {}, network: 'regtest' };
+    let hub = { getPeerManager: () => ({ broadcast: (type) => broadcasts.push(type) }), db: {}, p2pConfig: {}, network: 'regtest',
+        resolveBtcLatestBlock: async () => 100 };
     let engine = new CrossChainEngine(hub);
     engine.isKnownSender        = () => true;
     engine.digest               = () => DIGEST;

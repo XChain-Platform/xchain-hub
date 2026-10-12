@@ -24,9 +24,8 @@
 'use strict';
 
 const nodeUtil = require('node:util');
-// The mirror flag day is a registry row read by literal key (W5), on the request's own block.
-const gateRegistry = require('../../consensus/gate_registry');
-const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
+// The mirror era predicate, shared with the mirror and consensus so the three cannot drift.
+const { isMirrorEraRequest } = require('../response_mirror_era.js');
 const { ATTEST_WIRE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -58,13 +57,14 @@ module.exports = {
         // covers all of them. Gated on the REQUEST's own BTC block_index (never the
         // response's, never the current chain tip), matching every other request-plane
         // gate in this file. `null` in the activation map reads as unratified/off, so
-        // on every network but regtest this branch is dead code until the operator
-        // arms a height (mainnet and testnet are both null as of this writing). The
-        // failover sweep (processQueue) replays from the on-disk queue file
-        // independently of this event, so a legacy-era entry queued before a future
+        // this branch never fires on a network whose entry is null; which networks
+        // are armed, and at what height, lives only in the
+        // attest_response_mirror_activation row of consensus/gate_registry/shared_rows_1.js,
+        // so read it there rather than trusting a snapshot here. The failover sweep
+        // (processQueue) replays from the on-disk queue file independently of this event, so a legacy-era entry queued before a future
         // flag day still drains untouched; skipping the enqueue here needs no sweep
         // change.
-        if (gateRegistry.activeAt(ATTEST_RESPONSE_MIRROR_KEY, this.hub.network, null, Number(event.request && event.request.block_index), null)){
+        if (isMirrorEraRequest(this.hub.network, Number(event.request && event.request.block_index))){
             return true;
         }
         return false;

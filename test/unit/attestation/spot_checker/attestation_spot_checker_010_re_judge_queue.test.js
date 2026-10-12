@@ -267,11 +267,65 @@ describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookA
 
 describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('gives up after the attempt cap rather than holding a response body forever', async function () {
         const hub = makeHub({ db: makeFakeDb() });
-        const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('provider_paused', Infinity, false));
+        // An unreachable judge was dialed and failed, so each pass spends an attempt.
+        const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('unreachable', Infinity, false));
         sc.register('rc1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('rc1', 705, ['ff'.repeat(32)]));
         for (let i = 0; i < 6; i++) await sc.sweepReJudge();
         expect(sc.pendingReJudgeSize()).to.equal(0);
+    }); });
+
+// A paused or out-of-budget judge is never dialed, so waiting it out must not spend
+    // the attempt cap; the held check is still scored once the judge answers.
+for (const reason of ['provider_paused', 'budget_exhausted']) {
+describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('keeps a ' + reason + ' hold past the attempt cap and scores it once the judge answers', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry(reason, 11, false));
+        sc.register('rw1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('rw1', 707, ['ba'.repeat(32)]));
+        for (let i = 0; i < 10; i++) expect(await sc.sweepReJudge()).to.equal(0);
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        expect(sc._pendingReJudge.get('rw1').attempts).to.equal(0);
+        expect(db.rows).to.have.length(0);
+        expect(await sc.sweepReJudge()).to.equal(1);
+        expect(db.rows).to.have.length(1);
+        expect(db.rows[0].passed).to.equal(0);
+        expect(sc.failuresFor('ba'.repeat(32))).to.have.length(1);
+    }); });
+}
+
+describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('does not spend an attempt when the provider module is missing during the sweep', async function () {
+        const hub = makeHub({ db: makeFakeDb() });
+        const flaky = makeFlakyRegistry('provider_paused', 1, false);
+        let lookups = 0;
+        const registry = { getModule: () => (lookups++ === 0 ? flaky.getModule() : null) };
+        const sc = new AttestationSpotChecker(hub, registry);
+        sc.register('rm1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('rm1', 708, ['bc'.repeat(32)]));
+        for (let i = 0; i < 7; i++) await sc.sweepReJudge();
+        expect(sc.pendingReJudgeSize()).to.equal(1);
+        expect(sc._pendingReJudge.get('rm1').attempts).to.equal(0);
+    }); });
+
+describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('spends an attempt on each judge call that throws', async function () {
+        const hub = makeHub({ db: makeFakeDb() });
+        let calls = 0;
+        const registry = { getModule: () => ({ agree: (p, options) => {
+            if (calls++ === 0) { options.outcome.inconclusive = true; options.outcome.reason = 'unreachable'; return Promise.resolve(null); }
+            return Promise.reject(new Error('judge transport reset'));
+        } }) };
+        const sc = new AttestationSpotChecker(hub, registry);
+        sc.register('rx1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('rx1', 709, ['bd'.repeat(32)]));
+        await sc.sweepReJudge();
+        expect(sc._pendingReJudge.get('rx1').attempts).to.equal(1);
+        expect(sc._pendingReJudge.get('rx1').lastReason).to.equal('threw');
+    }); });
+
+describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('defaults the give-up age above the one-hour LLM spend window', function () {
+        const sc = new AttestationSpotChecker(makeHub({ db: makeFakeDb() }), makeFlakyRegistry('provider_paused', 0, true));
+        expect(sc.rejudgeMaxAgeMs).to.be.above(60 * 60 * 1000 + sc.rejudgeSweepMs);
     }); });
 
 describe('AttestationSpotChecker: re-judge queue', function () { afterEach(hookAt41466); it('ages a held record out even when the sweep never reaches the attempt cap', async function () {

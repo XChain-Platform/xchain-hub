@@ -21,16 +21,29 @@
  ********************************************************************/
 
 const { noteRoundLost } = require('../../consensus/diagnostics');
-const { nominalRoundSeconds } = require('../consensus/round_time');
+const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('../../consensus/federation.js');
+const { nominalRoundSeconds } = require('../consensus/round_time/round_time');
 const { roundTimeGateActive } = require('../consensus/round_time_gate');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// The wire block time for a round. Gate active: the nominal round time. Gate
+// off: the captured value when it is a positive safe integer, else the nominal
+// time, so a malformed value never reaches the wire.
+function wireBlockTime(round, btcBlockHeight, captured, network, epochStart, roundInterval) {
+    let nominal = nominalRoundSeconds(round, epochStart, roundInterval);
+    if (roundTimeGateActive({ network, btcHeight: btcBlockHeight })) return nominal;
+    if (nominal === null) return captured;
+    return Number.isSafeInteger(captured) && captured > 0 ? captured : nominal;
+}
+
 // True when the consensus engine reports a peer quorum, the same federation test
 // the follower uses before refusing a PROPOSE with no real BTC height.
-function isFederated(consensus) {
-    return typeof consensus.getQuorum === 'function' && consensus.getQuorum() > 0;
+function isFederated(consensus, network, btcBlockHeight) {
+    if (typeof consensus.getQuorum === 'function' && consensus.getQuorum() > 0) return true;
+    return isFederatedHubActive(network, btcBlockHeight) &&
+        isFederatedHub(liveFederationSignals(consensus));
 }
 
 // Store the round's durable skipped row instead of finalizing it; a rejected
@@ -49,9 +62,8 @@ module.exports = {
     scheduleFinalization(round) {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
-        let btcBlockTime   = this.currentBtcBlockTime;
-        if (roundTimeGateActive({ network: this.hub.network, btcHeight: btcBlockHeight }))
-            btcBlockTime = nominalRoundSeconds(round, this.epochStart, this.roundInterval);
+        let btcBlockTime   = wireBlockTime(round, btcBlockHeight, this.currentBtcBlockTime,
+            this.hub.network, this.epochStart, this.roundInterval);
         // Remember whether that height is the round-number stand-in rather than a
         // real BTC tip; the flag and the stand-in height are always set together.
         let anchorIsRoundNumber = !!this.chainTipFallbackActive;
@@ -83,7 +95,7 @@ module.exports = {
                 // Skip a round-number anchor on a federated hub, even inside the first interval:
                 // followers drop a PROPOSE pinned at a non-BTC height, so locking a snapshot there
                 // only wastes the round. Single-node and regtest (quorum 0) keep the fallback.
-                if (anchorIsRoundNumber && isFederated(this.oracleConsensus)) {
+                if (anchorIsRoundNumber && isFederated(this.oracleConsensus, this.hub.network, btcBlockHeight)) {
                     logger.warn('Oracle: Skipping finalization for round ' + round +
                         '; btcBlockHeight is the round-number fallback, not a BTC block, ' +
                         'and followers refuse a PROPOSE anchored there');

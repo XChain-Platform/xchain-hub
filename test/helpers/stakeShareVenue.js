@@ -31,7 +31,7 @@ function makeVenue(opts) {
     opts = opts || {};
     const venue = {
         tip:        150000,
-        lag:        null,          // getlatestblock's `lag`, which the gate's tip resolver bounds
+        lag:        0,             // getlatestblock's `lag`, which the gate's tip resolver bounds; null omits it
         sources:    OURS.concat(['community1']),
         allSources: null,          // the whole-federation set; null reuses `sources`
         weight:     25000,

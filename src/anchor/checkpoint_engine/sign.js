@@ -57,9 +57,14 @@ module.exports = {
         // reach leader-selection (grinding), the validator-set resolve, or the flag-
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
+
+        // Both declines here run before the sender is authenticated, so any peer can
+        // trigger them: noteCosignDecline throttles its warning per reason for that.
         let myBtc = await this.resolveSnapshotBlock();
-        if(!Number.isFinite(myBtc)) return;                        // no own tip -> fail closed
-        if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks) return;
+        if(!Number.isFinite(myBtc)) return this.noteCosignDecline('own_tip_unresolved', cp);   // no own tip -> fail closed
+        if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks)
+            return this.noteCosignDecline('snapshot_out_of_tolerance', cp,
+                'proposed ' + cp.snapshot_block + ', our tip ' + myBtc + ', tolerance ' + this.cosignToleranceBlocks);
 
         // Deterministic-seq guard: checkpoint_seq is a pure function of
         // snapshot_block, so re-derive it and refuse a leader whose seq does not match.
@@ -73,6 +78,7 @@ module.exports = {
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
+        if(this.declinesOffCadence(cp)) return;                    // too soon after the last checkpoint
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
@@ -81,9 +87,39 @@ module.exports = {
         // Independent confirmation from our own indexer/replica.
         let bh = null;
         try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
-        catch(e){ return; }                                        // can't confirm -> don't sign
-        if(!bh) return;
+        catch(e){ return this.noteCosignDecline('indexer_read_failed', cp, String(e && e.message).slice(0, 200)); }   // can't confirm -> don't sign
+        if(!bh) return this.noteCosignDecline('indexer_no_block', cp);
         this.coSignAgainstOwnBlock(cp, canonical, bh, myPubkey);
+    },
+
+    // Count a follower's refusal to co-sign and name it. Declining is the fail-closed answer;
+    // a silent one lets a member drop out of every quorum with no trace while the rest still
+    // sign. Every decline is counted; the warning is throttled per reason.
+    noteCosignDecline(reason, cp, detail){
+        let declines = this._cosignDeclines || (this._cosignDeclines = {});
+        declines[reason] = (declines[reason] || 0) + 1;
+        this._lastCosignDeclineReason = reason;
+        let loggedAt = this._cosignDeclineLoggedAt || (this._cosignDeclineLoggedAt = {});
+        let now = Date.now();
+        if(loggedAt[reason] && now - loggedAt[reason] < this._cadenceStallLogMs) return;
+        loggedAt[reason] = now;
+        logger.warn('StateCheckpointEngine: declining to co-sign ' + cp.chain + '@' + cp.block_index +
+            ' seq ' + cp.checkpoint_seq + ': ' + reason + (detail ? ' (' + detail + ')' : '') +
+            ' (declines for this reason so far: ' + declines[reason] + ')');
+    },
+
+    // Refuse a round that starts less than intervalBlocks after our last checkpoint, the
+    // follower half of the leader's gate in tick; without it a slot holder can checkpoint at
+    // every block it leads and pick the snapshot_block that keys the bundle election. A
+    // snapshot_block EQUAL to the latch is the same round (one SIGN_REQ per chain, and the
+    // first chain's FINALIZED may already have moved the latch there), so it still passes.
+    declinesOffCadence(cp){
+        let latch = this._lastCheckpointBtcBlock;
+        let snap  = Number(cp.snapshot_block);
+        if(latch == null || snap === latch || snap >= latch + this.intervalBlocks) return false;
+        this.noteCosignDecline('off_cadence', cp,
+            'proposed ' + snap + ', last checkpoint ' + latch + ', interval ' + this.intervalBlocks);
+        return true;
     },
 
     // The follower's leader check over the resolved set: this hub must be a member, and

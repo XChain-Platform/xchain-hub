@@ -37,6 +37,7 @@ const path = require('path');
 
 const local = require('../../../../../src/lib/attest_batch_wire.js');
 const { isAdmissionEra } = require('../../../../../src/consensus/gates/mirror_admission_gate.js');
+const { siblingCheckout, skipOrFail } = require('../../../../helpers/sibling_checkout.js');
 
 // Sibling checkout, resolved the way every other twin test resolves it: an explicit
 // env path for CI (actions/checkout cannot write above the workspace), falling back
@@ -107,11 +108,7 @@ describe('ATTEST v5/v6 batch wire: hub twin @regression', function () {
 
     describe('byte-identity with the xchain-indexer twin', function () {
         before(function () {
-            if (!fs.existsSync(TWIN_PATH)) {
-                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
-                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the indexer twin was not found at ' + TWIN_PATH);
-                this.skip();
-            }
+            skipOrFail(this, siblingCheckout(__dirname, TWIN_PATH), 'the indexer twin guard');
         });
 
         it('is byte-identical to xchain-indexer/src/actions/attest/attest_batch_wire.js', function () {
