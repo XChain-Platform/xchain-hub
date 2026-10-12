@@ -347,13 +347,10 @@ describe('remote token snapshot catch-up verifier', function () {
     function finalizedRemoteTokenRow(signers, signatureCount, overrides) {
         const row = Object.assign(remoteTokens.buildRemoteTokenSnapshot(
             'mainnet', 1, 'doge', {
-                give_tick: 'REMOTE',
-                give_decimals: 8,
-                give_owner: 'owner-address',
-                action_index: 7
+                give_tick: 'REMOTE', give_decimals: 8,
+                give_owner: 'owner-address', action_index: 7
             }), {
-            finalizing_view: 3,
-            status: 'finalized'
+            finalizing_view: 3, status: 'finalized'
         }, overrides);
         const canonical = remoteTokens.canonicalRemoteTokenSnapshot(row, row.finalizing_view);
         row.validator_signatures = JSON.stringify(signers.slice(0, signatureCount).map(signer => ({
@@ -363,12 +360,10 @@ describe('remote token snapshot catch-up verifier', function () {
         return row;
     }
 
-    function remoteTokenContext(signers, amounts) {
+    function remoteTokenContext(signers) {
         return {
-            resolveCapabilityValidators: async () => signers.map((signer, index) => ({
-                pubkey: signer.getPubkeyHex(),
-                source: amounts ? 'source-' + index : '',
-                amount: amounts ? amounts[index] : '1'
+            resolveCapabilityValidators: async () => signers.map(signer => ({
+                pubkey: signer.getPubkeyHex(), source: '', amount: '1'
             }))
         };
     }
@@ -378,7 +373,6 @@ describe('remote token snapshot catch-up verifier', function () {
         const context = remoteTokenContext(signers);
         const verify = require(MODULE_PATH).getCatchupVerifier('remote_token_snapshots');
         const row = finalizedRemoteTokenRow(signers, 3);
-
         expect(await verify(row, context)).to.equal(true);
         expect(await verify(finalizedRemoteTokenRow(signers, 2), context)).to.equal(false);
         expect(await verify(Object.assign({}, row, { owner: 'other-owner' }), context)).to.equal(false);
@@ -390,7 +384,6 @@ describe('remote token snapshot catch-up verifier', function () {
         const db = capabilityDb(signers);
         const verify = require(MODULE_PATH).getCatchupVerifier('remote_token_snapshots');
         const row = finalizedRemoteTokenRow(signers, 3);
-
         expect(await verify(row, { db })).to.equal(true);
         expect(db.calls).to.deep.equal([{ block: 1, capability: 'cross_chain' }]);
         expect(await verify(row, {})).to.equal(false);
