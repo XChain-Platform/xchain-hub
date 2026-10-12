@@ -10,6 +10,7 @@ const attestMethods = require('../../../../src/anchor/publisher/attest_round.js'
 const archiveAttestMethods = require('../../../../src/anchor/publisher/archive/attest.js');
 const rewardMethods = require('../../../../src/anchor/publisher/reward.js');
 const ar = require('../../../../src/consensus/gates/anchor_reward_gate.js');
+const remoteTokens = require('../../../../src/cross_chain/remote_token_snapshots.js');
 const proxyquire = require('proxyquire');
 
 const MODULE_PATH = require.resolve('../../../../src/peers/hub_db/catchup_verifiers.js');
@@ -24,9 +25,14 @@ const EXPECTED_TABLES = [
     'attestation_responses',
     'bridge_transfers',
     'policy_snapshots',
-    'list_snapshots'
+    'list_snapshots',
+    'remote_token_snapshots'
 ];
-const BUILT_IN_TABLES = ['state_checkpoints', 'anchor_reward_attestations'];
+const BUILT_IN_TABLES = [
+    'state_checkpoints',
+    'anchor_reward_attestations',
+    'remote_token_snapshots'
+];
 
 function identities(count) {
     return Array.from({ length: count }, () => {
@@ -147,7 +153,7 @@ describe('catch-up verifier registry', function () {
         delete require.cache[MODULE_PATH];
     });
 
-    it('exports the immutable set of eleven mirrored table names', function () {
+    it('exports the immutable set of twelve mirrored table names', function () {
         expect(registry.MIRRORED_TABLES).to.deep.equal(EXPECTED_TABLES);
         expect(Object.isFrozen(registry.MIRRORED_TABLES)).to.equal(true);
     });
@@ -334,5 +340,68 @@ describe('signed-row verifiers in the catch-up framework', function () {
         const weighted = Object.assign(rewardRow('anchor_bundle', 12, publisher), { network: 'testnet' });
         signReward(weighted, [keys[0]], publisher);
         expect(await verify(weighted, { db: weightedDb })).to.equal(true);
+    });
+});
+
+describe('remote token snapshot catch-up verifier', function () {
+    function finalizedRemoteTokenRow(signers, signatureCount, overrides) {
+        const row = Object.assign(remoteTokens.buildRemoteTokenSnapshot(
+            'mainnet', 1, 'doge', {
+                give_tick: 'REMOTE',
+                give_decimals: 8,
+                give_owner: 'owner-address',
+                action_index: 7
+            }), {
+            finalizing_view: 3,
+            status: 'finalized'
+        }, overrides);
+        const canonical = remoteTokens.canonicalRemoteTokenSnapshot(row, row.finalizing_view);
+        row.validator_signatures = JSON.stringify(signers.slice(0, signatureCount).map(signer => ({
+            pubkey: signer.getPubkeyHex(),
+            sig: signer.sign(canonical)
+        })));
+        return row;
+    }
+
+    function remoteTokenContext(signers, amounts) {
+        return {
+            resolveCapabilityValidators: async () => signers.map((signer, index) => ({
+                pubkey: signer.getPubkeyHex(),
+                source: amounts ? 'source-' + index : '',
+                amount: amounts ? amounts[index] : '1'
+            }))
+        };
+    }
+
+    it('accepts only a quorum-signed finalized row with intact content', async function () {
+        const signers = identities(4);
+        const context = remoteTokenContext(signers);
+        const verify = require(MODULE_PATH).getCatchupVerifier('remote_token_snapshots');
+        const row = finalizedRemoteTokenRow(signers, 3);
+
+        expect(await verify(row, context)).to.equal(true);
+        expect(await verify(finalizedRemoteTokenRow(signers, 2), context)).to.equal(false);
+        expect(await verify(Object.assign({}, row, { owner: 'other-owner' }), context)).to.equal(false);
+        expect(await verify(Object.assign({}, row, { status: 'pending' }), context)).to.equal(false);
+    });
+
+    it('uses stored cross-chain membership and rejects unavailable or truncated sets', async function () {
+        const signers = identities(4);
+        const db = capabilityDb(signers);
+        const verify = require(MODULE_PATH).getCatchupVerifier('remote_token_snapshots');
+        const row = finalizedRemoteTokenRow(signers, 3);
+
+        expect(await verify(row, { db })).to.equal(true);
+        expect(db.calls).to.deep.equal([{ block: 1, capability: 'cross_chain' }]);
+        expect(await verify(row, {})).to.equal(false);
+
+        const truncatedDb = capabilityDb(signers);
+        const originalRead = truncatedDb.findCapabilitySnapshotsBySnapshotBlock;
+        truncatedDb.findCapabilitySnapshotsBySnapshotBlock = async (...args) => {
+            const validators = await originalRead(...args);
+            validators.truncated = true;
+            return validators;
+        };
+        expect(await verify(row, { db: truncatedDb })).to.equal(false);
     });
 });

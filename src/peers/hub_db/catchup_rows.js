@@ -33,7 +33,8 @@ const CONTENT_KEY_READERS = Object.freeze({
     attestation_responses: (db, r) => hasRows(db.getAttestationResponse(r.network, r.request_id, r.effective_time)),
     bridge_transfers: (db, r) => hasRows(db.getBridgeTransferByTransferId(r.transfer_id)),
     policy_snapshots: (db, r) => hasRows(db.getPolicySnapshotAtSeq(r.network, r.origin_chain, r.tick, r.policy_seq)),
-    list_snapshots: (db, r) => hasRows(db.getListSnapshotAtSeq(r.network, r.home_chain, r.home_list_index, r.seq))
+    list_snapshots: (db, r) => hasRows(db.getListSnapshotAtSeq(r.network, r.home_chain, r.home_list_index, r.seq)),
+    remote_token_snapshots: (db, r) => hasRows(db.getRemoteTokenSnapshotById(r.snapshot_id))
 });
 
 async function rowAlreadyHeld(db, table, row) {
@@ -57,7 +58,8 @@ const ROW_WRITERS = Object.freeze({
     attestation_responses: (db, row) => db.createAttestationResponseMirrorRow(row),
     bridge_transfers: (db, row) => db.insertBridgeTransfer(row),
     policy_snapshots: (db, row) => db.insertPolicySnapshot(row),
-    list_snapshots: (db, row) => db.insertListSnapshot(row)
+    list_snapshots: (db, row) => db.insertListSnapshot(row),
+    remote_token_snapshots: (db, row) => db.insertRemoteTokenSnapshot(row, row.btc_chain_id)
 });
 
 function storeVerifiedRow(db, table, row) {

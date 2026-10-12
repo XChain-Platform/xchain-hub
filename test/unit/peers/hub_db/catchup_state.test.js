@@ -5,6 +5,7 @@
 
 const { expect } = require('chai');
 const { MIRRORED_TABLES } = require('../../../../src/peers/hub_db/catchup_verifiers.js');
+const { rowAlreadyHeld, storeVerifiedRow } = require('../../../../src/peers/hub_db/catchup_rows.js');
 const { createCatchupState } = require('../../../../src/peers/hub_db/catchup_state.js');
 
 describe('catch-up state transitions', function () {
@@ -17,7 +18,7 @@ describe('catch-up state transitions', function () {
         );
     });
 
-    it('is not caught up when ten of eleven tables are caught up', function () {
+    it('is not caught up when eleven of twelve tables are caught up', function () {
         const state = createCatchupState();
         MIRRORED_TABLES.slice(0, -1).forEach(table => state.markCaughtUp(table));
 
@@ -52,6 +53,45 @@ describe('catch-up state transitions', function () {
         expect(Object.values(state.status())).to.deep.equal(
             MIRRORED_TABLES.map(() => false)
         );
+    });
+});
+
+describe('remote token snapshot catch-up storage', function () {
+    it('checks the snapshot content key', async function () {
+        const calls = [];
+        const db = {
+            async getRemoteTokenSnapshotById(snapshotId) {
+                calls.push(snapshotId);
+                return [{ snapshot_id: snapshotId }];
+            }
+        };
+
+        expect(await rowAlreadyHeld(db, 'remote_token_snapshots', {
+            snapshot_id: 'a'.repeat(64)
+        })).to.equal(true);
+        expect(calls).to.deep.equal(['a'.repeat(64)]);
+    });
+
+    it('stores the verified row without its peer id', async function () {
+        const calls = [];
+        const db = {
+            async insertRemoteTokenSnapshot(...args) {
+                calls.push(args);
+            }
+        };
+        const peerRow = {
+            id: 91,
+            snapshot_id: 'b'.repeat(64),
+            btc_chain_id: 'chain-id'
+        };
+
+        await storeVerifiedRow(db, 'remote_token_snapshots', peerRow);
+
+        expect(calls).to.deep.equal([[
+            { snapshot_id: 'b'.repeat(64), btc_chain_id: 'chain-id' },
+            'chain-id'
+        ]]);
+        expect(peerRow.id).to.equal(91);
     });
 });
 
