@@ -93,6 +93,7 @@ const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const Module = require('module');
+const assert = require('assert');
 
 const SIBLING_MASK_ROOT = 'XCHAIN_SUITE_TITLE_REPO_ROOT';
 const SIBLING_DIR_ENV = ['XCHAIN_DOCS_DIR', 'XCHAIN_INDEXER_DIR'];
@@ -317,7 +318,56 @@ function main() {
     if (failed) process.exitCode = 1;
 }
 
+function registerSiblingLayoutTest() {
+    if (typeof global.describe !== 'function' || typeof global.it !== 'function') return;
+    global.describe('bin/suite-title-map.js', () => {
+        global.describe('--root', () => {
+            global.it('collects the checkout it is given, not the one it lives in', () => {
+                const originalRoot = getRepoRoot();
+                const scratchRoot = path.join(originalRoot, 'tmp');
+                fs.mkdirSync(scratchRoot, { recursive: true });
+                const fixtureBase = fs.mkdtempSync(path.join(scratchRoot, 'suite-title-map-'));
+                const fixtureRoot = path.join(fixtureBase, 'xchain-hub');
+                try {
+                    fs.mkdirSync(path.join(fixtureRoot, 'test'), { recursive: true });
+                    fs.symlinkSync(path.join(originalRoot, 'node_modules'),
+                        path.join(fixtureRoot, 'node_modules'), 'dir');
+                    fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+                        scripts: { test: "mocha --no-config 'test/**/*.test.js'" },
+                    }));
+                    fs.writeFileSync(path.join(fixtureRoot, 'test', 'sibling.test.js'), [
+                        "'use strict';",
+                        "const fs = require('fs');",
+                        "const path = require('path');",
+                        "const cases = ['local'];",
+                        "const sibling = path.resolve(__dirname, '../../xchain-indexer/cases.json');",
+                        "if (fs.existsSync(sibling)) cases.push(...JSON.parse(fs.readFileSync(sibling, 'utf8')));",
+                        "describe('fixture', () => cases.forEach((name) => it(name, () => {})));",
+                    ].join('\n'));
+
+                    setRepoRoot(fixtureRoot);
+                    const standalone = buildMap('test');
+                    assert.ok(!standalone.scripts.test.error, standalone.scripts.test.error);
+                    assert.deepStrictEqual(expand(standalone, 'test'), {
+                        'test/sibling.test.js': ['fixture local'],
+                    }, 'the fixture must collect its local control title');
+                    const siblingRoot = path.join(fixtureBase, 'xchain-indexer');
+                    fs.mkdirSync(siblingRoot);
+                    fs.writeFileSync(path.join(siblingRoot, 'cases.json'), JSON.stringify(['from sibling']));
+                    const platform = buildMap('test');
+                    assert.deepStrictEqual(platform, standalone,
+                        'an adjacent checkout must not add titles absent from standalone CI');
+                } finally {
+                    setRepoRoot(originalRoot);
+                    fs.rmSync(fixtureBase, { recursive: true, force: true });
+                }
+            });
+        });
+    });
+}
+
 if (require.main === module) main();
+else registerSiblingLayoutTest();
 
 module.exports = {
     buildMap,
