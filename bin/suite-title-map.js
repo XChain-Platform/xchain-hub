@@ -52,6 +52,12 @@
  * `ci:full` shells out to a script and the two mutation tiers run stryker, so
  * there are no titles to collect and the pin says so in as many words.
  *
+ * COLLECTION IS REPO-LOCAL. Adjacent xchain checkouts are hidden while mocha
+ * loads suite declarations. Data-driven cases sourced from a sibling are not
+ * collected by the standalone CI layout, so an ambient platform checkout must
+ * not make a regenerated pin differ. xchain-sync, xchain-explorer and
+ * xchain-indexer share this collection contract.
+ *
  * THE SHAPE ON DISK. Titles are stored once in `titleSets`, keyed by a hash of
  * the list, and each script's `files` map points a test file at the set it
  * contributed. Written out flat the pin is six megabytes of text repeated
@@ -86,10 +92,79 @@
 const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
+const Module = require('module');
+
+const SIBLING_MASK_ROOT = 'XCHAIN_SUITE_TITLE_REPO_ROOT';
+const SIBLING_DIR_ENV = ['XCHAIN_DOCS_DIR', 'XCHAIN_INDEXER_DIR'];
+
+/** Is `candidate` inside an adjacent xchain checkout other than `root`? */
+function isSiblingPath(root, candidate) {
+    if (typeof candidate !== 'string' && !Buffer.isBuffer(candidate)) return false;
+    const rel = path.relative(path.dirname(root), path.resolve(String(candidate)));
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    const entry = rel.split(path.sep)[0];
+    return entry !== path.basename(root) && entry.startsWith('xchain-');
+}
+
+function missingSibling(method, candidate) {
+    const error = new Error(`ENOENT: no such file or directory, ${method} '${String(candidate)}'`);
+    error.code = 'ENOENT';
+    error.errno = -2;
+    error.path = String(candidate);
+    error.syscall = method;
+    return error;
+}
+
+/** Make one mocha child see the same repo-local filesystem as standalone CI. */
+function installSiblingMask(root) {
+    const hide = (method) => {
+        const original = fs[method];
+        fs[method] = function maskedSibling(candidate, ...args) {
+            if (isSiblingPath(root, candidate)) {
+                if (method === 'existsSync') return false;
+                throw missingSibling(method.replace(/Sync$/, ''), candidate);
+            }
+            return original.call(fs, candidate, ...args);
+        };
+    };
+    ['accessSync', 'existsSync', 'lstatSync', 'readFileSync', 'readdirSync', 'realpathSync', 'statSync']
+        .forEach(hide);
+
+    const resolveFilename = Module._resolveFilename;
+    Module._resolveFilename = function maskedSiblingModule(request, parent, isMain, options) {
+        const resolved = resolveFilename.call(this, request, parent, isMain, options);
+        if (path.isAbsolute(resolved) && isSiblingPath(root, resolved)) {
+            const error = new Error(`Cannot find module '${request}'`);
+            error.code = 'MODULE_NOT_FOUND';
+            throw error;
+        }
+        return resolved;
+    };
+}
+
+if (process.env[SIBLING_MASK_ROOT]) installSiblingMask(path.resolve(process.env[SIBLING_MASK_ROOT]));
 
 const {
-    getRepoRoot, setRepoRoot, splitCommand, segmentCommand, mochaArgsFor, collect, buildMap,
+    getRepoRoot, setRepoRoot, splitCommand, segmentCommand, mochaArgsFor, collect, buildMap: collectMap,
 } = require('./lib/suite_title_map/collect.js');
+
+/** Collect with adjacent repositories hidden from every spawned mocha process. */
+function buildMap(only) {
+    const saved = new Map([[SIBLING_MASK_ROOT, process.env[SIBLING_MASK_ROOT]],
+        ['NODE_OPTIONS', process.env.NODE_OPTIONS],
+        ...SIBLING_DIR_ENV.map((name) => [name, process.env[name]])]);
+    process.env[SIBLING_MASK_ROOT] = getRepoRoot();
+    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, `--require=${__filename}`].filter(Boolean).join(' ');
+    for (const name of SIBLING_DIR_ENV) delete process.env[name];
+    try {
+        return collectMap(only);
+    } finally {
+        for (const [name, value] of saved) {
+            if (value === undefined) delete process.env[name];
+            else process.env[name] = value;
+        }
+    }
+}
 
 /** sha256 hex of one full title: the form a committed pin stores it in. */
 function titleDigest(title) {
@@ -252,6 +327,7 @@ module.exports = {
     splitCommand,
     compare,
     expand,
+    isSiblingPath,
     serialize,
     setRepoRoot,
     titleDigest,
