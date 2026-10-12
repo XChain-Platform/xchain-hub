@@ -354,4 +354,27 @@ describe('bin/consensus-identity.js', function () {
             assert.deepStrictEqual(Object.keys(JSON.parse(r.stdout).env), NAMES.filter((name) => name !== dropped));
         });
     });
+
+    // The absent-gate filter compares against the measured tree's own sentinel, never a local copy.
+    describe('--root and the absent-gate sentinel', () => {
+        function scratchRulesWith(tail) {
+            const root = scratchHubWith('');
+            fs.appendFileSync(path.join(root, 'src/consensus_rules_digest.js'), `\n${tail}\n`);
+            return root;
+        }
+
+        it('takes the sentinel from the rules module it is handed', () => {
+            assert.strictEqual(identity.absentSentinel(digest), digest.ABSENT);
+            assert.strictEqual(identity.absentSentinel({ ABSENT: '<gone>' }), '<gone>');
+        });
+
+        it('refuses a rules module that exports no sentinel rather than filtering on undefined', () => {
+            assert.throws(() => identity.absentSentinel({}), /exports no ABSENT sentinel/);
+            assert.throws(() => identity.absentSentinel({ ABSENT: '' }), /exports no ABSENT sentinel/);
+            const r = runRoot(scratchRulesWith('module.exports.ABSENT = undefined;'));
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.strictEqual(r.stdout, '');
+            assert.match(r.stderr, /exports no ABSENT sentinel/);
+        });
+    });
 });

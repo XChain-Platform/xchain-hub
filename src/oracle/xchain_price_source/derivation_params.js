@@ -62,7 +62,7 @@ function makePinOffRegtest(config) {
         let raw = config[key];
         let isSet = raw !== undefined && raw !== null && String(raw) !== '';
         if (isSet && diverges) {
-            logger.info('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
+            logger.warn('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
                 (network || '<unset>') + '; using the consensus-pinned value (' +
                 (pinned === null ? 'DISABLED' : pinned) +
                 '). The XCHAIN/USD derivation parameters are consensus-uniform and move ' +

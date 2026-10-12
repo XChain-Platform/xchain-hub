@@ -322,6 +322,48 @@ function registerSplitSuitePart5() {
     expect(nd.db.checkpoints.length, 'a rooted checkpoint still persists normally').to.equal(1);
   });
 }
+// The peer FINALIZED path refuses a cross-network checkpoint before it resolves the
+// validator set or verifies a signature, so the refusal is a named network mismatch
+// and never a sub-quorum drop.
+function registerSplitSuitePart7() {
+  it('peer FINALIZED refuses a cross-network checkpoint before any validator resolve', async function () {
+    let bus = buildMesh(1, {
+      btcBlock: 200
+    });
+    let nd = bus.nodes[0];
+    nd.engine.network = 'mainnet'; // deployment plane
+    let resolves = 0;
+    let origResolve = nd.engine.resolveCapabilityValidators.bind(nd.engine);
+    nd.engine.resolveCapabilityValidators = async (...args) => {
+      resolves++;
+      return origResolve(...args);
+    };
+    let subQuorumBefore = nd.engine._subQuorumFinalized;
+    let threw = null;
+    try {
+      await nd.engine.handleFinalized({
+        type: 'XCHK_FINALIZED',
+        data: {
+          checkpoint: cp(Object.assign({}, ROOTED, {
+            network: 'regtest'
+          })),
+          signatures: [{
+            pubkey: nd.pubkey,
+            sig: 'a'
+          }]
+        }
+      });
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw, 'a cross-network FINALIZED must be refused').to.not.equal(null);
+    expect(String(threw.message)).to.match(/network mismatch in finalized/);
+    expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+    expect(resolves, 'no validator resolve for a cross-network checkpoint').to.equal(0);
+    expect(nd.engine._subQuorumFinalized, 'not metered as sub-quorum').to.equal(subQuorumBefore);
+    expect(nd.db.checkpoints.length, 'nothing persisted').to.equal(0);
+  });
+}
 function registerSplitSuitePart6() {
   afterEach(async function () {
     for (let bus of buses) {
@@ -335,6 +377,7 @@ function registerSplitSuitePart6() {
     registerSplitSuitePart3();
     registerSplitSuitePart4();
     registerSplitSuitePart5();
+    registerSplitSuitePart7();
   });
 }
 describe('StateCheckpointEngine', function () {

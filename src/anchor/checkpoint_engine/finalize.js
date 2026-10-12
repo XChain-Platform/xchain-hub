@@ -51,6 +51,11 @@ module.exports = {
             return;
         }
 
+        // Refuse a cross-network checkpoint before the validator resolve and signature
+        // loop, like co-sign: no lookups, and a named network mismatch rather than a
+        // sub-quorum drop (the XCHK_FINALIZED .catch in handleMessage logs the throw).
+        this.assertCheckpointNetwork(cp, 'finalized');
+
         let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
         // Size the quorum from the RAW row count (item 2651), matching the propose
@@ -89,11 +94,9 @@ module.exports = {
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
     // indexer subscribers, and emit for the StateAnchorPublisher.
     async acceptFinalized(cp, sigs, quorum, isLeader){
-        // Refuse BEFORE any work. This cp arrived from a PEER, so its network is
-        // the sender's claim; if it disagrees with ours we would tally the signature set
-        // under a different rule than the anchor publisher (and the sender) will. Checked
-        // first so a cross-network checkpoint costs no validator resolution and cannot
-        // slip past an earlier early-return.
+        // Refuse a cross-network checkpoint before the rootless refusal and any DB work:
+        // the persist-time backstop for the leader's own accept, which skips handleFinalized
+        // (where the peer path already refused it before resolving validators).
         this.assertCheckpointNetwork(cp, 'accept-finalized');
         // EVERY hub persists the oracle_publish snapshot for the checkpoint's
         // snapshot_block, not just the cadence leader (tick): ANCHOR verifiers

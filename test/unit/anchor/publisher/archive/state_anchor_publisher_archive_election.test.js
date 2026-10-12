@@ -81,8 +81,9 @@ function registerArchiveLadderCases() {
         // Live finding (3-hub test cluster): the archive election had NO rank
         // tolerance - a signer-less elected leader stalled archiving (only
         // 1-of-3 elections could publish), and on a static regtest tip the
-        // same leader won forever. The election key is now content-anchored
-        // (wrapper checkpoint + batch seq) and ranks unlock like v0 anchors:
+        // same leader won forever. The election key is the wrapper checkpoint
+        // identity only (batch seq excluded, see archiveElectionKey in build.js)
+        // and ranks unlock like v0 anchors:
         // since = btcBlock - wrapper snapshot_block = 37 → floor(37/36) = 1.
         let bus = buildMesh(4, { btcBlock: 137, network: 'mainnet' });   // count-path (SWQ off below 961000)
         await startAll(bus);

@@ -146,7 +146,7 @@ function resolveAttestResponseForwardS(network, p2pConfig){
     let requested = isNonNegativeIntegerSpelling(raw) ? Number(String(raw).trim()) : null;
     if(requested !== ATTEST_RESPONSE_FORWARD_S && !warnedOverrideIgnored){
         warnedOverrideIgnored = true;
-        logger.info('WARNING: ' + ATTEST_RESPONSE_FORWARD_S_OVERRIDE + '=' + String(raw) +
+        logger.warn('WARNING: ' + ATTEST_RESPONSE_FORWARD_S_OVERRIDE + '=' + String(raw) +
             ' is set but IGNORED on ' + (network || '<unset>') + '; using the protocol forward margin (' +
             ATTEST_RESPONSE_FORWARD_S + 's). This seam is regtest-only: a hub stamping a different ' +
             'margin has every proposal refused by its peers and refuses every one of theirs.');
@@ -180,7 +180,7 @@ function resolveAttestBatchWindowS(network, p2pConfig){
     let requested = isNonNegativeIntegerSpelling(raw) ? Number(String(raw).trim()) : null;
     if(requested !== ATTEST_BATCH_WINDOW_S && !warnedWindowOverrideIgnored){
         warnedWindowOverrideIgnored = true;
-        logger.info('WARNING: ' + ATTEST_BATCH_WINDOW_S_OVERRIDE + '=' + String(raw) +
+        logger.warn('WARNING: ' + ATTEST_BATCH_WINDOW_S_OVERRIDE + '=' + String(raw) +
             ' is set but IGNORED on ' + (network || '<unset>') + '; using the protocol batch window (' +
             ATTEST_BATCH_WINDOW_S + 's). This seam is regtest-only: the window bounds are inside the ' +
             'batch key and the signed batch canonical, so a hub on its own cadence proposes batches ' +

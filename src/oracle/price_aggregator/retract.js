@@ -89,7 +89,7 @@ function oraclePriceRetractionDelete(sourceChain, b) {
 
 // Tell the hub DB sync channel to mirror these deletes so distributed
 // indexers prune their local price-table copies too. Carry to_action_index and
-// retraction_generation so the replica's _applyRetraction bounds and fences its
+// retraction_generation so the replica's applyRetraction bounds and fences its
 // delete identically (hub<->replica parity).
 function emitRetractionDeletes(sourceChain, b, snapDeleted, oracleDeleted) {
     if (snapDeleted > 0) {

@@ -167,7 +167,7 @@ function registerFeature9oraclePriceStalenessL5Part3() {
         block_timestamp: feature9oraclePriceStalenessL5NowS() - 999999
       }]);
       let logs = [];
-      let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+      let stub = sinon.stub(console, 'warn').callsFake(m => logs.push(String(m)));
       let s;
       try {
         s = await h.getPriceStatus('BTC/USD');
@@ -188,7 +188,7 @@ function registerFeature9oraclePriceStalenessL5Part3() {
     let h = new rootSuiteXChainHub('host', 3306, 'db', 'user', 'pass', {
       ORACLE_MAX_PRICE_AGE_SECONDS: 0
     });
-    let stub = sinon.stub(console, 'log');
+    let stub = sinon.stub(console, 'warn');
     try {
       expect(h.oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned);
     } finally {

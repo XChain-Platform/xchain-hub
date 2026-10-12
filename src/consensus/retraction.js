@@ -292,10 +292,11 @@ class RetractionConsensus {
         return validators;
     }
 
+    // Tip-only on every network: retraction takes no regtest snapshot-block seam, so with
+    // no BTC tip there is no snapshot block and submit and cosign sign nothing.
     async resolveSnapshotBlock(){
         let b = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-        if(b != null) return b;
-        return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
+        return b != null ? b : null;
     }
 }
 

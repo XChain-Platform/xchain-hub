@@ -106,7 +106,20 @@ const crypto = require('crypto');
 // in separate trees and each has to be able to take this reading against its own.
 let REPO_ROOT = path.resolve(__dirname, '..');
 
-const ABSENT = '<absent>';
+/**
+ * The absent-gate sentinel of the rules module that produced the gates map, so under
+ * --root the filter matches the measured tree's spelling, as the indexer twin does.
+ * @param {{ABSENT: string}} rulesModule the measured checkout's digest module
+ * @returns {string}
+ */
+function absentSentinel(rulesModule) {
+    const sentinel = rulesModule.ABSENT;
+    // A missing export would filter on undefined, which no projected gate reads, so --assert-no-absent would pass silently.
+    if (typeof sentinel !== 'string' || sentinel === '') {
+        throw new Error('src/consensus_rules_digest.js exports no ABSENT sentinel, so absent gates cannot be named');
+    }
+    return sentinel;
+}
 
 // The row a function-valued shared gate prints: present, body not digested (see SHARED_GATES).
 const FUNCTION_GATE = '<function>';
@@ -183,11 +196,13 @@ function coinConsensusPins() {
 }
 
 /**
- * The six values, all of them derived from the source tree alone.
+ * The six values, read from the source tree with no socket or database; the rules
+ * digest and its gates map also move with the regtest arming recorded as `env`.
  * @returns {object}
  */
 function codeIdentity() {
     const rulesModule = loadFromRepo('src/consensus_rules_digest.js');
+    const ABSENT = absentSentinel(rulesModule);
     const { HUB_SCHEMA_VERSION } = loadFromRepo('src/hub_schema_version.js');
     const logicPin = loadFromRepo('bin/lib/carrier_logic_pin.js');
     // The measured checkout's registry, whose exported canonicaliser consensusHash uses.
@@ -452,5 +467,5 @@ module.exports = {
     // captured the value at require time would keep reading the default after
     // --root moved it.
     repoRoot: () => REPO_ROOT,
-    ABSENT,
+    absentSentinel,
 };

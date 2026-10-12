@@ -31,7 +31,10 @@ const { installObservability } = require('../observability');   // default-off /
 const {
     installHubOracleMetrics,
     installHubStakeShareMetrics,
-    installHubGovernanceOverdueMetrics
+    installHubGovernanceOverdueMetrics,
+    installHubAttestationMetrics,
+    installHubCheckpointMetrics,
+    installHubOraclePublisherMetrics
 } = require('./hub_metrics');
 const { authGate, feedPortAllowlist } = require('./auth_gate');
 
@@ -180,6 +183,12 @@ function installMetrics(app, ctx) {
 
     // Governance state starts later, so the collector resolves it at scrape time.
     installHubGovernanceOverdueMetrics(observability, hub);
+
+    // Attestation, checkpoint and oracle-publisher health on the scrape, so each
+    // engine has a detector that does not depend on its stats RPC.
+    installHubAttestationMetrics(observability, hub);
+    installHubCheckpointMetrics(observability, hub);
+    installHubOraclePublisherMetrics(observability, hub);
     return observability;
 }
 

@@ -193,9 +193,9 @@ function applyTimingConfig() {
     // HubConsensusEnvGuard refuses a container regenerate that drops it) and ignoring the
     // override there would skip every round and stall every indexer's price-sync barrier.
     // What the hatch must not be is SILENT, so a sub-floor setting announces itself on any
-    // network that is not regtest, naming the defense it stands down.
+    // network that is not regtest, naming the defense it stands down, at warn level.
     if (this.minSubmissions < 2 && !(this.hub && this.hub.network === 'regtest')) {
-        logger.info('WARNING: ORACLE_MIN_SUBMISSIONS=' + this.minSubmissions + ' on ' +
+        logger.warn('WARNING: ORACLE_MIN_SUBMISSIONS=' + this.minSubmissions + ' on ' +
             (((this.hub && this.hub.network) || '<unset>')) + '; the 2-hub price diversity floor ' +
             'is STOOD DOWN on this hub, so one submitter can carry a federation-signed round. ' +
             'Intended only for a deliberate single-host deployment.');
@@ -244,7 +244,7 @@ function applyUnverifiedPairsHatch() {
     let allowUnverifiedEnv = String(hubConfig.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
     let isRegtest          = !!(this.hub && this.hub.network === 'regtest');
     if (allowUnverifiedEnv && !isRegtest) {
-        logger.info('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
+        logger.warn('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
             (((this.hub && this.hub.network) || '<unset>')) + '; unverifiable-pair co-sign ' +
             'stays fail-closed. This hatch is honored only on regtest single-host bring-up.');
     }

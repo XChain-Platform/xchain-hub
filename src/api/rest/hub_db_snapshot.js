@@ -41,7 +41,7 @@ function mountSnapshotRoutes(app, ctx) {
 function snapshotHelpers({ hub, HUB_NETWORK }) {
     // The per-table per-chain admission height watermark, for the REST carriers.
     //
-    // It rides all ELEVEN snapshot pages as well as the heartbeat and the ready frame:
+    // It rides every snapshot page as well as the heartbeat and the ready frame:
     // a poll-mode consumer never receives a heartbeat at all, so without it a poll-mode
     // bootstrap never establishes a baseline and every height-keyed barrier defers forever
     // rather than for one interval.

@@ -36,9 +36,9 @@ const ARCHIVE_REWARD_TYPE = 'anchor_archive';
 // The ledger-key qualifier for a reward of `rewardType` earned at `snapshotBlock`.
 // Non-archive -> 0, always, so those keys are exactly what they were pre-column.
 // A non-finite/negative snapshot block also yields 0 (the legacy value): the two writers
-// both validate the height before this point (anchor.js regex-checks SNAPSHOT_BLOCK at
-// parse, the derive path reads a BIGINT UNSIGNED column), so this is a fail-to-legacy
-// floor, not a live path.
+// both validate the height before this point (the derive path reads a BIGINT UNSIGNED
+// column, recovery refuses a non-finite or negative archived block_index before staging
+// it), so this is a fail-to-legacy floor, not a live path.
 function rewardRoundQualifier(rewardType, snapshotBlock){
     if(String(rewardType) !== ARCHIVE_REWARD_TYPE) return 0;
     let sb = Number(snapshotBlock);

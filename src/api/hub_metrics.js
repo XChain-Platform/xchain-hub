@@ -26,6 +26,9 @@
 'use strict';
 
 const { setSourceLiveness } = require('./hub_metrics_source_liveness');
+const { installHubAttestationMetrics } = require('./hub_metrics_attestation');
+const { installHubCheckpointMetrics } = require('./hub_metrics_checkpoint');
+const { installHubOraclePublisherMetrics } = require('./hub_metrics_oracle_publisher');
 
 /**
  * Register the hub's oracle-round heartbeat on an installed registry.
@@ -81,6 +84,10 @@ function registerOracleSeries(registry){
         name: 'xchain_oracle_round_timeouts_total',
         help: 'Oracle rounds evicted before reaching commit quorum, leader and follower seats alike'
     });
+    const abandonedRounds = registry.counter({
+        name: 'xchain_oracle_abandoned_rounds_total',
+        help: 'Oracle rounds this hub watched open and then recorded as abandoned, apart from other finalize-phase losses'
+    });
     // Source-diversity collapse, and the opposite failure to the two above: the round
     // DID reach quorum and was signed normally, so nothing else here moves, while the
     // federation had only one uncorrelated upstream behind a pair that normally has two
@@ -109,6 +116,7 @@ function registerOracleSeries(registry){
         currentRound,
         skippedStreak,
         roundTimeouts,
+        abandonedRounds,
         singleSourceRounds,
         priceSourceBoundRejects,
         priceSourceLive,
@@ -122,6 +130,7 @@ function collectOracleSeries(hub, {
     currentRound,
     skippedStreak,
     roundTimeouts,
+    abandonedRounds,
     singleSourceRounds,
     priceSourceBoundRejects,
     priceSourceLive,
@@ -148,6 +157,9 @@ function collectOracleSeries(hub, {
     const consensus = oracle.oracleConsensus;
     if(consensus && Number.isFinite(Number(consensus._roundTimeouts))) {
         roundTimeouts.setMonotonic({}, Number(consensus._roundTimeouts));
+    }
+    if(consensus && isNum(consensus._abandonedRounds)) {
+        abandonedRounds.setMonotonic({}, Number(consensus._abandonedRounds));
     }
     if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
         singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
@@ -311,5 +323,8 @@ function installHubGovernanceOverdueMetrics(observability, hub){
 module.exports = {
     installHubOracleMetrics,
     installHubStakeShareMetrics,
-    installHubGovernanceOverdueMetrics
+    installHubGovernanceOverdueMetrics,
+    installHubAttestationMetrics,
+    installHubCheckpointMetrics,
+    installHubOraclePublisherMetrics
 };

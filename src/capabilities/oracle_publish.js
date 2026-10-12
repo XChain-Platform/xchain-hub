@@ -56,14 +56,16 @@
 
 const { loadSignerHooks } = require('../lib/signer_loader.js');
 
-// Dogecoin base58 pay-to-pubkey-hash prefixes by network. Mainnet version byte
-// 0x1e renders as 'D'; testnet/regtest version byte 0x71 renders as 'n'. P2SH is
-// not accepted: the publisher signs with a single-key wallet.
+// Dogecoin base58 pay-to-pubkey-hash prefixes by network, from net.pubKeyHash in
+// src/coins/DOGE.js: mainnet 0x1e renders as 'D', testnet 0x71 as 'n', and regtest
+// reuses the Bitcoin-testnet byte 0x6f, which renders as 'm' or 'n'. P2SH is not
+// accepted: the publisher signs with a single-key wallet.
 const DOGE_ADDRESS_RE = {
     mainnet: /^D[a-km-zA-HJ-NP-Z1-9]{33}$/,
     testnet: /^n[a-km-zA-HJ-NP-Z1-9]{33}$/,
-    regtest: /^n[a-km-zA-HJ-NP-Z1-9]{33}$/,
+    regtest: /^[mn][a-km-zA-HJ-NP-Z1-9]{33}$/,
 };
+const DOGE_ADDRESS_PREFIX = { mainnet: "'D'", testnet: "'n'", regtest: "'m' or 'n'" };
 
 exports.selfTest = async (config) => {
     let entry = (config && config.oracle_publish) || null;
@@ -85,7 +87,7 @@ exports.selfTest = async (config) => {
     }
     if (!re.test(String(entry.doge_address))) {
         return { ok: false, reason: 'oracle_publish.doge_address is not a valid DOGE ' + network +
-                                    ' address (expected ' + (network === 'mainnet' ? "'D'" : "'n'") +
+                                    ' address (expected ' + DOGE_ADDRESS_PREFIX[network] +
                                     ' prefix, 34 chars)' };
     }
     if (!entry.doge_wallet) {

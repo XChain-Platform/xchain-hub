@@ -17,7 +17,6 @@
 const gateRegistry = require('../../consensus/gate_registry');
 const { maxBatchWindowRounds, pinnedMaxPriceAgeHourlyMs } = require('../price_batch_cadence.js');
 
-const UNARMED_FIRST_ROUND = 9999999999;
 const ORACLE_HOURLY_WINDOW_ROUNDS = 6;
 const HOURLY_WINDOW_GATE =
     'oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND';
@@ -30,8 +29,9 @@ function createWindowPlan({ firstRound, smallRounds, largeRounds, alignmentRound
         throw new TypeError('largeRounds must be a positive integer');
     }
 
+    // Compare against the registry's own sentinel (a constant row has no activeAt guard).
     const armed = firstRound !== null && firstRound !== undefined &&
-        firstRound !== UNARMED_FIRST_ROUND;
+        firstRound !== gateRegistry.UNARMED;
     const alignment = alignmentRounds === undefined ? largeRounds : alignmentRounds;
     if (!Number.isInteger(alignment) || alignment <= 0) {
         throw new TypeError('alignmentRounds must be a positive integer');
