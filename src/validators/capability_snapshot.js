@@ -69,8 +69,17 @@ function rpcErrorDetail(result) {
     return 'The indexer returned a JSON-RPC error: ' + String(msg).slice(0, 200) + '.';
 }
 
-class CapabilitySnapshot {
+async function postWith429Retry(url, body, config) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try { return await axios.post(url, body, config); }
+        catch (err) {
+            if (!err || !err.response || err.response.status !== 429 || attempt === 2) throw err;
+            await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt)));
+        }
+    }
+}
 
+class CapabilitySnapshot {
     constructor(hub) {
         this.hub = hub;
         // (capability:blockIndex) → { validators: [{pubkey, amount}], count, blockIndex, capability, expiresAt }
@@ -145,7 +154,7 @@ class CapabilitySnapshot {
         if (minStake !== null) params.min_stake = minStake;
 
         try {
-            let res = await axios.post(url, {
+            let res = await postWith429Retry(url, {
                 jsonrpc: '2.0',
                 id:      now,
                 method:  'getcapabilityvalidators',
@@ -204,7 +213,7 @@ class CapabilitySnapshot {
         if (minStake !== null) params.min_stake = minStake;
 
         try {
-            let res = await axios.post(url, {
+            let res = await postWith429Retry(url, {
                 jsonrpc: '2.0',
                 id:      now,
                 method:  'getstakeweightsbycapability',
@@ -252,7 +261,7 @@ class CapabilitySnapshot {
         if (!url) return this.fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
-            let res = await axios.post(url, {
+            let res = await postWith429Retry(url, {
                 jsonrpc: '2.0',
                 id:      now,
                 method:  'getactivevalidators',
@@ -298,7 +307,7 @@ class CapabilitySnapshot {
         if (!url) return this.fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
-            let res = await axios.post(url, {
+            let res = await postWith429Retry(url, {
                 jsonrpc: '2.0',
                 id:      now,
                 method:  'getactivestakeweights',
