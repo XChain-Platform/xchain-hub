@@ -36,6 +36,9 @@ module.exports = {
         let droppedPairs = [];
         let skippedRoundsReadError = false;
         let droppedPairsReadError = false;
+        let disputedRoundCount = 0;
+        let lastDisputedRound = null;
+        let disputedRoundsReadError = false;
         try {
             let rows = await this.db.findPriceSnapshotRoundsSkippedWithNoFinalized();
             skippedRounds = rows.map(r => Number(r.round_number));
@@ -54,6 +57,17 @@ module.exports = {
         } catch (err) {
             droppedPairsReadError = true;
             logger.warn(nodeUtil.format('Oracle: failed to read per-pair drops for diagnostics:', err));
+        }
+        try {
+            let rows = await this.db.getPriceSnapshotsDisputedRoundSummary();
+            let summary = rows[0] || {};
+            disputedRoundCount = Number(summary.disputed_count) || 0;
+            lastDisputedRound = summary.last_disputed_round == null
+                ? null
+                : Number(summary.last_disputed_round);
+        } catch (err) {
+            disputedRoundsReadError = true;
+            logger.warn(nodeUtil.format('Oracle: failed to read disputed rounds for diagnostics:', err));
         }
 
         let band = roundBand({ epochStartMs: this.epochStart, roundIntervalMs: this.roundInterval });
@@ -75,6 +89,7 @@ module.exports = {
         return Object.assign({},
             roundStateFields.call(this, info),
             skipAndDropFields(skippedRounds, skippedRoundsReadError, droppedPairs, droppedPairsReadError),
+            disputedFields(disputedRoundCount, lastDisputedRound, disputedRoundsReadError),
             outOfBandFields.call(this, band, implausibleRounds, implausibleRoundsReadError),
             persistCounterFields.call(this),
             consensusGaugeFields.call(this),
@@ -82,6 +97,14 @@ module.exports = {
     }
 
 };
+
+function disputedFields(disputedRoundCount, lastDisputedRound, disputedRoundsReadError) {
+    return {
+        disputedRoundCount:      disputedRoundCount,
+        lastDisputedRound:       lastDisputedRound,
+        disputedRoundsReadError: disputedRoundsReadError
+    };
+}
 
 // Every round still held in memory, sender by sender, as the plain object the
 // JSON-RPC layer serializes.

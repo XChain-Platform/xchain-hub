@@ -25,6 +25,12 @@
  ********************************************************************/
 
 module.exports = {
+    async getPriceSnapshotsDisputedRoundSummary() {
+        return this.doQuery(
+            "SELECT COUNT(DISTINCT round_number) AS disputed_count, " +
+            "MAX(round_number) AS last_disputed_round FROM price_snapshots WHERE status = 'disputed'");
+    },
+
     // Deletes from oracle_published_rounds.
     // Moved here from src/oracle/publisher.js:2878.
     async deleteOraclePublishedRound(cutoff) {
