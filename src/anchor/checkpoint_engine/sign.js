@@ -39,16 +39,16 @@ module.exports = {
         let sender   = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;                            // our own broadcast
 
-        // Third of the guard's three call sites (propose, co-sign, persist). The
-        // indexer byte-match further down rebuilds `mine` with the network OUR OWN
-        // indexer reports, so it catches record-vs-indexer drift and is blind to the
+        // One of the guard's call sites (propose, co-sign, peer finalized, persist,
+        // catch-up). The indexer byte-match further down rebuilds `mine` with the network
+        // OUR OWN indexer reports, so it catches record-vs-indexer drift and is blind to the
         // record-vs-DEPLOYMENT drift this predicate exists for: resolveCapabilityValidators
         // resolves the stake-weighted-quorum gate on `this.network`, so a hub whose
         // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
         // then refuse the finalized checkpoint under the other. Placed before the tip
-        // resolve and the validator resolve, like the persist path, so a cross-network
-        // record costs no lookups. A throw is caught by the XCHK_SIGN_REQ .catch in
-        // handleMessage; an unscoped hub (this.network === '') is warned, not refused.
+        // resolve and the validator resolve, like the propose and peer FINALIZED paths, so
+        // a cross-network record costs no lookups. A throw is caught by the XCHK_SIGN_REQ
+        // .catch in handleMessage; an unscoped hub (this.network === '') is warned, not refused.
         this.assertCheckpointNetwork(cp, 'co-sign');
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects

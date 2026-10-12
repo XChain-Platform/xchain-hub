@@ -72,27 +72,31 @@
 
 'use strict';
 
-// The encoder's SANITIZED fallback for a broadcast_tx whose own call to the coin node
-// failed at the TRANSPORT layer (xchain-encoder/src/api.js broadcast_tx hands this string
-// to upstreamErrorMessage; errorSanitize.isTransportError covers ECONNRESET / ETIMEDOUT /
-// ERR_BAD_RESPONSE, which is every case where the tx MAY ALREADY have reached the node).
-// The sanitizer deliberately strips err.code and err.response so the internal host:port
-// never leaks, and the encoder returns the result as an ordinary JSON-RPC error body (HTTP
-// 200, code -32603). Without this constant it is textually indistinguishable from a
-// genuine node rejection like 'bad-txns-inputs-missingorspent', so the prefix rule below
-// read it as definitive and the publishers re-broadcast a tx that may have landed.
-// Matching the literal is a deliberate cross-repo coupling and the only discriminator the
-// wire carries today; the durable fix is a distinct RPC code for transport failures on the
-// encoder side, which is a change in that repo.
+// The encoder's sanitized broadcast_tx text for a node TRANSPORT failure (code -32603, the tx
+// MAY have landed) and for a node rejection whose text tripped its leak patterns; only a
+// structured NODE_REJECTED reason tells them apart, so the bare literal reads AMBIGUOUS.
 const ENCODER_TRANSPORT_FALLBACK = 'Transaction broadcast failed';
 
 // The encoder's broadcast_tx reason for a node that already holds this exact
 // transaction (mempool or chain), carried on EncoderClient's err.rpcData.
 const TX_ALREADY_IN_CHAIN = 'TX_ALREADY_IN_CHAIN';
 
+// The encoder's broadcast_tx code and reason for the coin node's own refusal of a
+// transaction it received. Set only when the node answered with a JSON-RPC error body,
+// so it never names a transport fault.
+const NODE_REJECTED_CODE = -32010;
+const NODE_REJECTED = 'NODE_REJECTED';
+
 // True when the node answered that it already holds the transaction just sent.
 function isAlreadyKnownTx(e){
     return !!(e && e.rpcData && e.rpcData.reason === TX_ALREADY_IN_CHAIN);
+}
+
+// True when the encoder relayed the node's own rejection over an answered (non-5xx) call.
+function isNodeRejectedTx(e){
+    if (!e || Number(e.rpcCode) !== NODE_REJECTED_CODE) return false;
+    if (!e.rpcData || e.rpcData.reason !== NODE_REJECTED) return false;
+    return !(e.response && Number(e.response.status) >= 500);
 }
 
 function isAmbiguousSendError(e){
@@ -112,6 +116,8 @@ function isAmbiguousSendError(e){
     if (isAlreadyKnownTx(e)) return true;
     // A pipeline tags neverSent only on a failure before its send step, so a retry cannot double-spend.
     if (e.neverSent === true) return false;
+    // The node's own refusal is definitive whatever the sanitized message reads.
+    if (isNodeRejectedTx(e)) return false;
     let message = String(e.message || '');
     // A definitive rejection and an ambiguous transport failure share the SAME
     // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.

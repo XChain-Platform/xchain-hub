@@ -15,6 +15,7 @@
 'use strict';
 
 const assert = require('assert');
+const gateRegistry = require('../../../src/consensus/gate_registry');
 const { createWindowPlan } = require('../../../src/oracle/publisher/window_plan.js');
 
 function defineBoundaryTests() {
@@ -62,7 +63,7 @@ function defineSpecialSwitchTests() {
         assert.strictEqual(plan.straddles(0, 5), false);
     });
 
-    for (const firstRound of [null, 9999999999]) {
+    for (const firstRound of [null, gateRegistry.UNARMED]) {
         it('uses only small windows when firstRound is ' + String(firstRound), function() {
             const plan = createWindowPlan({ firstRound, smallRounds: 2, largeRounds: 6 });
 

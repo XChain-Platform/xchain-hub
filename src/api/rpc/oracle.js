@@ -58,9 +58,9 @@ function oracleStatusRpc(ctx) {
         // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for
         // the oracle-publish leader rotation - queue depth, lifetime published/abandoned
         // (dead-letter) counts, last-published round + txid, and the last-observed DOGE
-        // publisher-wallet balance for runway monitoring. Reports only THIS hub's rail:
-        // OraclePublisher implements no takeover, so a peer leader that goes dark moves
-        // nothing here and is detected off-hub by the dashboard's publish-coverage rail.
+        // publisher-wallet balance for runway monitoring. Reports only THIS hub's rail,
+        // including its takeover of windows a silent leader left unpublished (the
+        // takeover* fields); fleet-wide coverage is read off-hub by the dashboard.
         // Mirrors getanchorstatus: always 200 so a poller can read it independent of
         // overall hub health, {active:false} when no oracle publisher is running.
         async getoraclepublisherstatus(){

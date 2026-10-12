@@ -106,6 +106,20 @@ function registerOracleMinSubmissionsFloor2Tests1() {
             expect(r.text).to.contain('mainnet');
         });
 
+        it('announces the stood-down floor at warn level, never info', function () {
+            // LOG_LEVEL=warn drops info lines and alerting keys on level, so an info
+            // banner would be silent in exactly the deployment that filters for warnings.
+            process.env.ORACLE_MIN_SUBMISSIONS = '1';
+            let infoLines = [];
+            let warnLines = [];
+            let logStub  = sinon.stub(console, 'log').callsFake(m => infoLines.push(String(m)));
+            let warnStub = sinon.stub(console, 'warn').callsFake(m => warnLines.push(String(m)));
+            try { ocOnNetwork('mainnet'); } finally { logStub.restore(); warnStub.restore(); }
+            expect(warnLines.join('\n')).to.contain('STOOD DOWN');
+            expect(warnLines.join('\n')).to.contain('ORACLE_MIN_SUBMISSIONS=1');
+            expect(infoLines.join('\n')).to.not.contain('STOOD DOWN');
+        });
+
         it('honors an explicit 1 on regtest without the banner', function () {
             process.env.ORACLE_MIN_SUBMISSIONS = '1';
             let r = constructCapturingLogs('regtest');

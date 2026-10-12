@@ -27,6 +27,7 @@ function canonicalBatchCrc(crc){
     return String(crc).toLowerCase();
 }
 
+// Build the archive batch suffix, the one copy the v1 archive and the v3 fold canonicals share.
 function foldArchiveSuffix(archive){
     const field = name => String(archiveField(archive, name));
     return '|' + [field('MATCH_BATCH_SEQ'), field('MATCH_COUNT'),

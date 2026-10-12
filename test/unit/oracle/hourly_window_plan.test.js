@@ -15,6 +15,7 @@
 'use strict';
 
 const assert = require('assert');
+const gateRegistry = require('../../../src/consensus/gate_registry');
 const OracleBatchSigner = require('../../../src/oracle/batch_signer.js');
 const scheduler = require('../../../src/oracle/publisher/scheduler.js');
 const stats = require('../../../src/oracle/publisher/stats.js');
@@ -179,5 +180,21 @@ describe('hourly window plan configuration', function() {
             largeRounds: 2,
             alignmentRounds: 6
         }), RangeError);
+    });
+});
+
+describe('hourly window plan parked mainnet', function() {
+    it('keeps mainnet on small windows while its hourly first round sits at the registry sentinel', function() {
+        const hourly = createHourlyWindowPlan({
+            network: 'mainnet',
+            smallRounds: 2,
+            roundIntervalMs: 600000,
+            graceMs: 300000,
+            landingReserveMs: 300000
+        });
+
+        assert.strictEqual(hourly.firstRound, gateRegistry.UNARMED);
+        assert.strictEqual(hourly.plan.sizeAt(gateRegistry.UNARMED + 6), 2);
+        assert.strictEqual(hourly.plan.straddles(0, gateRegistry.UNARMED + 6), false);
     });
 });

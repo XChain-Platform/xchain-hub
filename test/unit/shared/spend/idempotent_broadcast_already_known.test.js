@@ -84,3 +84,48 @@ describe('idempotent-broadcast: an already-known transaction is a landed send', 
         expect(isAmbiguousSendError(caught)).to.equal(true);
     });
 });
+
+// The encoder sanitizes a node reject text that trips its leak patterns to the same
+// fallback string its transport failures carry; the structured reason tells them apart.
+describe('idempotent-broadcast: a structured NODE_REJECTED behind the sanitized fallback', function () {
+    const FALLBACK = 'Encoder RPC error: Transaction broadcast failed';
+    function sanitizedAnswer(rpc, extra) {
+        return Object.assign(new Error(FALLBACK), rpc, extra || {});
+    }
+
+    it('reads a -32010 NODE_REJECTED as definitive and never as never-sent', function () {
+        const e = sanitizedAnswer({ rpcCode: -32010, rpcData: { reason: 'NODE_REJECTED', node_code: -26 } });
+        expect(isAmbiguousSendError(e)).to.equal(false);
+        expect(isNeverSentError(e)).to.equal(false);
+    });
+
+    it('keeps the fallback ambiguous when the encoder sends no reason or a transport code', function () {
+        expect(isAmbiguousSendError(sanitizedAnswer({}))).to.equal(true);
+        expect(isAmbiguousSendError(sanitizedAnswer({ rpcCode: -32603 }))).to.equal(true);
+        expect(isAmbiguousSendError(sanitizedAnswer({ rpcCode: -32603, rpcData: { reason: 'NODE_REJECTED' } }))).to.equal(true);
+    });
+
+    it('keeps NODE_REJECTED ambiguous under a 5xx and under a funds-committed tag', function () {
+        const rpc = { rpcCode: -32010, rpcData: { reason: 'NODE_REJECTED', node_code: -26 } };
+        expect(isAmbiguousSendError(sanitizedAnswer(rpc, { response: { status: 502 } }))).to.equal(true);
+        expect(isAmbiguousSendError(sanitizedAnswer(rpc, { fundsCommitted: true }))).to.equal(true);
+    });
+
+    it('releases the reservation for a NODE_REJECTED the encoder client copies off a 200 body', async function () {
+        const axios = { post: sinon.stub().resolves({ data: { jsonrpc: '2.0', id: 1, error: {
+            code: -32010, message: 'Transaction broadcast failed',
+            data: { reason: 'NODE_REJECTED', node_code: -26 }
+        } } }) };
+        const EncoderClient = proxyquire('../../../../src/peers/encoder_client', { axios });
+        const guard = { check: () => ({ ok: true }), reserve: () => 'tok', commit: sinon.spy(), release: sinon.spy() };
+        let caught = null;
+        try {
+            await broadcastOnce({ key: 'r2', guard, ambiguousTag: 'testAmbiguous',
+                send: () => new EncoderClient('http://enc/rpc', '').broadcastTx('aabbcc') });
+        } catch (e) { caught = e; }
+        expect(caught.message).to.equal(FALLBACK);
+        expect(caught.testAmbiguous).to.equal(undefined);
+        expect(guard.release.calledOnceWithExactly('tok')).to.equal(true);
+        expect(guard.commit.called).to.equal(false);
+    });
+});

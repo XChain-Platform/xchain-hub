@@ -117,12 +117,17 @@ function build(network) {
     const cfg = { ...CONFIG, ...OVERRIDES };
     if (network === undefined) delete cfg.HUB_NETWORK;
     else cfg.HUB_NETWORK = network;
+    // `logged` holds both streams, so a "must not warn" check sees either level;
+    // `warned` holds warn level only, which is where a set-but-IGNORED line belongs.
     let logged = [];
+    let warned = [];
     let orig = console.log;
+    let origWarn = console.warn;
     console.log = (...a) => logged.push(a.join(' '));
+    console.warn = (...a) => { logged.push(a.join(' ')); warned.push(a.join(' ')); };
     let src;
-    try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; }
-    return { src, logged };
+    try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; console.warn = origWarn; }
+    return { src, logged, warned };
 }
 
 function expectPinned(src) {
@@ -202,10 +207,10 @@ xchainPriceSourceTests('consensus-uniform overrides are regtest-only', function 
     });
 
     it('ignores all four on mainnet and names each one it dropped', function () {
-        const { src, logged } = build('mainnet');
+        const { src, warned } = build('mainnet');
         expectPinned(src);
         for (const key of Object.keys(OVERRIDES)) {
-            expect(logged.some(l => l.includes(key) && /is set but IGNORED on mainnet/.test(l)),
+            expect(warned.some(l => l.includes(key) && /is set but IGNORED on mainnet/.test(l)),
                 key + ' must log a set-but-IGNORED line').to.be.true;
         }
     });
@@ -215,9 +220,9 @@ xchainPriceSourceTests('consensus-uniform overrides are regtest-only', function 
     });
 
     it('fails closed when the network is unset (standalone is not a bypass)', function () {
-        const { src, logged } = build(undefined);
+        const { src, warned } = build(undefined);
         expectPinned(src);
-        expect(logged.some(l => /IGNORED on <unset>/.test(l)),
+        expect(warned.some(l => /IGNORED on <unset>/.test(l)),
             'an unset network names itself in the warning').to.be.true;
     });
 
@@ -230,9 +235,11 @@ xchainPriceSourceTests('consensus-uniform overrides are regtest-only', function 
                       XCHAIN_PRICE_BOOTSTRAP_SATS: String(XCHAIN_PRICE_BOOTSTRAP_SATS) };
         let logged = [];
         let orig = console.log;
+        let origWarn = console.warn;
         console.log = (...a) => logged.push(a.join(' '));
+        console.warn = (...a) => logged.push(a.join(' '));
         let src;
-        try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; }
+        try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; console.warn = origWarn; }
         expect(src.windowBlocks).to.equal(1000);
         expect(src.bootstrapXchainBtc).to.equal('0.00001000');
         expect(logged.some(l => /IGNORED/.test(l)),

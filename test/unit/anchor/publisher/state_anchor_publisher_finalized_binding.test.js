@@ -46,7 +46,10 @@ function registerTxidBindingCases() {
         let seen = null;
         follower.pub.indexerCall = async (coin, method, params) => {
             seen = params;
-            return { exists: true, checkpoint_anchored: true, status: 'valid', version: Number(params.version),
+            // An honest indexer answers the announced v1 head txid with that head (version
+            // 1) whether or not the caller filtered by version, as the back-fill gate does not.
+            return { exists: true, checkpoint_anchored: true, status: 'valid',
+                     version: params.version != null ? Number(params.version) : 1,
                      confirmations: follower.pub.dogeConfirmations, txid: params.txid,
                      block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
                      actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash };

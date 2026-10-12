@@ -89,7 +89,7 @@ function registerOracleAllowUnverifiedPairsNetwork2Tests1() {
         ['mainnet', 'testnet', ''].forEach(function (network) {
             it('ignores the flag on ' + (network || '<unset network>') + ' and warns', function () {
                 let logs = [];
-                let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+                let stub = sinon.stub(console, 'warn').callsFake(m => logs.push(String(m)));
                 let flag;
                 try { flag = ocOnNetwork(network).allowUnverifiedPairs; } finally { stub.restore(); }
                 expect(flag).to.equal(false);
@@ -101,8 +101,9 @@ function registerOracleAllowUnverifiedPairsNetwork2Tests1() {
             delete process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS;
             let logs = [];
             let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+            let warnStub = sinon.stub(console, 'warn').callsFake(m => logs.push(String(m)));
             let flag;
-            try { flag = ocOnNetwork('mainnet').allowUnverifiedPairs; } finally { stub.restore(); }
+            try { flag = ocOnNetwork('mainnet').allowUnverifiedPairs; } finally { stub.restore(); warnStub.restore(); }
             expect(flag).to.equal(false);
             expect(logs.join('\n')).to.not.contain('ORACLE_ALLOW_UNVERIFIED_PAIRS');
         });
