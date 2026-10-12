@@ -1566,18 +1566,6 @@
       "8c37002e7fa47e3e3dd76b7f7e186d75d380ba727aa73db50a8d2e0956fa747d",
       "78dbdc589f86a86c513f6369f353983cfdcf96a7a3b6c52dd71baa93cac7483e"
     ],
-    "22285887d49a942e": [
-      "bb201e63b18b65e8e680e363ed152c6411861a5e346532b0cf8d34c1df883d73",
-      "f60548c9a2dbb706fbf949d0e45bb4d8251c91d4eed79a1fc482e9dfcc434c6a",
-      "fd9770c10f4cf7a5e57caf633446b0d05d9b75df49d95231a8cd93e3ca6c0f52",
-      "23ea9cb26862c92bbbe79d8978af9f0464f0837b6202d6a224df597413c03cec",
-      "4ca4769906a78e8221619a770ba7f9f1f0a678d2cc1e8a47d11fc3fc2a826863",
-      "2d0496d2f10412a3c96765ae4ae3cc7e8a750514b9fd59e424c08b7d2a6b62cd",
-      "a9df221e47fbad96ef0547499e023376068d2953c6426c7f2e453f1045564004",
-      "86332d60d1bc473672a0773c00e70d2e6447c43b69092ee71476eabbf46a5579",
-      "911c17dd27c66392810f4ac2870f30f068219a702f2bbaf72a660846a318449e",
-      "657ef02aa7ee05c0a1be04b272fd94067b3ade6d778e20fd5fa33af77e16f455"
-    ],
     "22fe09fae995c037": [
       "550d28b560ef4f5ac50eda32f8fef8268856862b7197142182705eee7b31a85f",
       "1a1a32b31314917128ffc5517713c05eb9b7c1cd5f81a36f0e37682ec3747c2a",
@@ -2493,14 +2481,6 @@
       "6f6082143ce25cd80d39a10ff65b37232fae393caddedd34a43078573e83d8f8",
       "7f1c43a9322fca2919874526ade17c2d4d0e30b00b498d1635ee9700eae7ea54"
     ],
-    "31e546510d72f652": [
-      "4bbf368853d4905a9a7352c60e7788ac071b8e5d3cb5f471411607424b2fa875",
-      "fddc8221cc36527faf89c5b3513f9ac40389b3d6f06a9577afe2925eb572b26e",
-      "32ea624e65a5e2f75337a6d8365136c99db28e319bc1282e646ed2b6e98de97d",
-      "59e5ee41471cf9fde28d9ce61b9145b81a5d01e8102f9f2039e05c1a710b9536",
-      "4f53c872703a5d62931a3362355e4182a210ea9a636a0adfb95eabc8468a287e",
-      "0ff59bbe2f13d6c039e91bef31182f7ef0592957f9400f60674ae8312ad307b4"
-    ],
     "32bc32529d10ed89": [
       "d78b65d2198e37d5b71f7676015de3c8227f254bde2fbd0f64d4af70bce28022",
       "ee24da267db2555bd37c9c325ba380e2a35fb3684a51f7b8098ac5c3bd624579",
@@ -3049,6 +3029,14 @@
       "86476bf558491a4a263eaf2766ccff5bb0e14aaa0fabaa1bf9190b2fce447816",
       "ae5bb3072f01d34476932ebd5fcde9101529f6f0acbe2002a0105f80d1a79382",
       "58f6529f08f86235d505f09778268e8af4e99532c83acf2c4e5a5e0bc1d3f651"
+    ],
+    "3fa9fdb94548c37d": [
+      "4bbf368853d4905a9a7352c60e7788ac071b8e5d3cb5f471411607424b2fa875",
+      "fddc8221cc36527faf89c5b3513f9ac40389b3d6f06a9577afe2925eb572b26e",
+      "32ea624e65a5e2f75337a6d8365136c99db28e319bc1282e646ed2b6e98de97d",
+      "59e5ee41471cf9fde28d9ce61b9145b81a5d01e8102f9f2039e05c1a710b9536",
+      "f55c388e2a52e5f124aebafd9ab8470cb9dc8f5661efb809a417ebf5d28e7683",
+      "0ff59bbe2f13d6c039e91bef31182f7ef0592957f9400f60674ae8312ad307b4"
     ],
     "3fb22a8d5bf14ade": [
       "aa878c39dddbcb0cfb6a55e16161662e7b437d315b3b5dd8eed18d6f82ccf9f9",
@@ -4031,6 +4019,19 @@
       "402e3fca050ca66c59540b877df6a0de0d35b51276a31c3d217820acf082fafd",
       "3b3b117eda13f966f4daaaeb6b324f9af62640fe476c9e3d39fc73d4daa54ef4",
       "6c562e668e12fcc5701919402714653364cf6b47ea7a846f6d4311b9b486808e"
+    ],
+    "5359956dc7a88e69": [
+      "0612f2e73292cffb2009c05eb3275070e3d2462a65a09e8ceb45aaec13fa81c6",
+      "732217343a65739acc95426fd8e6485f7e0d60532708455ff41cd54c67c89e6d",
+      "27e5465186a46c5dbbd595dae40396d0733ad18a6297bbb7f803e5989a69bd04",
+      "7f0754b0cbd4ef79540edc8b5132fb34cd98b817b3622a3435162e0f9464bba5",
+      "f44d44c26dc752b52fd6fbacca5d556f8057fd5be82a8ae678ea42a9b776740d",
+      "2dae2ec0e151ffa3a164d196435dfe1d4b7e5ee6cd68ba982305afc03b098172",
+      "1c6defc2eb0252baaefcd52e4343a5e051e74b6e7f5b81dac4049ea9ed435ec3",
+      "287a17ac0e3bab9e176ea379739b42e2512d6bb7647bcce6972e469ccbd50fd1",
+      "7bce80dd24b9ca2cd21a77dc516cb21e0289741943d274246a9cc64958c223d7",
+      "1864a53c78b1413415e300729ea04c1b85e9b25b58f28d4122fadceb00721033",
+      "f0b3a176ece80be74ede79be346b2e909e48a5c4285a32798b1395dbb52e2f9a"
     ],
     "535f8e4d43c961c7": [
       "c86f3154908cd11380cb13080191104e8f63e3063581d329e8743c731fe1d089",
@@ -5315,6 +5316,18 @@
       "9cdfece69e837c955d1aecf9a03c6fc06c706fe96df8c1b4ab0fccc080e5a026",
       "690efab7a873ec48252f851826e934cc7c83fe00a48198977717fb03ee2956b8"
     ],
+    "6a4f6d4e99c3e1a9": [
+      "bb201e63b18b65e8e680e363ed152c6411861a5e346532b0cf8d34c1df883d73",
+      "d2bb47490389558dd60f1d55b75e50b6476816e22b8fbb913ff5a9d33b376125",
+      "fd9770c10f4cf7a5e57caf633446b0d05d9b75df49d95231a8cd93e3ca6c0f52",
+      "23ea9cb26862c92bbbe79d8978af9f0464f0837b6202d6a224df597413c03cec",
+      "4ca4769906a78e8221619a770ba7f9f1f0a678d2cc1e8a47d11fc3fc2a826863",
+      "2d0496d2f10412a3c96765ae4ae3cc7e8a750514b9fd59e424c08b7d2a6b62cd",
+      "a9df221e47fbad96ef0547499e023376068d2953c6426c7f2e453f1045564004",
+      "86332d60d1bc473672a0773c00e70d2e6447c43b69092ee71476eabbf46a5579",
+      "911c17dd27c66392810f4ac2870f30f068219a702f2bbaf72a660846a318449e",
+      "657ef02aa7ee05c0a1be04b272fd94067b3ade6d778e20fd5fa33af77e16f455"
+    ],
     "6a5e7a72cad8819f": [
       "0f3ee2f3c3b7feee89447acc90dcf6b99c208880a759b4f7578174e7e17dd583",
       "a3df8791e8ca43ab1e8f851900d208ae586409632575b02aaafd44dfd3e7a515",
@@ -5393,6 +5406,18 @@
       "258ba9a54631d5060e20a74e2405fa87d6d1fc022c34cc2819d374af1fe2483b",
       "c34414a5d9c9bee6fa464487a2c01dcc00ddd54bf1ad2313772bdf1d8290bf24",
       "b8b08627111bf7973e567301d0d73a4401ebda887807b24d4889f4fd31948fb7"
+    ],
+    "6c004462541fea40": [
+      "e61935b7807184b19ace78db3c03db6e93eeebc3d09816aa1528597906a042ff",
+      "633d134b9127b9a96cb1b911dcca33577bd9270778245d40299290c0b32775e3",
+      "d73f525a4c7e19e38673ea8cbb16efa6ad981c5abaddf76531c76b774647eeae",
+      "4c748483a8f3b38af74503602f29dace0e9d6dc9c1e6683a078b51136e207780",
+      "54e30856a27fc12d8bbd0987f4b3c6f36ad89582e7d468b0789b50c0becd43e7",
+      "819b0d6e780814f1d41a41ee89093203bbb5f0e34dc8032337add84aff8d0335",
+      "4dccc9dd84f6bcf4df43732f47aaf21b47c348e72c22d06126e4ee43804de629",
+      "63f1e9e211851868d4b4f39d82daa1f4e572b0f1bdd04180d1d62d2b9de5e31f",
+      "4917e9e897246108fde5de17fb87a48a5fbba5558c73b1cba9ee6fee713e683b",
+      "c41ae277751629e5cf841bebaf8eab2c2493fe1022fb097c57e4131ae4d6369b"
     ],
     "6c55ae1122bb2be8": [
       "9fffd9d87da4fe3995da3287fdfd91ee558b32e6ae957df12edd92237e67dab9",
@@ -6626,10 +6651,6 @@
       "248a96c1ea8a1c73ba1ef6ae96c22d6b08ac15c9452e24a7bc2a6ba8736e529f",
       "1c2ed97f02ff8da4e79ba954cd99539672cdc5fe18a97ed11b0eeb935c55ecb1"
     ],
-    "8403bd2752dafe09": [
-      "d98872e9df5b6a0e521745e4a0dfba6c74041de4f1329fdca41a3bc2673f2e91",
-      "d6c2388bc11caec86ec9a1e799812e742bd9e2e574942e4fe34235b11824e3c0"
-    ],
     "84297e6004a05e8e": [
       "c1a5ccb9375ac111a501ca7b6648a4bef4168474e133e20a6ba1ef34f8abd97a",
       "3d3e679ca316047f98e66fadff4bd902407872fe9fdbdf0e5f0756802a8a6d5d",
@@ -7755,12 +7776,6 @@
       "05b4cd7791b2675d3247fdf489e9926318e6485fbc17d0055845c9a78fb9e77b",
       "55420df3c8db26cfa38348378c110b076a6c68e03ce79507f38ab3e7ba8b0a01"
     ],
-    "a134445465762923": [
-      "73bf12316438a6758ecb9837d23a603b4d62dd2a17612e36859915891dfa3854",
-      "b16c9244c57aee4f812e771f345131124de7faa22ab19ee9ad107ffc0df46a37",
-      "912505060fc187b0d9e65c29736ea01794cacc4dccf24087876a5ff4d4a6a7d2",
-      "9892b30230df4b2e11aeb2eab3d95bd56d19a45b45e2653b64f490f69b2c642d"
-    ],
     "a14e19e8b0a69493": [
       "a05589facb1327f243517041902a5357400601142ce0dbddf9de78486b5223c5",
       "3678cb205f756ecba00e5902173b1d0b732dd36c6ef76293d259d2a72648f61a",
@@ -8354,18 +8369,6 @@
       "fa4ca293a8c129acd796a8c29bd6804bc275f9c165e064ece3a73fa1b3ecb904",
       "5408e5df68cc186320c9ce7d5e02bd2966ffadc79e564b81beaeac0a64ea11c3",
       "9a9f62c0692c8fe56ed07acaccf25e14cd9d32e0ee70ebfee14efbf744ec6bd2"
-    ],
-    "ae7ad1d19661c731": [
-      "e61935b7807184b19ace78db3c03db6e93eeebc3d09816aa1528597906a042ff",
-      "633d134b9127b9a96cb1b911dcca33577bd9270778245d40299290c0b32775e3",
-      "d73f525a4c7e19e38673ea8cbb16efa6ad981c5abaddf76531c76b774647eeae",
-      "4c748483a8f3b38af74503602f29dace0e9d6dc9c1e6683a078b51136e207780",
-      "54e30856a27fc12d8bbd0987f4b3c6f36ad89582e7d468b0789b50c0becd43e7",
-      "819b0d6e780814f1d41a41ee89093203bbb5f0e34dc8032337add84aff8d0335",
-      "4dccc9dd84f6bcf4df43732f47aaf21b47c348e72c22d06126e4ee43804de629",
-      "d0990147a647d347369f77d17e2083a2e65087b987c6c25ef15a167134776fb2",
-      "4917e9e897246108fde5de17fb87a48a5fbba5558c73b1cba9ee6fee713e683b",
-      "c41ae277751629e5cf841bebaf8eab2c2493fe1022fb097c57e4131ae4d6369b"
     ],
     "ae9fdc20218e386b": [
       "76bb47f402a962e31ad3d4e51da8c70cb7355fc7dc462abb46eafa166a41f72e",
@@ -9466,13 +9469,6 @@
       "8c02b7d506f8e1c49a4647d6ba1398347d6b64e454388c816f312ff8999b80b3",
       "c13bdf262dbad55996e4f6797871742e85c9ba26740920397f1eb777f0ca4a54"
     ],
-    "c7f04e2b8dbfd526": [
-      "8fe0fa826abecb09f569d5785d0ec4b71a9db5d4973ac937d8580391162d493f",
-      "7cb11b98ff226650c194a5c570314c047048fc49bd3918cd469d499b88f3bb51",
-      "e9a18458c667baa8be033e5aaf314c8195d87e64bc5b63ef0313230f9060a38b",
-      "6d8731a81d879595ff4b9739b908b485aa1d51620d30e1a39c3c31ee2df958ba",
-      "9be0be9956110f0e7e92690cfb4e4e5800a43b7f84cca3b0598e8fc4d504eda4"
-    ],
     "c83b90aff657ed0c": [
       "0cdef5318636d4222dfe161fae4e2ccb8a0c38c718307fcc573ed07bad597096",
       "8a8f5011c3c67e730af9998b5cf1d33beb5d5a903a4f8223750074936c0a5949",
@@ -9654,6 +9650,14 @@
       "a52eabcc400dcbecf060039a39d3392717911a83c71cf2f3df3746269489568c",
       "48ecc45e3b27c3d3bbcce540c0c8640f12269ce7c86ec22cf77c2d2f2be2adeb",
       "f463001f24467acb8ecbd4092d04cc53821c81591e31f45bb865bf60c6c0f9e6"
+    ],
+    "ca7c370119f8eacc": [
+      "7a950cec17063d86f3bc9917ae76f27602cb87907d7e75f1daf480d0b242be29",
+      "7cb11b98ff226650c194a5c570314c047048fc49bd3918cd469d499b88f3bb51",
+      "e9a18458c667baa8be033e5aaf314c8195d87e64bc5b63ef0313230f9060a38b",
+      "6d8731a81d879595ff4b9739b908b485aa1d51620d30e1a39c3c31ee2df958ba",
+      "66e6d2530f63bf3465af14bf9a25114a67db906a5000abbe3584c2221c7c7037",
+      "9be0be9956110f0e7e92690cfb4e4e5800a43b7f84cca3b0598e8fc4d504eda4"
     ],
     "caa7ac2417926056": [
       "8bee6058d16515b5494ae839630cdfe09b1846b5b757a51a8270848defe81ce5",
@@ -10241,19 +10245,6 @@
     "db7f4c3b4ebab637": [
       "db7f4c3b4ebab637a78db4b42af6233cc3a49753c837503f6a29181d71d1d627"
     ],
-    "db874a1a91dd3f4f": [
-      "0612f2e73292cffb2009c05eb3275070e3d2462a65a09e8ceb45aaec13fa81c6",
-      "732217343a65739acc95426fd8e6485f7e0d60532708455ff41cd54c67c89e6d",
-      "27e5465186a46c5dbbd595dae40396d0733ad18a6297bbb7f803e5989a69bd04",
-      "7f0754b0cbd4ef79540edc8b5132fb34cd98b817b3622a3435162e0f9464bba5",
-      "f44d44c26dc752b52fd6fbacca5d556f8057fd5be82a8ae678ea42a9b776740d",
-      "2dae2ec0e151ffa3a164d196435dfe1d4b7e5ee6cd68ba982305afc03b098172",
-      "d9af384c75fd5f1739f815c132376e93cc7c3c52d695f6ba77d847ce5b4af61a",
-      "287a17ac0e3bab9e176ea379739b42e2512d6bb7647bcce6972e469ccbd50fd1",
-      "7bce80dd24b9ca2cd21a77dc516cb21e0289741943d274246a9cc64958c223d7",
-      "1864a53c78b1413415e300729ea04c1b85e9b25b58f28d4122fadceb00721033",
-      "f0b3a176ece80be74ede79be346b2e909e48a5c4285a32798b1395dbb52e2f9a"
-    ],
     "dbb8e3899e3315c8": [
       "d3613924234437c084f6f36ed5d5c527cbd798c48d01c74593f2cd4e34379bb7",
       "945e60d64d05d45d3698b2c041f79d3531561083c946704fba6df08f8ec66fa4",
@@ -10416,6 +10407,13 @@
       "16e521f53785e7f59f2f4f14c60530fa4dba0bad665df23a05b670f69a7dc5cb",
       "22d8cd0f1bbc23eaec05243687ea60e856c9a86106ca004f97b6259a9eb324f9",
       "5434284291ecd567e21264225d68642755fb91594a198017dd770d1533def5c3"
+    ],
+    "e2ed5c7ed2c095ac": [
+      "73bf12316438a6758ecb9837d23a603b4d62dd2a17612e36859915891dfa3854",
+      "8ddc4ccef909f992d84ba6e89766a2595b5051d1eb9f22ec8af2f04c6f83162d",
+      "b16c9244c57aee4f812e771f345131124de7faa22ab19ee9ad107ffc0df46a37",
+      "912505060fc187b0d9e65c29736ea01794cacc4dccf24087876a5ff4d4a6a7d2",
+      "9892b30230df4b2e11aeb2eab3d95bd56d19a45b45e2653b64f490f69b2c642d"
     ],
     "e341792b453e2231": [
       "dccd769c2b9f3b610a408c573ff41dc40ad38540777fe29e61745069d5751729",
@@ -10996,6 +10994,10 @@
       "f962078c5303164d4a21c3eacd3a9ddaacb5aa7398105ecb5a361a5ead282262",
       "afae4bd859943dd6802bcd3275685454516694390eaa709a6dfe13aa70059557",
       "d8502e9b4b39e7e05d73987e07c5c5abd45953560e22c9c50bb0dfc1c50158e3"
+    ],
+    "f124281b14374603": [
+      "d98872e9df5b6a0e521745e4a0dfba6c74041de4f1329fdca41a3bc2673f2e91",
+      "e17f51a7e6ce5917042c38cc91725284682d1ee5542490450e13d7151d134b4a"
     ],
     "f1c31e47d19a9777": [
       "f1c31e47d19a9777dcfa647083b0b1e2644b6a466dd5451b2bce4787775a404a"
@@ -11648,7 +11650,7 @@
         "ci:regression"
       ],
       "fileCount": 897,
-      "titleCount": 8501,
+      "titleCount": 8503,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11779,7 +11781,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
-        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
@@ -12020,7 +12022,7 @@
         "test/unit/consensus/deviation_band.test.js": "e46355aa3642c3f4",
         "test/unit/consensus/equivocation_header.test.js": "f53e08468f0d56c8",
         "test/unit/consensus/federation.test.js": "452487ebfc26a114",
-        "test/unit/consensus/federation_gate.test.js": "db874a1a91dd3f4f",
+        "test/unit/consensus/federation_gate.test.js": "5359956dc7a88e69",
         "test/unit/consensus/full_node_challenge_round.test.js": "65e26d9ed92900fe",
         "test/unit/consensus/full_node_challenge_round_01_eligibility_flow.test.js": "67aa15f62095f428",
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
@@ -12031,9 +12033,9 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -12053,7 +12055,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "6a4f6d4e99c3e1a9",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
@@ -12395,7 +12397,7 @@
         "test/unit/peers/hub_db/catchup_verifiers.test.js": "d46882250bb23414",
         "test/unit/peers/hub_db/cross_chain_catchup_verifiers.test.js": "21b122e758b48759",
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
-        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "31e546510d72f652",
+        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "3fa9fdb94548c37d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
@@ -12525,7 +12527,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
-        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "ca7c370119f8eacc",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
@@ -12602,7 +12604,7 @@
     },
     "test": {
       "fileCount": 897,
-      "titleCount": 8501,
+      "titleCount": 8503,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12733,7 +12735,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
-        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
@@ -12974,7 +12976,7 @@
         "test/unit/consensus/deviation_band.test.js": "e46355aa3642c3f4",
         "test/unit/consensus/equivocation_header.test.js": "f53e08468f0d56c8",
         "test/unit/consensus/federation.test.js": "452487ebfc26a114",
-        "test/unit/consensus/federation_gate.test.js": "db874a1a91dd3f4f",
+        "test/unit/consensus/federation_gate.test.js": "5359956dc7a88e69",
         "test/unit/consensus/full_node_challenge_round.test.js": "65e26d9ed92900fe",
         "test/unit/consensus/full_node_challenge_round_01_eligibility_flow.test.js": "67aa15f62095f428",
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
@@ -12985,9 +12987,9 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -13007,7 +13009,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "6a4f6d4e99c3e1a9",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
@@ -13349,7 +13351,7 @@
         "test/unit/peers/hub_db/catchup_verifiers.test.js": "d46882250bb23414",
         "test/unit/peers/hub_db/cross_chain_catchup_verifiers.test.js": "21b122e758b48759",
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
-        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "31e546510d72f652",
+        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "3fa9fdb94548c37d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
@@ -13479,7 +13481,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
-        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "ca7c370119f8eacc",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
@@ -13505,7 +13507,7 @@
     },
     "test:all": {
       "fileCount": 977,
-      "titleCount": 9324,
+      "titleCount": 9326,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13716,7 +13718,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "4bfec0a3f9eaf395",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
-        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "a134445465762923",
+        "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
         "test/unit/anchor/reward_tracker.test.js": "25d8cda0b176f4f8",
         "test/unit/anchor/reward_tracker_amount_string.test.js": "89e6f66735149ef9",
         "test/unit/anchor/reward_tracker_anchor_dedup_race.test.js": "14102b3a3a5fe4f1",
@@ -13957,7 +13959,7 @@
         "test/unit/consensus/deviation_band.test.js": "e46355aa3642c3f4",
         "test/unit/consensus/equivocation_header.test.js": "f53e08468f0d56c8",
         "test/unit/consensus/federation.test.js": "452487ebfc26a114",
-        "test/unit/consensus/federation_gate.test.js": "db874a1a91dd3f4f",
+        "test/unit/consensus/federation_gate.test.js": "5359956dc7a88e69",
         "test/unit/consensus/full_node_challenge_round.test.js": "65e26d9ed92900fe",
         "test/unit/consensus/full_node_challenge_round_01_eligibility_flow.test.js": "67aa15f62095f428",
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
@@ -13968,9 +13970,9 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "8403bd2752dafe09",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
-        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "ae7ad1d19661c731",
+        "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -13990,7 +13992,7 @@
         "test/unit/consensus/retraction/config_guard.test.js": "9c31c3c624248943",
         "test/unit/consensus/retraction/submit_retry.test.js": "546d8909c68777da",
         "test/unit/consensus/retraction_consensus.test.js": "234394661b7ed313",
-        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "22285887d49a942e",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "6a4f6d4e99c3e1a9",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
@@ -14332,7 +14334,7 @@
         "test/unit/peers/hub_db/catchup_verifiers.test.js": "d46882250bb23414",
         "test/unit/peers/hub_db/cross_chain_catchup_verifiers.test.js": "21b122e758b48759",
         "test/unit/peers/hub_db/landing_watermark.test.js": "c2aa6bb9e22dc43d",
-        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "31e546510d72f652",
+        "test/unit/peers/hub_db/landing_watermark_clear_frontier.test.js": "3fa9fdb94548c37d",
         "test/unit/peers/hub_db/peer_catchup.test.js": "0c657e45472b229b",
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
@@ -14462,7 +14464,7 @@
         "test/unit/validators/governance/governance_slash_value_shape.test.js": "5b8bedb0be481b4a",
         "test/unit/validators/governance/governance_takeover_entitlement.test.js": "27256091d8b6f5af",
         "test/unit/validators/governance/governance_takeover_rank.test.js": "0effc02e10a094a0",
-        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "c7f04e2b8dbfd526",
+        "test/unit/validators/governance/governance_tally_failover_gate.test.js": "ca7c370119f8eacc",
         "test/unit/validators/governance/governance_vote_replay.test.js": "a242b6d6dc0bca58",
         "test/unit/validators/governance/slash_governance.test.js": "7aa628101562e42d",
         "test/unit/validators/governance/slash_proposals_rpc.test.js": "0e7db3725b1f0a42",
