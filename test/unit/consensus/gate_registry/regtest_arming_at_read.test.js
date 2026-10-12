@@ -47,7 +47,7 @@ const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
     'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
     'shared_rows_3.js': 'd671489c2b683ec2a94d0f45da1056687c38f78959a9f1780825eb7e3a37d6ea',
     'shared_rows_4.js': '08e0e852d04c0736d88c19c6ae2c63d0061591c3dc700a22a9018a23a1d3069d',
-    'shared_rows_5.js': '314a932134f30530b3b4013678b6e6dba99d39e551ce5b107a251c8fd3bd8105',
+    'shared_rows_5.js': 'dbdace4fbc23a3dfaf1a1383083731d23a266d39efed58ce9b89961bc7221065',
 });
 
 function sha256(bytes) {
@@ -71,6 +71,27 @@ function withEnv(value, fn) {
 function rowOf(key) {
     const hit = registry.rows().find(([k]) => k === key);
     return hit ? hit[1] : undefined;
+}
+
+// The testnet chain heights are read off the registry, so a re-slide of the
+// cut height needs no edit here. The bare testnet key stays dark: only a
+// chain-keyed read reaches the armed height.
+function assertAttestBatchHeadRow() {
+    const row = registry.get(ATTEST_BATCH_HEAD_KEY);
+
+    assert.strictEqual(row.mainnet, registry.UNARMED);
+    assert.strictEqual(row.testnet, registry.UNARMED);
+    assert.strictEqual(row.regtest, 0);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'mainnet', null, 0, 0), false);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', null, 0, 0), false);
+    assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'regtest', null, 0, 0), true);
+    for (const coin of ['BTC', 'LTC', 'DOGE']) {
+        const armed = row[coin + ':testnet'];
+        assert.ok(Number.isSafeInteger(armed) && armed > 1 && armed < registry.UNARMED, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, 1, 0), false, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, armed - 1, 0), false, coin);
+        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', coin, armed, 0), true, coin);
+    }
 }
 
 describe('gate_registry: regtest arming is applied at READ time @regression @tier1', function () {
@@ -117,14 +138,7 @@ describe('gate_registry: regtest arming is applied at READ time @regression @tie
         });
     });
 
-    it('keeps the attest batch-head gate at the dark sentinel off regtest and active at regtest genesis', function () {
-        const row = registry.get(ATTEST_BATCH_HEAD_KEY);
-
-        assert.deepStrictEqual(row, { mainnet: 9999999999, testnet: 9999999999, regtest: 0 });
-        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'mainnet', null, 0, 0), false);
-        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'testnet', null, 0, 0), false);
-        assert.strictEqual(registry.activeAt(ATTEST_BATCH_HEAD_KEY, 'regtest', null, 0, 0), true);
-    });
+    it('keeps the attest batch-head gate dark on mainnet, armed per testnet chain, and active at regtest genesis', assertAttestBatchHeadRow);
 
 });
 
