@@ -22,7 +22,7 @@ describe('consensus rules digest activeGatesAt unit filtering', function () {
         const key = 'oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND';
         assert.strictEqual(gateUnits.unitOf(key), 'constant');
         assert.strictEqual(registry.get(key).testnet, 5082);
-        assert.ok(!activeGatesAt(5082, 'testnet').includes(key));
+        assert.ok(!activeGatesAt(156140, 'testnet').includes(key));
         assert.ok(!activeGatesAt(Number.MAX_SAFE_INTEGER, 'regtest').includes(key));
     });
 
