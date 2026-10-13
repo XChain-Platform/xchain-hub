@@ -33,7 +33,7 @@ const proxyquire = require('proxyquire');
 const { createMockHub } = require('../../../helpers/mockHub');
 
 const SUBMISSIONS_INFO_KEYS = [
-    'currentRound', 'roundInterval', 'submissions',
+    'currentRound', 'roundInterval', 'submissions', 'expectedPairs', 'expectedPairsRound',
     'skippedRounds', 'skippedCount', 'skippedRoundsReadError',
     'droppedPairs', 'droppedPairCount', 'droppedPairsReadError',
     'roundBand', 'implausibleRounds', 'implausibleRoundCount', 'implausibleRoundRejections',
