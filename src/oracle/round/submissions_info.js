@@ -36,9 +36,6 @@ module.exports = {
         let droppedPairs = [];
         let skippedRoundsReadError = false;
         let droppedPairsReadError = false;
-        let disputedRoundCount = 0;
-        let lastDisputedRound = null;
-        let disputedRoundsReadError = false;
         try {
             let rows = await this.db.findPriceSnapshotRoundsSkippedWithNoFinalized();
             skippedRounds = rows.map(r => Number(r.round_number));
@@ -58,17 +55,7 @@ module.exports = {
             droppedPairsReadError = true;
             logger.warn(nodeUtil.format('Oracle: failed to read per-pair drops for diagnostics:', err));
         }
-        try {
-            let rows = await this.db.getPriceSnapshotsDisputedRoundSummary();
-            let summary = rows[0] || {};
-            disputedRoundCount = Number(summary.disputed_count) || 0;
-            lastDisputedRound = summary.last_disputed_round == null
-                ? null
-                : Number(summary.last_disputed_round);
-        } catch (err) {
-            disputedRoundsReadError = true;
-            logger.warn(nodeUtil.format('Oracle: failed to read disputed rounds for diagnostics:', err));
-        }
+        let disputed = await readDisputedSummary.call(this);
 
         let band = roundBand({ epochStartMs: this.epochStart, roundIntervalMs: this.roundInterval });
         let implausibleRounds = [];
@@ -89,7 +76,7 @@ module.exports = {
         return Object.assign({},
             roundStateFields.call(this, info),
             skipAndDropFields(skippedRounds, skippedRoundsReadError, droppedPairs, droppedPairsReadError),
-            disputedFields(disputedRoundCount, lastDisputedRound, disputedRoundsReadError),
+            disputedFields(disputed),
             outOfBandFields.call(this, band, implausibleRounds, implausibleRoundsReadError),
             persistCounterFields.call(this),
             consensusGaugeFields.call(this),
@@ -98,11 +85,30 @@ module.exports = {
 
 };
 
-function disputedFields(disputedRoundCount, lastDisputedRound, disputedRoundsReadError) {
+// Durable disputed-round read from price_snapshots (status='disputed'). Same
+// additive-marker contract as the other reads: a failed read sets the error
+// flag instead of serving a clean-looking zero.
+async function readDisputedSummary() {
+    let out = { count: 0, last: null, readError: false };
+    try {
+        let rows = await this.db.getPriceSnapshotsDisputedRoundSummary();
+        let summary = rows[0] || {};
+        out.count = Number(summary.disputed_count) || 0;
+        out.last = summary.last_disputed_round == null
+            ? null
+            : Number(summary.last_disputed_round);
+    } catch (err) {
+        out.readError = true;
+        logger.warn(nodeUtil.format('Oracle: failed to read disputed rounds for diagnostics:', err));
+    }
+    return out;
+}
+
+function disputedFields(disputed) {
     return {
-        disputedRoundCount:      disputedRoundCount,
-        lastDisputedRound:       lastDisputedRound,
-        disputedRoundsReadError: disputedRoundsReadError
+        disputedRoundCount:      disputed.count,
+        lastDisputedRound:       disputed.last,
+        disputedRoundsReadError: disputed.readError
     };
 }
 
