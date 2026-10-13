@@ -55,9 +55,12 @@ module.exports = {
             // non-finalized round.
             let skipRows = await this.db.getPriceSnapshotsCountUnfinalizedAfterRound(lastFinalizedRound);
             this.consecutiveSkippedRounds = (skipRows && skipRows.length) ? Number(skipRows[0].skipped) : 0;
+            this.freshnessHydrateError = false;
         } catch (err) {
             // Non-fatal: a hydration failure must not block oracle startup. Leave the
-            // constructor defaults (0 / null) in place and continue.
+            // constructor defaults (0 / null) in place and continue. The flag lets
+            // the submissions info tell those defaults from a real clean slate.
+            this.freshnessHydrateError = true;
             logger.warn(nodeUtil.format('Oracle: failed to hydrate freshness counters on start:', err));
         }
     },

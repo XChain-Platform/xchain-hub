@@ -38,7 +38,7 @@ const SUBMISSIONS_INFO_KEYS = [
     'droppedPairs', 'droppedPairCount', 'droppedPairsReadError',
     'roundBand', 'implausibleRounds', 'implausibleRoundCount', 'implausibleRoundRejections',
     'failedSubmissionPersists', 'lastSubmissionPersistFailureRound', 'lastSubmissionPersistFailureCount',
-    'submissionsPruneFailures', 'lastSubmissionsPruneFailureRound', 'consecutiveSkippedRounds',
+    'submissionsPruneFailures', 'lastSubmissionsPruneFailureRound', 'consecutiveSkippedRounds', 'freshnessHydrateError',
     'round_timeouts', 'abandoned_rounds', 'lastAbandonedRound',
     'single_source_rounds', 'lastSingleSourceRound', 'oracle_fetch_failures',
     'lastSuccessfulRoundTime', 'lastSuccessAgeMs', 'usingFallback', 'chainTipFetchFailures',
