@@ -1,11 +1,12 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
 const { verifyCapabilitySnapshotRow } = require('../../../../src/oracle/price_aggregator/capability_catchup_verifier.js');
 const { PEER, peerManager, makeCatchup, delayedPage } = require('./helpers/peer_catchup_harness.js');
 
-const EMPTY_PAGE = { table: 'price_snapshots', rows: [] };
+const EMPTY_PAGE = { table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] };
 
 function rateLimited() {
     const err = new Error('Snapshot request returned HTTP 429');
@@ -22,8 +23,8 @@ function unreadableCapabilityCatchup() {
     const rows = [{ id: 1, snapshot_block: 1000, capability: 'price', signing_pubkey: 'bb'.repeat(32),
         source: '', amount: '5' }];
     const fetchPage = sinon.stub();
-    fetchPage.onFirstCall().resolves({ table: 'capability_snapshots', rows: [] });
-    fetchPage.resolves({ table: 'capability_snapshots', rows });
+    fetchPage.onFirstCall().resolves({ table: 'capability_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
+    fetchPage.resolves({ table: 'capability_snapshots', schema_version: HUB_SCHEMA_VERSION, rows });
     return makeCatchup({
         db, tables: ['capability_snapshots'], pageSize: 1000, indexerReadIntervalMs: 0, fetchPage,
         getVerifier: () => verifyCapabilitySnapshotRow, hasRow: async () => false, storeRow: async () => {}

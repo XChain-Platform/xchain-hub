@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -72,7 +73,7 @@ function producerRows(env, round, firstId, options) {
 
 function feed(rows) {
     return sinon.stub().callsFake(async (peer, table, cursor, limit) => ({
-        table, rows: rows.filter(row => row.id > cursor).slice(0, limit)
+        table, schema_version: HUB_SCHEMA_VERSION, rows: rows.filter(row => row.id > cursor).slice(0, limit)
     }));
 }
 

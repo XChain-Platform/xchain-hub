@@ -10,6 +10,7 @@ const { createCatchupState } = require('./catchup_state.js');
 const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
 const { createRefusalMemo } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
+const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
 const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
@@ -323,6 +324,12 @@ class HubDbPeerCatchup {
             const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
             if (!page || page.table !== table || !Array.isArray(page.rows)) {
                 throw new Error('Invalid snapshot page for ' + table);
+            }
+            // A stale or newer peer's rows may carry columns this hub cannot interpret; the throw
+            // lands in walkTable's catch, which backs the feed off and tries the next peer.
+            if (page.schema_version !== HUB_SCHEMA_VERSION) {
+                throw new Error('Snapshot page for ' + table + ' has schema_version ' + page.schema_version +
+                    ', expected ' + HUB_SCHEMA_VERSION);
             }
             walk.cursor = advanceCursor(walk.cursor, page.rows);
             const full = page.rows.length >= this.pageSize;

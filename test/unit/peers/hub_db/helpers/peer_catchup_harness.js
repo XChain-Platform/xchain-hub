@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../../src/hub_schema_version.js');
 // Shared fixtures for the hub DB peer catch-up suites (peer_catchup*.test.js).
 const EventEmitter = require('events');
 const sinon = require('sinon');
@@ -55,7 +56,7 @@ function makeCatchup(overrides) {
 }
 function delayedPage(ms) {
     return sinon.stub().callsFake(() => new Promise(resolve => setTimeout(
-        () => resolve({ table: 'price_snapshots', rows: [] }), ms)));
+        () => resolve({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] }), ms)));
 }
 module.exports = {
     delayedPage, PEER, VALIDATOR_ADDR, SIGNING_PUBKEY, PEER_B, VALIDATOR_ADDR_B, SIGNING_PUBKEY_B, peerManager, priceDb, makeCatchup };

@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -78,7 +79,7 @@ describe('hub DB peer catch-up with membership only in the effective signer set'
         const fetched = [];
         const fetchPage = async (peer, table, cursor) => {
             fetched.push(peer + ' ' + table + ' ' + cursor);
-            return { table, rows: [] };
+            return { table, schema_version: HUB_SCHEMA_VERSION, rows: [] };
         };
         const catchup = catchupFor(f.local.manager, fetchPage);
 

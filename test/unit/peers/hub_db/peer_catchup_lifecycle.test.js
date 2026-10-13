@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
@@ -9,7 +10,7 @@ describe('hub DB peer catch-up without a peer registry', function () {
     it('fetches from a chain signer', async function () {
         const pm = peerManager(true);
         delete pm.registryHasPubkey;
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
+        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
         await catchup.start();
         catchup.stop();
@@ -25,7 +26,7 @@ describe('hub DB peer catch-up lifecycle', function () {
     });
     it('runs again when a peer link reconnects', async function () {
         const pm = peerManager(true);
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
+        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage });
         await catchup.start();
         pm.emit('peer:connect', PEER);
@@ -63,7 +64,7 @@ describe('hub DB peer catch-up retry lifecycle', function () {
         const pm = peerManager(true);
         pm.validatorPubkeys.clear();
         pm.effectiveSignerSet = new Set();
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
+        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
         const catchup = makeCatchup({ peerManager: pm, fetchPage, retryIntervalMs: 25 });
         await catchup.start();
         expect(fetchPage.called).to.equal(false);

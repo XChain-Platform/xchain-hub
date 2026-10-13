@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const http = require('http');
 const sinon = require('sinon');
 const { expect } = require('chai');
@@ -27,7 +28,7 @@ function callsTo(fetchPage, peer) {
     return fetchPage.getCalls().filter(call => call.args[0] === peer).length;
 }
 
-const EMPTY_PAGE = { table: 'price_snapshots', rows: [] };
+const EMPTY_PAGE = { table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] };
 
 function registerRequestTests() {
     it('walks a table in pages of 10000 rows by default', async function () {
