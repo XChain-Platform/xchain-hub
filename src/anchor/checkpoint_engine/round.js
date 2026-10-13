@@ -35,10 +35,13 @@ const logger = getLogger();
 // sequence at or below the highest one already seated, so an evicted sequence is fenced
 // by the DB as soon as any later checkpoint finalizes.
 const CHECKPOINT_SIGNED_SEQ_MEMORY = 512;
+// Re-leads of one timed-out round at its snapshot block before the cadence moves on.
+const CHECKPOINT_ROUND_RETRIES = 3;
 
 module.exports = {
 
-    async runRound(chain, snapshotBlock, validators){
+    // `retry` ({ attempt, blockIndex }) marks a re-lead of a round that timed out unfinalized.
+    async runRound(chain, snapshotBlock, validators, retry){
         // Checkpoint the chain's tip minus a confirmation margin, so every peer's
         // indexer/replica has indexed the block and a shallow reorg can't race the round.
         let tip = await this.indexerCall(chain, 'getblockhashes', {});
@@ -47,6 +50,11 @@ module.exports = {
         if(target < 0) target = Number(tip.block_index);
         let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
         if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
+
+        // A retry re-proposes the SAME payload. If the tip moved the target off the timed-out
+        // block, a re-lead would be a second payload at the sequence (refused, and logged as
+        // equivocation); drop it, the signatures on the first payload cannot be reused anyway.
+        if(retry && Number(bh.block_index) !== Number(retry.blockIndex)) return;
 
         let network = String(bh.network || '');
         if(!network) throw new Error(chain + ' indexer returned no network (refusing a network-agnostic checkpoint)');
@@ -90,7 +98,7 @@ module.exports = {
             return;
         }
 
-        this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig });
+        this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt: retry ? retry.attempt : 0 });
     },
 
     // The checkpoint record a leader proposes from its own indexer's block hashes `bh` at
@@ -134,7 +142,7 @@ module.exports = {
     // Open the leader's round for a proposal that needs peer signatures: the pending entry
     // and its timeout, the SIGN_REQ, then a quorum check the leader's own signature seeds.
     openLeaderRound(round){
-        let { id, cp, canonical, quorum, weighted, validators, myPubkey, mySig } = round;
+        let { id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt } = round;
         // Re-map to the signer-verification shape, preserving the truncation flag so
         // checkQuorum's meetsStakeThreshold still fails closed on an over-cap snapshot
         // (the .map would otherwise drop it, same defect class as the resolver above).
@@ -153,14 +161,24 @@ module.exports = {
             if(!pending.done){
                 this._roundTimeouts++;
                 logger.warn('StateCheckpointEngine: round ' + id + ' timed out at ' +
-                    pending.signatures.size + '/' + quorum + ' sigs, retrying next cadence; missing: ' +
+                    pending.signatures.size + '/' + quorum + ' sigs, retrying; missing: ' +
                     this.missingSigners(pending));
+                this.queueRoundRetry(cp, attempt || 0);
             }
         }, this.roundTimeoutMs);
         if(pending.timer.unref) pending.timer.unref();
 
         this.peerManager.broadcast(XCHK_SIGN_REQ, { checkpoint: cp, sig_pubkey: myPubkey, sig: mySig });
         this.checkQuorum(id);
+    },
+
+    // Remember a timed-out round so the next tick re-leads it at the same snapshot block.
+    // The cadence latch has already advanced, so without this a frozen tip never reaches
+    // the next interval and the chain is never checkpointed. Bounded per chain.
+    queueRoundRetry(cp, attempt){
+        if(attempt >= CHECKPOINT_ROUND_RETRIES) return;
+        if(!this._roundRetries) this._roundRetries = new Map();
+        this._roundRetries.set(cp.chain, { snapshotBlock: cp.snapshot_block, blockIndex: cp.block_index, attempt: attempt + 1 });
     },
 
     // The validators that did not sign a timed-out round, sorted and deduped (a weighted
