@@ -54,7 +54,7 @@ describe('catch-up state transitions', function () {
         await assertRemoteTokenContentReader();
     });
 
-    it('is not caught up when eleven of twelve tables are caught up', function () {
+    it('is not caught up when ten of eleven tables are caught up', function () {
         const state = createCatchupState();
         MIRRORED_TABLES.slice(0, -1).forEach(table => state.markCaughtUp(table));
 
