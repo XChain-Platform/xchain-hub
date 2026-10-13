@@ -190,7 +190,10 @@ function persistCounterFields() {
         // Stake-feed lookup faults on the unregistered-peer audit path, count-only.
         stakeWeightLookupFailures:         this.stakeWeightLookupFailures,
         lastStakeWeightLookupFailureRound: this.lastStakeWeightLookupFailureRound,
-        consecutiveSkippedRounds: this.consecutiveSkippedRounds
+        consecutiveSkippedRounds: this.consecutiveSkippedRounds,
+        // True when the startup freshness rehydrate failed, so the zeroed stall
+        // counters above are defaults rather than the durable record.
+        freshnessHydrateError:    this.freshnessHydrateError === true
     };
 }
 
