@@ -27,8 +27,8 @@ describe('hub-schema-version', function () {
     // The value is part of the contract: this hub mirrors list_snapshots, whose
     // quorum-signed versions become injected LIST legs in every consumer. Pin
     // the shape, not just the type, so the bump cannot be lost in a rebase.
-    it('is v9, the metadata-carrying list_snapshots shape, so a v8 reader refuses this stream', function () {
-        assert.strictEqual(mod.HUB_SCHEMA_VERSION, 9);
-        assert.notStrictEqual(8, mod.HUB_SCHEMA_VERSION);
+    it('is v10, so a v9 reader refuses this stream', function () {
+        assert.strictEqual(mod.HUB_SCHEMA_VERSION, 10);
+        assert.notStrictEqual(9, mod.HUB_SCHEMA_VERSION);
     });
 });

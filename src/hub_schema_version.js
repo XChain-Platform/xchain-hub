@@ -127,6 +127,21 @@
 // v9 ROLL: the v8 order stands. This hub rolls FIRST and stamps 9, then every
 // indexer and the explorer roll back to back behind it. The whole roll completes
 // BELOW every network's LIST_META_ACTIVATION height.
-const HUB_SCHEMA_VERSION = 9;
+//
+// v10: the version fence is raised again so the mirror set as it stands today,
+// including remote_token_snapshots, is stamped under a version no v9 reader
+// accepts. A v9 reader cannot be told apart from a current one on the wire
+// otherwise, and a stream it half-understands is the fork shape this handshake
+// exists to refuse. A stale reader must reject this stream until it has rolled
+// to v10.
+//
+// v10 ROLL: the v9 order stands. This hub rolls FIRST and stamps 10, then every
+// indexer and the explorer roll back to back behind it.
+//
+// v10 PEER CATCH-UP RULE: a peer hub still on v9 is stale, not compatible. It
+// catches up by rolling to v10 and only then replaying peer catch-up rows; a
+// row or snapshot stamped with any other version is refused whole, never
+// coerced or partially applied, so a lagging peer halts instead of forking.
+const HUB_SCHEMA_VERSION = 10;
 
 module.exports = { HUB_SCHEMA_VERSION };

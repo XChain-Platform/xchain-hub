@@ -81,7 +81,7 @@
   "coin_pin_skipped_networks": [
     "mainnet"
   ],
-  "hub_schema_version": 9,
+  "hub_schema_version": 10,
   "carrier_logic_digest": "1416c44a7dbe0b2c521b6e96a6cd2cee3acfc38bface0851d3bb719afb8e90ef",
   "env": {
     "XC_AMOUNTS_PRICE_REGTEST_ACTIVATION": null,
