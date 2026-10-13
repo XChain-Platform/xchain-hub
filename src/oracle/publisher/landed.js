@@ -63,7 +63,12 @@ module.exports = {
         if (!Number.isFinite(f) || !Number.isFinite(l) || l < f) return 0;
         let pruned = 0;
         for (let r of Array.from(this._buffer.keys())) {
-            if (r >= f && r <= l && this._buffer.delete(r)) pruned++;
+            if (r >= f && r <= l && this._buffer.delete(r)) {
+                pruned++;
+                // Remember WHY the round has no buffered copy, so the pre-publish
+                // self-check does not read a shed round as a coverage hole.
+                this.markRoundLanded(r);
+            }
         }
         for (let w = this.windowIndexOf(f); w <= this.windowIndexOf(l); w++) {
             let range = this.windowPlan.rangeOf(w);
@@ -85,6 +90,36 @@ module.exports = {
                 '] after their batch landed on chain' + via);
         }
         return pruned;
+    },
+
+    // Rounds shed because their batch landed. Bounded: oldest entries fall out first,
+    // and a round that has fallen out is answered by the chain read in
+    // roundsCarriedByChain instead.
+    markRoundLanded(round) {
+        if (!this._landedRounds) this._landedRounds = new Set();
+        this._landedRounds.add(round);
+        while (this._landedRounds.size > 20000) {
+            this._landedRounds.delete(this._landedRounds.values().next().value);
+        }
+    },
+
+    isRoundLanded(round) {
+        return !!(this._landedRounds && this._landedRounds.has(round));
+    },
+
+    // Of `rounds` (finalized locally, not buffered), those a valid PRICE batch on the
+    // landing chain already carries. Covers a restart or a window-size change, where
+    // the in-memory record of shed rounds is gone. Fails open to "none carried": the
+    // caller then withholds the window, which is the safe side.
+    async roundsCarriedByChain(rounds) {
+        if (rounds.length === 0) return new Set();
+        let answer = await this.fetchLandedBatches(Math.min(...rounds), Math.max(...rounds));
+        let carried = new Set();
+        if (!answer) return carried;
+        for (let r of rounds) {
+            if (answer.batches.some(b => r >= b.first_round && r <= b.last_round)) carried.add(r);
+        }
+        return carried;
     },
 
     // Ask the landing chain's indexer which pending windows already carry a valid

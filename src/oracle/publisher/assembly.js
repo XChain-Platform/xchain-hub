@@ -328,6 +328,16 @@ module.exports = {
             if (!Number.isFinite(r) || have.has(r)) continue;
             missing.push(r);
         }
+        // A round shed after its batch landed has no buffered copy by design, and the
+        // chain carries it: it is not a hole. Without this a window-size change leaves
+        // the window's tail (rounds the old windows already landed) unpublishable.
+        if (missing.length > 0) {
+            missing = missing.filter(r => !this.isRoundLanded(r));
+        }
+        if (missing.length > 0) {
+            let carried = await this.roundsCarriedByChain(missing);
+            missing = missing.filter(r => !carried.has(r));
+        }
         if (missing.length > 0) {
             logger.warn('OraclePublisher: window [' + first + ',' + last + '] has finalized round(s) ' +
                 missing.join(', ') + ' with no buffered copy; withholding the batch rather than ' +
