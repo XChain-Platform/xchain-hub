@@ -72,7 +72,9 @@ addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'hei
 addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: 156230, regtest: 0 });
 
 // Effective allow/block-list enforcement: armed on testnet, inert on mainnet
-// and regtest until coordinated activation.
+// and regtest until coordinated activation. A regtest venue arms it at read
+// time from XC_OFFER_LIST_REGTEST_ACTIVATION (the entry, gate_registry.js,
+// carries that overlay because this part is data only).
 addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
     mainnet: UNARMED,
     'BTC:testnet': 156230,
