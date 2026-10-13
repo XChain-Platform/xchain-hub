@@ -95,9 +95,6 @@ const crypto = require('crypto');
 const Module = require('module');
 const assert = require('assert');
 
-const SIBLING_MASK_ROOT = 'XCHAIN_SUITE_TITLE_REPO_ROOT';
-const SIBLING_DIR_ENV = ['XCHAIN_DOCS_DIR', 'XCHAIN_INDEXER_DIR'];
-
 /** Is `candidate` inside an adjacent xchain checkout other than `root`? */
 function isSiblingPath(root, candidate) {
     if (typeof candidate !== 'string' && !Buffer.isBuffer(candidate)) return false;
@@ -143,7 +140,12 @@ function installSiblingMask(root) {
     };
 }
 
-if (process.env[SIBLING_MASK_ROOT]) installSiblingMask(path.resolve(process.env[SIBLING_MASK_ROOT]));
+// XCHAIN_SUITE_TITLE_REPO_ROOT is set only by buildMap below, for the mocha
+// children it spawns; every variable here is read by literal name so the
+// environment-variable documentation gate can see it.
+if (process.env.XCHAIN_SUITE_TITLE_REPO_ROOT) {
+    installSiblingMask(path.resolve(process.env.XCHAIN_SUITE_TITLE_REPO_ROOT));
+}
 
 const {
     getRepoRoot, setRepoRoot, splitCommand, segmentCommand, mochaArgsFor, collect, buildMap: collectMap,
@@ -151,19 +153,29 @@ const {
 
 /** Collect with adjacent repositories hidden from every spawned mocha process. */
 function buildMap(only) {
-    const saved = new Map([[SIBLING_MASK_ROOT, process.env[SIBLING_MASK_ROOT]],
-        ['NODE_OPTIONS', process.env.NODE_OPTIONS],
-        ...SIBLING_DIR_ENV.map((name) => [name, process.env[name]])]);
-    process.env[SIBLING_MASK_ROOT] = getRepoRoot();
-    process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, `--require=${__filename}`].filter(Boolean).join(' ');
-    for (const name of SIBLING_DIR_ENV) delete process.env[name];
+    const saved = {
+        repoRoot: process.env.XCHAIN_SUITE_TITLE_REPO_ROOT,
+        nodeOptions: process.env.NODE_OPTIONS,
+        docsDir: process.env.XCHAIN_DOCS_DIR,
+        indexerDir: process.env.XCHAIN_INDEXER_DIR,
+    };
+    process.env.XCHAIN_SUITE_TITLE_REPO_ROOT = getRepoRoot();
+    process.env.NODE_OPTIONS = [saved.nodeOptions, `--require=${__filename}`].filter(Boolean).join(' ');
+    // Sibling-checkout overrides would point the children back at the trees the mask hides.
+    delete process.env.XCHAIN_DOCS_DIR;
+    delete process.env.XCHAIN_INDEXER_DIR;
     try {
         return collectMap(only);
     } finally {
-        for (const [name, value] of saved) {
-            if (value === undefined) delete process.env[name];
-            else process.env[name] = value;
-        }
+        // Assigning undefined to process.env stores the string "undefined", so an unset one is deleted.
+        if (saved.repoRoot === undefined) delete process.env.XCHAIN_SUITE_TITLE_REPO_ROOT;
+        else process.env.XCHAIN_SUITE_TITLE_REPO_ROOT = saved.repoRoot;
+        if (saved.nodeOptions === undefined) delete process.env.NODE_OPTIONS;
+        else process.env.NODE_OPTIONS = saved.nodeOptions;
+        if (saved.docsDir === undefined) delete process.env.XCHAIN_DOCS_DIR;
+        else process.env.XCHAIN_DOCS_DIR = saved.docsDir;
+        if (saved.indexerDir === undefined) delete process.env.XCHAIN_INDEXER_DIR;
+        else process.env.XCHAIN_INDEXER_DIR = saved.indexerDir;
     }
 }
 
