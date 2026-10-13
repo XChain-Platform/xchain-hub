@@ -10892,6 +10892,12 @@
       "b8c4e9ae49381962bb341e9587ed8400d4aaa7ecd699ac5af0a176fe814776d6",
       "5ba4a5aba770ab3bf4ad8ff838463f5fc771b04db6c7d1586c59ff359e99b587"
     ],
+    "eeedc84cb270e8b7": [
+      "4e46dc8e6fb4ca6b0e7e98db86c7c5338d069788be0aab14bd860a4372576ff6",
+      "369874c68bb66a30f8e70b2aa50242d6f444e3f1f50d8ab3b6996a02b66f7f34",
+      "d498183c9868c6f1bd61d1f4e89eeddc974466299e565dfe5569b822c17f9223",
+      "55a0df6094980dab11d4916bc26e7fdc6f8bb599247420bf0ef8f484e268912e"
+    ],
     "ef567d8ba15a9039": [
       "ab3159e31a8b7ec00398c65efe4eff34efdc466899631f0af239b37467e01250",
       "e6462d7ac795bebd32fec7e763247b19e7bec6a1b9e22107739afa611ceb6865"
@@ -11605,8 +11611,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 901,
-      "titleCount": 8449,
+      "fileCount": 902,
+      "titleCount": 8453,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12341,6 +12347,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
+        "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
         "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
@@ -12563,8 +12570,8 @@
       }
     },
     "test": {
-      "fileCount": 901,
-      "titleCount": 8449,
+      "fileCount": 902,
+      "titleCount": 8453,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13299,6 +13306,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
+        "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
         "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
@@ -13470,8 +13478,8 @@
       }
     },
     "test:all": {
-      "fileCount": 981,
-      "titleCount": 9272,
+      "fileCount": 982,
+      "titleCount": 9276,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14286,6 +14294,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
+        "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
         "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
