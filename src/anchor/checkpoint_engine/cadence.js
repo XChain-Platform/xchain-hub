@@ -133,8 +133,11 @@ module.exports = {
                 // On schedule: the cadence simply has not come round yet.
                 this.clearCadenceStall();
                 this.clearNotMySlot();
+                await this.retryTimedOutRounds();
                 return;
             }
+            // A new interval supersedes any timed-out round still waiting for a retry.
+            if(this._roundRetries) this._roundRetries.clear();
 
             let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
@@ -161,6 +164,25 @@ module.exports = {
             }
         } finally {
             this._ticking = false;
+        }
+    },
+
+    // Re-lead each chain round that timed out unfinalized, at the snapshot block it first
+    // used (so a frozen BTC tip still checkpoints). Entries are consumed as they run; a
+    // retry that times out again re-queues itself up to the round's retry cap.
+    async retryTimedOutRounds(){
+        if(!this._roundRetries || this._roundRetries.size === 0) return;
+        let retries = [...this._roundRetries];
+        this._roundRetries.clear();
+        for(let [chain, retry] of retries){
+            if(!this.indexers[chain] || !this.indexers[chain].url) continue;
+            try {
+                let validators = await this.resolveCapabilityValidators('oracle_publish', retry.snapshotBlock);
+                if(!this.leadsCadenceSlot(retry.snapshotBlock, validators)) continue;
+                await this.runRound(chain, retry.snapshotBlock, validators, retry);
+            } catch(e){
+                logger.warn('StateCheckpointEngine: ' + chain + ' round retry failed: ' + (e && e.message));
+            }
         }
     },
 
