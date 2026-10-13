@@ -18,6 +18,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
+const { resetRoundCadence } = require('../../../src/oracle/round_cadence.js');
 const { waitUntil } = require('../../helpers/waitUntil');
 const { DB_METHODS } = require('../../helpers/mockHub');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('../../../src/constants.js');
@@ -54,6 +55,8 @@ function apiStubs(captured) {
         'http': { createServer: sinon.stub().returns(server) },
         'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
         'geoip-lite': { lookup: sinon.stub().returns(null) },
+        // A fresh resolver per boot: the shared module may hold a value cached by an earlier suite.
+        './oracle/round_cadence.js': proxyquire('../../../src/oracle/round_cadence.js', {}),
         './XChainHub': function () { captured.p2pConfig = arguments[5]; return makeHub(); }
     };
 }
@@ -87,7 +90,9 @@ async function bootP2pConfig(env) {
 describe('src/api.js p2pConfig oracle cadence', function () {
     // The first proxyquire of api.js loads its whole require graph.
     this.timeout(20000);
-    afterEach(function () { sinon.restore(); });
+    // The cadence resolves once per process; each boot must resolve afresh.
+    beforeEach(resetRoundCadence);
+    afterEach(function () { sinon.restore(); resetRoundCadence(); });
 
     it('carries a positive operator interval and window through unchanged', async function () {
         const cfg = await bootP2pConfig({ ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '20000' });

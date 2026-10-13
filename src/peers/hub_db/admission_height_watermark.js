@@ -23,7 +23,8 @@
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const { ADMIT_COLUMN_CHAINS, normalizeChain, rowAdmitBlocks } = require('../../lib/admission_height.js');
 const { rowMarginBlocks } = require('../../consensus/gates/mirror_admission_margin_gate.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_XDEX_ROUND_TIMEOUT_MS,
+const { resolveRoundCadence } = require('../../oracle/round_cadence.js');
+const { DEFAULT_XDEX_ROUND_TIMEOUT_MS,
         DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const hubConfig = require('../../config');
 
@@ -115,9 +116,7 @@ class AdmissionHeightWatermark {
             // A price round's terminal bound is its own cadence: the next round opens only
             // once this one is finalized or skipped, so the interval is what bounds how long
             // a round can hold the watermark.
-            price: positiveIntConfig(
-                hubConfig.ORACLE_ROUND_INTERVAL || this.config.ORACLE_ROUND_INTERVAL,
-                DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL'),
+            price: resolveRoundCadence(this.config).roundInterval,
             // oracle_prices has no consensus round at all: the rows are the hub's own ingest
             // of an on-chain PRICE v1 transaction, so the bound is how long an ingest may
             // trail the chain it reads. Its own knob, because nothing else sizes it.

@@ -23,6 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
+const { resetRoundCadence } = require('../../../../src/oracle/round_cadence.js');
 const HubDbBroadcaster = proxyquire('../../../../src/peers/hub_db_broadcaster.js', { ws: { OPEN: 1 } });
 const { AdmissionHeightWatermark } = HubDbBroadcaster;
 const StateAnchorPublisher = require('../../../../src/anchor/publisher.js');
@@ -48,8 +49,9 @@ function withCleanEnv(fn) {
                   'HUB_ADMISSION_RELAY'];
     const saved = {};
     for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; }
+    resetRoundCadence();
     try { return fn(); }
-    finally { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+    finally { resetRoundCadence(); for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
 }
 
 function makeWatermark(extra) {
