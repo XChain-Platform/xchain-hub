@@ -23,6 +23,7 @@
 'use strict';
 
 const { summarizeUtxoConfirmations } = require('../../lib/utxo_balance.js');
+const { mainnetWritesOpen } = require('../../lib/mainnet_write_window.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -224,6 +225,10 @@ module.exports = {
     // What the rank wake should run this tick. Failover-only in the steady state;
     // a normal flush exactly while a confirmed-input deferral is outstanding, so
     // the led row it stood down from is retried in minutes rather than a day.
+    nowSeconds(){
+        return Math.floor(Date.now() / 1000);
+    },
+
     wakeFlushOpts(){
         return { failoverOnly: !this._leaderRetryDue };
     },
@@ -351,6 +356,8 @@ module.exports = {
     async flush(opts){
         let failoverOnly = !!(opts && opts.failoverOnly);
         if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
+        // Mainnet writes are shut until the window opens: skip the whole cycle, rows stay pending.
+        if(!mainnetWritesOpen(this.network, this.nowSeconds())) return { anchored: [], archive: 'none', skipped: 'mainnet_window_closed' };
         this._flushing = true;
         // A normal flush is the retry a deferral was waiting for; it re-arms below
         // only if it defers again.
