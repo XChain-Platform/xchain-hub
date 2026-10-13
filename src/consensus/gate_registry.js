@@ -81,12 +81,12 @@ registerRows(registry, hubConfig.env());
 // per raw value. Unset or refused leaves the committed (UNARMED) entry.
 const OFFER_LIST_KEY = 'cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT';
 const blockOverlay = registry.overlay;
-const offerListEnv = hubConfig.env();
+const env = hubConfig.env();
 let offerListHit = null;
 registry.setReadOverlay((key, table) => {
     const base = blockOverlay(key, table);
     if (key !== OFFER_LIST_KEY) return base;
-    const raw = offerListEnv.XC_OFFER_LIST_REGTEST_ACTIVATION;
+    const raw = env.XC_OFFER_LIST_REGTEST_ACTIVATION;
     if (offerListHit && offerListHit.raw === raw && offerListHit.base === base) return offerListHit.value;
     const height = regtestHeight(raw, 0, 'OFFER LIST', 'XC_OFFER_LIST_REGTEST_ACTIVATION');
     const value = height === null ? base : Object.freeze(Object.assign({}, base, { regtest: height }));
