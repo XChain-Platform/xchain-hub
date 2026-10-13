@@ -22,6 +22,7 @@
  ********************************************************************/
 
 const { roundBand, describeImplausibleRound } = require('../oracle_round_band.js');
+const { DERIVED_PAIRS } = require('../../constants.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -75,6 +76,7 @@ module.exports = {
 
         return Object.assign({},
             roundStateFields.call(this, info),
+            expectedPairFields.call(this),
             skipAndDropFields(skippedRounds, skippedRoundsReadError, droppedPairs, droppedPairsReadError),
             disputedFields(disputed),
             outOfBandFields.call(this, band, implausibleRounds, implausibleRoundsReadError),
@@ -147,6 +149,16 @@ function roundStateFields(info) {
         submissionWindow:         this.submissionWindow,
         submissions:              info
     };
+}
+
+// The pairs this hub admits for the live round. Derived pairs drop out while
+// the xchain price gate is shut for that round, so a consumer does not alert on
+// a pair nobody can submit yet. A missing gate reads as shut.
+function expectedPairFields() {
+    let gateOpen = typeof this.xchainPriceGateOpen === 'function' && this.xchainPriceGateOpen();
+    let derived = new Set(DERIVED_PAIRS);
+    let pairs = Array.from(this.canonicalPairs || []).filter(p => gateOpen || !derived.has(p));
+    return { expectedPairs: pairs, expectedPairsRound: this.currentRound };
 }
 
 // Recently skipped rounds, so operators can detect feed-outage gaps straight
