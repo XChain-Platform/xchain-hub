@@ -189,8 +189,8 @@ handler, governance, and attestation subsystems are **all enabled only when
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ORACLE_ROUND_INTERVAL` | No | `600000` | Round length (ms). It must be uniform across the federation so each hub computes the same round number from `ORACLE_EPOCH_START`. |
-| `ORACLE_SUBMISSION_WINDOW` | No | `180000` | Submission window within a round (ms). It must be uniform across the federation so every hub closes submissions at the same point in each round. |
+| `ORACLE_ROUND_INTERVAL` | No | `600000` | Round length (ms). It must be uniform across the federation so each hub computes the same round number from `ORACLE_EPOCH_START`. Every reader (the API config, batch signer, publisher, admission watermark, chain tips and the health probe) takes the value from one per-process resolver, so a hub never runs two cadences. The environment variable is honoured on regtest only; other networks use the p2pConfig value or the default. |
+| `ORACLE_SUBMISSION_WINDOW` | No | `180000` | Submission window within a round (ms). It must be uniform across the federation so every hub closes submissions at the same point in each round. It resolves through the same per-process resolver as `ORACLE_ROUND_INTERVAL`. |
 | `ORACLE_REWARD_PER_ROUND` | No | `10.00000000` | Reward per round, a positive plain decimal; any other form fails reward distribution with "Invalid reward amount". |
 | `ORACLE_FINALIZATION_TIMEOUT` | No | `120000` | Finalization timeout (ms). |
 | `ORACLE_MIN_SUBMISSIONS` | No | `1` | Minimum submissions to finalize a round. |

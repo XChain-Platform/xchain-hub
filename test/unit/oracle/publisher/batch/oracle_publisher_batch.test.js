@@ -23,6 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 
 const OraclePublisher = require('../../../../../src/oracle/publisher.js');
+const { resetRoundCadence } = require('../../../../../src/oracle/round_cadence.js');
 const { waitUntil }   = require('../../../../helpers/waitUntil');
 const { PRICE_BATCH_COMPRESSION_MARKER, inflatePriceBatchBody } = require('../../../../../src/price_batch_compression.js');
 const { DB_METHODS }  = require('../../../../helpers/mockHub.js');
@@ -246,6 +247,8 @@ function makeDb(seed) {
 
 function makePublisher(opts) {
     opts = opts || {};
+    // The cadence resolves once per process; each publisher's cfg must be read afresh.
+    resetRoundCadence();
     let dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oracle-pub-batch-'));
     tmpDirs.push(dir);
 

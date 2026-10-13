@@ -69,14 +69,13 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 // identically, or a consumer that switches between the two feeds sees the same value
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
-const { positiveIntConfig } = require('./lib/config_int.js');
+const { resolveRoundCadence } = require('./oracle/round_cadence.js');
 const { parseCorsOrigin } = require('./api/cors_origin.js');
 const { parseExemptLocal } = require('./api/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
-const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('./constants');
+const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
 const { installMiddleware } = require('./api/middleware');
 const { buildRpcController } = require('./api/rpc');
 const { mountSnapshotRoutes } = require('./api/rest/hub_db_snapshot');
@@ -250,10 +249,9 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
 
     ORACLE_EPOCH_START:     parseInt(hubConfig.ORACLE_EPOCH_START),
     // Positive-only: the interval divides elapsed time into federation round numbers.
-    ORACLE_ROUND_INTERVAL:  positiveIntConfig(hubConfig.ORACLE_ROUND_INTERVAL,
-        DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL'),
-    ORACLE_SUBMISSION_WINDOW: positiveIntConfig(hubConfig.ORACLE_SUBMISSION_WINDOW,
-        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, 'ORACLE_SUBMISSION_WINDOW'),
+    // First resolution of the process-wide cadence; every later reader gets this value.
+    ORACLE_ROUND_INTERVAL:  resolveRoundCadence(hubConfig).roundInterval,
+    ORACLE_SUBMISSION_WINDOW: resolveRoundCadence(hubConfig).submissionWindow,
     // Per-round cap on collected peer submissions (anti-flood, OracleRound.js).
     // Passed through UNPARSED for the same reason as the retention knob below:
     // OracleRound.js owns the parse, the range check and the 200 default, so a
