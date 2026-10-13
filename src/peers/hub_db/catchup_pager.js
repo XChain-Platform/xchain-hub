@@ -3,6 +3,7 @@
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
 const { MIRRORED_TABLES } = require('./catchup_verifiers.js');
 
 const mirroredTableSet = new Set(MIRRORED_TABLES);
@@ -51,6 +52,10 @@ function pageSnapshotTable({ table, fetchPage, onRow, limit = 1000 }) {
                 const body = await fetchPage({ table, sinceId: lastId, limit });
                 if (!body || body.table !== table || !Array.isArray(body.rows)) {
                     throw new Error('Invalid snapshot response for table ' + table);
+                }
+                if (body.schema_version !== HUB_SCHEMA_VERSION) {
+                    throw new Error('Snapshot response for table ' + table + ' has schema_version ' +
+                        body.schema_version + ', expected ' + HUB_SCHEMA_VERSION);
                 }
 
                 for (const row of body.rows) {

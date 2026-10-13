@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const EventEmitter = require('events');
 const sinon = require('sinon');
 const { expect } = require('chai');
@@ -67,9 +68,10 @@ describe('hub DB peer catch-up paging', function () {
         const fetchPage = sinon.stub();
         fetchPage.onFirstCall().resolves({
             table: 'price_snapshots',
+                schema_version: HUB_SCHEMA_VERSION,
             rows: [{ id: 41, round_number: 7 }, { id: 44, round_number: 8 }]
         });
-        fetchPage.onSecondCall().resolves({ table: 'price_snapshots', rows: [] });
+        fetchPage.onSecondCall().resolves({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
         const catchup = await completedCatchup({ db, fetchPage });
         expect(fetchPage.firstCall.args.slice(0, 4)).to.deep.equal([PEER, 'price_snapshots', 0, 2]);
         expect(fetchPage.secondCall.args[2]).to.equal(44);
@@ -84,7 +86,7 @@ describe('hub DB peer catch-up paging', function () {
         const catchup = await completedCatchup({
             db,
             fetchPage: sinon.stub().resolves({
-                table: 'price_snapshots', rows: [{ id: 9, round_number: 3, coin_pair: 'BTC/USD' }]
+                table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [{ id: 9, round_number: 3, coin_pair: 'BTC/USD' }]
             })
         });
         expect(db.findPriceSnapshotsForRound.calledOnceWithExactly(3)).to.equal(true);
@@ -104,7 +106,7 @@ describe('hub DB peer catch-up verification', function () {
             hasRow: sinon.stub().resolves(false),
             storeRow,
             fetchPage: sinon.stub().resolves({
-                table: 'oracle_prices', rows: [{ id: 3, source_address: 'oracle-address' }]
+                table: 'oracle_prices', schema_version: HUB_SCHEMA_VERSION, rows: [{ id: 3, source_address: 'oracle-address' }]
             })
         });
         expect(verifier.calledOnce).to.equal(true);
@@ -123,7 +125,7 @@ describe('hub DB peer catch-up verification', function () {
             logger,
             getVerifier: () => async () => ({ ok: false, reason: 'bad quorum' }),
             fetchPage: sinon.stub().resolves({
-                table: 'price_snapshots', rows: [{ id: 12, round_number: 4 }]
+                table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [{ id: 12, round_number: 4 }]
             })
         });
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
@@ -189,7 +191,7 @@ describe('hub DB peer catch-up local ids', function () {
             hasRow: sinon.stub().resolves(false),
             storeRow,
             fetchPage: sinon.stub().resolves({
-                table: 'price_snapshots', rows: [{ id: 77, round_number: 5 }]
+                table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [{ id: 77, round_number: 5 }]
             })
         });
         expect(storeRow.calledOnce).to.equal(true);
@@ -235,7 +237,7 @@ describe('hub DB peer catch-up peer resolution', function () {
                 inbound: true, validatorAddr: side.remoteAddr, feedUrl: side.remoteAddr
             });
             side.pm.peers.get(side.remoteAddr).feedUrl = null;
-            const fetchPage = sinon.stub().callsFake(async (peer, table) => ({ table, rows: [] }));
+            const fetchPage = sinon.stub().callsFake(async (peer, table) => ({ table, schema_version: HUB_SCHEMA_VERSION, rows: [] }));
             const catchup = await completedCatchup({
                 peerManager: side.pm, tables, getVerifier: () => async () => true, fetchPage
             });
@@ -307,7 +309,7 @@ describe('hub DB peer catch-up peer eligibility', function () {
     it('fetches from a registry peer when the effective signer set is empty', async function () {
         const pm = peerManager(true);
         pm.effectiveSignerSet = new Set();
-        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', rows: [] });
+        const fetchPage = sinon.stub().resolves({ table: 'price_snapshots', schema_version: HUB_SCHEMA_VERSION, rows: [] });
         const catchup = await completedCatchup({ peerManager: pm, fetchPage });
         expect(fetchPage.calledOnceWithExactly(PEER, 'price_snapshots', 0, 2)).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);

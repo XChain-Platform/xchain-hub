@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
@@ -24,7 +25,7 @@ function capabilityHarness(rows, snapshot, held) {
         getVerifier: () => verifyCapabilitySnapshotRow,
         hasRow: async () => held === true,
         storeRow: async () => {},
-        fetchPage: async () => ({ table: 'capability_snapshots', rows })
+        fetchPage: async () => ({ table: 'capability_snapshots', schema_version: HUB_SCHEMA_VERSION, rows })
     });
     return { catchup, read };
 }

@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const sinon = require('sinon');
 const { expect } = require('chai');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
@@ -14,9 +15,9 @@ const SKIPPED = [
 function servingRows(rowsForWalk) {
     let walk = 0;
     return sinon.stub().callsFake(async (peer, table, cursor) => {
-        if (cursor !== 0) return { table, rows: [] };
+        if (cursor !== 0) return { table, schema_version: HUB_SCHEMA_VERSION, rows: [] };
         walk += 1;
-        return { table, rows: rowsForWalk(walk) };
+        return { table, schema_version: HUB_SCHEMA_VERSION, rows: rowsForWalk(walk) };
     });
 }
 
