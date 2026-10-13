@@ -205,7 +205,7 @@ describe('catch-up verifier registry', function () {
         delete require.cache[MODULE_PATH];
     });
 
-    it('exports the immutable set of eleven mirrored table names', function () {
+    it('exports the immutable set of twelve mirrored table names', function () {
         expect(registry.MIRRORED_TABLES).to.deep.equal(EXPECTED_TABLES);
         expect(Object.isFrozen(registry.MIRRORED_TABLES)).to.equal(true);
     });
