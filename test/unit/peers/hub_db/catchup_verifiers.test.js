@@ -10,6 +10,7 @@ const attestMethods = require('../../../../src/anchor/publisher/attest_round.js'
 const archiveAttestMethods = require('../../../../src/anchor/publisher/archive/attest.js');
 const rewardMethods = require('../../../../src/anchor/publisher/reward.js');
 const ar = require('../../../../src/consensus/gates/anchor_reward_gate.js');
+const remoteTokens = require('../../../../src/cross_chain/remote_token_snapshots.js');
 const proxyquire = require('proxyquire');
 
 const MODULE_PATH = require.resolve('../../../../src/peers/hub_db/catchup_verifiers.js');
@@ -24,9 +25,14 @@ const EXPECTED_TABLES = [
     'attestation_responses',
     'bridge_transfers',
     'policy_snapshots',
-    'list_snapshots'
+    'list_snapshots',
+    'remote_token_snapshots'
 ];
-const BUILT_IN_TABLES = ['state_checkpoints', 'anchor_reward_attestations'];
+const BUILT_IN_TABLES = [
+    'state_checkpoints',
+    'anchor_reward_attestations',
+    'remote_token_snapshots'
+];
 
 function identities(count) {
     return Array.from({ length: count }, () => {
@@ -128,6 +134,58 @@ function signReward(row, signers, publisher) {
         pubkey: s.getPubkeyHex(), sig: s.sign(canonical)
     })));
     return row;
+}
+
+function finalizedRemoteTokenRow(signers, signatureCount, overrides) {
+    const offer = { give_tick: 'REMOTE', give_decimals: 8,
+        give_owner: 'owner-address', action_index: 7 };
+    const row = Object.assign(remoteTokens.buildRemoteTokenSnapshot('mainnet', 1, 'doge', offer),
+        { finalizing_view: 3, status: 'finalized' }, overrides);
+    const canonical = remoteTokens.canonicalRemoteTokenSnapshot(row, row.finalizing_view);
+    row.validator_signatures = JSON.stringify(signers.slice(0, signatureCount).map(signer => ({
+        pubkey: signer.getPubkeyHex(), sig: signer.sign(canonical)
+    })));
+    return row;
+}
+
+function remoteTokenContext(signers) {
+    return { resolveCapabilityValidators: async () => signers.map(signer => ({
+        pubkey: signer.getPubkeyHex(), source: '', amount: '1'
+    })) };
+}
+
+async function assertRemoteTokenContentVerification(registry) {
+    const signers = identities(4);
+    const context = remoteTokenContext(signers);
+    const verify = registry.getCatchupVerifier('remote_token_snapshots');
+    const row = finalizedRemoteTokenRow(signers, 3);
+    expect(await verify(row, context)).to.equal(true);
+    expect(await verify(finalizedRemoteTokenRow(signers, 2), context)).to.equal(false);
+    const forgedSignatures = JSON.parse(row.validator_signatures)
+        .map(signature => Object.assign({}, signature, { sig: '0'.repeat(128) }));
+    const forged = Object.assign({}, row, { validator_signatures: JSON.stringify(forgedSignatures) });
+    expect(await verify(forged, context)).to.equal(false);
+    expect(await verify(Object.assign({}, row, { owner: 'other-owner' }), context)).to.equal(false);
+    expect(await verify(Object.assign({}, row, { status: 'pending' }), context)).to.equal(false);
+}
+
+async function assertRemoteTokenStoredMembership(registry) {
+    const signers = identities(4);
+    const db = capabilityDb(signers);
+    const verify = registry.getCatchupVerifier('remote_token_snapshots');
+    const row = finalizedRemoteTokenRow(signers, 3);
+    expect(await verify(row, { db })).to.equal(true);
+    expect(db.calls).to.deep.equal([{ block: 1, capability: 'cross_chain' }]);
+    expect(await verify(row, {})).to.equal(false);
+
+    const truncatedDb = capabilityDb(signers);
+    const originalRead = truncatedDb.findCapabilitySnapshotsBySnapshotBlock;
+    truncatedDb.findCapabilitySnapshotsBySnapshotBlock = async (...args) => {
+        const validators = await originalRead(...args);
+        validators.truncated = true;
+        return validators;
+    };
+    expect(await verify(row, { db: truncatedDb })).to.equal(false);
 }
 
 describe('catch-up verifier registry', function () {
@@ -313,6 +371,8 @@ describe('signed-row verifiers in the catch-up framework', function () {
         const weighted = signCheckpoint(
             Object.assign(checkpointRow(12), { network: 'testnet' }), [keys[0]]);
         expect(await verify(weighted, { db: weightedDb })).to.equal(true);
+
+        await assertRemoteTokenContentVerification(registry);
     });
 
     it('verifies rewards from the database context and production canonical', async function () {
@@ -334,5 +394,7 @@ describe('signed-row verifiers in the catch-up framework', function () {
         const weighted = Object.assign(rewardRow('anchor_bundle', 12, publisher), { network: 'testnet' });
         signReward(weighted, [keys[0]], publisher);
         expect(await verify(weighted, { db: weightedDb })).to.equal(true);
+
+        await assertRemoteTokenStoredMembership(registry);
     });
 });
