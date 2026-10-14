@@ -152,6 +152,14 @@ describe('bin/consensus-identity.js: child environment and registry-row refusal'
         }
     });
 
+    it('refuses with exit 2 when the venue arms the hub-only offer-list row the pin did not', function () {
+        const res = spawnSync(process.execPath, [BIN, '--compare', PIN], { cwd: REPO, encoding: 'utf8',
+            env: Object.assign(childEnv(), { XC_OFFER_LIST_REGTEST_ACTIVATION: 'armed' }) });
+        expect(res.status, res.stdout + res.stderr).to.equal(2);
+        expect(res.stdout).to.equal('');
+        expect(res.stderr).to.match(/XC_OFFER_LIST_REGTEST_ACTIVATION: pin unset, now "armed"/);
+    });
+
     it('drives a missing value row down the carrier rethrow branch', function () {
         // A moved fixture would test the no-carrier branch instead, so it fails loudly here.
         expect(fs.existsSync(MISSING_ROW_CARRIER), MISSING_ROW_CARRIER).to.equal(true);

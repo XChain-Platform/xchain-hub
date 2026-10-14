@@ -25,8 +25,8 @@ function hexPk(n) {
 }
 let hub, rt;
 // The hub no longer POSTs any reward to the BTC indexer. Every anchor reward is
-// derived on-chain by each indexer (per-chain from the ANCHOR v4/v5 publisher
-// attestation, archive from the v1 tail), and both flag-days are behind mainnet and sit at
+// derived on-chain by each indexer (bundle from the ANCHOR v0 publisher attestation,
+// archive from the v1 tail), and both flag-days are behind mainnet and sit at
 // 0 on testnet and regtest, so the indexer refused every push on every live
 // network. What survives here is the AMOUNT rule, which is a separate question:
 // a derived reward must record the frozen consensus constant so the hub's
@@ -73,7 +73,7 @@ function registerSplitSuitePart1() {
 }
 function registerSplitSuitePart2() {
   it('gates the AMOUNT on the THREADED reward network, not the hub network (#2236)', async function () {
-    // The build half (StateAnchorPublisher) gates the v4/v5 payload on the
+    // The build half (StateAnchorPublisher) gates the bundle attestation tail on the
     // checkpoint ROW's network. An unscoped hub (network='') re-deriving
     // the record-half gate from hub.network saw ''->inactive and credited
     // the legacy amount AND pushed it, while every indexer ALSO derived

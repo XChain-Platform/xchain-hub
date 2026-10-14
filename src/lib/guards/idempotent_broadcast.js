@@ -220,4 +220,16 @@ async function broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag,
     return result || {};
 }
 
-module.exports = { isAmbiguousSendError, isNeverSentError, isAlreadyKnownTx, AtMostOnce, broadcastOnce };
+// Return a broadcast result as { txid } with a non-empty txid, accepting a bare txid string.
+// A send that answered without one has an unknown outcome, so it throws an error the
+// classifier above reads as AMBIGUOUS: the caller dead-letters or latches, never re-sends.
+function requireBroadcastTxid(result, who){
+    if (typeof result === 'string' && result.trim() !== '') return { txid: result.trim() };
+    if (result && typeof result.txid === 'string' && result.txid.trim() !== '') return result;
+    let e = new Error((who || 'broadcast') + ': broadcast reported success but returned no txid, ' +
+                      'so whether the transaction reached the node is unknown');
+    e.missingTxid = true;
+    throw e;
+}
+
+module.exports = { isAmbiguousSendError, isNeverSentError, isAlreadyKnownTx, AtMostOnce, broadcastOnce, requireBroadcastTxid };

@@ -431,6 +431,16 @@
       "92bec50cfae43e0fcb9ef7aeb873a9948921640797a199e636d59ceebf738459",
       "8dd96f104c105d75adab5b14ccb4aea4beaea66082737c0571a97d1bfd335271"
     ],
+    "0a741541b64b1cd8": [
+      "553a47664ff68ebd2322440bb690a3a8afcfbb998fce4b309d5905adc807d22b",
+      "90b8f1d3600d843774ad2b9796e4fb3d0abba2e417067c025fed3b3c7d8e545d",
+      "577ddb2b4ef78c41a5473de0e0f43ecbc4511ccef79b6cab54246716b8389c18",
+      "43ba8d1168cfe42ae83e959baf507a76892d5cf07e0c92998af7536c1cd2e2e6",
+      "4382156a6201c78aff60e3d471e2d287424b991b1ec97d9cdc9def6ef65eeaf0",
+      "ed037a567c9a768a3ae3c8a28e947e110596a0ce6a43c07f37bb3cf813cdc9d3",
+      "c1d3e76bafb10499ecf2b43824b6b13842d78ef702ad5cd78b2e887ceaabfa6a",
+      "556b31f4edcebb7fb219cb27a9be02bd33a08fedaed5481e4ed6a165352d011d"
+    ],
     "0a89620a527bdc0d": [
       "d539f6ce4d11141f3cc8840bd2e43bc87b286171217f7f749a414f068144d374",
       "e75ecaee9b2812cc2b368183c9eb5495fb7946881b41a45c28441e84304754fd",
@@ -1959,6 +1969,14 @@
       "8b2cbe2cae161c897ae650bf9b6400a39c128d6cbc5ccbf103d33ca6978bcae8",
       "29f43380613d45c8f16601e9b5ded0a353a4d2f1ad89f07c5d999d0a0d763efb"
     ],
+    "2ab801a5f33393d4": [
+      "b5b2e73fc96463b27b3e1e40d6bbeed2458cc9e8b4ae028843d60dd16fe3adbd",
+      "ed3cd44e009cb0a04a78303cb42c0bf4874253aafc94fdd35818369b993034d5",
+      "58fefcdd6946117867844f0636b1f8eeb44af08ed4792a77b2226e71d9599686",
+      "dc27b5bf4e017120180299eb09fe79ad154f58cdca7c7f16bca33e9c395571ad",
+      "e2067edb793ae37acc4a07093b097e1e57801272550360e1ff0c3035d5010543",
+      "3978bd70212d9c6c6a0eedabeecdd35f1c1ae1b34314741fd6c9e74466704dca"
+    ],
     "2af60c2a993c4ea8": [
       "ca6925ed31f4bf64fe96cd6bfaabc2d5742b5d7261bd04ecee90b3d7d103926d",
       "7a602cba0bae761c5d287d2772738e71e2d49b647c3636191df1d2ff18dade77",
@@ -2291,20 +2309,6 @@
       "c83348a828d2e363396027040117957afe0b0bf1290bf69bebc9ad50603741d4",
       "3ce7b4f8ad8a2a41abb21ac056a3830a91364cbea05f24c6369931cef65273f2"
     ],
-    "2fe6a8ae4f10f89f": [
-      "b4c9fcab359048a74b4a2be185f1c3cced20b15856ab07b3548e757869ccc290",
-      "2ee3e1920a12722bc94eb97caad5440723ba76af4deeec466967f97cee2bb7b3",
-      "76d662b7ab498bf6b625912d7ae39f638cf17b4184788db93ec95aaaa6c76e0a",
-      "34cd00114000644f825c58c7b9e3af4b1ba7983355e4b4aa4127fab0c6a16050",
-      "f316d1b0fb9cb9de7172c075a2bdf09b91fdd3fc7cdea7c173dc0f987d75ac32",
-      "422c27bd1934510be43ac8758ec838345e47954f6bb2ce0c941061940e8897f3",
-      "27ad7ef70905cd6c1cce4eab846f41044c48389eed9f1549baaa8ac437f6bd96",
-      "cd5e3694bf2a5631561cd7c794a5fa9d0bebad416bc54964ac9380b5c7686f8b",
-      "b1d061a03ec709848069ac594cb4dc52389c8137126f5eb0e5f374543c526875",
-      "9f8e96fda6e40cd2b3774b377b93f1ea484d24265329ddbeafc15db7f5f0329a",
-      "bef4cc2d9d859c4c6abdc1f9cf38829f02cb5a7548698a5311addcf3afb05d42",
-      "5a3fb0dcedf2187fd52e5b40632f1cc65ae44b1738e739cd9164173a43964ecf"
-    ],
     "2fec827b3fd7ec50": [
       "2fe6e3f6dcc2569ea980dae8b882571cc86bc30febb098f21df5b78fcfd23769",
       "61bffcf38237f2cbc4ff9ad822095a1df5d3438d072ad9de7c38f01da0630a77",
@@ -2614,6 +2618,12 @@
       "e275f24a9cb8794e2673628d908489b1ed617efbff728269dd2a043d665d1474",
       "0ae2129a87cbd47497e63792fbfc11c87c276d53e8dce461a10d2a77bef55d4e"
     ],
+    "34f9901b8917d825": [
+      "53fc68e16ff91a9e3d80b792b82dc90eede0314ebacd3443244389a9e350e134",
+      "85323e7feb8c3ce320f55ab13169296f9d432fe2d59995840e1f4c1b22242d3c",
+      "d0c62cb06e00ce0697c1b68a37b5dfe9142809d218a7665b167306e10ff35fe2",
+      "be5cb89835eaa914a4689f03afc307526c8948394c6fd210f56a439f36869204"
+    ],
     "34fd516da6922017": [
       "d9a192f300f0fbc10280cdb43574bb802e83feb5a49cffa62822dfb30efdf23e",
       "13fc7f56ff0715a26f40fc57f7ba2e368f0e823f0d8d023a1d656ec711edce18",
@@ -2883,6 +2893,10 @@
       "e109cfd6aff13b61c954aec7a9c59df28338ebf7f2472c1642f95c3ccc29643e",
       "3005e05f3b14a09959814ae07780bfebbfad999e61e3e4a1b200b43ee14aab09",
       "2c3bf854e746730fa481336a57069a0a55bf9bda52f906f1ba90e195399cb3bb"
+    ],
+    "3b0515bfd917f793": [
+      "ab79d55a5efbd2861aaf5371c8f9e84b2e699f8f17bf8f40ec1c359a150ae806",
+      "c52c1767b1ecb119c1e42db1630c29659a73804702aba1b8e5518373079e39a4"
     ],
     "3b0606b7dfb6b630": [
       "8903071323345e9777874833e6ca5a1df768a6f625fee0c82dd216d9763cf13f",
@@ -4327,6 +4341,9 @@
       "a610b5808ee93ade944a105a08590e6726206ee7103d53fce50cf071fd412302",
       "75fc24af41d961898ca159fd0e98619cff3699f4c9537c79bf45a23d7cab0a02"
     ],
+    "56e2effa6675b4fa": [
+      "56e2effa6675b4fa8048d5f58d95a063348eb1c3601b21ac8ddfff7df580940b"
+    ],
     "57541f407f082a03": [
       "9ed44e541d4dff1337ce2d1391af8be07dda7ed4ae0e9aaa3e114de047537a3d",
       "8b8c300b8ee2b4cdeb94146212388987742ad04d334d04d82d0399d30af8f5f6",
@@ -5408,14 +5425,6 @@
       "34ba682f04d0fbd6b2edc58fa5e7906f0d0a3bb208ad182830795f4fd3ba5a30",
       "1698e46604b44e2da891f42d661b6b42b1d73af4a621871a74763128cb7209b1"
     ],
-    "6a72bc04b51f578c": [
-      "cd063f37409ff62d969fa8db065af1e29c2c8cfc350d4a8ec2d27992e0810632",
-      "ca1e44ea8d137621b5056c9c1e64fb00e90271b5faa8efdf31a5a2c9078e5f70",
-      "f871577013e05aa9a7f2253f7da278649950f7353b4fc70b93ca8871b8424057",
-      "8a6da9cdf974854ed1b2c91249351b3a0708545004869b71f0906d50349f295e",
-      "7c4996f9c110c6c2819f5980deaadabbf1ceb5623aaf439aaad1526abca10173",
-      "33474440d729632a61bf170ba8826f8386145898999b5e8b8d82d084a2a2fc7f"
-    ],
     "6ad4cbce720263c1": [
       "b2b5055f29d9ffec58be9d9b2f01b42ef5774313f9d36098b79d3a9188d9c9db",
       "ce51372658e58c7320e98fee61787fec22d1c03474c5ab33ef65b503d0c1ea86",
@@ -5542,15 +5551,6 @@
       "d0820dcdb65537245bb91ec3549a144dd58b46f636b44493adea61139c27b709",
       "91996d511ecbd6861c6786c33b20ed6a7eef3e3af11391bccc7ede4977559672"
     ],
-    "6d6111b65218efc0": [
-      "553a47664ff68ebd2322440bb690a3a8afcfbb998fce4b309d5905adc807d22b",
-      "90b8f1d3600d843774ad2b9796e4fb3d0abba2e417067c025fed3b3c7d8e545d",
-      "577ddb2b4ef78c41a5473de0e0f43ecbc4511ccef79b6cab54246716b8389c18",
-      "43ba8d1168cfe42ae83e959baf507a76892d5cf07e0c92998af7536c1cd2e2e6",
-      "4382156a6201c78aff60e3d471e2d287424b991b1ec97d9cdc9def6ef65eeaf0",
-      "ed037a567c9a768a3ae3c8a28e947e110596a0ce6a43c07f37bb3cf813cdc9d3",
-      "c1d3e76bafb10499ecf2b43824b6b13842d78ef702ad5cd78b2e887ceaabfa6a"
-    ],
     "6d77ce6dc95c94b3": [
       "1dfae07a38abad56b831a0310dcdd75e79bd922e97cc701dd497f3326a46915d",
       "e296ab7ba9af7e555e4de23572c09f8fec6141a09ecb1b8b1747d0d610178db2",
@@ -5672,6 +5672,12 @@
       "ba2763597640fdc457f4981dde1ffb6fc46121b635591f8b0001e59cf5e4ef41",
       "ce940b7e38182e23474a46200d6a1f5c78e6b1d270cef280f185ed01bd1e4afd",
       "7bc1780c414125d44d22bab09a44248113fa317d0498d33a399f7a838ff53887"
+    ],
+    "6fba22c36fdd1002": [
+      "6f5bc9cbeb56975ce99ad26e9658f46df92a06384b35a3909f05677df46d5212",
+      "eee8ec6a91dfee5515bfdda0d4abcc7ea615160e96ea3a609f2591d9d61f4084",
+      "b9a0d98a82de845dbc94b613634c7a9f5a40414a294e97d68c29b9e12808fa0e",
+      "09b22f0702106069133aa4f7502d3021e256ea1eee5a1e6ee74f9aab1a82eff6"
     ],
     "7040c0d93b487fac": [
       "1b6aeefb04c8d28674912d1a6122f8c78435fbc5ed148935d4259217523b9133",
@@ -6185,11 +6191,6 @@
       "d9af96feca218470523243e93678864cf1a2452ff72f1aa18d9f4454b91fd360",
       "2c64374e82e44efafda53f7526d1a19e2e0dbce90b8937525054f51a6ceb0c6d"
     ],
-    "77d180905f04e648": [
-      "850f9c505373d0d3ebbeaca9891f0761e6561237d97b31a6760d9080ae9f1c97",
-      "a4f0fae373548054b2ba135ed8b771c64b12ebf2203ffb326efc6ef871096137",
-      "980c27ef8f6b9ac556095ff102d91084556bcce3ecd9391a857557e3a2567bf7"
-    ],
     "780904a051bf3e9e": [
       "bb4cfd8ca3b7616a346c519b133dffc63525c0d84d2a467716b09a47d84329dc",
       "4748c63e1cdbded8dcf7900984247f724021f9bc91acaad3418d7be1135b9d88",
@@ -6569,6 +6570,13 @@
       "52dc8be300812c7991271bbe77b232fdb2bbcc14aa616be40dddad4e80bfc73d",
       "7913ad82c7ddac575915c3fd0af8b2f1e5dc9d56c2d4ea1724ab75786addf107"
     ],
+    "814d21828c5a7872": [
+      "27de4cdf6ee01930f9127e5f33917ef1078eb6e131c0b2f14e29d6aa414a70e9",
+      "5d62ba7aa596c6d76cd0909f1caa252770b4bdfd5f9eccb083d0b0841a886836",
+      "c7b7ac39d5fc7cbc6bd84e7cab48250181b8fc1b623c35e1617577a239d6ea04",
+      "c16ea585447340be4231c092d84c46682233187d53c7552ece5a32dd97bde137",
+      "1d71f4f04d44b3775a806d9fcfccbab8b029ab154192d73b4c6c04990dfd9898"
+    ],
     "81df4d986b922d69": [
       "c55235691ca08cf451977c563bc6fb23217506650cc67a0731ce40c57b7cfcb2",
       "ecb08417b062f62444b0f7d146990be57b06a66f25fb8e42a7944b7d9105a64c",
@@ -6875,6 +6883,12 @@
       "17199d5aca91ea7f069f4f2391a7091d639589c31022cc3f83b96627a85ec0ba",
       "d54281c9ceb753043aa1e7bac6182a33b6609eed1da82917407ea9b8719393c4"
     ],
+    "8a1a837d4f106c39": [
+      "03eb5af1080a461b52525104c2a4d86a611843e70f4637140909f8b3326b05aa",
+      "f62bca62afed19b4442cad0e40661c7c1b121147eed513c398dd453c1e5003dc",
+      "5e2d9b43a12c3276dd59a305abe08a7a1f5a434170aa045e7078c1a3c39b47e2",
+      "e1ddab1883afd5a22464dfa5e0f7525618cf6921816e69731d372071e65a322d"
+    ],
     "8a286e2b471b11d5": [
       "bec2bca83e8ddda52375c1a4cf06932c69c435d818db62aefb33e42486b58899",
       "8ed334fe4d83a6a7a1284562347040460540d0831df6590cefa2b528045fe805",
@@ -7126,6 +7140,20 @@
       "1b1d9143a9bafda5b4749868177c167b6d65b900889998f3a4e0334a4932aff9",
       "f317e1660ef5f875fdbf0a6cfd381ad6dd9346458a3dbb09914c886f55aabddb",
       "a4f28392cd88b0aeae64532bba834620d28876d39f8dc24fe465c1911c9f43e4"
+    ],
+    "9020d9127a0a11c1": [
+      "cd063f37409ff62d969fa8db065af1e29c2c8cfc350d4a8ec2d27992e0810632",
+      "ca1e44ea8d137621b5056c9c1e64fb00e90271b5faa8efdf31a5a2c9078e5f70",
+      "f871577013e05aa9a7f2253f7da278649950f7353b4fc70b93ca8871b8424057",
+      "8a6da9cdf974854ed1b2c91249351b3a0708545004869b71f0906d50349f295e",
+      "7c4996f9c110c6c2819f5980deaadabbf1ceb5623aaf439aaad1526abca10173",
+      "33474440d729632a61bf170ba8826f8386145898999b5e8b8d82d084a2a2fc7f",
+      "4e7fb0f4f29893a3fa226150e4374a7a42c39c22c93c3bc978fdb5830745a76d",
+      "b14a3a0a0f6956157e9699fc39796faffea06df2e4f832bd4147f497746e51a3",
+      "9b66c7d0dc2e6789faafb16fbc4e7cf2e6cdb485469257766106aac422a69653",
+      "69d108130b17c3e8b183c7f44f84aaa080cadeb343b25ef0816fc2ccc19ad2c1",
+      "41ce489e4392c8b606bc965476c390c9f634ed3021129e4ee5b6d98017933974",
+      "42b3eed28199d6ffb1d0b205695bd2502de77559200eba5a6159fc60f647a7e5"
     ],
     "9039fb06c56c7cc0": [
       "9039fb06c56c7cc03c1e0cf0ae0247276be60fb721f1b66f3b40b7d611100a0d"
@@ -7395,6 +7423,11 @@
       "2b19627d3ac8a8292660a70c16126587d833e2a1460db309184d834d13b823cf",
       "22da9dc8dab48c7f413e6bdaafe6557762494aa324b17f15ef048944ba70ac77"
     ],
+    "9968bf2a6d79299e": [
+      "c6fd4e6c5f04eea041c01921104e160a4dc4704d6b82d85b94e4f23862555667",
+      "d7d51c9934976f6e9f982fb6f7c77f374f8643818050a4e746d2f8f14e82392c",
+      "17a3e3d4017ae54e22a3966590fa50bd4ea31dbed4141b16c4e5341cf4f68da4"
+    ],
     "99e43b63c10886e0": [
       "8f2468ba729ea03a96139bd69126651499e267bfa97427a7ea2a9e110de2c4b6",
       "ec664eeff1e6126aaaed57d15460ef45d32903ae8b7220848679971153ea14be",
@@ -7476,6 +7509,19 @@
       "9895adf0e93c43d35e9b3e1491aee9280c0aa79bc2f310bdd17a290d63ad7609",
       "dfa73a5aafe808c7a4ad1ffec900feca9113519df159d0a49933eeafe4896ec4",
       "09826e20731fb8b0af4fa7a4214682fd08dc07cc158cbedb4f22be98531e1e55"
+    ],
+    "9b4addeb552d849f": [
+      "abd5f55019e38ccdc0bb7c767dff6f87fdba441efaf8f9d02ac7e233ad6a6367",
+      "761db3c7c07fc585c2a61f9de84163a9136f9dd11aa096d74bf155acd16db3ac",
+      "80e846b956881c977d2be023c30d35a395251b2f72e9042e8fb2785198dd104f",
+      "5ef7f5853faf2db14d787e0cb63f439307c8f79655d7fe10410a780becf86237",
+      "225010e837cce1ecc53c7a28e08444dba3b4fb4034ed09e85fbb664afc1ba741",
+      "387ddf5efbbb5c40390c030ba3ca2df4ce77f561c74ca063b002e46518941314",
+      "f281f734a3115d564a3a9a85d76cfa9d9c419b84a2fbe6f45fcc24bce58cc1dc",
+      "059c2fb811d793d07b7a07676cd67da079e1e6fcdf568ca258a2620a26490880",
+      "85a12cf5bc368a3eb4d7c119de50592ed15e2e79b6d40fa989f1f247b0236712",
+      "3aa0c30761eca4f994be9b49f2157ad1e42c93bd7bd49ede311795dab4d64067",
+      "ed4f6456f39b658c1955258a9e6c999d7e8e31cb0af2db6ed2db4f802c4058e6"
     ],
     "9b94adfd1325f788": [
       "8d8011990263df9886b0561da1e52ff82852b27b27d782caa42cd4d7857fe7fa",
@@ -7655,6 +7701,10 @@
       "da4199d9b91e7fc57de18f5ad07fb53f86747ffb70b0575c904f82d5219f03f8",
       "fce8043bd6e009b126f57f9425bddb830e3ef155e9bcc5e3de46e1a240a16575",
       "8d2379984b961676c761975260e1f117ab2a836253405c2c712810bf2f15ff7c"
+    ],
+    "9ef69f876eba4e83": [
+      "feff14d8cd15894e09b9a10d661bc594e66a9934a395db1d0b7aee76889399a7",
+      "963317615dc5d2a205ef11eb6120c97e3e5ba23906f66ecc58911d042cd27d86"
     ],
     "9f07b242948de72b": [
       "f867686f1247239e1f092327b678a11cb10b7b2c427b0a6ec2ec1746856aa384",
@@ -8622,6 +8672,35 @@
       "bb17f5074604d3377c15cdb29d4edcf9c0f7d24d01ed0151d8dcfb937034d670",
       "7dc9f78a49ffe0c344a21955ec8c35ce580acae9517d440a0762676154859900"
     ],
+    "b344a896643ad3dd": [
+      "4272a285ca76785d5d547292ee376cc6fff720c1a07a8c8cac2454337abe50e4",
+      "db942c5b37732df486197d41f39c6b4ab924140463be3b9d7bcf5fccc3c91fc3",
+      "f8538011c3bb68beb31b4f703a27ab8d2834158c24acd1ed5daeb939bed5661b",
+      "08417e4a8f320476d9b60dd36dd1b652802318e860c6211a2b704cd053d066c6",
+      "bb338cb1298efb12cbfa09864403063a6bb43faf9f1d5f8e182685b615133dba",
+      "810ef5bf682e89404ca342347e209c7e251cf0ccfad91263812a61fb8cb8690c",
+      "837069f2400dda3f1f10a9f7c48712f360a9e299a8769c2660498f570f4223ad",
+      "bcf875bd919fac931010c5a2ae9d0c301a65a7fdf9555a520dcebbe3537d52eb",
+      "297c60c6aba88efe8d95f8746ce92191c3b8a84614365300e90da54731761d46",
+      "71d017ba8d6f162a4c122bdeb365b3b13e6c55abfd4e71d6d712b81adaad6bae",
+      "ba779e970a2f133aaa8764e57b350eee6c327734b533e6e1caa8c7a20a323d7f",
+      "563d181b5aeb39ffc3dfa31ddb6fb19b6970858fbe5ce94114f1e8f68a3680e8",
+      "d6fd282b3a8e66bc973a2ded411c66e22a321564dfcc6a72ff48b2c568bc8ace",
+      "1e0e5d3c810f5d0c7e0bd4fa9223a3d1e2b12de86037d1c6330fd95488820ff5",
+      "0f6907edeec3d9608d26d681b6be93de4d43fcc15753628da4d04e03607c29bc",
+      "f08b6547bdc68891b08c214722d5a836b9f29c5e1516c2f9275f4737df10dfdd",
+      "af91c3a17c004072c2296bfa9351ab72bc359a99f2584cfb6eec68ae19336afb",
+      "d5e68a47b1dc8a837f7e9058d0c4dae6f692b68723bbeac9ed5179cfadb3b822",
+      "2fa39e0eb5c7d84a83f2b90183e5d1892dae29b896b4d6b3cde7dfe536102753",
+      "a45e591f6c0f9fd548caed3a660d1fa74b3e7b127e02927be21e8033aeb5fcc2",
+      "932af78e9e22c72f675b068af780937812477bc10f69c8b1d08c86d37875369c",
+      "a5635c7a16520ad323fdf0b8ec3d944c51a282e7beeb7d72c85fb0d382af68f5",
+      "f731f0a960df668822ea3a4688a0843f427abfd1d731337bdfaad471b212075e",
+      "f19bffa0f2d5600bdbfa8d78746b758b39733f003b2e62b30f147b66435a6e58",
+      "b928acaec7f28811519636fdbd9063ca9e82f08b7b0e326e94f90d61e5c9a893",
+      "6ee40614d90eedee78e09baff816174d5461381e36141741aab8630401b924cc",
+      "ad767e59f39c3b88da7b40dc38b8e30dac62b72848c6b6fc6b5d57547f51d583"
+    ],
     "b40470008f637181": [
       "ef106277d594905d45afab11f63fcadb639dc6c0d014e31fc3d9493dd15f42ff",
       "a4d0ae8574201a19b4fe8e9673e45bc1e61d4c6796b374af4f87406779daa9b4",
@@ -8699,6 +8778,21 @@
       "f7e5e6631715c8abfe64a69389c46d148a841b8386db7909c17a666bb2ab1a33",
       "e7a00dcb303f0ec4a34922c0bbcb603eb744bd79c33f3a68e09fe2eff6ea310d"
     ],
+    "b5786d53b9b3772e": [
+      "b4c9fcab359048a74b4a2be185f1c3cced20b15856ab07b3548e757869ccc290",
+      "2ee3e1920a12722bc94eb97caad5440723ba76af4deeec466967f97cee2bb7b3",
+      "76d662b7ab498bf6b625912d7ae39f638cf17b4184788db93ec95aaaa6c76e0a",
+      "34cd00114000644f825c58c7b9e3af4b1ba7983355e4b4aa4127fab0c6a16050",
+      "f316d1b0fb9cb9de7172c075a2bdf09b91fdd3fc7cdea7c173dc0f987d75ac32",
+      "a8789a9888aee4f607ef9de1a6bba90a7fe97fe9c41107c2faf0731b2561f532",
+      "422c27bd1934510be43ac8758ec838345e47954f6bb2ce0c941061940e8897f3",
+      "27ad7ef70905cd6c1cce4eab846f41044c48389eed9f1549baaa8ac437f6bd96",
+      "cd5e3694bf2a5631561cd7c794a5fa9d0bebad416bc54964ac9380b5c7686f8b",
+      "b1d061a03ec709848069ac594cb4dc52389c8137126f5eb0e5f374543c526875",
+      "9f8e96fda6e40cd2b3774b377b93f1ea484d24265329ddbeafc15db7f5f0329a",
+      "bef4cc2d9d859c4c6abdc1f9cf38829f02cb5a7548698a5311addcf3afb05d42",
+      "5a3fb0dcedf2187fd52e5b40632f1cc65ae44b1738e739cd9164173a43964ecf"
+    ],
     "b57f54b715e5532d": [
       "4e88eba93c7e1992717e9f0dd67aad481286c385bdc3ef0fe620f931f49181ce",
       "4d03a891e047274359bc946f23d50a5c1a69d970306bdc40adc9907ea404cd05",
@@ -8723,32 +8817,6 @@
       "229597886f2ccc3e7c052cb37400fbfacd6f0c0427cfd11aa1ce16ed8157cd45",
       "c10d07ab877bc3b944b2421282a20c324d555ba99bd4cef6e167d26b16c55cbc",
       "88eb98f1c85f1b0aa3a1b6f981895ee1708fafa94ae3cc32a0455debcac2018a"
-    ],
-    "b5ae9697bae7bee9": [
-      "4272a285ca76785d5d547292ee376cc6fff720c1a07a8c8cac2454337abe50e4",
-      "db942c5b37732df486197d41f39c6b4ab924140463be3b9d7bcf5fccc3c91fc3",
-      "f8538011c3bb68beb31b4f703a27ab8d2834158c24acd1ed5daeb939bed5661b",
-      "08417e4a8f320476d9b60dd36dd1b652802318e860c6211a2b704cd053d066c6",
-      "bb338cb1298efb12cbfa09864403063a6bb43faf9f1d5f8e182685b615133dba",
-      "810ef5bf682e89404ca342347e209c7e251cf0ccfad91263812a61fb8cb8690c",
-      "837069f2400dda3f1f10a9f7c48712f360a9e299a8769c2660498f570f4223ad",
-      "bcf875bd919fac931010c5a2ae9d0c301a65a7fdf9555a520dcebbe3537d52eb",
-      "297c60c6aba88efe8d95f8746ce92191c3b8a84614365300e90da54731761d46",
-      "71d017ba8d6f162a4c122bdeb365b3b13e6c55abfd4e71d6d712b81adaad6bae",
-      "ba779e970a2f133aaa8764e57b350eee6c327734b533e6e1caa8c7a20a323d7f",
-      "563d181b5aeb39ffc3dfa31ddb6fb19b6970858fbe5ce94114f1e8f68a3680e8",
-      "d6fd282b3a8e66bc973a2ded411c66e22a321564dfcc6a72ff48b2c568bc8ace",
-      "1e0e5d3c810f5d0c7e0bd4fa9223a3d1e2b12de86037d1c6330fd95488820ff5",
-      "0f6907edeec3d9608d26d681b6be93de4d43fcc15753628da4d04e03607c29bc",
-      "f08b6547bdc68891b08c214722d5a836b9f29c5e1516c2f9275f4737df10dfdd",
-      "af91c3a17c004072c2296bfa9351ab72bc359a99f2584cfb6eec68ae19336afb",
-      "d5e68a47b1dc8a837f7e9058d0c4dae6f692b68723bbeac9ed5179cfadb3b822",
-      "2fa39e0eb5c7d84a83f2b90183e5d1892dae29b896b4d6b3cde7dfe536102753",
-      "a45e591f6c0f9fd548caed3a660d1fa74b3e7b127e02927be21e8033aeb5fcc2",
-      "932af78e9e22c72f675b068af780937812477bc10f69c8b1d08c86d37875369c",
-      "a5635c7a16520ad323fdf0b8ec3d944c51a282e7beeb7d72c85fb0d382af68f5",
-      "f731f0a960df668822ea3a4688a0843f427abfd1d731337bdfaad471b212075e",
-      "f19bffa0f2d5600bdbfa8d78746b758b39733f003b2e62b30f147b66435a6e58"
     ],
     "b60cf70a0fd7cc9b": [
       "307944229482f8daed9fbb9617371fa69bc47896c41816f4c04d5e2a3b6b311a",
@@ -9359,17 +9427,6 @@
       "729484ea61c6a946ec27453a20f5790278b5b656add6ebad8917f68d2133825e",
       "a7f2968b651bff5b3cdaf5a35b52320c0c17a0f8389fbd3fc2f314fac1f93793"
     ],
-    "c3f7029c3cec31ed": [
-      "abd5f55019e38ccdc0bb7c767dff6f87fdba441efaf8f9d02ac7e233ad6a6367",
-      "761db3c7c07fc585c2a61f9de84163a9136f9dd11aa096d74bf155acd16db3ac",
-      "80e846b956881c977d2be023c30d35a395251b2f72e9042e8fb2785198dd104f",
-      "5ef7f5853faf2db14d787e0cb63f439307c8f79655d7fe10410a780becf86237",
-      "225010e837cce1ecc53c7a28e08444dba3b4fb4034ed09e85fbb664afc1ba741",
-      "387ddf5efbbb5c40390c030ba3ca2df4ce77f561c74ca063b002e46518941314",
-      "f281f734a3115d564a3a9a85d76cfa9d9c419b84a2fbe6f45fcc24bce58cc1dc",
-      "059c2fb811d793d07b7a07676cd67da079e1e6fcdf568ca258a2620a26490880",
-      "85a12cf5bc368a3eb4d7c119de50592ed15e2e79b6d40fa989f1f247b0236712"
-    ],
     "c484940cf757b02e": [
       "0133eb5c2798bb10d6af65359e06e199636c69c43a24ff6da1f5b4c784d47fd6",
       "061bbaff2cb1ef79654e5a63700310e011e933a449a78f281326653b6492467e",
@@ -9486,6 +9543,13 @@
       "ef5d01a6399708f8e781754f8a2c751ea61b6e8e7c72763b56772715b05c2a4a",
       "00239f8f5d2b383647096576e0d708d3f4c3735e85a03a59f9561351a77f61cc",
       "20618016ab77b2cfb6d9bb261e3f44cdf2577e566337053f8b6cef7781c4e1fd"
+    ],
+    "c6b0c8b8930c78d1": [
+      "850f9c505373d0d3ebbeaca9891f0761e6561237d97b31a6760d9080ae9f1c97",
+      "a4f0fae373548054b2ba135ed8b771c64b12ebf2203ffb326efc6ef871096137",
+      "980c27ef8f6b9ac556095ff102d91084556bcce3ecd9391a857557e3a2567bf7",
+      "73c158d55ffb463ba0523a81188cafc6ffa851a381680a4b64cb0efc3be9565d",
+      "b065ca60fac832503c6ac77cef356b2d764a7c858889e9bbd4ec372ba5a75a7b"
     ],
     "c72c3923c9521692": [
       "0643ecc2d39c95da98f994643e3544f4663a72f0e4829c9fd3fdd057df3a7f3f",
@@ -11747,8 +11811,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 922,
-      "titleCount": 8549,
+      "fileCount": 931,
+      "titleCount": 8592,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11785,6 +11849,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "9b27d2992decf8cb",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_round_failure_meter.test.js": "2ab801a5f33393d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_conflict.test.js": "9162b9bdb2d0bb05",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
@@ -11909,12 +11974,12 @@
         "test/unit/api/metrics/hub_metrics_attestation.test.js": "d5d68fe99c81e399",
         "test/unit/api/metrics/hub_metrics_checkpoint.test.js": "05158805f986969c",
         "test/unit/api/metrics/hub_metrics_governance_overdue.test.js": "3add9c5f3c63ad18",
-        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "6d6111b65218efc0",
+        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "0a741541b64b1cd8",
         "test/unit/api/metrics/hub_metrics_price_sources.test.js": "f68ecdd0c0b2d64d",
         "test/unit/api/metrics/hub_metrics_source_liveness.test.js": "9845ef612b448cb1",
         "test/unit/api/metrics/hub_metrics_stake_share.test.js": "f662a09764eebc02",
         "test/unit/api/openrpc_coverage.test.js": "d7b430a267fdffd6",
-        "test/unit/api/p2p_config_oracle_cadence.test.js": "77d180905f04e648",
+        "test/unit/api/p2p_config_oracle_cadence.test.js": "c6b0c8b8930c78d1",
         "test/unit/api/rate_limit/rate_limit_policy.test.js": "0af56bff93fd06c4",
         "test/unit/api/rate_limit/rate_limit_tiers.test.js": "a631601e6a772ed4",
         "test/unit/api/rate_limit_snapshot_route.test.js": "bddb3baaa2485755",
@@ -11956,6 +12021,7 @@
         "test/unit/attestation/consensus/judge_model/attestation_consensus_018_judge_model_re_signs_the_canonical.test.js": "c3e9c2545e38c27e",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_effective_time.test.js": "9e073541d39972ea",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_leader_stall.test.js": "63539e3be3ae6881",
+        "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_no_quorum_leader_gate.test.js": "6fba22c36fdd1002",
         "test/unit/attestation/consensus/messages/attestation_consensus_000_handlecommit_commit_after_winner_is_set.test.js": "cf699c82a9baa5ad",
         "test/unit/attestation/consensus/messages/attestation_consensus_001_handlecommit_commit_before_the_round_exists.test.js": "a638f5e3c25b04c7",
         "test/unit/attestation/consensus/messages/attestation_consensus_006_early_message_buffer.test.js": "c60dd2259bc34f9b",
@@ -12009,6 +12075,7 @@
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_003_publishing_a_window.test.js": "df31c62269909e83",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_007_window_membership.test.js": "6e552b32752fd416",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_016_an_empty_window.test.js": "292b1c61d4ca49c9",
+        "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_missing_txid.test.js": "9968bf2a6d79299e",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_004_getbroadcaster.test.js": "338e9f983f5a999d",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
@@ -12167,6 +12234,7 @@
         "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "f29ab086c1ed6b4d",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_sentinel_parity.test.js": "56e2effa6675b4fa",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
         "test/unit/consensus/stake_weighted_quorum.test.js": "9163864e09185997",
         "test/unit/cross_chain/bridge/cross_chain_bridge_activation_resolve.test.js": "2635b20b3c8ae92e",
@@ -12215,8 +12283,9 @@
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
-        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "c3f7029c3cec31ed",
+        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",
         "test/unit/cross_chain/cross_chain_engine_03_quorum_locking.test.js": "628aa61fb442f1c7",
+        "test/unit/cross_chain/cross_chain_engine_attestation_store_redrive.test.js": "8a1a837d4f106c39",
         "test/unit/cross_chain/cross_chain_engine_follower_round_open.test.js": "d75dbb4b8740e1a4",
         "test/unit/cross_chain/cross_chain_engine_propose_height_bound.test.js": "5089943d915335dc",
         "test/unit/cross_chain/dex/cross_chain_dex_consensus.test.js": "e5cc0e43db1619aa",
@@ -12459,6 +12528,7 @@
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_17_catch_up_sweep_faults.test.js": "807669e8cca07fe6",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_partly_landed_window.test.js": "470727669fe89453",
         "test/unit/oracle/publisher/batch/price_batch_compression_failures.test.js": "40dd68082fe3dfe3",
+        "test/unit/oracle/publisher/batch/takeover/oracle_publisher_batch_takeover_read_error.test.js": "9ef69f876eba4e83",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_01_confirmed_utxo_reserve.test.js": "c72c3923c9521692",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_02_confirmation_watchdog.test.js": "667e5b369f187865",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_03_watchdog_fail_soft.test.js": "f85c48de68c2ded3",
@@ -12470,6 +12540,7 @@
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
+        "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
         "test/unit/oracle/publisher/oracle_publisher_queue.test.js": "46015ea1a842c057",
         "test/unit/oracle/publisher/oracle_publisher_rank_and_balance.test.js": "d589dedf4edbecfc",
@@ -12500,7 +12571,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
-        "test/unit/oracle/round_cadence.test.js": "6a72bc04b51f578c",
+        "test/unit/oracle/round_cadence.test.js": "9020d9127a0a11c1",
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
@@ -12581,11 +12652,12 @@
         "test/unit/providers/llm/llm_provider_spend_audit.test.js": "359a475a03bf7a9e",
         "test/unit/providers/llm/llm_provider_spend_budget.test.js": "3fc94d10ee3c0a32",
         "test/unit/providers/llm/llm_provider_thinking_headroom.test.js": "b573b7385706cfea",
+        "test/unit/repo_guards/acorn_pin_twins.test.js": "3b0515bfd917f793",
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "2fe6a8ae4f10f89f",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -12663,6 +12735,7 @@
         "test/unit/validators/slash_detector.test.js": "7c7bdc6f10941487",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_gate_predicate_parity.test.js": "34f9901b8917d825",
         "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",
@@ -12679,11 +12752,11 @@
     },
     "ci:guards": {
       "fileCount": 6,
-      "titleCount": 101,
+      "titleCount": 104,
       "files": {
         "bin/test/check_frozen_set.test.js": "3bd7d783e07522e8",
         "bin/test/ci_fast_select.test.js": "dadd8267f80d0b30",
-        "bin/test/consensus_identity.test.js": "b5ae9697bae7bee9",
+        "bin/test/consensus_identity.test.js": "b344a896643ad3dd",
         "bin/test/reachability.test.js": "f94d590c6f5103a8",
         "bin/test/sibling_reference_map.test.js": "b329650aa29bbbf7",
         "bin/test/suite_title_map.test.js": "34fd516da6922017"
@@ -12726,8 +12799,8 @@
       }
     },
     "test": {
-      "fileCount": 922,
-      "titleCount": 8549,
+      "fileCount": 931,
+      "titleCount": 8592,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12764,6 +12837,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "9b27d2992decf8cb",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_round_failure_meter.test.js": "2ab801a5f33393d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_conflict.test.js": "9162b9bdb2d0bb05",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
@@ -12888,12 +12962,12 @@
         "test/unit/api/metrics/hub_metrics_attestation.test.js": "d5d68fe99c81e399",
         "test/unit/api/metrics/hub_metrics_checkpoint.test.js": "05158805f986969c",
         "test/unit/api/metrics/hub_metrics_governance_overdue.test.js": "3add9c5f3c63ad18",
-        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "6d6111b65218efc0",
+        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "0a741541b64b1cd8",
         "test/unit/api/metrics/hub_metrics_price_sources.test.js": "f68ecdd0c0b2d64d",
         "test/unit/api/metrics/hub_metrics_source_liveness.test.js": "9845ef612b448cb1",
         "test/unit/api/metrics/hub_metrics_stake_share.test.js": "f662a09764eebc02",
         "test/unit/api/openrpc_coverage.test.js": "d7b430a267fdffd6",
-        "test/unit/api/p2p_config_oracle_cadence.test.js": "77d180905f04e648",
+        "test/unit/api/p2p_config_oracle_cadence.test.js": "c6b0c8b8930c78d1",
         "test/unit/api/rate_limit/rate_limit_policy.test.js": "0af56bff93fd06c4",
         "test/unit/api/rate_limit/rate_limit_tiers.test.js": "a631601e6a772ed4",
         "test/unit/api/rate_limit_snapshot_route.test.js": "bddb3baaa2485755",
@@ -12935,6 +13009,7 @@
         "test/unit/attestation/consensus/judge_model/attestation_consensus_018_judge_model_re_signs_the_canonical.test.js": "c3e9c2545e38c27e",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_effective_time.test.js": "9e073541d39972ea",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_leader_stall.test.js": "63539e3be3ae6881",
+        "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_no_quorum_leader_gate.test.js": "6fba22c36fdd1002",
         "test/unit/attestation/consensus/messages/attestation_consensus_000_handlecommit_commit_after_winner_is_set.test.js": "cf699c82a9baa5ad",
         "test/unit/attestation/consensus/messages/attestation_consensus_001_handlecommit_commit_before_the_round_exists.test.js": "a638f5e3c25b04c7",
         "test/unit/attestation/consensus/messages/attestation_consensus_006_early_message_buffer.test.js": "c60dd2259bc34f9b",
@@ -12988,6 +13063,7 @@
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_003_publishing_a_window.test.js": "df31c62269909e83",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_007_window_membership.test.js": "6e552b32752fd416",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_016_an_empty_window.test.js": "292b1c61d4ca49c9",
+        "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_missing_txid.test.js": "9968bf2a6d79299e",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_004_getbroadcaster.test.js": "338e9f983f5a999d",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
@@ -13146,6 +13222,7 @@
         "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "f29ab086c1ed6b4d",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_sentinel_parity.test.js": "56e2effa6675b4fa",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
         "test/unit/consensus/stake_weighted_quorum.test.js": "9163864e09185997",
         "test/unit/cross_chain/bridge/cross_chain_bridge_activation_resolve.test.js": "2635b20b3c8ae92e",
@@ -13194,8 +13271,9 @@
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
-        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "c3f7029c3cec31ed",
+        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",
         "test/unit/cross_chain/cross_chain_engine_03_quorum_locking.test.js": "628aa61fb442f1c7",
+        "test/unit/cross_chain/cross_chain_engine_attestation_store_redrive.test.js": "8a1a837d4f106c39",
         "test/unit/cross_chain/cross_chain_engine_follower_round_open.test.js": "d75dbb4b8740e1a4",
         "test/unit/cross_chain/cross_chain_engine_propose_height_bound.test.js": "5089943d915335dc",
         "test/unit/cross_chain/dex/cross_chain_dex_consensus.test.js": "e5cc0e43db1619aa",
@@ -13438,6 +13516,7 @@
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_17_catch_up_sweep_faults.test.js": "807669e8cca07fe6",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_partly_landed_window.test.js": "470727669fe89453",
         "test/unit/oracle/publisher/batch/price_batch_compression_failures.test.js": "40dd68082fe3dfe3",
+        "test/unit/oracle/publisher/batch/takeover/oracle_publisher_batch_takeover_read_error.test.js": "9ef69f876eba4e83",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_01_confirmed_utxo_reserve.test.js": "c72c3923c9521692",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_02_confirmation_watchdog.test.js": "667e5b369f187865",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_03_watchdog_fail_soft.test.js": "f85c48de68c2ded3",
@@ -13449,6 +13528,7 @@
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
+        "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
         "test/unit/oracle/publisher/oracle_publisher_queue.test.js": "46015ea1a842c057",
         "test/unit/oracle/publisher/oracle_publisher_rank_and_balance.test.js": "d589dedf4edbecfc",
@@ -13479,7 +13559,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
-        "test/unit/oracle/round_cadence.test.js": "6a72bc04b51f578c",
+        "test/unit/oracle/round_cadence.test.js": "9020d9127a0a11c1",
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
@@ -13560,11 +13640,12 @@
         "test/unit/providers/llm/llm_provider_spend_audit.test.js": "359a475a03bf7a9e",
         "test/unit/providers/llm/llm_provider_spend_budget.test.js": "3fc94d10ee3c0a32",
         "test/unit/providers/llm/llm_provider_thinking_headroom.test.js": "b573b7385706cfea",
+        "test/unit/repo_guards/acorn_pin_twins.test.js": "3b0515bfd917f793",
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "2fe6a8ae4f10f89f",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -13642,6 +13723,7 @@
         "test/unit/validators/slash_detector.test.js": "7c7bdc6f10941487",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_gate_predicate_parity.test.js": "34f9901b8917d825",
         "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",
@@ -13654,8 +13736,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1002,
-      "titleCount": 9372,
+      "fileCount": 1011,
+      "titleCount": 9415,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13772,6 +13854,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_guards.test.js": "55e1648965218427",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_multisource.test.js": "7210baf7f28fa9ba",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_rootless_guard.test.js": "9b27d2992decf8cb",
+        "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_round_failure_meter.test.js": "2ab801a5f33393d4",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_conflict.test.js": "9162b9bdb2d0bb05",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
@@ -13896,12 +13979,12 @@
         "test/unit/api/metrics/hub_metrics_attestation.test.js": "d5d68fe99c81e399",
         "test/unit/api/metrics/hub_metrics_checkpoint.test.js": "05158805f986969c",
         "test/unit/api/metrics/hub_metrics_governance_overdue.test.js": "3add9c5f3c63ad18",
-        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "6d6111b65218efc0",
+        "test/unit/api/metrics/hub_metrics_oracle_publisher.test.js": "0a741541b64b1cd8",
         "test/unit/api/metrics/hub_metrics_price_sources.test.js": "f68ecdd0c0b2d64d",
         "test/unit/api/metrics/hub_metrics_source_liveness.test.js": "9845ef612b448cb1",
         "test/unit/api/metrics/hub_metrics_stake_share.test.js": "f662a09764eebc02",
         "test/unit/api/openrpc_coverage.test.js": "d7b430a267fdffd6",
-        "test/unit/api/p2p_config_oracle_cadence.test.js": "77d180905f04e648",
+        "test/unit/api/p2p_config_oracle_cadence.test.js": "c6b0c8b8930c78d1",
         "test/unit/api/rate_limit/rate_limit_policy.test.js": "0af56bff93fd06c4",
         "test/unit/api/rate_limit/rate_limit_tiers.test.js": "a631601e6a772ed4",
         "test/unit/api/rate_limit_snapshot_route.test.js": "bddb3baaa2485755",
@@ -13943,6 +14026,7 @@
         "test/unit/attestation/consensus/judge_model/attestation_consensus_018_judge_model_re_signs_the_canonical.test.js": "c3e9c2545e38c27e",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_effective_time.test.js": "9e073541d39972ea",
         "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_leader_stall.test.js": "63539e3be3ae6881",
+        "test/unit/attestation/consensus/judge_model/attestation_consensus_judge_model_no_quorum_leader_gate.test.js": "6fba22c36fdd1002",
         "test/unit/attestation/consensus/messages/attestation_consensus_000_handlecommit_commit_after_winner_is_set.test.js": "cf699c82a9baa5ad",
         "test/unit/attestation/consensus/messages/attestation_consensus_001_handlecommit_commit_before_the_round_exists.test.js": "a638f5e3c25b04c7",
         "test/unit/attestation/consensus/messages/attestation_consensus_006_early_message_buffer.test.js": "c60dd2259bc34f9b",
@@ -13996,6 +14080,7 @@
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_003_publishing_a_window.test.js": "df31c62269909e83",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_007_window_membership.test.js": "6e552b32752fd416",
         "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_016_an_empty_window.test.js": "292b1c61d4ca49c9",
+        "test/unit/attestation/publisher/batch/window/attestation_batch_publisher_missing_txid.test.js": "9968bf2a6d79299e",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_004_getbroadcaster.test.js": "338e9f983f5a999d",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
@@ -14154,6 +14239,7 @@
         "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": "f29ab086c1ed6b4d",
         "test/unit/consensus/rules_digest/consensus_rules_digest_heartbeat.test.js": "bc350e86fa265502",
         "test/unit/consensus/rules_digest/consensus_rules_digest_registry_loader.test.js": "9cfb9533963697d2",
+        "test/unit/consensus/rules_digest/consensus_rules_digest_sentinel_parity.test.js": "56e2effa6675b4fa",
         "test/unit/consensus/snapshot_truncation_carry.test.js": "79ce93722e67f595",
         "test/unit/consensus/stake_weighted_quorum.test.js": "9163864e09185997",
         "test/unit/cross_chain/bridge/cross_chain_bridge_activation_resolve.test.js": "2635b20b3c8ae92e",
@@ -14202,8 +14288,9 @@
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
-        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "c3f7029c3cec31ed",
+        "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",
         "test/unit/cross_chain/cross_chain_engine_03_quorum_locking.test.js": "628aa61fb442f1c7",
+        "test/unit/cross_chain/cross_chain_engine_attestation_store_redrive.test.js": "8a1a837d4f106c39",
         "test/unit/cross_chain/cross_chain_engine_follower_round_open.test.js": "d75dbb4b8740e1a4",
         "test/unit/cross_chain/cross_chain_engine_propose_height_bound.test.js": "5089943d915335dc",
         "test/unit/cross_chain/dex/cross_chain_dex_consensus.test.js": "e5cc0e43db1619aa",
@@ -14446,6 +14533,7 @@
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_17_catch_up_sweep_faults.test.js": "807669e8cca07fe6",
         "test/unit/oracle/publisher/batch/oracle_publisher_batch_partly_landed_window.test.js": "470727669fe89453",
         "test/unit/oracle/publisher/batch/price_batch_compression_failures.test.js": "40dd68082fe3dfe3",
+        "test/unit/oracle/publisher/batch/takeover/oracle_publisher_batch_takeover_read_error.test.js": "9ef69f876eba4e83",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_01_confirmed_utxo_reserve.test.js": "c72c3923c9521692",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_02_confirmation_watchdog.test.js": "667e5b369f187865",
         "test/unit/oracle/publisher/confirmation/oracle_publisher_confirmation_03_watchdog_fail_soft.test.js": "f85c48de68c2ded3",
@@ -14457,6 +14545,7 @@
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
+        "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
         "test/unit/oracle/publisher/oracle_publisher_queue.test.js": "46015ea1a842c057",
         "test/unit/oracle/publisher/oracle_publisher_rank_and_balance.test.js": "d589dedf4edbecfc",
@@ -14487,7 +14576,7 @@
         "test/unit/oracle/round/oracle_round_time_producer.test.js": "b10ef03fe6c19f24",
         "test/unit/oracle/round/oracle_submissions_role.test.js": "6529741614d8e8be",
         "test/unit/oracle/round/xchain_price_meta.test.js": "74f39be6d5103b6e",
-        "test/unit/oracle/round_cadence.test.js": "6a72bc04b51f578c",
+        "test/unit/oracle/round_cadence.test.js": "9020d9127a0a11c1",
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
@@ -14568,11 +14657,12 @@
         "test/unit/providers/llm/llm_provider_spend_audit.test.js": "359a475a03bf7a9e",
         "test/unit/providers/llm/llm_provider_spend_budget.test.js": "3fc94d10ee3c0a32",
         "test/unit/providers/llm/llm_provider_thinking_headroom.test.js": "b573b7385706cfea",
+        "test/unit/repo_guards/acorn_pin_twins.test.js": "3b0515bfd917f793",
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
-        "test/unit/repo_guards/consensus_identity_cli.test.js": "2fe6a8ae4f10f89f",
+        "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
@@ -14650,6 +14740,7 @@
         "test/unit/validators/slash_detector.test.js": "7c7bdc6f10941487",
         "test/unit/validators/slash_detector_01_state_and_proposals.test.js": "85467858f93cf75b",
         "test/unit/validators/slash_detector_clamped_band.test.js": "f2a144dcf4eb8db3",
+        "test/unit/validators/stake_share_gate_predicate_parity.test.js": "34f9901b8917d825",
         "test/unit/validators/stake_share_lose_one_margin.test.js": "33f689fbf51caded",
         "test/unit/validators/stake_share_monitor.test.js": "30403fa8c1785d5b",
         "test/unit/validators/stake_share_monitor_monitor.test.js": "c02138b31d90cc7a",

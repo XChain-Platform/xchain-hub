@@ -26,7 +26,9 @@ const COUNTERS = [
     ['_malformedFinalized', 'xchain_checkpoint_malformed_finalized_total', 1],
     ['_seqConflicts', 'xchain_checkpoint_seq_conflicts_total', 2],
     ['_seqDoubleSignRefusals', 'xchain_checkpoint_seq_double_sign_refusals_total', 3],
-    ['_cadenceStalls', 'xchain_checkpoint_cadence_stalls_total', 9]
+    ['_cadenceStalls', 'xchain_checkpoint_cadence_stalls_total', 9],
+    ['_roundFailures', 'xchain_checkpoint_round_failures_total', 5],
+    ['_selfAcceptFailures', 'xchain_checkpoint_self_accept_failures_total', 6]
 ];
 
 // A fake StateCheckpointEngine carrying only the fields the collector reads.

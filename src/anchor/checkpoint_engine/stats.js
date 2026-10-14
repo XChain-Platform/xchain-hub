@@ -41,7 +41,7 @@ module.exports = {
                 checkpoint_seq: Number(r.last_seq)
             };
         }
-        return {
+        return Object.assign({
             last_finalized_by_chain: last_finalized_by_chain,
             round_timeouts:          this._roundTimeouts,
             malformed_finalized:     this._malformedFinalized,
@@ -76,6 +76,23 @@ module.exports = {
             frozen_tip_ticks:        this._notMySlotTicks,
             frozen_tip_block:        this._notMySlotBlock,
             frozen_tip_stall_ticks:  this._frozenTipTicks
+        }, this.leaderFailureStats());
+    },
+
+    // The leader-side failure meters getStats reports beside the cadence ones.
+    leaderFailureStats(){
+        return {
+            // Per-chain rounds this hub led that threw before proposing. An entry in
+            // last_round_failure_by_chain means that chain's latest round produced no
+            // checkpoint; it is removed when a later round for that chain returns.
+            round_failures:              this._roundFailures || 0,
+            round_failures_by_chain:     Object.assign({}, this._roundFailuresByChain),
+            last_round_failure_by_chain: Object.assign({}, this._lastRoundFailureByChain),
+            // Leader writes of its own quorum-finalized checkpoint that failed, how many wait
+            // for a retry on the next tick, and how many were given up after the retry cap.
+            self_accept_failures:        this._selfAcceptFailures || 0,
+            self_accept_retries_pending: this._selfAcceptRetries ? this._selfAcceptRetries.size : 0,
+            self_accepts_abandoned:      this._selfAcceptsAbandoned || 0
         };
     }
 

@@ -234,7 +234,7 @@ function registerAnchorElectionTests() {
 
 function registerAnchorBundleTests() {
 
-    // The ANCHOR v7 bundle budget (D10). Same ceiling, different producer: the bundle
+    // The ANCHOR v0 bundle budget (D10). Same ceiling, different producer: the bundle
     // packs N checkpoint SECTIONS plus one attestation tail into one action, so the
     // knob that overflows first is the federation's SIGNER COUNT, not a chunk size.
     // Overflow is SPLIT chain-ascending, never dropped, because the decoder discards an

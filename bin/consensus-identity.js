@@ -22,7 +22,8 @@
  *   hub_only_rules_digest     sha256 over the rows in hub_rows.js, with the
  *                             gate-by-gate preimage kept beside it. These rules
  *                             have no indexer twin, so they stay separate from
- *                             the cross-repo digest above.
+ *                             the cross-repo digest above. Not pure either: see
+ *                             TWO OF THE SIX below.
  *   gates_field_hash          sha256 of the GATES field this hub signs into a
  *                             ROLLCALL v1 epoch, which is
  *                             knownGateKeys().join(','). Built by gatesFor()
@@ -48,7 +49,7 @@
  * reason this script exists rather than a one-line hash. Two digests that differ
  * say nothing about what to fix; the map turns "the digest changed" into "these
  * gates changed", which is the sentence an operator can act on, and it is what
- * makes an environment-shifted digest diagnosable in one read (see ONE OF THE
+ * makes an environment-shifted digest diagnosable in one read (see TWO OF THE
  * SIX below). The SIGNED wire field is knownGateKeys().join(','), built from
  * the key list alone, so it reads the same whether or not a carrier resolves.
  * That is why consensus_rules_digest takes each gate from the activation
@@ -70,13 +71,16 @@
  * is the config oracle, so its identity is entirely code-derived and this
  * script opens no socket, reads no .env and needs no database.
  *
- * ONE OF THE SIX IS NOT PURE, AND IT MATTERS FOR ANY PIN. The rules digest
- * hashes gate VALUES, and a regtest venue arms some gates from its own
+ * TWO OF THE SIX ARE NOT PURE, AND IT MATTERS FOR ANY PIN. Both rules digests
+ * hash gate VALUES, and a regtest venue arms some gates from its own
  * environment rather than from a committed height, so the same build reports one
- * digest in a bare checkout and another inside a configured container. A reading
- * records that environment as `env` (a pin with none was taken bare), --compare
- * refuses (exit 2) a pin taken under another or shaped for another tool, and
- * `consensus_rules_gates` in the JSON output names the gate behind a mismatch.
+ * digest in a bare checkout and another inside a configured container. The
+ * cross-repo digest moves with the REGTEST_ARMING variables; the hub-only digest
+ * moves with XC_OFFER_LIST_REGTEST_ACTIVATION through the entry's offer-list
+ * overlay (src/consensus/gate_registry.js). A reading records both sets as `env`
+ * (a pin with none was taken bare), --compare refuses (exit 2) a pin taken under
+ * another or shaped for another tool, and `consensus_rules_gates` and
+ * `hub_only_rules_gates` in the JSON output name the gate behind a mismatch.
  *
  * USAGE
  *   node bin/consensus-identity.js                    human summary
@@ -196,8 +200,8 @@ function coinConsensusPins() {
 }
 
 /**
- * The six values, read from the source tree with no socket or database; the rules
- * digest and its gates map also move with the regtest arming recorded as `env`.
+ * The six values, read from the source tree with no socket or database; both rules
+ * digests and their gates maps also move with the regtest arming recorded as `env`.
  * @returns {object}
  */
 function codeIdentity() {
@@ -254,18 +258,24 @@ const ARMING_READERS = {
     XC_CONTRACTS_REGTEST_ACTIVATION:      (env) => env.XC_CONTRACTS_REGTEST_ACTIVATION,
     XC_LISTS_MARKET_REGTEST_ACTIVATION:   (env) => env.XC_LISTS_MARKET_REGTEST_ACTIVATION,
     XC_LISTS_MARKET_REGTEST_TIME:         (env) => env.XC_LISTS_MARKET_REGTEST_TIME,
+    XC_OFFER_LIST_REGTEST_ACTIVATION:     (env) => env.XC_OFFER_LIST_REGTEST_ACTIVATION,
 };
 
+// Arm the hub-only rows through the entry's own overlay in src/consensus/gate_registry.js,
+// which the byte-twin REGTEST_ARMING cannot name; they move hub_only_rules_digest.
+const HUB_ONLY_ARMING = Object.freeze(['XC_OFFER_LIST_REGTEST_ACTIVATION']);
+
 /**
- * Every variable REGTEST_ARMING names, mapped to its raw value, null when unset.
+ * Every variable REGTEST_ARMING or HUB_ONLY_ARMING names, mapped to its raw value, null when unset.
  * @param {object} env the environment to read
  * @returns {Object<string, string|null>}
  */
 function armingEnv(env) {
     // The measured checkout's list, so under --root env names the variables that armed that tree's digest.
     const { REGTEST_ARMING } = loadFromRepo('src/consensus/gate_registry/shared_rows.js');
+    const names = Object.values(REGTEST_ARMING).map((rule) => rule.env).concat(HUB_ONLY_ARMING);
     const out = {};
-    for (const name of Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort()) {
+    for (const name of Array.from(new Set(names)).sort()) {
         // A variable with no reader would arm the digest unrecorded, so it is a refusal.
         if (!ARMING_READERS[name]) throw new Error(`REGTEST_ARMING names ${name}, which armingEnv has no reader for`);
         const raw = ARMING_READERS[name](env);

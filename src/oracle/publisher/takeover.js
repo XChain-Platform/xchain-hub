@@ -58,6 +58,7 @@ module.exports = {
     // Step in for a silent leader, or decline. Declines for four distinct reasons,
     // each of which must stay distinguishable in the log from "took over". Only one of
     // them is temporary: the ambiguity cooldown re-arms itself and comes back.
+    // An unreadable on-chain check declines as if observed but is counted on its own.
     async attemptTakeover(windowIndex) {
         if (!this.enabled) return false;
         let first = windowIndex * this.batchWindowRounds;
@@ -225,6 +226,8 @@ module.exports = {
             let rows = await this.db.hasPriceSnapshotsByRoundNumber(first, last);
             return !!(rows && rows.length);
         } catch (e) {
+            // Count it, so the polled status cannot read this hub's own DB fault as "the leader landed".
+            this.takeoverDeclinedReadError = (this.takeoverDeclinedReadError || 0) + 1;
             logger.warn(nodeUtil.format('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
                 ' are already on chain; declining takeover: ', e && e.message));
             return true;

@@ -97,6 +97,24 @@ module.exports = {
         this._cadenceStallLoggedAt = 0;
     },
 
+    // Count a per-chain round this hub led that threw before proposing, and keep its reason
+    // until that chain's next round returns. Runs at most once per chain per cadence or retry.
+    noteRoundFailure(chain, btcBlock, err){
+        let reason = String((err && err.message) || err).slice(0, 300);
+        if(!this._roundFailuresByChain)    this._roundFailuresByChain    = {};
+        if(!this._lastRoundFailureByChain) this._lastRoundFailureByChain = {};
+        this._roundFailures = (this._roundFailures || 0) + 1;
+        this._roundFailuresByChain[chain] = (this._roundFailuresByChain[chain] || 0) + 1;
+        this._lastRoundFailureByChain[chain] = { reason: reason, block: (btcBlock == null ? null : Number(btcBlock)), at: Date.now() };
+        logger.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + reason +
+                    ' (' + this._roundFailuresByChain[chain] + ' failed round(s) for this chain so far)');
+    },
+
+    // A round for this chain returned, so its last failure no longer describes it.
+    clearRoundFailure(chain){
+        if(this._lastRoundFailureByChain) delete this._lastRoundFailureByChain[chain];
+    },
+
     // Seed the cadence latch from persisted checkpoints so a hub restart does
     // not fire an off-schedule (extra DOGE-anchored) checkpoint. The latch is a
     // single global "last snapshot block we checkpointed at" (one round spans
@@ -135,6 +153,7 @@ module.exports = {
         if(this.observerHold()) return;
         this._ticking = true;
         try {
+            await this.retryFailedSelfAccepts();
             let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this.finalizedLatchHolds(btcBlock)){
@@ -185,11 +204,12 @@ module.exports = {
         this._attemptedCheckpointBtcBlock = btcBlock;
         for(let chain of this.chains){
             if(!this.indexers[chain].url) continue;
-            try { await this.runRound(chain, btcBlock, validators); }
+            try { await this.runRound(chain, btcBlock, validators); this.clearRoundFailure(chain); }
             catch(e){
                 // An indexer blip before the proposal: retryable here on a frozen tip, and
-                // the next block's leader retries the interval since no latch moved.
-                logger.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message));
+                // the next block's leader retries the interval since no latch moved. Each
+                // failure is metered per chain so getcheckpointstats names the chain and reason.
+                this.noteRoundFailure(chain, btcBlock, e);
                 this.queueRoundRetry({ chain, snapshot_block: btcBlock, block_index: null }, 0);
             }
         }
@@ -302,8 +322,9 @@ module.exports = {
                 let validators = await this.resolveCapabilityValidators('oracle_publish', retry.snapshotBlock);
                 if(!this.leadsCadenceSlot(retry.snapshotBlock, validators)) continue;
                 await this.runRound(chain, retry.snapshotBlock, validators, retry);
+                this.clearRoundFailure(chain);
             } catch(e){
-                logger.warn('StateCheckpointEngine: ' + chain + ' round retry failed: ' + (e && e.message));
+                this.noteRoundFailure(chain, retry.snapshotBlock, e);
             }
         }
     },

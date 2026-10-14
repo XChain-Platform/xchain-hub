@@ -25,7 +25,7 @@
 const { forwardableUtxos }  = require('../../lib/encoder/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../../lib/guards/two_phase_guard.js');
 const { abandonBuild } = require('../../lib/encoder/encoder_reservation.js');
-const { isAmbiguousSendError, isNeverSentError } = require('../../lib/guards/idempotent_broadcast.js');
+const { isAmbiguousSendError, isNeverSentError, requireBroadcastTxid } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -73,7 +73,7 @@ module.exports = {
         for(let i = 0; i < encoded.wires.length; i++){
             let result;
             try {
-                result = await broadcaster(encoded.wires[i]);
+                result = requireBroadcastTxid(await broadcaster(encoded.wires[i]), 'AttestationBatchPublisher');
             } catch(e){
                 let ambiguous = isAmbiguousSendError(e);
                 // THE HEAD IS THE ONLY WIRE WHOSE FAILURE CAN PROVE THE WINDOW IS UNTOUCHED.

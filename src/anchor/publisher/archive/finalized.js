@@ -53,9 +53,9 @@ module.exports = {
         // oracle_publish member forge a FINALIZED that (a) marks settled rows
         // archived under a bogus batch_seq -> stranded from full-parse recovery
         // (XANC-FINALIZED-STRAND-1), and (b) mirrors the anchor_archive reward
-        // crediting itself -> mints COLLECT-spendable XCHAIN, since the archive
-        // reward push is NOT retired by the anchor-reward flag-day (RewardTracker
-        // only derives anchor_<CHAIN> on-chain; anchor_archive still pushes). Fail
+        // crediting itself -> mints COLLECT-spendable XCHAIN below the archive-reward
+        // flag-day (at/above it applyFinalized retires that mirror and the indexer derives
+        // anchor_archive from the v1 archive head's publisher attestation). Fail
         // closed on an un-observed round: back-fill is local bookkeeping the rows
         // re-archive under a fresh seq if missed, and the elected leader records
         // its own reward directly (co-signers' mirrors are redundant, INSERT

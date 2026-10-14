@@ -26,6 +26,7 @@
 'use strict';
 
 const nodeUtil = require('node:util');
+const { requireBroadcastTxid } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -171,7 +172,14 @@ module.exports = {
         }
 
         try {
-            let result = await broadcaster(payload);
+            let result;
+            try {
+                result = requireBroadcastTxid(await broadcaster(payload), 'OraclePublisher');
+            } catch (sendErr) {
+                // A send that answered without a txid has an unknown outcome: dead-letter, never re-send.
+                if (sendErr && sendErr.missingTxid) sendErr.oracleAmbiguousSend = true;
+                throw sendErr;
+            }
             await this.notePublishedEntry(entry, entryRounds, result, spendToken, pass);
             // Successfully published. Drop from queue (do not add to remaining).
         } catch (err) {

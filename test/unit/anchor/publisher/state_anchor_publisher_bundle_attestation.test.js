@@ -271,7 +271,7 @@ function registerDeferralCases() {
     });
 
     it('a peer does NOT mirror the anchor_<chain> reward from V0_DONE at/above the flag-day', async function () {
-        // V0_DONE does not carry (and its canonical does not bind) which payload
+        // BUNDLE_DONE does not carry (and its canonical does not bind) which payload
         // version landed, so at/above the flag-day the mirror could mint a reward
         // for a degraded legacy fallback no live indexer credits. Peers therefore
         // skip the mirror entirely; live + recovering indexers derive the credit

@@ -20,7 +20,7 @@
  *
  ********************************************************************/
 
-const { XCHAIN_ATTEST_COMMIT } = require('./constants.js');
+const { XCHAIN_ATTEST_COMMIT, STORE_REDRIVE_BASE_MS, STORE_REDRIVE_MAX_MS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -54,6 +54,14 @@ module.exports = {
         return counted;
     },
 
+    // List the voters countedVotes counts: snapshot members only, or every voter when
+    // no snapshot population resolved.
+    countedVoters(pending, voteSet) {
+        if (!voteSet) return [];
+        if (!pending || !pending.memberPubkeys) return [...voteSet];
+        return [...voteSet].filter(pk => pending.memberPubkeys.has(pk));
+    },
+
     checkPrepareQuorum(attestationId) {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
@@ -85,8 +93,9 @@ module.exports = {
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
         if (this.countedVotes(pending, pending.commits) >= quorum) {
             pending.finalized = true;
-            // Do NOT clear the round timer here: it is the backstop for a store
-            // that never succeeds. It is cleared on the success path instead.
+            // Quorate rounds outlive the round timer: they leave memory only when the store
+            // lands (or the engine stops), so a peer-persisted attestation is never dropped here.
+            pending.quorate = true;
 
             let attestation = {
                 attestationId:     pending.attestationId,
@@ -95,13 +104,15 @@ module.exports = {
                 destChain:         pending.destChain,
                 confirmations:     pending.confirmations,
                 status:            'attested',
-                validatorCount:    pending.prepares.size,
-                consensusProof:    JSON.stringify([...pending.commits])
+                // Store the electorate that cleared quorum, not every registered key that voted.
+                validatorCount:    this.countedVotes(pending, pending.prepares),
+                consensusProof:    JSON.stringify(this.countedVoters(pending, pending.commits))
             };
 
             this.storeWithRetry(attestation)
                 .then(() => {
                     if (pending.timer) clearTimeout(pending.timer);
+                    if (pending.storeRedriveTimer) clearTimeout(pending.storeRedriveTimer);
                     this.markFinalized(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
@@ -114,19 +125,32 @@ module.exports = {
                     if (pending.resolve) pending.resolve(attestation);
                 })
                 .catch(err => {
-                    // Retain the round instead of deleting it. Both
-                    // handleCommit and this method return early once the id is
-                    // gone from pendingAttestations, so dropping it here destroys
-                    // a quorum-signed attestation that peer hubs have already
-                    // persisted, with no later COMMIT able to re-drive the store.
-                    // Reset the finalize flag so a retransmitted COMMIT does, and
-                    // leave the round timer (never cleared above) as the terminal
-                    // backstop that rejects and evicts the round.
+                    // Retain the round and re-drive the store on our own timer: peers send
+                    // COMMIT once, and the round timer may already have fired, so nothing
+                    // else is guaranteed to retry a quorum-signed attestation peers persisted.
                     logger.error('CrossChain: Error storing attestation after ' +
                         this.storeRetryAttempts + ' attempt(s), retaining round for retry: ' + err.message);
                     pending.finalized = false;
+                    this.armStoreRedrive(attestationId, pending);
                 });
         }
+    },
+
+    // Schedule another store of a quorate round with doubling backoff. The timer bails when
+    // the round is gone, replaced, or already mid-store, and re-enters through
+    // checkCommitQuorum so the in-flight claim (finalized) keeps one store at a time.
+    armStoreRedrive(attestationId, pending) {
+        let delay = Math.min((pending._storeRedriveMs || 0) * 2 || STORE_REDRIVE_BASE_MS, STORE_REDRIVE_MAX_MS);
+        pending._storeRedriveMs = delay;
+        if (pending.storeRedriveTimer) clearTimeout(pending.storeRedriveTimer);
+        pending.storeRedriveTimer = setTimeout(() => {
+            pending.storeRedriveTimer = null;
+            if (this.pendingAttestations.get(attestationId) !== pending || pending.finalized) return;
+            this.checkCommitQuorum(attestationId);
+        }, delay);
+        // Never hold the process open on a re-drive; stop() clears it on shutdown.
+        if (typeof pending.storeRedriveTimer.unref === 'function') pending.storeRedriveTimer.unref();
+        logger.warn('CrossChain: attestation ' + attestationId + ' store re-drive scheduled in ' + delay + 'ms');
     },
 
     // Record a finalized attestation id under the bounded FIFO ring (R2-CCF4).

@@ -109,8 +109,8 @@ module.exports = {
         // checkpoint INSERT/broadcast/emit below are all skipped and no
         // quorum-signed, unverifiable row reaches a mirror or the anchor poller.
         // Matches the leader tick persist (unguarded) and writeFinalizedMatch;
-        // callers (tick .catch, handleFinalized .catch, the leader accept .catch)
-        // log the accept error, and the FINALIZED broadcast is re-deliverable.
+        // callers log the accept error; a peer can be re-sent the FINALIZED broadcast,
+        // and the leader's own accept is re-run each tick (queueSelfAccept).
         this.refuseRootlessPersist(cp);
 
         let seated = await this.seatedCheckpointAtSeq(cp);

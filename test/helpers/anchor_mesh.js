@@ -90,7 +90,7 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
         // at full depth). Adversarial receiver-path tests override the stub.
         p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000', DOGE_INDEXER_URL: 'http://doge-indexer.test' }, opts.cfg || {}),
         capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
-        // Populated oracle_publish registry: the V0_DONE/FINALIZED handlers resolve
+        // Populated oracle_publish registry: the BUNDLE_DONE/FINALIZED handlers resolve
         // the membership set via getActiveOraclePublishPubkeys(null), which now falls
         // through to the registry. Mirrors a live hub (registry populated post-startup);
         // the empty-set case is the fail-closed startup window, exercised separately.
@@ -113,7 +113,7 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
 }
 
 // Default on-chain ANCHOR oracle: answer getanchoraction from this
-// node's own checkpoint rows so the honest receiver path (V0_DONE /
+// node's own checkpoint rows so the honest receiver path (BUNDLE_DONE /
 // FINALIZED for a checkpoint this node actually holds) verifies at full depth.
 // Returns exists:false for an unknown checkpoint (the phantom-txid case).
 //
@@ -132,7 +132,7 @@ function honestAnchorOracle(self, db, bus) {
         // broadcast on the mesh (bus.onchain, recorded by the broadcast
         // hook below); otherwise every fresh checkpoint would look
         // already-anchored and no publish test could run. txid-bound
-        // lookups keep the honest-echo model (tests inject V0_DONE for
+        // lookups keep the honest-echo model (tests inject BUNDLE_DONE for
         // anchors that "landed" without a mesh broadcast).
         if (!params.txid) {
             let mined = bus.onchain.some(a => a.chain === String(params.chain) &&

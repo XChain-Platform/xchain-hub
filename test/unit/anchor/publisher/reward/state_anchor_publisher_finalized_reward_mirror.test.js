@@ -77,8 +77,8 @@ function registerForgedFinalizedCase() {
         // signature alone let ANY oracle_publish member forge a FINALIZED. Without the
         // observed-leader gate the forge would (a) mark m1 archived under a bogus
         // batch_seq (stranding it from full-parse recovery) and (b) mirror the
-        // anchor_archive reward crediting the attacker (minting COLLECT XCHAIN, since
-        // the archive reward push is NOT retired by the anchor-reward flag-day).
+        // anchor_archive reward crediting the attacker (minting COLLECT XCHAIN below the
+        // archive-reward flag-day, where the mirror is still the peer rail).
         let bus = buildMesh(2);
         let follower = bus.nodes[0];
         let attacker = bus.nodes[1];        // a real oracle_publish member, but no observed archive election for seq 7

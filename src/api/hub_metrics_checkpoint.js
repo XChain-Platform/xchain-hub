@@ -42,7 +42,11 @@ const CHECKPOINT_SERIES = {
             'Signature requests refused because this hub already signed a different payload at that sequence',
             '_seqDoubleSignRefusals'),
         countSpec('xchain_checkpoint_cadence_stalls_total',
-            'Checkpoint cadence ticks that were due but this hub could not lead', '_cadenceStalls')
+            'Checkpoint cadence ticks that were due but this hub could not lead', '_cadenceStalls'),
+        countSpec('xchain_checkpoint_round_failures_total',
+            'Per-chain checkpoint rounds this hub led that threw before proposing', '_roundFailures'),
+        countSpec('xchain_checkpoint_self_accept_failures_total',
+            'Failed writes of a checkpoint this hub finalized as leader, retries included', '_selfAcceptFailures')
     ],
     gauges: [
         {

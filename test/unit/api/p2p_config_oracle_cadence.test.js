@@ -112,3 +112,19 @@ describe('src/api.js p2pConfig oracle cadence', function () {
         expect(cfg.ORACLE_SUBMISSION_WINDOW).to.equal(DEFAULT_ORACLE_SUBMISSION_WINDOW_MS);
     });
 });
+
+// Off regtest the env knobs never reach p2pConfig: the cadence numbers federation rounds.
+describe('src/api.js p2pConfig oracle cadence off regtest', function () {
+    this.timeout(20000);
+    beforeEach(resetRoundCadence);
+    afterEach(function () { sinon.restore(); resetRoundCadence(); });
+
+    for (const network of ['mainnet', 'testnet']) {
+        it(`pins the shared defaults on ${network} even with both knobs set`, async function () {
+            const cfg = await bootP2pConfig({ HUB_NETWORK: network,
+                ORACLE_ROUND_INTERVAL: '60000', ORACLE_SUBMISSION_WINDOW: '20000' });
+            expect(cfg.ORACLE_ROUND_INTERVAL).to.equal(DEFAULT_ORACLE_ROUND_INTERVAL_MS);
+            expect(cfg.ORACLE_SUBMISSION_WINDOW).to.equal(DEFAULT_ORACLE_SUBMISSION_WINDOW_MS);
+        });
+    }
+});

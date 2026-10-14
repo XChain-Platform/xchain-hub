@@ -96,7 +96,7 @@ class RewardTracker {
         logger.info('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
-    // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
+    // Record a single anchor-publish reward (ANCHOR v0 checkpoint bundle or v1 archive).
     // rewardType: 'anchor_bundle' / 'anchor_archive'; roundNumber: snapshot_block /
     // batch_seq. The publisher that paid the DOGE earns it. Below each reward type's
     // flag-day it is called on EVERY hub (the publisher at publish time; peers from the
@@ -124,7 +124,7 @@ class RewardTracker {
     //
     // The collapse above is a read-modify-write and MUST NOT interleave. Every
     // caller (StateAnchorPublisher.recordReward) is fire-and-forget, so a hub can
-    // have its own publish and a peer's V0_DONE/FINALIZED mirror in flight for the
+    // have its own publish and a peer's BUNDLE_DONE/FINALIZED mirror in flight for the
     // same (round_number, reward_type) with DIFFERENT pubkeys at once. Both awaited
     // the same empty SELECT, both fell through to the INSERT, and because the UNIQUE
     // KEY carries validator_pubkey both landed: a permanently double-minted,
@@ -204,28 +204,29 @@ class RewardTracker {
 
         // The row above is hub-local, and that is the end of it: the hub never writes a
         // reward anywhere else. Every anchor reward is derived from on-chain bytes by the
-        // indexer itself (per-chain from the ANCHOR v4/v5 publisher attestation, archive
-        // from v6), so a hub-side write would be a second, weaker source for a row the
-        // chain already determines.
+        // indexer itself (bundle from the v0 publisher attestation or a v3 fold, archive
+        // from the v1 archive head's attestation; the per-chain v4/v5 rewards predate the
+        // version restart and are never re-derived), so a hub-side write would be a second,
+        // weaker source for a row the chain already determines.
     }
 
     // The anchor reward amount to record, as a decimal string ('0.00000000' when the
     // configured legacy amount is not numeric). Pure: no DB access, so the locked body
     // keeps its statement order.
     resolveAnchorRewardAmount(rewardType, blockIndex, rewardNetwork) {
-        // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
-        // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
+        // At/above the anchor-reward flag-day an anchor reward (the v0 bundle today; the
+        // retired pre-restart v4/v5 per-chain wires before it) is DERIVED on-chain, and every indexer credits the FROZEN
         // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
         // therefore archive) that SAME frozen amount, or a recovered node (which restores the
         // archived amount) would diverge from a live node (which derives the frozen amount) when
         // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. The same rule extends to
         // `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
-        // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
+        // v1 archive head's publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
         // flag-day the legacy operator-tunable amount stands.
         // Gate on the REWARD's network (the checkpoint row's, threaded from the
         // publisher), falling back to the hub's own network only for callers that
-        // do not pass one. The build half (StateAnchorPublisher's v4/v5 payload
-        // gate) keys on row.network; re-deriving from this.hub.network here
+        // do not pass one. The build half (StateAnchorPublisher's bundle attestation
+        // tail gate) keys on the checkpoint network; re-deriving from this.hub.network here
         // diverged on a legacy-unscoped hub (network===''): a post-flag-day
         // mainnet checkpoint was built derivable (indexer credits the frozen
         // amount on-chain) while this half saw ''->inactive and ALSO credited +
@@ -237,7 +238,7 @@ class RewardTracker {
         let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
                                ar.isAnchorRewardActive(Number(blockIndex), network);
         // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
-        // from the ANCHOR v7 publisher attestation. Same frozen ANCHOR_REWARD_AMOUNT and
+        // from the ANCHOR v0 publisher attestation (or a v3 fold). Same frozen ANCHOR_REWARD_AMOUNT and
         // the same flag-day as the per-chain form it replaces, so a hub that records it
         // and an indexer that derives it agree on the amount whatever
         // ANCHOR_REWARD_PER_PUBLISH is set to locally.

@@ -116,6 +116,7 @@ class CrossChainEngine extends EventEmitter {
         // Reject all pending attestations
         for (let [id, pending] of this.pendingAttestations) {
             if (pending.timer) clearTimeout(pending.timer);
+            if (pending.storeRedriveTimer) clearTimeout(pending.storeRedriveTimer);
             if (pending.reject) pending.reject(new Error('Cross-chain engine stopped'));
         }
         this.pendingAttestations.clear();

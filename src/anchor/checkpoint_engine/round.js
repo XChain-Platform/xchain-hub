@@ -37,6 +37,9 @@ const logger = getLogger();
 const CHECKPOINT_SIGNED_SEQ_MEMORY = 512;
 // Re-leads of one timed-out round at its snapshot block before the cadence moves on.
 const CHECKPOINT_ROUND_RETRIES = 3;
+// Ticks a failed leader self-accept is re-run on, and how many distinct ones are held.
+const CHECKPOINT_SELF_ACCEPT_RETRIES = 30;
+const CHECKPOINT_SELF_ACCEPT_MEMORY  = 64;
 
 module.exports = {
 
@@ -93,7 +96,7 @@ module.exports = {
         // Single-node self-sign fast path. Below SWQ this is snapCount<=1 (one row).
         let soleSelf = this.isSoleSelfFederation(validators, myPubkey);
         if(snapCount <= 1 || (weighted && soleSelf)){
-            await this.acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
+            await this.acceptSoleSelf(cp, [{ pubkey: myPubkey, sig: mySig }], quorum);
             return;
         }
 
@@ -110,6 +113,13 @@ module.exports = {
         let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
         if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
         return bh;
+    },
+
+    // No peer holds a sole-self checkpoint, so a failed write is queued for retry and still
+    // thrown, which meters the round failure for this chain.
+    async acceptSoleSelf(cp, sigs, quorum){
+        try { await this.acceptFinalized(cp, sigs, quorum, true); }
+        catch(e){ this.queueSelfAccept(cp, sigs, quorum, e); throw e; }
     },
 
     // The checkpoint record a leader proposes from its own indexer's block hashes `bh` at
@@ -232,7 +242,47 @@ module.exports = {
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XCHK_FINALIZED, { checkpoint: pending.cp, signatures: sigs });
         this.acceptFinalized(pending.cp, sigs, pending.quorum, true)
-            .catch(e => logger.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
+            .catch(e => this.queueSelfAccept(pending.cp, sigs, pending.quorum, e));
+    },
+
+    // Hold a leader self-accept that failed after quorum (a DB blip on the snapshot or the
+    // checkpoint write) so the next tick writes the row again. Peers persist it from the
+    // FINALIZED broadcast; without this the leader alone would lack it until a restart.
+    queueSelfAccept(cp, sigs, quorum, err){
+        if(!this._selfAcceptRetries) this._selfAcceptRetries = new Map();
+        this._selfAcceptFailures = (this._selfAcceptFailures || 0) + 1;
+        let id   = this.roundId(cp);
+        let held = this._selfAcceptRetries.get(id);
+        this._selfAcceptRetries.set(id, { cp: cp, sigs: sigs, quorum: quorum, attempts: held ? held.attempts : 0 });
+        while(this._selfAcceptRetries.size > CHECKPOINT_SELF_ACCEPT_MEMORY){
+            this._selfAcceptRetries.delete(this._selfAcceptRetries.keys().next().value);
+            this._selfAcceptsAbandoned = (this._selfAcceptsAbandoned || 0) + 1;
+        }
+        logger.error('StateCheckpointEngine: accept error (leader, ' + id + '), retrying on the next tick: ' + (err && err.message));
+    },
+
+    // Re-run each held self-accept once. Safe to repeat: the writes are INSERT IGNORE, and a
+    // different payload already seated at the sequence returns without writing anything.
+    async retryFailedSelfAccepts(){
+        if(!this._selfAcceptRetries || this._selfAcceptRetries.size === 0) return;
+        for(let [id, held] of [...this._selfAcceptRetries]){
+            try {
+                await this.acceptFinalized(held.cp, held.sigs, held.quorum, true);
+                this._selfAcceptRetries.delete(id);
+                this.clearRoundFailure(held.cp.chain);
+            } catch(e){
+                this._selfAcceptFailures = (this._selfAcceptFailures || 0) + 1;
+                held.attempts++;
+                if(held.attempts < CHECKPOINT_SELF_ACCEPT_RETRIES){
+                    logger.warn('StateCheckpointEngine: leader accept retry ' + held.attempts + ' failed for ' + id + ': ' + (e && e.message));
+                    continue;
+                }
+                this._selfAcceptRetries.delete(id);
+                this._selfAcceptsAbandoned = (this._selfAcceptsAbandoned || 0) + 1;
+                logger.error('StateCheckpointEngine: gave up writing leader checkpoint ' + id + ' after ' +
+                             held.attempts + ' retries (peer catch-up restores it on reconnect or restart): ' + (e && e.message));
+            }
+        }
     },
 
     roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; },

@@ -250,8 +250,9 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     ORACLE_EPOCH_START:     parseInt(hubConfig.ORACLE_EPOCH_START),
     // Positive-only: the interval divides elapsed time into federation round numbers.
     // First resolution of the process-wide cadence; every later reader gets this value.
-    ORACLE_ROUND_INTERVAL:  resolveRoundCadence(hubConfig).roundInterval,
-    ORACLE_SUBMISSION_WINDOW: resolveRoundCadence(hubConfig).submissionWindow,
+    // Resolved from an empty cfg so only the resolver's regtest-gated env arm can move it.
+    ORACLE_ROUND_INTERVAL:  resolveRoundCadence({}).roundInterval,
+    ORACLE_SUBMISSION_WINDOW: resolveRoundCadence({}).submissionWindow,
     // Per-round cap on collected peer submissions (anti-flood, OracleRound.js).
     // Passed through UNPARSED for the same reason as the retention knob below:
     // OracleRound.js owns the parse, the range check and the 200 default, so a

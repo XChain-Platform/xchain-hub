@@ -26,7 +26,10 @@ const COUNTERS = [
     ['publishedCount', 'xchain_oracle_publisher_published_total', 40],
     ['abandonedCount', 'xchain_oracle_publisher_abandoned_total', 2],
     ['takeoverAttempts', 'xchain_oracle_publisher_takeover_attempts_total', 5],
-    ['takeoverPublished', 'xchain_oracle_publisher_takeover_published_total', 3]
+    ['takeoverPublished', 'xchain_oracle_publisher_takeover_published_total', 3],
+    ['takeoverDeclinedUnproven', 'xchain_oracle_publisher_takeover_declined_unproven_total', 7],
+    ['takeoverDeclinedReadError', 'xchain_oracle_publisher_takeover_declined_read_error_total', 8],
+    ['takeoverDeferred', 'xchain_oracle_publisher_takeover_deferred_total', 4]
 ];
 
 // A fake OraclePublisher carrying only the fields the collector reads.
@@ -34,7 +37,10 @@ function fakePublisher(overrides = {}){
     const publisher = {
         lastPublishedRound: 9182,
         _pendingConfirmations: new Map([['tx1', {}], ['tx2', {}]]),
-        batchSignTimeouts: () => 6
+        batchSignTimeouts: () => 6,
+        failoverWindowBlocks: 6,
+        _observationProven: true,
+        _takeoverUnlanded: new Map([[12, 1000]])
     };
     for(const [field, , value] of COUNTERS) publisher[field] = value;
     return Object.assign(publisher, overrides);
@@ -66,6 +72,22 @@ describe('hub oracle publisher scrape series', function () {
         expect(sample(out, 'xchain_oracle_publisher_batch_sign_timeouts_total')).to.equal(6);
         expect(sample(out, 'xchain_oracle_publisher_last_published_round')).to.equal(9182);
         expect(sample(out, 'xchain_oracle_publisher_unconfirmed_publishes')).to.equal(2);
+        expect(sample(out, 'xchain_oracle_publisher_takeover_armed')).to.equal(1);
+        expect(sample(out, 'xchain_oracle_publisher_takeover_unlanded_windows')).to.equal(1);
+    });
+
+    it('tells a deaf follower from failover that was never needed', function () {
+        // Deaf: failover configured, feed never proven, every decline counted, no attempt.
+        let out = install({ oraclePublisher: fakePublisher({
+            _observationProven: false, takeoverDeclinedUnproven: 9, takeoverAttempts: 0
+        }) }).render();
+        expect(sample(out, 'xchain_oracle_publisher_takeover_armed')).to.equal(0);
+        expect(sample(out, 'xchain_oracle_publisher_takeover_declined_unproven_total')).to.equal(9);
+        expect(sample(out, 'xchain_oracle_publisher_takeover_attempts_total')).to.equal(0);
+        _resetObservability();
+        // Failover not configured reads unarmed even with a proven feed.
+        out = install({ oraclePublisher: fakePublisher({ failoverWindowBlocks: 0 }) }).render();
+        expect(sample(out, 'xchain_oracle_publisher_takeover_armed')).to.equal(0);
     });
 
     it('never walks a counter backwards when the publisher is recreated', function () {
@@ -92,6 +114,9 @@ describe('hub oracle publisher scrape series', function () {
         publisher.lastPublishedRound = null;
         let out = registry.render();
         expect(sample(out, 'xchain_oracle_publisher_last_published_round')).to.equal(null);
+        publisher._takeoverUnlanded = undefined;
+        out = registry.render();
+        expect(sample(out, 'xchain_oracle_publisher_takeover_unlanded_windows')).to.equal(null);
         hub.oraclePublisher = null;
         out = registry.render();
         expect(sample(out, 'xchain_oracle_publisher_unconfirmed_publishes')).to.equal(null);
@@ -112,7 +137,8 @@ describe('hub oracle publisher scrape series', function () {
 
     it('reads only fields the real publisher assigns', function () {
         const source = sourceUnder('oracle/publisher');
-        const fields = COUNTERS.map(([field]) => field).concat(['lastPublishedRound', '_pendingConfirmations']);
+        const fields = COUNTERS.map(([field]) => field).concat(['lastPublishedRound', '_pendingConfirmations',
+            'failoverWindowBlocks', '_observationProven', '_takeoverUnlanded']);
         for(const field of fields) expect(assignsField(source, field), field).to.equal(true);
         expect(definesMethod(source, 'batchSignTimeouts')).to.equal(true);
     });

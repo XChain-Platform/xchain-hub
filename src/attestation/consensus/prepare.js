@@ -88,7 +88,9 @@ module.exports = {
     // sender, not just the leader: a dead leader must not block an
     // outage from being recorded. Safety comes from the co-sign rules
     // (mayCoSignNonOk: a hub only vouches for what it observed), never from
-    // trusting the sender.
+    // trusting the sender. The one exception is a judge_model no_quorum,
+    // which only the leader can derive, so it is leader-only (see
+    // nonOkDerivationRefuses).
     adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey){
         if(body.length !== 0 || meta !== ''){
             logger.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
@@ -141,10 +143,17 @@ module.exports = {
     // the request to deadline. Buffer until `need` proposals are in hand
     // (the same threshold maybeAdvanceFromProposals uses), then adopt only
     // if our own agree() over the ok proposals yields no winner. judge_model
-    // is deliberately exempt: only the leader runs the judge, so a follower
-    // genuinely cannot re-derive the verdict (the seam note below), and its
-    // adoption stays participation-gated by the co-sign policy.
+    // cannot be self-derived (only the leader runs the judge, the seam note
+    // below), so it is leader-gated instead, by the same rule as adoptOkPrepare.
     nonOkDerivationRefuses(envelope, pending, rid, status, senderPubkey){
+        // Buffer a judge_model no_quorum from a non-leader: no follower can reach that verdict,
+        // so one Byzantine member could force a fee-burning non-ok ATTEST over the leader's ok
+        // result. It replays once the leader's winner lands and counts only if it verifies.
+        if(status === 'no_quorum' && pending.pinnedConsensusStrategy === 'judge_model' &&
+           pending.leaderPubkey && senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
+            this.bufferEarlyMessage(rid, envelope);
+            return true;
+        }
         if(status === 'no_quorum' && pending.pinnedConsensusStrategy === 'byte_equality'){
             let needNq = Math.min(pending.redundancy, pending.responsible.length);
             if(pending.proposals.size < needNq){

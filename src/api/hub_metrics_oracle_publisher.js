@@ -20,7 +20,7 @@
 
 const { installEngineSeries, callIf } = require('./hub_metrics_engine_series');
 
-// Publish progress, dead letters, takeover of a silent leader and unlanded sends.
+// Publish progress, dead letters, takeover of a silent leader (armed, declined, deferred) and unlanded sends.
 const ORACLE_PUBLISHER_SERIES = {
     counters: [
         {
@@ -43,6 +43,22 @@ const ORACLE_PUBLISHER_SERIES = {
             help: 'Takeover windows this hub went on to publish',
             read: (publisher) => publisher.takeoverPublished
         },
+        // Declines move only this counter, so attempts at 0 cannot tell a deaf feed from no dark leader.
+        {
+            name: 'xchain_oracle_publisher_takeover_declined_unproven_total',
+            help: 'Takeovers this hub declined because it has never observed an on-chain PRICE batch (a deaf feed, not a healthy leader)',
+            read: (publisher) => publisher.takeoverDeclinedUnproven
+        },
+        {
+            name: 'xchain_oracle_publisher_takeover_declined_read_error_total',
+            help: 'Takeovers this hub declined because its own DB could not say whether the window was already on chain',
+            read: (publisher) => publisher.takeoverDeclinedReadError
+        },
+        {
+            name: 'xchain_oracle_publisher_takeover_deferred_total',
+            help: 'Takeover attempts deferred because the leader may already have a batch in flight',
+            read: (publisher) => publisher.takeoverDeferred
+        },
         {
             name: 'xchain_oracle_publisher_batch_sign_timeouts_total',
             help: 'PRICE batch signing rounds that timed out waiting for co-signatures',
@@ -60,6 +76,18 @@ const ORACLE_PUBLISHER_SERIES = {
             help: 'Publishes this hub broadcast that have not yet reached a block',
             read: (publisher) => (publisher._pendingConfirmations instanceof Map
                 ? publisher._pendingConfirmations.size : null)
+        },
+        // Mirror takeoverStats(): armed needs a failover window AND a proven observation feed.
+        {
+            name: 'xchain_oracle_publisher_takeover_armed',
+            help: '1 when a failover window is configured and this hub has proven it would see a leader batch land',
+            read: (publisher) => publisher.failoverWindowBlocks > 0 && publisher._observationProven === true
+        },
+        {
+            name: 'xchain_oracle_publisher_takeover_unlanded_windows',
+            help: 'Takeover windows past the election that have not yet reached the send queue',
+            read: (publisher) => (publisher._takeoverUnlanded instanceof Map
+                ? publisher._takeoverUnlanded.size : null)
         }
     ]
 };

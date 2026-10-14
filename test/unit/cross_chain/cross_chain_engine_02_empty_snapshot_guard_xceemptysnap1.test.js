@@ -302,6 +302,32 @@ function registerFeature11snapshotGatedPBFTTallyPart4() {
     };
     expect(rootSuiteEngine.countedVotes(pending, pending.prepares)).to.equal(1);
   });
+  it('stores only snapshot members in the attestation count and proof', async function () {
+    let [a, b] = feature11snapshotGatedPBFTTallyMEMBERS.map(v => v.pubkey);
+    let outsider = feature11snapshotGatedPBFTTallyOUTSIDER.pubkey;
+    let stored = sinon.stub(rootSuiteEngine, 'storeWithRetry').resolves();
+    rootSuiteEngine.pendingAttestations.set('BTC:7:LTC', {
+      attestationId: 'BTC:7:LTC', sourceChain: 'BTC', sourceActionIndex: 7, destChain: 'LTC', confirmations: 3,
+      quorum: 2, finalized: false, memberPubkeys: new Set(feature11snapshotGatedPBFTTallyMEMBERS.map(v => v.pubkey)),
+      prepares: new Set([a, b, outsider]), commits: new Set([a, outsider, b])
+    });
+    rootSuiteEngine.checkCommitQuorum('BTC:7:LTC');
+    let attestation = stored.firstCall.args[0];
+    expect(attestation.validatorCount).to.equal(2, 'the outsider PREPARE is not counted');
+    expect(JSON.parse(attestation.consensusProof)).to.deep.equal([a, b], 'the outsider COMMIT is not in the proof');
+  });
+  it('stores the raw count and proof when no snapshot population resolved', async function () {
+    let stored = sinon.stub(rootSuiteEngine, 'storeWithRetry').resolves();
+    rootSuiteEngine.pendingAttestations.set('BTC:8:LTC', {
+      attestationId: 'BTC:8:LTC', sourceChain: 'BTC', sourceActionIndex: 8, destChain: 'LTC', confirmations: 3,
+      quorum: 2, finalized: false, memberPubkeys: null,
+      prepares: new Set(['k1', 'k2', 'k3']), commits: new Set(['k1', 'k2'])
+    });
+    rootSuiteEngine.checkCommitQuorum('BTC:8:LTC');
+    let attestation = stored.firstCall.args[0];
+    expect(attestation.validatorCount).to.equal(3);
+    expect(JSON.parse(attestation.consensusProof)).to.deep.equal(['k1', 'k2']);
+  });
 }
 function registerFeature11snapshotGatedPBFTTally() {
   describe('snapshot-gated PBFT tally', function () {

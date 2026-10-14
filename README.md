@@ -323,7 +323,7 @@ The hub uses 23 MariaDB tables (auto-created on startup):
 | `cross_chain_calls` | XCALL relay rows tracking cross-chain contract call dispatch and result phases |
 | `cross_chain_matches` | Finalized cross-chain DEX order matches |
 | `state_checkpoints` | Per-chain ledger/actions/contract hash checkpoints with optional on-chain anchor txid |
-| `anchor_reward_attestations` | Hub-authored, append-only ANCHOR v4/v5/v6 reward attestations mirrored to indexers for COLLECT-spendable reward derivation |
+| `anchor_reward_attestations` | Hub-authored, append-only ANCHOR v0 bundle and v1 archive reward attestations (rows from the retired pre-restart wires remain) mirrored to indexers for COLLECT-spendable reward derivation |
 | `telemetry_pings` | Anonymous usage pings from xchain-node operators (IP never stored) |
 
 ## Dependencies

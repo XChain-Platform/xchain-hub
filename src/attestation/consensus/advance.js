@@ -221,7 +221,8 @@ module.exports = {
     // Re-assert the SAME preconditions this function checked before the await, on
     // the object the map holds NOW. agree() is an API call on the judge_model path,
     // so PBFT messages are delivered while it runs:
-    //   - a responsible peer's signed no_quorum PREPARE can establish a winner and
+    //   - a responsible peer's signed non-ok PREPARE (provider_error; a judge_model
+    //     no_quorum is leader-only) can establish a winner and
     //     leave signatures in the map over THAT canonical. Assigning the judge's ok
     //     winner below would not clear them, and checkCommitQuorum gates on
     //     signatures.size, so the round finalizes carrying a signature that does not
