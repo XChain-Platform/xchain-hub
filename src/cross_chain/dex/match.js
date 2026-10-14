@@ -24,6 +24,7 @@ const bc = require('../../bcmath.js');
 const nodeUtil = require('node:util');
 const { ALLOWED_CHAINS } = require('./constants.js');
 const offerLists = require('./offer_lists.js');
+const { ANY_PRICE_ERA, pricesCross } = require('./price_cross.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -58,14 +59,15 @@ module.exports = {
             // in what order. Per-coin try/catch is preserved so one slow/failed indexer
             // still yields an empty book for that coin rather than aborting the whole round.
             await Promise.all(ALLOWED_CHAINS.map((coin) => this.loadOfferBook(coin, offersByCoin)));
-            // Avoid list RPCs until the structural matcher finds a crossing pair.
-            if(this.findMatches(offersByCoin).length === 0) return;
+            // Avoid list RPCs until the structural matcher finds a crossing pair; the price
+            // era waits on the snapshot block, so this pass admits ORDER pairs in either era.
+            if(this.findMatches(offersByCoin, ANY_PRICE_ERA).length === 0) return;
             let snapshotBlock = await this.resolveSnapshotBlock();
             if(snapshotBlock == null) return;
             let allOffers = [];
             for(let coin of ALLOWED_CHAINS) allOffers = allOffers.concat(offersByCoin[coin] || []);
             await offerLists.prepareOfferLists(this, allOffers, snapshotBlock);
-            for(let desc of this.findMatches(offersByCoin)){
+            for(let desc of this.findMatches(offersByCoin, snapshotBlock)){
                 try {
                     await this.finalizeMatchAtSnapshot(desc, snapshotBlock);
                 } catch(e){
@@ -132,8 +134,9 @@ module.exports = {
     // unchanged); ORDER↔ORDER → price-time book with partial fills (Phase B); SWAP↔ORDER
     // → skipped (carry-forward). Returns an array of match descriptors, each already
     // canonical-ordered (lo = home_coin-lower side). One fill per offer per round (`used`);
-    // the poll loop drains deeper book crossings over subsequent rounds as committed grows.
-    findMatches(offersByCoin){
+    // the poll loop drains deeper book crossings over subsequent rounds as committed grows;
+    // snapshotBlock fixes the ORDER price-cross era (dex/price_cross.js).
+    findMatches(offersByCoin, snapshotBlock){
         let all = [];
         for(let coin of ALLOWED_CHAINS) all = all.concat(offersByCoin[coin] || []);
         let matches = [], used = new Set();
@@ -143,7 +146,7 @@ module.exports = {
             for(let j = i + 1; j < all.length; j++){
                 let b = all[j], bKey = this.offerKey(b.home_coin, b.action_index);
                 if(used.has(bKey)) continue;
-                let desc = this.tryMatch(a, b);
+                let desc = this.tryMatch(a, b, snapshotBlock);
                 if(desc){
                     matches.push(desc);
                     used.add(aKey); used.add(bKey);
@@ -155,7 +158,7 @@ module.exports = {
     },
 
     // Attempt to match offers a and b. Returns a canonical-ordered descriptor or null.
-    tryMatch(a, b){
+    tryMatch(a, b, snapshotBlock){
         if(a.home_coin === b.home_coin) return null;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return null; // never match across networks
         if(!offerLists.offerPairAllowed(a, b)) return null;
@@ -170,7 +173,7 @@ module.exports = {
             // Single full fill (committed is 0 pre-match → filled_before 0).
             return this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount));
         }
-        if(aKind === 'order' && bKind === 'order') return this.tryOrderMatch(a, b);
+        if(aKind === 'order' && bKind === 'order') return this.tryOrderMatch(a, b, snapshotBlock);
         return null;                                   // SWAP↔ORDER: carry-forward
     },
 
@@ -187,7 +190,7 @@ module.exports = {
 
     // The structural and price-cross gates of an ORDER pair, then its maker and taker with
     // their limit prices and remaining capacity; null when the pair cannot fill.
-    orderPricing(a, b){
+    orderPricing(a, b, snapshotBlock){
         // Each side must give what the other wants (same token pair, mirrored ownership flags).
         if(a.give_coin !== b.get_coin || a.get_coin !== b.give_coin) return null;
         if((a.give_tick || '') !== (b.get_tick || '')) return null;
@@ -207,8 +210,7 @@ module.exports = {
         let takerGivePrice = bc.getPrice(taker.get_amount, taker.give_amount); // GET per GIVE (taker ask)
         let takerGetPrice  = bc.getPrice(taker.give_amount, taker.get_amount); // GIVE per GET
         let makerGetPrice  = bc.getPrice(maker.give_amount, maker.get_amount); // maker GIVE per maker GET (bid)
-        // Skip price mismatch (order_match.js:118): maker's bid must reach the taker's ask.
-        if(bc.bcgt(makerGetPrice, takerGivePrice)) return null;
+        if(!pricesCross(maker.home_network, snapshotBlock, makerGetPrice, takerGivePrice)) return null;
 
         let takerRem = this.effectiveRemaining(taker);
         let makerRem = this.effectiveRemaining(maker);

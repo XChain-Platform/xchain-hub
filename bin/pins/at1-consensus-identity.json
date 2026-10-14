@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "ac3e2e16d3500d1de7c6fd5bee77ebc6590451c1a21e3d858d24c08b00028425",
+  "consensus_rules_digest": "2a3ac3d9c1a6bdb31de7c73bb6fecdf8f118321a11bfe2e99d2dd4ee2e1c3c02",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -45,9 +45,10 @@
     "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154777}",
     "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"mainnet\":null,\"regtest\":0}",
-    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16}}"
+    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16}}",
+    "order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}"
   },
-  "gate_key_count": 45,
+  "gate_key_count": 46,
   "absent_gates": [],
   "hub_only_rules_digest": "cbf9bf57203c24142c84de15a1d457f359f76872522466b550c86507538fa806",
   "hub_only_rules_gates": {
@@ -60,8 +61,8 @@
     "validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION": "{\"mainnet\":null,\"regtest\":0,\"testnet\":156230}"
   },
   "hub_only_gate_key_count": 7,
-  "gates_field": "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION,anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S,anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION,anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION,attest_relay_activation.ATTEST_RELAY_ACTIVATION,attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2,attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION,checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION,cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION,equivocation_header.EQUIV_HEADER_ACTIVATION,list_meta_activation.LIST_META_ACTIVATION,list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION,mirror_admission_activation.ADMIT_MARGIN_BLOCKS,mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS,mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS,mirror_admission_activation.CANONICAL_HEIGHT_RE,mirror_admission_activation.CHAIN_CODE_RE,mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION,mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION,mirror_admission_activation.admissionCanonicalField,mirror_admission_activation.decodeAdmitBlocks,mirror_admission_activation.encodeAdmitBlocks,mirror_admission_activation.isAdmissionEra,mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION,mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS,oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND,oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION,oracle_round_time_activation.ORACLE_ROUND_TIME_ACTIVATION,price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION,price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION,price_scale_activation.PRICE_V1_FEE_MAX_LENGTH,price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH,price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION,retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION,rollcall_activation.ROLLCALL_ACTIVATION,rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION,snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION,stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION,token_bridge_activation.TOKEN_BRIDGE_ACTIVATION,xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION",
-  "gates_field_hash": "ff2ff79fbeb40d8e5e0360bcd8ae0f7c5224660159412e5134fa2eab6f39599a",
+  "gates_field": "anchor_bundle_order_activation.ANCHOR_BUNDLE_ORDER_ACTIVATION,anchor_reward_activation.ANCHOR_ATTEST_ARRIVAL_MARGIN_S,anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_ACTIVATION,anchor_reward_activation.ANCHOR_REWARD_DERIVE_ACTIVATION,anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION,attest_relay_activation.ATTEST_RELAY_ACTIVATION,attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION,attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2,attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION,checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION,cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION,equivocation_header.EQUIV_HEADER_ACTIVATION,list_meta_activation.LIST_META_ACTIVATION,list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION,mirror_admission_activation.ADMIT_MARGIN_BLOCKS,mirror_admission_activation.ADMIT_MAX_FUTURE_BLOCKS,mirror_admission_activation.ADMIT_MIN_FUTURE_BLOCKS,mirror_admission_activation.CANONICAL_HEIGHT_RE,mirror_admission_activation.CHAIN_CODE_RE,mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION,mirror_admission_activation.MIRROR_ADMISSION_CONSUMER_ACTIVATION,mirror_admission_activation.admissionCanonicalField,mirror_admission_activation.decodeAdmitBlocks,mirror_admission_activation.encodeAdmitBlocks,mirror_admission_activation.isAdmissionEra,mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION,mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS,oracle_hourly_window_activation.ORACLE_HOURLY_WINDOW_FIRST_ROUND,oracle_price_age_hourly_activation.ORACLE_PRICE_AGE_HOURLY_ACTIVATION,oracle_round_time_activation.ORACLE_ROUND_TIME_ACTIVATION,order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION,price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION,price_scale_activation.PRICE_V1_CANONICAL_ACTIVATION,price_scale_activation.PRICE_V1_FEE_MAX_LENGTH,price_scale_activation.PRICE_V1_VALUE_MAX_LENGTH,price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION,retraction_signing_activation.RETRACTION_SIGNING_ACTIVATION,rollcall_activation.ROLLCALL_ACTIVATION,rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION,snapshot_reorg_buffer.SNAPSHOT_BURIAL_ACTIVATION,stake_weighted_quorum.STAKE_WEIGHTED_QUORUM_ACTIVATION,token_bridge_activation.TOKEN_BRIDGE_ACTIVATION,xchain_bridge_activation.XCHAIN_BRIDGE_ACTIVATION",
+  "gates_field_hash": "8a5efffbb5ccdaa89bcdcf52df1fdb1c62f626ef82cac52f9287f1621e5ee44d",
   "coin_consensus_pins": {
     "BTC:mainnet": "1fd448eafb00c95f526f1d01422df98c1af8876a0adbefd859fca19c7d789a31",
     "LTC:mainnet": "3d3d4b3820199d4398b53eb239be552acd281dff678cda0d88acf3932af2076e",
@@ -82,7 +83,7 @@
     "mainnet"
   ],
   "hub_schema_version": 10,
-  "carrier_logic_digest": "cc067500bc8c665b82384ce0cbc4aa09be91fbbdb4115cda9c7c60cce986b176",
+  "carrier_logic_digest": "e9d1fabb3ae162a544e4e8a18df6276eb72b15d58b98eafcce515c9df46d49f5",
   "env": {
     "XC_AMOUNTS_PRICE_REGTEST_ACTIVATION": null,
     "XC_AMOUNTS_PRICE_REGTEST_TIME": null,

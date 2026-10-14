@@ -27,7 +27,7 @@
     },
     "consensus_rules_digest": {
       "path": "src/consensus_rules_digest.js",
-      "hash": "5727511efdf8497853838f2b0608f2d6ac33caabccc483d650987f9944802e1a",
+      "hash": "4546074d3c270b3b497eee3ed7aa9ed973f8387dc8d4ae5e48478583db8600c1",
       "twins": [
         "xchain-indexer"
       ],
@@ -806,6 +806,13 @@
       "to": "5727511efdf8497853838f2b0608f2d6ac33caabccc483d650987f9944802e1a",
       "reason": "Copy the activeGatesAt unit filter from the indexer canonical twin",
       "date": "2026-10-13"
+    },
+    {
+      "id": "consensus_rules_digest",
+      "from": "5727511efdf8497853838f2b0608f2d6ac33caabccc483d650987f9944802e1a",
+      "to": "4546074d3c270b3b497eee3ed7aa9ed973f8387dc8d4ae5e48478583db8600c1",
+      "reason": "order_match_price_cross_activation appended to SHARED_GATES",
+      "date": "2026-10-14"
     }
   ]
 }

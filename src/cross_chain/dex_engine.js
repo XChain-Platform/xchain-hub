@@ -188,8 +188,8 @@ class CrossChainDexEngine extends EventEmitter {
     // gate, then the bottleneck clamp with orderInfo = taker (later) / matchInfo = maker
     // (earlier). Fill quantities are computed on effective_remaining (committed-aware), so
     // the same mirrored state always re-derives the same fill (PBFT determinism).
-    tryOrderMatch(a, b){
-        let priced = this.orderPricing(a, b);
+    tryOrderMatch(a, b, snapshotBlock){
+        let priced = this.orderPricing(a, b, snapshotBlock);
         if(!priced) return null;
         let { maker, taker, ownership, takerGivePrice, takerGetPrice, takerRem, makerRem } = priced;
 
