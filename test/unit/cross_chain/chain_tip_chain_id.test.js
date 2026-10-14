@@ -284,16 +284,17 @@ function registerChainTipStorageSuite() {
 describe('db.setChainTip / db.getChainTip', function () {
         it('writes chain_id as a chain_tips param under the normalized coin key', async function () {
             const { db } = makeDb();
-            const setParam = sinon.stub(db, 'setParam').resolves();
+            const setParams = sinon.stub(db, 'setParams').resolves(3);
             await db.setChainTip('BTC', 'regtest', 131, 1757298240, LOCAL_ID);
-            expect(setParam.calledWith('bitcoin', 'regtest', 'chain_tips', 'chain_id', LOCAL_ID)).to.be.true;
+            expect(setParams.firstCall.args[0]).to.deep.include(
+                { coin: 'bitcoin', network: 'regtest', module: 'chain_tips', paramName: 'chain_id', paramValue: LOCAL_ID });
         });
 
         it('leaves the stored chain_id alone when a push carries none', async function () {
             const { db } = makeDb();
-            const setParam = sinon.stub(db, 'setParam').resolves();
+            const setParams = sinon.stub(db, 'setParams').resolves(2);
             await db.setChainTip('BTC', 'regtest', 131, 1757298240);
-            expect(setParam.getCalls().some(c => c.args[3] === 'chain_id'),
+            expect(setParams.firstCall.args[0].some(r => r.paramName === 'chain_id'),
                    'an identity-less push must not clear the identity the mirrors filter on').to.be.false;
         });
 

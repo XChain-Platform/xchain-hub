@@ -3701,6 +3701,9 @@
       "b7daa12f1c5c62750566aab7ecc711622cc83ce51d1904938a9e4b3017099d33",
       "0b6db67300bfa73dc7198c63d56964c085f0e3610c7ec62eb859515e3643db09"
     ],
+    "4cdfc7e5f916dbd5": [
+      "4cdfc7e5f916dbd5243e6dfecd6f20ac0efaba1353e4411f4585c022072dcb00"
+    ],
     "4d27e256e7e566cf": [
       "13a242a37969aa9e3e06c4551f30a50801b493f8d58229d8c1b484eab6be2600",
       "99ffde1424ff4ce35dfedf70e10fbb70a5de938e6514e910a00cfe76204f8364",
@@ -4839,6 +4842,13 @@
     "63a524343653adcb": [
       "e33e00cc7104ea0668eb3e8f0dfeda7330cfdb27c5bcc9959ab1e85738d0b88d",
       "4441a690c2227a786b72623b250fe384a6faed3d4fc898a57058e3e4c634f397"
+    ],
+    "63cb4fae607355b8": [
+      "b57a50a77b8aa31cd8d659c99f027b269ab54f8e02a2fe15f2ba438eee2f2065",
+      "a92c65abef2fce851f1627ea6471efb857a67d9ebf1cf998a9f2d77fdeff5e0d",
+      "4450e59db39d01cab8f3c483eb3180ef7395bc1ec05a8668d7c684f4d8db70d0",
+      "bc104122fc7592d997be9eff7d69311ea22234494bf0e998a3f6467165c5d802",
+      "7f16c4d0924c1e80aca702fa3f680c295b5304771b3164af62c81deb3fa4fbdf"
     ],
     "64073938227b8635": [
       "6415701c2298779f38133a152b28f7f48679ffd1658c64265a8c09430bb7db5e",
@@ -9282,6 +9292,15 @@
       "b3896ae91151e3bce1907e998cbc9f188c72f29ae41c89d17d67c990e226a228",
       "5fd4bff46983f23d29f1cf4d42da2c853618305d3022d4f58b8edc03bca5eabd"
     ],
+    "c32df9a3b4c47fe5": [
+      "c606f83f56984b51e9019484e4b160fef5019d6edd7c1b6a40574adb3f6a8cfe",
+      "adcf2ff9632b4b1296aba45ddbfaf943ea55c2cf150ef5ebcaf92762c0f82e80"
+    ],
+    "c3313947c4c955b1": [
+      "84e8d0689b18ffbb9804338ee3064384d600b563a62a47116854099bf575f8a7",
+      "a3e2c8bde35d69c7835cd7acadf096a50ed66e82aa37c3f8f1e602e2a8b12a66",
+      "0e6b287e57fb7fec296a4f6fe02a7bf7dd86c549faf8c82c5fec86dc393658b8"
+    ],
     "c33e2293d4d6368b": [
       "f92b12bca004d58546d3409b7a10c19847828c5e7833018e04d4c5aab99e703e",
       "64c6316bcb78ff403b4e7a42256ee4e1e843f6e1cad582f968401f1fd3624e55",
@@ -10709,6 +10728,14 @@
       "b6521af5dc5c5c804850c791f08e468807cbb1708ccac4489732e0ab347119b1",
       "d741e87e5089aa589a04c09df66d10bea7a6c6531d9de156187112a50c34b93b"
     ],
+    "e916c870a667780d": [
+      "1c1b78f1084031c959638703a4a89677869cc46ce40c5e30251575b826321682",
+      "979a533649ae1cfc0d9dc16170468afe31fb1e1a120b3045c37a64f791b95d32",
+      "63b93d4eb8c9bbc25a3e04710c5f4d5d46e6b3d2e0c6172db3a7892b74c69420",
+      "db5685ef1e0f2409d4d92779bc1071f01f160c9ee47cc6b2af554ad3018203d4",
+      "ccf07eed88367ad87bcb7e592e021482bca6791fafbe57e214ba27869e6503c0",
+      "f77cb4628cfcb8724be4b4b3497c10625fe021df6251e045a43402626e812751"
+    ],
     "e9a1825a136ab8cc": [
       "441728ab3f4a3fb859d2dbd40d13e3703f59996d24b1eef1f90a50f469694f4b",
       "7a3ad7d1879bee5741f64c571781ff537eaed53ae89f00b08ff649914119e56e",
@@ -10974,6 +11001,10 @@
       "cfe1607fc5ad4d7d8fe4f2c09c36d8b97ca63f41814200b862d907f3c95f8de2",
       "f3fae9d70e60d2c617eb92c5212f55ca259896b3df057352522b8b7883b237e4",
       "5ee08bc65e45eff2e0b8b9675b926343686db4d934a4b22879da617ecca80be9"
+    ],
+    "efb0b8428cd662a5": [
+      "f61d19a9dcb21489b09aea1da040213e57b72b825507099f5069174bb4aa19a4",
+      "7bb442da6503528dd98e7e9cd6060bbcd1c9c7b82c8c7e63e529757f33c42fbe"
     ],
     "eff09819ca94154a": [
       "3bf0407a310f6649ac153d2045d123aa1c0546430b6b6adc26780bdb073dbfd9",
@@ -11689,8 +11720,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 912,
-      "titleCount": 8511,
+      "fileCount": 918,
+      "titleCount": 8530,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -11711,6 +11742,11 @@
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "fdcf1ef58f618708",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
+        "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
+        "test/unit/anchor/checkpoint_engine/liveness/mixed_version_roll.test.js": "63cb4fae607355b8",
+        "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
+        "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
+        "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -12213,6 +12249,7 @@
         "test/unit/db/archive/db_archive_price_legacy_proof_excluded.test.js": "fbc022b021ea503e",
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
+        "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
         "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
         "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",
@@ -12658,8 +12695,8 @@
       }
     },
     "test": {
-      "fileCount": 912,
-      "titleCount": 8511,
+      "fileCount": 918,
+      "titleCount": 8530,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12680,6 +12717,11 @@
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "fdcf1ef58f618708",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
+        "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
+        "test/unit/anchor/checkpoint_engine/liveness/mixed_version_roll.test.js": "63cb4fae607355b8",
+        "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
+        "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
+        "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -13182,6 +13224,7 @@
         "test/unit/db/archive/db_archive_price_legacy_proof_excluded.test.js": "fbc022b021ea503e",
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
+        "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
         "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
         "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",
@@ -13576,8 +13619,8 @@
       }
     },
     "test:all": {
-      "fileCount": 992,
-      "titleCount": 9334,
+      "fileCount": 998,
+      "titleCount": 9353,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13678,6 +13721,11 @@
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "fdcf1ef58f618708",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
+        "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
+        "test/unit/anchor/checkpoint_engine/liveness/mixed_version_roll.test.js": "63cb4fae607355b8",
+        "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
+        "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
+        "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -14180,6 +14228,7 @@
         "test/unit/db/archive/db_archive_price_legacy_proof_excluded.test.js": "fbc022b021ea503e",
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
+        "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
         "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
         "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",

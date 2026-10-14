@@ -42,19 +42,14 @@ module.exports = {
 
     // `retry` ({ attempt, blockIndex }) marks a re-lead of a round that timed out unfinalized.
     async runRound(chain, snapshotBlock, validators, retry){
-        // Checkpoint the chain's tip minus a confirmation margin, so every peer's
-        // indexer/replica has indexed the block and a shallow reorg can't race the round.
-        let tip = await this.indexerCall(chain, 'getblockhashes', {});
-        if(!tip || tip.block_index == null) throw new Error('no tip block hashes from ' + chain + ' indexer');
-        let target = Number(tip.block_index) - this.confirmations;
-        if(target < 0) target = Number(tip.block_index);
-        let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
-        if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
+        let bh = await this.roundTargetBlock(chain);
 
         // A retry re-proposes the SAME payload. If the tip moved the target off the timed-out
         // block, a re-lead would be a second payload at the sequence (refused, and logged as
         // equivocation); drop it, the signatures on the first payload cannot be reused anyway.
-        if(retry && Number(bh.block_index) !== Number(retry.blockIndex)) return;
+        // A round that threw before proposing has no block yet (blockIndex null) and signed
+        // nothing, so its retry proposes whatever the indexer serves now.
+        if(retry && retry.blockIndex != null && Number(bh.block_index) !== Number(retry.blockIndex)) return;
 
         let network = String(bh.network || '');
         if(!network) throw new Error(chain + ' indexer returned no network (refusing a network-agnostic checkpoint)');
@@ -82,9 +77,13 @@ module.exports = {
         // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
         this.assertCheckpointNetwork(cp, 'propose');
+        // The interval rule, re-read here because a peer's FINALIZED or this hub's own
+        // co-signature on another round of the interval may have landed during the reads above.
+        if(this.declinesOwnRound(cp)) return;
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
         if(!this.claimSeqSignature(cp, canonical)) return;
+        this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
@@ -99,6 +98,18 @@ module.exports = {
         }
 
         this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt: retry ? retry.attempt : 0 });
+    },
+
+    // Checkpoint the chain's tip minus a confirmation margin, so every peer's
+    // indexer/replica has indexed the block and a shallow reorg can't race the round.
+    async roundTargetBlock(chain){
+        let tip = await this.indexerCall(chain, 'getblockhashes', {});
+        if(!tip || tip.block_index == null) throw new Error('no tip block hashes from ' + chain + ' indexer');
+        let target = Number(tip.block_index) - this.confirmations;
+        if(target < 0) target = Number(tip.block_index);
+        let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
+        if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
+        return bh;
     },
 
     // The checkpoint record a leader proposes from its own indexer's block hashes `bh` at
@@ -172,9 +183,10 @@ module.exports = {
         this.checkQuorum(id);
     },
 
-    // Remember a timed-out round so the next tick re-leads it at the same snapshot block.
-    // The cadence latch has already advanced, so without this a frozen tip never reaches
-    // the next interval and the chain is never checkpointed. Bounded per chain.
+    // Remember a timed-out (or thrown) round so the next tick re-leads it at the same
+    // snapshot block. tick treats a tip still at this hub's attempt as already led, so
+    // without this a frozen tip never re-leads and the chain is never checkpointed.
+    // Bounded per chain.
     queueRoundRetry(cp, attempt){
         if(attempt >= CHECKPOINT_ROUND_RETRIES) return;
         if(!this._roundRetries) this._roundRetries = new Map();
@@ -213,6 +225,9 @@ module.exports = {
         pending.done = true;
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
         this.pending.delete(id);
+        // A checkpoint inside this interval finalized while the signatures came in (two
+        // slot holders led one interval): this round yields and no retry is queued.
+        if(this.declinesOwnRound(pending.cp)) return;
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XCHK_FINALIZED, { checkpoint: pending.cp, signatures: sigs });
@@ -232,8 +247,8 @@ module.exports = {
     // flight and re-proposes a new block at the same snapshot_block, and for a reorg that
     // moves the block under one: both are indistinguishable from equivocation to every
     // peer, and the signatures already collected on the first payload can still be
-    // assembled by anyone. The cost is that one round; the cadence latch has already
-    // advanced, so the next snapshot_block checkpoints normally.
+    // assembled by anyone. The cost is that one round; the next block's cadence leader
+    // retries the interval, since only a FINALIZED checkpoint moves the latch.
     claimSeqSignature(cp, canonical){
         let key  = cp.chain + '|' + cp.network + '|' + Number(cp.checkpoint_seq);
         let held = this._signedAtSeq.get(key);

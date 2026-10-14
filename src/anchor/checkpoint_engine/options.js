@@ -124,7 +124,11 @@ module.exports = {
         // Leader-side rounds in flight: Map<id, pending>. id = chain|network|block_index|seq.
         this.pending = new Map();
 
-        this._lastCheckpointBtcBlock = null;     // leader cadence latch
+        this._lastCheckpointBtcBlock = null;     // snapshot block of the last FINALIZED checkpoint
+        this._attemptedCheckpointBtcBlock = null; // block of this hub's latest led round, finalized or not
+        // Map<snapshot block, expiry ms>: rounds this hub signed that may still finalize
+        // (cadence.js cadenceConflict), so it signs at most one round per interval.
+        this._roundSignatures = new Map();
         this._pollTimer      = null;
         this._messageHandler = null;
         this._ticking        = false;

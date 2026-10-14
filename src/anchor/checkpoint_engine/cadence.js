@@ -42,10 +42,9 @@ module.exports = {
 
     // Record a due-but-not-my-slot tick at `btcBlock`. Returns true when the same
     // block has now been seen for at least K consecutive such ticks (frozen tip).
-    // Compare NUMERICALLY: resolveBtcLatestBlock serves the height from two
-    // sources (the pushed chain_tips row, then a getlatestblock RPC), so the same
-    // frozen height can arrive as 14671 on one tick and '14671' on the next. A
-    // strict === there would restart the counter every tick and leave the meter
+    // resolveSnapshotBlock already hands tick an integer, so the Number() here guards a
+    // direct caller rather than converting a live value: compared strictly, a string and
+    // a number for one height would restart the counter every tick and leave the meter
     // permanently at 1, which is precisely the silent failure it exists to catch.
     noteNotMySlot(btcBlock){
         let block = Number(btcBlock);
@@ -121,6 +120,15 @@ module.exports = {
     },
 
     // Cadence: leader-only initiation; followers only react to SIGN_REQs.
+    //
+    // Two latches, because they answer different questions. _lastCheckpointBtcBlock is
+    // the snapshot block of the last FINALIZED checkpoint, the same on every hub that saw
+    // it, and both the leader gate here and the co-sign gate read it. The attempt latch
+    // records only that this hub opened a round at a block, so a tip that has not moved
+    // re-leads through the bounded retry rather than as a fresh round. Writing the attempt
+    // into the finalized latch, as this tick once did, made one failed round refuse every
+    // rotated leader's retry for a whole interval, and the next failed round staggered the
+    // latches further until no checkpoint finalized anywhere.
     async tick(){
         if(this._ticking) return;
         // Before any indexer round trip: an observer's round cannot be signed.
@@ -129,42 +137,156 @@ module.exports = {
         try {
             let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
-            if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
+            if(this.finalizedLatchHolds(btcBlock)){
                 // On schedule: the cadence simply has not come round yet.
                 this.clearCadenceStall();
                 this.clearNotMySlot();
                 await this.retryTimedOutRounds();
                 return;
             }
+            // Same block as this hub's own open attempt: the tip has not moved, so the
+            // attempt's retry (bounded) runs instead of a fresh round.
+            if(btcBlock === this._attemptedCheckpointBtcBlock){ await this.retryTimedOutRounds(); return; }
+            this.supersedeOwnAttempt(btcBlock);
+            // This hub's signature is on another round of this interval that may still
+            // finalize; leading a second one could give the interval two checkpoints.
+            if(this.signedRoundConflict(btcBlock) != null) return;
             // A new interval supersedes any timed-out round still waiting for a retry.
             if(this._roundRetries) this._roundRetries.clear();
 
             let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
-
-            // We are the cadence leader (or a single-node set): one round per chain.
-            // Mirror the capability snapshot BEFORE the latch moves. This call sits
-            // outside the per-chain guard below, so a throw here aborts every chain's
-            // round; with the latch already advanced the whole interval was dropped
-            // and getcheckpointstats still read clean, which is the silent-cadence
-            // shape that cost 18 days on mainnet. Meter it and leave the round retryable.
-            try {
-                await this.persistCapabilitySnapshot('oracle_publish', btcBlock);
-            } catch(e){
-                this.noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
-                return;
-            }
-            // The latch advances even on per-chain failure; the next cadence retries.
-            this.clearCadenceStall();
-            this._lastCheckpointBtcBlock = btcBlock;
-            for(let chain of this.chains){
-                if(!this.indexers[chain].url) continue;
-                try { await this.runRound(chain, btcBlock, validators); }
-                catch(e){ logger.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message)); }
-            }
+            await this.leadCadenceRound(btcBlock, validators);
         } finally {
             this._ticking = false;
         }
+    },
+
+    // True while `btcBlock` is inside the interval after the last FINALIZED checkpoint.
+    finalizedLatchHolds(btcBlock){
+        let last = this._lastCheckpointBtcBlock;
+        return last != null && btcBlock < Number(last) + this.intervalBlocks;
+    },
+
+    // We are the cadence leader (or a single-node set): one round per chain.
+    async leadCadenceRound(btcBlock, validators){
+        // Mirror the capability snapshot BEFORE the attempt is recorded. This call sits
+        // outside the per-chain guard below, so a throw here aborts every chain's round;
+        // recorded first, the whole interval was dropped and getcheckpointstats still
+        // read clean, which is the silent-cadence shape that cost 18 days on mainnet.
+        // Meter it and leave the round retryable.
+        try {
+            await this.persistCapabilitySnapshot('oracle_publish', btcBlock);
+        } catch(e){
+            this.noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
+            return;
+        }
+        this.clearCadenceStall();
+        this._attemptedCheckpointBtcBlock = btcBlock;
+        for(let chain of this.chains){
+            if(!this.indexers[chain].url) continue;
+            try { await this.runRound(chain, btcBlock, validators); }
+            catch(e){
+                // An indexer blip before the proposal: retryable here on a frozen tip, and
+                // the next block's leader retries the interval since no latch moved.
+                logger.warn('StateCheckpointEngine: ' + chain + ' round failed: ' + (e && e.message));
+                this.queueRoundRetry({ chain, snapshot_block: btcBlock, block_index: null }, 0);
+            }
+        }
+    },
+
+    // The interval rule every signature this hub gives obeys, as leader or co-signer. A
+    // round at `snap` may not start inside the interval after the last FINALIZED
+    // checkpoint (a snapshot EQUAL to it is the same round, one SIGN_REQ per chain, and
+    // the first chain's FINALIZED may already have moved the latch there), nor inside the
+    // interval of another snapshot this hub signed whose round may still finalize. Two
+    // slot holders one block apart in tip both see the interval due; since any two
+    // quorums share a signer, one signature per interval lets at most one of them
+    // finalize. Returns why `snap` conflicts, or null.
+    cadenceConflict(snap){
+        let finalized = this.finalizedConflict(snap);
+        if(finalized != null) return finalized;
+        let held = this.signedRoundConflict(Number(snap));
+        if(held != null) return 'this hub signed snapshot ' + held + ' in the same interval and that round is still open';
+        return null;
+    },
+
+    // The finalized-latch half of cadenceConflict alone.
+    finalizedConflict(snap){
+        let s = Number(snap), last = this._lastCheckpointBtcBlock;
+        if(last != null && s !== Number(last) && s < Number(last) + this.intervalBlocks)
+            return 'last checkpoint ' + Number(last) + ', interval ' + this.intervalBlocks;
+        return null;
+    },
+
+    // A snapshot this hub signed whose round may still finalize and that sits within one
+    // interval of `snap`, or null. A signature stops counting once its round finalizes or
+    // is superseded (the latch reaches it) or once a round timeout has passed, after
+    // which an honest leader can no longer finalize it.
+    signedRoundConflict(snap){
+        let s = Number(snap), now = Date.now(), last = this._lastCheckpointBtcBlock;
+        for(let [held, until] of this._roundSignatures){
+            if(until <= now || (last != null && held <= Number(last))){ this._roundSignatures.delete(held); continue; }
+            if(held !== s && Math.abs(s - held) < this.intervalBlocks) return held;
+        }
+        return null;
+    },
+
+    // A newer block on this hub's own tip supersedes the unfinalized round it led at an
+    // older one. That block has its own slot holder, and while this hub's round stays
+    // open (or queued for a retry) its own signature holds the interval against that
+    // leader. Only the leader finalizes its round, so dropping the round makes releasing
+    // the signature safe. A round already finalized on some chain (the latch reached the
+    // attempt) is left alone: the rest of its chains are the same round.
+    supersedeOwnAttempt(btcBlock){
+        let attempt = this._attemptedCheckpointBtcBlock, last = this._lastCheckpointBtcBlock;
+        if(attempt == null || !(btcBlock > attempt) || (last != null && Number(last) >= attempt)) return;
+        this.dropOwnAttempt(attempt);
+    },
+
+    // Two slot holders one block apart in tip lead one interval, the lagging one at the
+    // lower block. The higher one yields when the lower round asks for its co-signature:
+    // it drops its own unfinalized round, as above, so it can sign the lower one. Peers
+    // that already co-signed the higher round keep that signature until it expires, so
+    // the race resolves at once only where they had not; otherwise the next block's
+    // leader retries the interval. Called only once our own indexer has confirmed `cp`,
+    // so a proposal this hub could not sign never costs it its own round.
+    yieldToLowerRound(cp){
+        let snap = Number(cp.snapshot_block), attempt = this._attemptedCheckpointBtcBlock, last = this._lastCheckpointBtcBlock;
+        if(attempt == null || !(snap < attempt) || attempt - snap >= this.intervalBlocks) return;
+        if(last != null && Number(last) >= attempt) return;
+        if(this.finalizedConflict(snap) != null) return;
+        this.dropOwnAttempt(attempt);
+    },
+
+    // Cancel this hub's own open or queued round at `attempt` and release its signature.
+    dropOwnAttempt(attempt){
+        for(let [id, p] of this.pending){
+            if(Number(p.cp.snapshot_block) !== attempt) continue;
+            if(p.timer){ clearTimeout(p.timer); p.timer = null; }
+            p.done = true;
+            this.pending.delete(id);
+        }
+        if(this._roundRetries)
+            for(let [chain, r] of this._roundRetries) if(Number(r.snapshotBlock) === attempt) this._roundRetries.delete(chain);
+        this._roundSignatures.delete(attempt);
+        this._attemptedCheckpointBtcBlock = null;
+    },
+
+    // Record a signature this hub gave on a round at `snap`, as leader or co-signer.
+    noteRoundSignature(snap){
+        this._roundSignatures.set(Number(snap), Date.now() + this.roundTimeoutMs);
+    },
+
+    // The leader's half of the interval rule, checked where its signature would leave
+    // and again at quorum: a FINALIZED checkpoint or a co-signature inside the interval
+    // that landed while this round was being built means another round owns it.
+    declinesOwnRound(cp){
+        let conflict = this.cadenceConflict(cp.snapshot_block);
+        if(conflict == null) return false;
+        logger.info('StateCheckpointEngine: not finalizing ' + cp.chain + ' round at snapshot ' +
+                    Number(cp.snapshot_block) + ': ' + conflict);
+        return true;
     },
 
     // Re-lead each chain round that timed out unfinalized, at the snapshot block it first
