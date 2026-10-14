@@ -107,6 +107,7 @@ const ark                   = require('./anchor_reward_key.js');
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
 const { installParts } = require('./install_parts.js');
+const { classifyAnchorSendFailure, markNeverSent } = require('./publisher/send_failure.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, DEFAULT_ANCHOR_MARKER_RETENTION_MS,
         MATCH_KEYS, XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE,
         XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN,
@@ -221,6 +222,27 @@ class StateAnchorPublisher {
 
     async defaultBroadcast(payload, signer, opts){
         signer = signer || this.resolveSigner();
+        let txHex;
+        try {
+            txHex = await this.buildSignedAnchorTx(payload, signer, opts);
+        } catch(e){
+            // Nothing above the send can put a transaction on a wire, so every failure
+            // there is tagged neverSent: broadcastWithRetry reads each broadcaster failure
+            // with the shared classifier, and an untagged pre-send error reads ambiguous.
+            // A thrown string, undefined or frozen error is replaced by a tagged Error.
+            throw markNeverSent(e);
+        }
+        // Only broadcast_tx has a side effect, so only ITS failures get the ambiguity
+        // classification broadcastWithRetry keys the no-double-broadcast guard on.
+        try {
+            return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
+        } catch(e){
+            throw classifyAnchorSendFailure(e);
+        }
+    }
+
+    // Select inputs, build and sign the anchor transaction; the signed hex, never sent.
+    async buildSignedAnchorTx(payload, signer, opts){
         if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
         if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
@@ -256,16 +278,7 @@ class StateAnchorPublisher {
             await abandonBuild(signer.encoder, psbtResult, 'StateAnchorPublisher');
             throw e;
         }
-        // Everything above is pre-send (building/signing; no money has moved).
-        // Only broadcast_tx has a side effect, so only ITS failures get the
-        // ambiguity classification broadcastWithRetry keys the no-double-
-        // broadcast guard on.
-        try {
-            return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
-        } catch(e){
-            if(this.isAmbiguousSendError(e)) e.anchorAmbiguousSend = true;
-            throw e;
-        }
+        return txHex;
     }
 }
 

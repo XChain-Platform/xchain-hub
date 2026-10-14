@@ -22,6 +22,7 @@
 'use strict';
 
 const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
+const { classifyAnchorSendFailure, deadLetterAnchorSend, sdkRetryAfterMs } = require('./send_failure.js');
 const { sumUtxosCoins } = require('../../lib/utxo_balance.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -43,12 +44,10 @@ function parseRetryAfterMs(raw){
 
 module.exports = {
 
-    // Back-to-back spends from the one publisher wallet race the UTXO
-    // tracker's mempool view and collide on input selection
-    // (txn-mempool-conflict), so every anchor broadcast retries with a pause
-    // for the previous spend to become visible. Throws the last error once
+    // Broadcast with retry, WITHOUT double-spending on a lost ACK. Back-to-back spends
+    // from the one wallet collide on input selection (txn-mempool-conflict), so a
+    // definitive failure retries after a pause; the last error is thrown once
     // attempts are exhausted.
-    // Broadcast with retry, WITHOUT double-spending on a lost ACK.
     //
     // Each attempt intentionally rebuilds a FRESH PSBT from fresh UTXOs (conflict
     // avoidance for back-to-back multi-chain anchors), which is exactly why a
@@ -69,13 +68,15 @@ module.exports = {
     // Rules:
     //   - existsCheck says exists        -> adopt it; never re-broadcast.
     //   - definitive pre-send/reject err -> safe: retry with a fresh PSBT.
-    //   - ambiguous send err (tagged `anchorAmbiguousSend` by defaultBroadcast)
-    //     -> the tx may sit in the DOGE mempool where the indexer cannot see it
-    //     yet; poll existsCheck briefly, then DEFER (throw) instead of
-    //     re-broadcasting. The row stays pending; the next flush's pre-broadcast
-    //     existence check settles it once mined (adopt) or confirms absence
-    //     (safe re-broadcast). Same defer-over-risk choice AttestationPublisher
-    //     makes when its indexer is unreachable.
+    //   - ambiguous send err -> the tx may sit in the DOGE mempool where the
+    //     indexer cannot see it yet; poll existsCheck briefly, then DEFER (throw)
+    //     instead of calling the broadcaster again. Every broadcaster's failure is
+    //     read by the shared classifier (send_failure.js): defaultBroadcast's own
+    //     broadcast_tx failures, and a signer hook's `fundsCommitted` reveal
+    //     failure, timeout or untagged error, all of which may have spent. The row
+    //     keeps its intent; the next flush's pre-broadcast existence check settles
+    //     it once mined (adopt) or confirms absence. A hook's reveal fields go to
+    //     the anchor dead-letter file for the operator.
     async broadcastWithRetry(broadcaster, payload, attempts, existsCheck){
         attempts = attempts || 5;
         let token = this.reserveBroadcastBudget();
@@ -104,18 +105,12 @@ module.exports = {
                     this.spendGuard.commit(token);
                     return sent;
                 }
-                catch(e){
+                catch(thrown){
+                    const e = classifyAnchorSendFailure(thrown);
                     lastErr = e;
                     this.releaseOnUnfundedBuild(e, token);
-                    if(e && e.anchorAmbiguousSend){
-                        // The send may have been accepted; give the anchor a bounded
-                        // window to reach the indexer's mined view, then defer. Either
-                        // way the fee is treated as spent.
-                        let found = existsCheck ? await this.pollAmbiguousSend(existsCheck) : null;
-                        this.spendGuard.commit(token);
-                        if(found) return found;   // our send is what landed
-                        throw e;   // defer to a later flush; never rebuild+re-broadcast
-                    }
+                    // Read before the rate-limit wait: a 429 on a funded reveal is ambiguous.
+                    if(e.anchorAmbiguousSend) return await this.deferAmbiguousSend(e, payload, existsCheck, token);
                     let rlWaitMs = this.rateLimitRetryDelay(e, rateLimitWaits, token);
                     if(rlWaitMs !== null){
                         rateLimitWaits++;
@@ -135,6 +130,18 @@ module.exports = {
             // back rather than leaking a reservation that over-counts the window.
             this.spendGuard.release(token);
         }
+    },
+
+    // The send may have been accepted: give the anchor a bounded window to reach the
+    // indexer's mined view and adopt it when it appears, else record any reveal fields
+    // and throw, deferring to a later flush. Either way the fee is treated as spent,
+    // and the broadcaster is never called again for this payload.
+    async deferAmbiguousSend(e, payload, existsCheck, token){
+        const found = existsCheck ? await this.pollAmbiguousSend(existsCheck) : null;
+        this.spendGuard.commit(token);
+        if(found) return found;   // our send is what landed
+        deadLetterAnchorSend(this.anchorDeadLetterPath, payload, e);
+        throw e;
     },
 
     // flush() checks the pause + per-window
@@ -270,15 +277,18 @@ module.exports = {
     // rate limit. Reads the encoder's own signal rather than guessing a curve: the
     // per-IP limiter and the concurrency gate both answer 429/-32029 but want waits
     // ~60x apart. A missing or unparseable header falls back to the flat retry delay
-    // (still a wait, never an unbounded one), and every result is clamped.
+    // (still a wait, never an unbounded one), and every result is clamped. A signer
+    // hook built on xchain-sdk reports the same 429 as code RATE_LIMITED with
+    // retryAfterSeconds and no axios response, so that shape is read too.
     rateLimitWaitMs(e){
         if(!e) return null;
         let status = e.response ? Number(e.response.status) : NaN;
-        if(status !== 429 && Number(e.rpcCode) !== -32029) return null;
+        let sdkLimited = e.code === 'RATE_LIMITED';
+        if(status !== 429 && Number(e.rpcCode) !== -32029 && !sdkLimited) return null;
         let headers = (e.response && e.response.headers) || {};
         let raw = headers['retry-after'];
         if(raw === undefined) raw = headers['Retry-After'];
-        let ms = parseRetryAfterMs(raw);
+        let ms = sdkLimited ? sdkRetryAfterMs(e) : parseRetryAfterMs(raw);
         if(ms === null) ms = this.chunkRetryDelayMs;
         let cap = Number(this.rateLimitMaxWaitMs);
         if(!Number.isFinite(cap) || cap < 0) cap = 60000;

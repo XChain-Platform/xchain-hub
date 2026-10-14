@@ -25,6 +25,7 @@
 const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
+const { anchorSendMayHaveLanded } = require('./send_failure.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -200,12 +201,11 @@ module.exports = {
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
-            // withdraw the intents rather than hold the sections for the TTL over a
-            // send that never happened. An AMBIGUOUS send keeps its intents: that
-            // case is exactly what the markers are for.
-            if(!(e && e.anchorAmbiguousSend)) for(let s of group) await this.withdrawAnchorIntent(s);
-            if(archiveSection && !(e && e.anchorAmbiguousSend))
-                await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
+            // withdraw the intents rather than hold the sections for the TTL. An
+            // AMBIGUOUS or funds-committed send keeps them: that is what they are for.
+            const keep = anchorSendMayHaveLanded(e);
+            if(!keep) for(let s of group) await this.withdrawAnchorIntent(s);
+            if(archiveSection && !keep) await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
             throw e;
         }
         return result;

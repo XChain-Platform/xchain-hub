@@ -226,7 +226,7 @@ function registerSplitSuitePart4() {
     pub.findExistingCheckpointAnchor = async () => null;
     await pub.publishPendingCheckpoints({
       broadcastFn: async () => {
-        throw new Error('no UTXOs available for Dpub1');
+        throw Object.assign(new Error('no UTXOs available for Dpub1'), { neverSent: true });
       }
     }, 1000);
     expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')).to.have.length(1);

@@ -54,6 +54,7 @@ const config = {
     get ADMISSION_WATERMARK_SAMPLE_MS() { return process.env.ADMISSION_WATERMARK_SAMPLE_MS; },
     get ANCHOR_AMBIGUOUS_POLL_ATTEMPTS() { return process.env.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS; },
     get ANCHOR_AMBIGUOUS_POLL_MS() { return process.env.ANCHOR_AMBIGUOUS_POLL_MS; },
+    get ANCHOR_DEADLETTER_PATH() { return process.env.ANCHOR_DEADLETTER_PATH; },
     get ANCHOR_ANNOUNCE_QUEUE_MAX() { return process.env.ANCHOR_ANNOUNCE_QUEUE_MAX; },
     get ANCHOR_ANNOUNCE_RETRY_MS() { return process.env.ANCHOR_ANNOUNCE_RETRY_MS; },
     get ANCHOR_ANNOUNCE_RETRY_TTL_MS() { return process.env.ANCHOR_ANNOUNCE_RETRY_TTL_MS; },

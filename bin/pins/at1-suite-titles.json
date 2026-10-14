@@ -4958,6 +4958,22 @@
       "d8a7ce71d3db2f24edac6ed1bf79b31ad7bb8552710a02d3ec8dffbd077301cb",
       "a373c048914ba9bf6ea8edb0c70e8e5bd65b9c91a5f7fba142b453b4bf2e0526"
     ],
+    "65499b4f5ba19cf4": [
+      "6aa2cb9d59b19cf13c26f7ec8df8cb834ee39db4c809d6818b4163a48aea64fa",
+      "fb028d5d08dc15321ce0252f95e95b7ada2d35f24879ac2dcf61d8c6cfa260dd",
+      "e55f40483dd3db6f46de287330d2764a519919684a0f80907b8fd98d459307b1",
+      "e2fa9fa570ab33445351c85ec6dd8cd3b8611ce97505420086635022780d2e11",
+      "9603109e64850e828b81b9f79e4e5965a213ed77d10e0bac8ae3f5a3f936dd5b",
+      "a996249b7e58800db019c847f37580d15b487cff2af429580511a8bbb8ca77c8",
+      "5e7d730fb7ac6d69a3079914ed485c647e6ed8e6666736d0f53e51e2607a7bc6",
+      "ec390e61cd960b62f5d0949fd59ff71da42e88d9dd56cacf01254d9298983f94",
+      "d12eb40c2dbe2b85c5b984a4d885bdad83f2cedcf8e7d77c40517698701caa34",
+      "5dc729a69c4d205ab279c9f3ea158c12456013c2bf52b393c9dafcff87520277",
+      "d45afb963cd26e15db095df9ced7e0d4e2eab8acfed96bc880f4763bd0756a85",
+      "8670ea5c8a504680c0cce63f41d8c7a9a54075411d56b8a30b71241619026932",
+      "288aeb45d747bddecf7543b31287df6338b6f1666400b207bc109310c57b4f92",
+      "5b0f78ab829f0451a80360a346c123b8ab0d492c368dd9acede447a2f8256970"
+    ],
     "6570d185ba838173": [
       "b7b2fbf77594a7790a4615c629dbb0750e6e8caea66f9fafa8c03d6361850c50",
       "9703706db31d479bc98b2baf8bd1e67f5a0e661e5bf6a8607c3299047c0939ba",
@@ -9531,6 +9547,34 @@
       "6ef50ed78bd6b9bc5bfd4175f29cf058ada71d7e5982db25068a6332238eb1a3",
       "8b03eb7e7c51a87d387743e632ad16162500da071c23717b5610efbaf7c8a2de"
     ],
+    "c6392c1749dd493c": [
+      "08308a5c341e7cf2ea0ae48c2e0c915067bf6031e60fd68be52d7874f1330e35",
+      "949702254079d385efd40f026a8c56fa728cf1536777f20883fd2d10b4a5a401",
+      "091c29f2d8f9b58065924555053bc1460943bf00ad3ea8bbef604186b39fdd06",
+      "99e26999ce222ea293a9f40b24a898002aa5beb42413e0ff7b83d1b2dba4aee8",
+      "e62792593c40d81f402bedec50303231938c8f7502604053a40a1217a88d9003",
+      "efdd4373eaddfe554e32dd40e31704d55972a7c62b7c3149616114d3108c1dcc",
+      "140359107683bd6929a9ac4477bb13f84da0135425381b5e7397b84984adc8c6",
+      "8a0eaeb20a4a7a0bcdcaeb4312d262f69405728f7b0b90dc3cfdf65afe1f0a71",
+      "69d301b1378c12f026c6c3de5564e211a2e603e11f741808b249124bf9008587",
+      "3bcfa1e8742328a61b7b5e53fa479532c6ef4d202644b767358d6325c91f604e",
+      "839d1e563ca7850abbc121f1195cbe18115f988401fab153fd8e2108db6951f9",
+      "05943559d956e232afdec95a948bef96e2bdf091f2daefc114e44af012d85644",
+      "7c3db0c2897b69fd9745b556987decfef5d0f1471d98bbddec5e22e0f23f58fd",
+      "e9a750bc10030332c7bfa496605b21a7fb938e0ea52a36cf4a1859d7765ae86a",
+      "5a7a27ac0d7cc48a97451d734e5ce08f8739e135101a66bbbb0d8f931a2a1539",
+      "9a2c4070860f237fed82c3a5616ed03b1348ba2903b3ea401071deb29d5ac50d",
+      "25fb02bbe51813d2a4d1b6108c1d2f0609d817153a368eb9211fce478fb6bdf1",
+      "6fb3cea7b6e63082ea279e45e39f574fd7c9acfd083083cb248982bc66c33e27",
+      "7934549b40d162a3db04991589a88825eca372a565c1ee0c782038439e2a79c0",
+      "6382aabdbfb7482841542e5835c05212ea4a7805833654685190f04d2ce75866",
+      "02b7e765680ac9edecf7895896a91ad2f4444aa4aa7aa20e93e2416357f24330",
+      "4a7fac5de41f4326e4a07a210db5a295cf39d431ed4bdcfa9dd698b10dfa4443",
+      "41eb8c5389637479d30a3a0a100f7d38716be0648bfaa0c8b129b88b18653b3f",
+      "a12582eb48bf1a67e8b7010915ace5717a0fa5cee71a4ff651b5e6821e489a0f",
+      "aa261a29f8281f693e1929e7a014db9eb2229d9190546e196c195d25dddac6c0",
+      "c28b3a2dbe8b475b2644eb5796aa74a5ee1c1c24bb24c609a10b13dcbcdbcbf3"
+    ],
     "c63e3ecf2eb62cde": [
       "4395290a647d8f21d6f097b19a4376cbfcaf6511f167dccc0a0ec9cea9bb1104",
       "7aa6cbaaa7e03cb42dfdde6f604b91a66962e5d159bc8678f691149ae2bfbe78",
@@ -10279,18 +10323,6 @@
       "b10990ed4b316156ecaf26132b1f86ac98b4ca0a52360809358f8b65e0fdd14d",
       "1b52d55ea8fdc32f862b1c62179bd89c4bcba4233668d3f160644057a29f3844",
       "bee723ff0ce55a8dde9290fb3c3322c1deae3792051598de892542338056fd05"
-    ],
-    "d8799b5b9466fc6e": [
-      "db0a5ad3cfa90acf1ca3ae81cd9266265584f53de05a1c88552af0c2440fe685",
-      "e1f27cdb2516ea2ffa410a7f53bba3054cfe7d8b8ad00e82c3df9f39c5da52a9",
-      "304c3d2dd02cca9471f763a1adc34897a687e7dcb6cb7877ddedb02e6d63db3a",
-      "593df17de324d1bda65ee58739e32cbcc92ee5e39d89340775b557f5cfe149ed",
-      "0e7313c1ff79a0421bd28ccad1068dbd64e10e7b7a8832f81386260b512ba5d2",
-      "ac4f10ef0e0f78bca758611d7e63431b72bbcfb7dd62f708e34f9ef4926bc392",
-      "3eabda7d504463258066ed1bf3e6c425de7548ca0224408acea2a015654ee89c",
-      "134ff72f431f0cce82b73add3006ada328e79946ed5af29f8289ad1b9515a1db",
-      "6acddfc16c6683cf182ed62557d2be3235f81d3a5264620c4925b9087e1d206e",
-      "c62ada85c2ec4a2d6b3ab926bf49c3d9dfb20d461e7297e904c892c2db3d3eec"
     ],
     "d880a2efba0422d3": [
       "b1379185a085f710d738d052650986dd971fbb6b960a3961487c48f318a47714",
@@ -11504,6 +11536,21 @@
       "b27116b8950f57f309b5c2464637a49df62b7f7782601ea6c4e208851df93b01",
       "04c65d232ca647ff1b61442d7770dc7b400de2003cf2807261bc107d024cb030"
     ],
+    "f8260b1db01c0900": [
+      "d4bb4cdda2d61458c0791dfa92bc72529bf10f46d4580792e20e7e28164a743d",
+      "db0a5ad3cfa90acf1ca3ae81cd9266265584f53de05a1c88552af0c2440fe685",
+      "e1f27cdb2516ea2ffa410a7f53bba3054cfe7d8b8ad00e82c3df9f39c5da52a9",
+      "d00256d97f436521ac7884536232ef2da14694f2200a992a975fbaf58bf218c2",
+      "b4409ff7b03f2f888b4d96145af26827b36d83cc9fa4f626a808ed7378f4b73d",
+      "aad4dfdf69f852b00f9d4dfa31569b8a46830e10dbe6629a32824bf17cedb8c0",
+      "59f62e5ba3dfafbae6db4123287b53c9dd6de5849a638f5c0f50610db7ac01d0",
+      "97b2dd7b44a8709d4fb5247475ce617407f0bacc5f9d0482134beab3e31ccbf4",
+      "ac4f10ef0e0f78bca758611d7e63431b72bbcfb7dd62f708e34f9ef4926bc392",
+      "3eabda7d504463258066ed1bf3e6c425de7548ca0224408acea2a015654ee89c",
+      "134ff72f431f0cce82b73add3006ada328e79946ed5af29f8289ad1b9515a1db",
+      "6acddfc16c6683cf182ed62557d2be3235f81d3a5264620c4925b9087e1d206e",
+      "c62ada85c2ec4a2d6b3ab926bf49c3d9dfb20d461e7297e904c892c2db3d3eec"
+    ],
     "f848101de0f26a45": [
       "aa72839c5ce957458accfdd1ed69a78aae4bdc722a874c6da9640fa6c01699f2",
       "b50da41333f64911824a0cf1e23253031fa64ff4fade89d3defb67032f9e7708",
@@ -11812,7 +11859,7 @@
         "ci:regression"
       ],
       "fileCount": 931,
-      "titleCount": 8592,
+      "titleCount": 8595,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12659,7 +12706,7 @@
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -12763,9 +12810,11 @@
       }
     },
     "ci:regression": {
-      "fileCount": 18,
-      "titleCount": 240,
+      "fileCount": 20,
+      "titleCount": 280,
       "files": {
+        "test/regression/anchor_signer_hook_error_shapes.test.js": "c6392c1749dd493c",
+        "test/regression/anchor_signer_hook_send_failures.test.js": "65499b4f5ba19cf4",
         "test/regression/attestation_body_cap.test.js": "3041f3f48c815ad0",
         "test/regression/attestation_meta_cap.test.js": "eaabfd52fa05c9ba",
         "test/regression/attestation_status_cap.test.js": "414b54ebfddfcdcb",
@@ -12800,7 +12849,7 @@
     },
     "test": {
       "fileCount": 931,
-      "titleCount": 8592,
+      "titleCount": 8595,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13647,7 +13696,7 @@
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -13736,8 +13785,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1011,
-      "titleCount": 9415,
+      "fileCount": 1013,
+      "titleCount": 9458,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -13792,6 +13841,8 @@
         "test/performance/p2p_flood.test.js": "8bfb66de2dc1529d",
         "test/performance/resilience.test.js": "d7c1c4f3ce4fd373",
         "test/performance/soak.test.js": "fdb397d4f4108a09",
+        "test/regression/anchor_signer_hook_error_shapes.test.js": "c6392c1749dd493c",
+        "test/regression/anchor_signer_hook_send_failures.test.js": "65499b4f5ba19cf4",
         "test/regression/attestation_body_cap.test.js": "3041f3f48c815ad0",
         "test/regression/attestation_meta_cap.test.js": "eaabfd52fa05c9ba",
         "test/regression/attestation_status_cap.test.js": "414b54ebfddfcdcb",
@@ -14664,7 +14715,7 @@
         "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "d8799b5b9466fc6e",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -14864,9 +14915,11 @@
       }
     },
     "test:regression": {
-      "fileCount": 18,
-      "titleCount": 240,
+      "fileCount": 20,
+      "titleCount": 280,
       "files": {
+        "test/regression/anchor_signer_hook_error_shapes.test.js": "c6392c1749dd493c",
+        "test/regression/anchor_signer_hook_send_failures.test.js": "65499b4f5ba19cf4",
         "test/regression/attestation_body_cap.test.js": "3041f3f48c815ad0",
         "test/regression/attestation_meta_cap.test.js": "eaabfd52fa05c9ba",
         "test/regression/attestation_status_cap.test.js": "414b54ebfddfcdcb",
@@ -14888,9 +14941,11 @@
       }
     },
     "test:regression:p0": {
-      "fileCount": 16,
-      "titleCount": 110,
+      "fileCount": 18,
+      "titleCount": 150,
       "files": {
+        "test/regression/anchor_signer_hook_error_shapes.test.js": "c6392c1749dd493c",
+        "test/regression/anchor_signer_hook_send_failures.test.js": "65499b4f5ba19cf4",
         "test/regression/attestation_body_cap.test.js": "133c2dc9e5c36251",
         "test/regression/attestation_meta_cap.test.js": "eaabfd52fa05c9ba",
         "test/regression/attestation_status_cap.test.js": "414b54ebfddfcdcb",
@@ -14910,9 +14965,11 @@
       }
     },
     "test:regression:p0p1": {
-      "fileCount": 17,
-      "titleCount": 195,
+      "fileCount": 19,
+      "titleCount": 235,
       "files": {
+        "test/regression/anchor_signer_hook_error_shapes.test.js": "c6392c1749dd493c",
+        "test/regression/anchor_signer_hook_send_failures.test.js": "65499b4f5ba19cf4",
         "test/regression/attestation_body_cap.test.js": "3041f3f48c815ad0",
         "test/regression/attestation_meta_cap.test.js": "eaabfd52fa05c9ba",
         "test/regression/attestation_status_cap.test.js": "414b54ebfddfcdcb",

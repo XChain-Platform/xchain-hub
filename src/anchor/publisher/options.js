@@ -97,6 +97,11 @@ module.exports = {
         // accepted anchor to reach the indexer's mined view before deferring.
         this.ambiguousPollAttempts = parseInt(hubConfig.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
         this.ambiguousPollDelayMs  = parseInt(hubConfig.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
+        // Append-only record of a send a signer hook failed after funding, with the
+        // signed reveal an operator rebroadcasts (send_failure.js). An unset or empty
+        // ANCHOR_DEADLETTER_PATH falls through to the default, so a record is always written.
+        this.anchorDeadLetterPath = hubConfig.ANCHOR_DEADLETTER_PATH || cfg.ANCHOR_DEADLETTER_PATH ||
+                                    './data/anchor-publish.deadletter.jsonl';
     },
 
     initFailoverLadder(cfg){
