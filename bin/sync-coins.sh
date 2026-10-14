@@ -26,7 +26,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/../src/coins"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
-FILES="BTC.js LTC.js DOGE.js index.js consensus_pin.js"
+FILES="BTC.js LTC.js DOGE.js KAS.js index.js consensus_pin.js"
 SERVICES="xchain-indexer xchain-explorer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-sdk xchain-sync xchain-node xchain-e2e-test xchain-regtest-miner"
 
 CHECK=0
