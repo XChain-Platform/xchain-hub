@@ -7018,6 +7018,10 @@
       "8d415e5fb1bdd128b4632603590ee1b791f00337bbaddb70129b3cc888c04990",
       "b66df718f514d23497c169bb382da747e30eaa4735d53fe05af47a1ea42733ce"
     ],
+    "8e68cd15a63348ec": [
+      "5271838b93428f3984fdb6c1ea033969647bcf8474cc56e258224e1eaa19559b",
+      "26c41be1f381fccaa0b82eba9735df1a3e03f0c2e75cc97656815f254baf61dc"
+    ],
     "8e6a2164b0851b61": [
       "3e2c226291a7f97701fe52d9e170807adbaa3d0974debbe61520dbf25906db44",
       "23069b614310f51d5b98f68b64f0ace3fd05dd58f1edc98a6f2ebb45a109df20",
@@ -7745,6 +7749,17 @@
       "ed18261b32b7bda16ce63db9e46afdacc672f638bd287cdb606a2dec14c72e00",
       "05b4cd7791b2675d3247fdf489e9926318e6485fbc17d0055845c9a78fb9e77b",
       "55420df3c8db26cfa38348378c110b076a6c68e03ce79507f38ab3e7ba8b0a01"
+    ],
+    "a100c97bac6b50e8": [
+      "9c032cf4133f12612987d188d892588bde7af4f92c79c2088f2024a3035a7442",
+      "712720de0950f1ca83dbb45447bcf11fa117aba30520c7926d827721d39718a0",
+      "e911fc4581525935294180dbf3d3ff30e656c6438cedae4a74e07e45318499e6",
+      "529c1b04fd1e0d531eb3b753dd5e51e6963633e4fc303eb4263d5c244f2370c4",
+      "b17be33f9e0dfe85df3fd75aa2705f1e0e3ab0bdb963ae09cc6b1adc1b97f8db",
+      "ddf0b67e68585036b5969baa17979ea5dc2679368655ac730ac0dd69904e6e08",
+      "a6b727e8dcc8877c378d9f36bde13cde699d3419a2f3776dbb00e3afb7e31c0f",
+      "0f7d13c3f504360b36963ef2d2fd612684080a8f77869db607e01951e8302a24",
+      "e58d31db57d7b78825e6b166808cb9a76cadce94369a58d001f21be9b57d1ea8"
     ],
     "a14e19e8b0a69493": [
       "a05589facb1327f243517041902a5357400601142ce0dbddf9de78486b5223c5",
@@ -9033,6 +9048,11 @@
       "5118befbfe8697ed82383687fe9d4ddf520bb658b44d3d2b4ee1a0dfede82d66",
       "2228ec4bc31e50197350393f0eef393ab52778d1496f80d24830b1aec3d417c2"
     ],
+    "bbde03ff3d4a71c9": [
+      "eef2ee6f34674e5eb3bfd708a68837e3fb100805ea0bef710235bb0b31eb6f60",
+      "6cdc16b3eebe0544874ec3f4891c67c3d7515c5849d3061903ed25fc6cdfe277",
+      "8df7890143d0f96f13b404526ade05f7bc02a11df37da74b5350b62273e1f644"
+    ],
     "bbeaa65bab61dc48": [
       "aefcadefd7d5c2ef529aeef60fe4ae4977e08a5fc472d18bcd123128f0cb4cae",
       "3e11fe9eb48f6ddcd53ca902c8b33aa9aa86ce7b9f8d1ef8b0defe9d4df87ab4",
@@ -9134,6 +9154,13 @@
       "0bc803c7bbd95c8dbf99364431d95d2bb80c9ee33eb7bbd363232edc96b3b94a",
       "59a9f916343a8b0edd698070b0864ab4aededf09631352dee9839c2dab023597",
       "cefbeb40393649afe2e887da391aeed23b2a8148624ea6edca2841c178dd24ac"
+    ],
+    "bffb1550f6408669": [
+      "8bdb1dcce1a8e560e8d03b1713530c3161fc728e40977748d4ae48494fede99c",
+      "6f0ae062c9f6b5b0e0b6bd8864f1fa4259469347b88eee7e265991df87f1c7ba",
+      "9b0f5a4dac15583aa4ce780e88765791f36ce6774c5fc3986903221d0d1bc339",
+      "bcf28a875a183cb92ae271fce33c0a67c3e8ab83a8dd07808f6cd3f0c098a6d9",
+      "eec3c6aec44ae5ade05ad1193badb315cf7b4992ffa2ce201e731b4527510f4e"
     ],
     "c02138b31d90cc7a": [
       "b4ccce6646d0282f9696839b974082449753e11dbfea423757cf4f9c853ef8b8",
@@ -11720,8 +11747,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 918,
-      "titleCount": 8530,
+      "fileCount": 922,
+      "titleCount": 8549,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12325,6 +12352,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
+        "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
         "test/unit/oracle/consensus/oracle_consensus_determinism.test.js": "32e41476bd95994a",
         "test/unit/oracle/consensus/oracle_consensus_fallback.test.js": "169c3c22108b8f33",
@@ -12337,6 +12365,7 @@
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
+        "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
@@ -12394,6 +12423,7 @@
         "test/unit/oracle/price/fetcher/price_fetcher_06_multisourcecapablepairs.test.js": "c27ee6b4710e93a1",
         "test/unit/oracle/price/fetcher/price_fetcher_07_bound_rejection_signal.test.js": "0ac5be97bc41674f",
         "test/unit/oracle/price/fetcher/price_fetcher_08_source_liveness.test.js": "3afbad95cc08b84b",
+        "test/unit/oracle/price/fetcher/price_fetcher_09_even_median_rounding.test.js": "bbde03ff3d4a71c9",
         "test/unit/oracle/price/price_admission_wire_carrier.test.js": "9d75f575c8a2618c",
         "test/unit/oracle/price/price_admission_wire_carrier_batch.test.js": "e134fd4216f851a3",
         "test/unit/oracle/price/price_admission_wire_carrier_consensus.test.js": "5410ed197c04f467",
@@ -12591,6 +12621,7 @@
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",
         "test/unit/shared/constants_conformance.test.js": "f3a1c1901689df27",
+        "test/unit/shared/oracle_clamp_constants_docs_mirror.test.js": "8e68cd15a63348ec",
         "test/unit/shared/secret_env.test.js": "505e7155617ef70a",
         "test/unit/shared/signer_loader.test.js": "c99d2b748e69eb73",
         "test/unit/shared/spend/effector_spend_ceiling_reservation.test.js": "a42ed728e9dfcacf",
@@ -12695,8 +12726,8 @@
       }
     },
     "test": {
-      "fileCount": 918,
-      "titleCount": 8530,
+      "fileCount": 922,
+      "titleCount": 8549,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13300,6 +13331,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
+        "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
         "test/unit/oracle/consensus/oracle_consensus_determinism.test.js": "32e41476bd95994a",
         "test/unit/oracle/consensus/oracle_consensus_fallback.test.js": "169c3c22108b8f33",
@@ -13312,6 +13344,7 @@
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
+        "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
@@ -13369,6 +13402,7 @@
         "test/unit/oracle/price/fetcher/price_fetcher_06_multisourcecapablepairs.test.js": "c27ee6b4710e93a1",
         "test/unit/oracle/price/fetcher/price_fetcher_07_bound_rejection_signal.test.js": "0ac5be97bc41674f",
         "test/unit/oracle/price/fetcher/price_fetcher_08_source_liveness.test.js": "3afbad95cc08b84b",
+        "test/unit/oracle/price/fetcher/price_fetcher_09_even_median_rounding.test.js": "bbde03ff3d4a71c9",
         "test/unit/oracle/price/price_admission_wire_carrier.test.js": "9d75f575c8a2618c",
         "test/unit/oracle/price/price_admission_wire_carrier_batch.test.js": "e134fd4216f851a3",
         "test/unit/oracle/price/price_admission_wire_carrier_consensus.test.js": "5410ed197c04f467",
@@ -13566,6 +13600,7 @@
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",
         "test/unit/shared/constants_conformance.test.js": "f3a1c1901689df27",
+        "test/unit/shared/oracle_clamp_constants_docs_mirror.test.js": "8e68cd15a63348ec",
         "test/unit/shared/secret_env.test.js": "505e7155617ef70a",
         "test/unit/shared/signer_loader.test.js": "c99d2b748e69eb73",
         "test/unit/shared/spend/effector_spend_ceiling_reservation.test.js": "a42ed728e9dfcacf",
@@ -13619,8 +13654,8 @@
       }
     },
     "test:all": {
-      "fileCount": 998,
-      "titleCount": 9353,
+      "fileCount": 1002,
+      "titleCount": 9372,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14304,6 +14339,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
+        "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
         "test/unit/oracle/consensus/oracle_consensus_determinism.test.js": "32e41476bd95994a",
         "test/unit/oracle/consensus/oracle_consensus_fallback.test.js": "169c3c22108b8f33",
@@ -14316,6 +14352,7 @@
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
+        "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
@@ -14373,6 +14410,7 @@
         "test/unit/oracle/price/fetcher/price_fetcher_06_multisourcecapablepairs.test.js": "c27ee6b4710e93a1",
         "test/unit/oracle/price/fetcher/price_fetcher_07_bound_rejection_signal.test.js": "0ac5be97bc41674f",
         "test/unit/oracle/price/fetcher/price_fetcher_08_source_liveness.test.js": "3afbad95cc08b84b",
+        "test/unit/oracle/price/fetcher/price_fetcher_09_even_median_rounding.test.js": "bbde03ff3d4a71c9",
         "test/unit/oracle/price/price_admission_wire_carrier.test.js": "9d75f575c8a2618c",
         "test/unit/oracle/price/price_admission_wire_carrier_batch.test.js": "e134fd4216f851a3",
         "test/unit/oracle/price/price_admission_wire_carrier_consensus.test.js": "5410ed197c04f467",
@@ -14570,6 +14608,7 @@
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",
         "test/unit/shared/constants_conformance.test.js": "f3a1c1901689df27",
+        "test/unit/shared/oracle_clamp_constants_docs_mirror.test.js": "8e68cd15a63348ec",
         "test/unit/shared/secret_env.test.js": "505e7155617ef70a",
         "test/unit/shared/signer_loader.test.js": "c99d2b748e69eb73",
         "test/unit/shared/spend/effector_spend_ceiling_reservation.test.js": "a42ed728e9dfcacf",

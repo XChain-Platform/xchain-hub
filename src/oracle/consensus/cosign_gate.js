@@ -15,8 +15,9 @@
  * XChain Hub - Oracle Consensus: the co-sign gate
  *
  * What a follower checks before it signs a leader price: the hard bound, the canonical
- * pair whitelist, the deviation band against this hub own aggregate or the last
- * finalized price, and the coverage check for a pair the proposer suppressed.
+ * pair whitelist, the deviation band against this hub own aggregate (both middle values
+ * when that set is even and the proposer submitted the pair) or the last finalized
+ * price, and the coverage check for a pair the proposer suppressed.
  *
  ********************************************************************/
 
@@ -45,15 +46,32 @@ const logger = getLogger();
 // raw-addr guard as a belt-and-suspenders fallback for unknown-pubkey addrs.
 function proposerExcludedAggregate(envelope, submissions) {
     let refSubs = new Map();
+    let proposerPairs = new Set();
     let proposerPk = this.resolveSenderPubkey(envelope.sender);
     if (submissions) for (let [addr, sub] of submissions) {
-        if (addr === envelope.sender) continue;
+        if (addr === envelope.sender) { notePairs(proposerPairs, sub); continue; }
         let pk = (sub && sub.pubkey) ? String(sub.pubkey).toLowerCase() : this.resolveSenderPubkey(addr);
-        if (proposerPk && pk === proposerPk) continue;
+        if (proposerPk && pk === proposerPk) { notePairs(proposerPairs, sub); continue; }
         refSubs.set(addr, sub);
     }
-    let localByPair  = new Map((this.aggregateAll(refSubs) || []).map(a => [a.coinPair, a.price]));
-    return localByPair;
+    let sortedByPair = new Map();
+    let localByPair  = new Map((this.aggregateAll(refSubs, sortedByPair) || []).map(a => [a.coinPair, a.price]));
+    // For a pair the PROPOSER itself submitted and whose reference set is even, the two
+    // middle values the leader's odd median falls between (evenSetMiddles explains why
+    // the band is measured to them). A pair the proposer did not submit leaves the
+    // leader aggregating this same even set, so its mean stays the reference.
+    let middlesByPair = new Map();
+    for (let coinPair of localByPair.keys()) {
+        if (!proposerPairs.has(coinPair)) continue;
+        let middles = this.evenSetMiddles(coinPair, sortedByPair.get(coinPair));
+        if (middles) middlesByPair.set(coinPair, middles);
+    }
+    return { localByPair, middlesByPair };
+}
+
+// Record every pair a proposer-held submission carries a price entry for.
+function notePairs(pairs, sub) {
+    if (sub && Array.isArray(sub.prices)) for (let p of sub.prices) if (p && p.coinPair) pairs.add(p.coinPair);
 }
 
 // Canonical mean-relative band (shared deviation_band helper):
@@ -71,15 +89,25 @@ function proposerExcludedAggregate(envelope, submissions) {
 // string coercion) is then one definition shared with the slash
 // gate, so it cannot be edited on one side of the accept/slash pair
 // and not the other. deviation is recomputed inside the branch for
-// the pct/metadata only, which keeps the co-sign path at exactly one
-// computation and costs a second bcdiv solely on a reject.
-function localDeviationRejected(p, local, devThreshold, reject) {
-    if (devband.exceedsBand(local, p.price, devThreshold, 18)) {
-        let deviation = devband.deviationFrom(local, p.price, 18);
+// the pct/metadata only, which keeps the co-sign path at one band check
+// per reference value and costs the extra bcdiv calls solely on a reject.
+// An even reference set left by dropping the proposer's own submission for the pair is
+// measured against both middle values, and the proposal passes when it sits within
+// the band of either one: the same both-middles test the leader's even-split gate
+// applies. Their mean is a value no honest leader publishes from that round.
+function localDeviationRejected(p, local, middles, devThreshold, reject) {
+    let refs = middles || [local];
+    if (refs.every(ref => devband.exceedsBand(ref, p.price, devThreshold, 18))) {
+        // Report the nearest reference, the one the proposal came closest to passing.
+        let nearest = refs[0], deviation = devband.deviationFrom(refs[0], p.price, 18);
+        for (let ref of refs.slice(1)) {
+            let d = devband.deviationFrom(ref, p.price, 18);
+            if (bcmath.bclt(d, deviation)) { nearest = ref; deviation = d; }
+        }
         let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
         reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
-            '% from local ' + local + ' (> ' + (devThreshold * 100) + '%)',
-            { reason: 'deviation', proposed: String(p.price), local: String(local), deviation: bcmath.bcformat(deviation, 18) });
+            '% from local ' + nearest + ' (> ' + (devThreshold * 100) + '%)',
+            { reason: 'deviation', proposed: String(p.price), local: String(nearest), deviation: bcmath.bcformat(deviation, 18) });
         return true;
     }
     return false;
@@ -159,7 +187,8 @@ function historicalRejected(p, reject) {
 }
 
 // One proposed pair against the co-sign bounds: true when the round must be withheld.
-function priceRejected(p, localByPair, canonicalPairs, devThreshold, reject) {
+function priceRejected(p, refs, canonicalPairs, devThreshold, reject) {
+    let { localByPair, middlesByPair } = refs;
     // Verify the price is spelled in the chain's v0 form before reading it as a number:
     // parseFloat and the bignumber band admit '1e5', '+100' and '0100', which the chain refuses
     // and which would sink the whole atomic signed batch. Honest bcformat(value, 8) output always
@@ -187,7 +216,7 @@ function priceRejected(p, localByPair, canonicalPairs, devThreshold, reject) {
     }
     let local = localByPair.get(p.coinPair);
     if (local !== undefined && local !== null && bcmath.bcgt(local, '0')) {
-        return localDeviationRejected(p, local, devThreshold, reject);
+        return localDeviationRejected(p, local, middlesByPair.get(p.coinPair), devThreshold, reject);
     }
     return historicalRejected.call(this, p, reject);
 }
@@ -241,7 +270,7 @@ function coverageRejects(prices, submissions, localByPair, reject) {
 // very loose PRICE_MAX bound. Without this a Byzantine leader can inject any price in
 // (0, PRICE_MAX) for any pair that quorum co-signers did not price locally.
 function coSignGateRejects(round, envelope, prices, submissions) {
-    let localByPair = proposerExcludedAggregate.call(this, envelope, submissions);
+    let refs = proposerExcludedAggregate.call(this, envelope, submissions);
     // Federation-uniform deviation band (shared constant, not per-hub config) so
     // every hub's accept/withhold boundary is identical; deviation is computed in
     // bignumber (bcmath) per the platform mandate, removing the +-band-boundary
@@ -269,9 +298,9 @@ function coSignGateRejects(round, envelope, prices, submissions) {
         this.emit('oracle:propose-rejected', Object.assign({ round, sender: envelope.sender, coinPair }, extra || {}));
     };
     for (let p of prices) {
-        if (priceRejected.call(this, p, localByPair, canonicalPairs, devThreshold, reject)) return true;
+        if (priceRejected.call(this, p, refs, canonicalPairs, devThreshold, reject)) return true;
     }
-    return coverageRejects.call(this, prices, submissions, localByPair, reject);
+    return coverageRejects.call(this, prices, submissions, refs.localByPair, reject);
 }
 
 module.exports = { coSignGateRejects };

@@ -299,7 +299,10 @@ class PriceFetcher {
         let sorted = [...values].sort((a, b) => a - b);
         let mid = Math.floor(sorted.length / 2);
         if (sorted.length % 2 === 0) {
-            return bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(String(sorted[mid - 1]), String(sorted[mid]), 8), '2', 8), 8);
+            // Round once, at the final 8-decimal format, as the consensus median does
+            // (aggregate.js medianOf): a scale-8 sum then a scale-8 halving rounds twice
+            // and can land one ulp off the value both middles agree on.
+            return bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(String(sorted[mid - 1]), String(sorted[mid]), 18), '2', 18), 8);
         }
         return bcmath.bcformat(String(sorted[mid]), 8);
     }

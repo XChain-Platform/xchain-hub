@@ -36,9 +36,10 @@ const TRIM_PERCENT = 0.15;  // Discard top and bottom 15% of submissions
 // submission repeating a pair cannot shift the trim boundary.
 function collectPairValues(submissions, coinPair) {
     // Collect all prices for this pair. Keep the original string `s` alongside a
-    // float `f` used only for ordering. The median value itself is computed in
-    // bignumber (bcmath) per the platform's bignumber mandate, so the
-    // signed aggregate carries no float/`.toFixed` rounding artifact.
+    // float `f` used only for the admission range check and its exact bignumber `d`,
+    // parsed once here and used for ordering. The median value itself is computed in
+    // bignumber (bcmath) per the platform's bignumber mandate, so the signed
+    // aggregate carries no float/`.toFixed` rounding artifact.
     let values = [];
     for (let [sender, sub] of submissions) {
         if (sub.prices && Array.isArray(sub.prices)) {
@@ -46,7 +47,7 @@ function collectPairValues(submissions, coinPair) {
                 if (p.coinPair === coinPair && p.price) {
                     let val = parseFloat(p.price);
                     if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
-                        values.push({ f: val, s: String(p.price) });
+                        values.push({ f: val, s: String(p.price), d: bcmath.bcnum(String(p.price)) });
                         // Cap each sender at one data point per pair. A
                         // submission could contain N entries for the same
                         // pair; counting them all would inflate values.length
@@ -61,15 +62,27 @@ function collectPairValues(submissions, coinPair) {
     return values;
 }
 
+// Exact decimal order on the submitted spelling, with the spelling itself as the last
+// tie-break so the order is total. A float compare is not enough: above 2^26 two
+// 8-decimal prices one ulp apart parse to the same float, and a stable sort then keeps
+// arrival order, so hubs holding identical submissions could publish different medians.
+function compareExact(a, b) {
+    let c = a.d.comparedTo(b.d);
+    if (c !== 0) return c;
+    if (a.s < b.s) return -1;
+    if (a.s > b.s) return 1;
+    return 0;
+}
+
 // Sort ascending and trim both tails; null (logged) when the trim empties the set.
 function trimPairValues(values, coinPair) {
-    // Sort ascending (ordering only; float compare is fine here)
-    values.sort((a, b) => a.f - b.f);
+    // Sort ascending by exact decimal value, independent of arrival order
+    values.sort(compareExact);
 
-    // Trim top and bottom 15%. Use Math.ceil so at least one value is trimmed
-    // once N >= 4 (Math.floor yields 0 for all N <= 6, making the trim a no-op
-    // in small federations and leaving a single in-bounds outlier able to shift
-    // a 2-source median by ~50%).
+    // Trim ceil(15%) of the values from EACH end, only when at least one value is
+    // left. The trim is symmetric, so it never moves the middle element(s): the
+    // published value is the plain median of every submission for the pair. It
+    // bounds nothing on its own; the even-split gate and the per-round clamp below do.
     let trimCount = Math.ceil(values.length * TRIM_PERCENT);
     if (trimCount > 0 && values.length > 2 * trimCount) {
         values = values.slice(trimCount, values.length - trimCount);
@@ -182,7 +195,9 @@ function evenSplitRejected(values, mid, median, coinPair) {
 
 module.exports = {
 
-    aggregateAll(submissions) {
+    // `sortedOut`, when given, is a Map that receives each pair's sorted post-trim
+    // values, so the co-sign gate reads its reference middles without a second pass.
+    aggregateAll(submissions, sortedOut) {
         if (!submissions) return [];   // no submission map for this round (guard: for..of undefined throws)
         let coinPairs = new Set();
         for (let [sender, sub] of submissions) {
@@ -195,7 +210,7 @@ module.exports = {
 
         let results = [];
         for (let pair of coinPairs) {
-            let price = this.aggregate(submissions, pair);
+            let price = this.aggregate(submissions, pair, sortedOut);
             if (price !== null) {
                 results.push({ coinPair: pair, price: price });
             }
@@ -217,7 +232,7 @@ module.exports = {
     },
 
     // Aggregate a single coin pair using trimmed median
-    aggregate(submissions, coinPair) {
+    aggregate(submissions, coinPair, sortedOut) {
         if (!submissions) return null;
         let values = collectPairValues(submissions, coinPair);
 
@@ -232,6 +247,7 @@ module.exports = {
 
         values = trimPairValues(values, coinPair);
         if (values === null) return null;
+        if (sortedOut) sortedOut.set(coinPair, values);
 
         let mid = Math.floor(values.length / 2);
         let median = medianOf(values, mid);
@@ -249,6 +265,20 @@ module.exports = {
 
         if (values.length % 2 === 0 && evenSplitRejected(values, mid, median, coinPair)) return null;
         return this.clampToLastFinalized(coinPair, median);
+    },
+
+    // The two middle values of an EVEN sorted post-trim set for coinPair (as aggregate()
+    // hands to its `sortedOut`), each quantized to 8 decimals and clamped exactly as the
+    // aggregate is, or null for an odd or empty set.
+    // These bound what an honest leader publishes when it adds one submission of its own:
+    // the odd median of the larger set is the lower middle, the upper middle, or the
+    // leader's own value between them, so the co-sign gate accepts a proposal within the
+    // band of either one rather than of their mean, which no such leader ever publishes.
+    evenSetMiddles(coinPair, values) {
+        if (!Array.isArray(values) || values.length === 0 || values.length % 2 !== 0) return null;
+        let mid = values.length / 2;
+        return [values[mid - 1], values[mid]].map(v =>
+            this.clampToLastFinalized(coinPair, bcmath.bcformat(v.s, 8), true));
     },
 
     // Per-pair bounded-change clamp. The trim + median above bound what a
@@ -269,7 +299,8 @@ module.exports = {
     // round-aligned change). No history (brand-new pair, cold standalone cache) means no
     // clamp; the unverifiable-pair gate covers that case on the co-sign side.
     // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
-    clampToLastFinalized(coinPair, price) {
+    // `quiet` skips the warn line, for a co-sign reference value that is not being published.
+    clampToLastFinalized(coinPair, price, quiet) {
         let last = this.getLastFinalizedPrice(coinPair);
         if (last === null || !bcmath.bcgt(last, '0')) return price;
         let pct = maxChangeForPair(coinPair);
@@ -277,13 +308,13 @@ module.exports = {
         let hi = bcmath.bcadd(last, maxDelta, 8);
         let lo = bcmath.bcsub(last, maxDelta, 8);
         if (bcmath.bcgt(price, hi)) {
-            logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+            if (!quiet) logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(hi, 8) + ' (last finalized ' + last + ', max +' +
                 (pct * 100) + '%/round)');
             return bcmath.bcformat(hi, 8);
         }
         if (bcmath.bclt(price, lo)) {
-            logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+            if (!quiet) logger.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(lo, 8) + ' (last finalized ' + last + ', max -' +
                 (pct * 100) + '%/round)');
             return bcmath.bcformat(lo, 8);
