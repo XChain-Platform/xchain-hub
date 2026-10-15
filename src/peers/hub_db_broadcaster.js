@@ -89,6 +89,14 @@ function initWatermarkCadence(broadcaster) {
     if (broadcaster._watermarkTimer.unref) broadcaster._watermarkTimer.unref();
 }
 
+// A disputed price_snapshots row takes a round OUT of every consensus read (each one
+// filters status = 'finalized'), so it binds nothing at any height and the
+// late-finalization refusal in broadcastRow has nothing to protect. Refusing it would
+// leave running mirrors reading a round this hub no longer serves as finalized.
+function withdrawsPriceRound(event) {
+    return event.table === 'price_snapshots' && !!event.row && event.row.status === 'disputed';
+}
+
 function recoverLateChainIngest(broadcaster, event, late) {
     if (!late || event.origin !== 'chain-ingest') return false;
     broadcaster.dropAllForResync('chain-ingested ' + event.table + ' below admission watermark');
@@ -234,7 +242,7 @@ class HubDbBroadcaster {
         // row that binds at or below it is a fork, not a late delivery. A legacy row carries
         // no admission height and is never refused, so a hub below the activation is
         // byte-identical to today.
-        if (this.admissionWatermark && event) {
+        if (this.admissionWatermark && event && !withdrawsPriceRound(event)) {
             const late = this.admissionWatermark.isLateFinalization(event.table, event.row);
             // PRICE consumers do not apply isRowReadableAt when selecting snapshots,
             // so a chain-ingested row cannot safely bypass this refusal. The consumer's

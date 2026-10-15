@@ -163,6 +163,17 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
         return this.doQuery(`UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'`, [bound]);
     },
 
+    // Reads every disputed price_snapshots row inside a reorg bound, whole, for the mirror
+    // broadcast that follows updatePriceSnapshotByBlockTimestamp. Same bound and unit as that
+    // UPDATE (bound in ms, block_timestamp in seconds). SELECT * because the indexer mirror
+    // upserts on (round_number, coin_pair) and takes a disputed row whole, so it needs the
+    // shape the snapshot endpoint serves (findPriceSnapshotsById). Rows an earlier reorg
+    // already disputed inside the bound are read too: re-emitting them is idempotent and
+    // heals a mirror that was disconnected for that earlier dispute.
+    async findDisputedPriceSnapshotsAfterBlockTimestamp(bound) {
+        return this.doQuery(`SELECT * FROM price_snapshots WHERE status = 'disputed' AND block_timestamp > ? / 1000 ORDER BY id ASC`, [bound]);
+    },
+
     // Updates price_snapshots.
     // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {

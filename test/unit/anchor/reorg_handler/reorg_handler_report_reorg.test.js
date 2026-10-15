@@ -79,7 +79,7 @@ function registerReportSingleNodeCases() {
         await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
 
         // Should have called doQuery for: delete attestations, update snapshots, insert reorg attestation
-        expect(hub.db.doQuery.callCount).to.equal(3);
+        expect(hub.db.doQuery.callCount).to.equal(4); // delete + update + insert + disputed-row re-read
         expect(hub.db.doQuery.getCall(0).args[0]).to.include('DELETE FROM attestations');
         expect(hub.db.doQuery.getCall(1).args[0]).to.include("status = 'disputed'");
         expect(hub.db.doQuery.getCall(2).args[0]).to.include('reorg_attestations');

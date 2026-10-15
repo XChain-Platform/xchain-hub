@@ -61,7 +61,7 @@ function registerSuitePart3() {
             sinon.stub(rh, 'verifyReorgAgainstOwnNode').resolves(true);
 
             await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
-            expect(hub.db.doQuery.callCount).to.equal(3);
+            expect(hub.db.doQuery.callCount).to.equal(4); // delete + update + insert + disputed-row re-read
         });
     });
 }
@@ -307,7 +307,7 @@ describe('Regression: ReorgHandler', function () {
 
             await waitUntil(() => rh.processed.has(reorgId), { label: 'the commit quorum to execute the rollback' });
 
-            expect(hub.db.doQuery.callCount).to.equal(3);
+            expect(hub.db.doQuery.callCount).to.equal(4); // delete + update + insert + disputed-row re-read
             expect(rh.processed.has(reorgId)).to.be.true;
             expect(emitted).to.not.be.null;
         });

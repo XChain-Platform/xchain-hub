@@ -126,6 +126,27 @@ module.exports = {
         return await this.db.findReorgAttestations(limit);
     },
 
+    // Re-read the rows the dispute UPDATE left disputed and emit each one as a
+    // 'row:inserted' event, the re-read-and-emit shape PriceAggregator.stampBatchLanding
+    // uses for an in-place price_snapshots change. Hub start-up wires the event to
+    // HubDbBroadcaster.broadcastRow, so every subscribed indexer mirror upserts the
+    // disputed row and stops reading the round, landing on the row a fresh drain of this
+    // table inserts. Never fatal: the hub's own table is already correct, and a mirror
+    // that misses the event drops the round from its finalized set at its next full
+    // re-page, which serves the row disputed. Returns the number of rows emitted.
+    async emitDisputedPriceRows(bound) {
+        let rows;
+        try {
+            rows = await this.db.findDisputedPriceSnapshotsAfterBlockTimestamp(bound);
+        } catch (e) {
+            logger.error('Reorg: could not re-read disputed price_snapshots rows after ' + bound +
+                ' for the mirror broadcast: ' + (e && e.message ? e.message : e));
+            return 0;
+        }
+        for (let row of (rows || [])) this.emit('row:inserted', { table: 'price_snapshots', row: row });
+        return (rows || []).length;
+    },
+
     async executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
         logger.info('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
 
@@ -161,6 +182,10 @@ module.exports = {
         await this.db.setReorgAttestation(reorgId, chain, reorgHeight, timestamp, JSON.stringify(affectedChains), validatorCount, proof);
 
         this.processed.add(reorgId);
+
+        // Last of the rollback's writes, so the mirror broadcast follows the hub's own
+        // durable state.
+        await this.emitDisputedPriceRows(bound);
 
         logger.info('Reorg: Rollback complete for ' + reorgId +
             ': attestations and snapshots after ' + bound +
