@@ -262,13 +262,13 @@ module.exports = {
     // Reads the newest attestations rows, any status.
     // Moved here from src/cross_chain/engine.js:295, the branch that adds no status filter.
     async findAttestations(limit) {
-        return this.doQuery("SELECT * FROM attestations ORDER BY created_at DESC LIMIT ?", [limit]);
+        return this.doQuery("SELECT * FROM attestations ORDER BY created_at DESC, id DESC LIMIT ?", [limit]);
     },
 
     // Reads the newest attestations rows in one status.
     // Moved here from src/cross_chain/engine.js:295, the branch that filters on status.
     async findAttestationsByStatus(status, limit) {
-        return this.doQuery("SELECT * FROM attestations WHERE status = ? ORDER BY created_at DESC LIMIT ?", [status, limit]);
+        return this.doQuery("SELECT * FROM attestations WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?", [status, limit]);
     },
 
     // Reads the newest attestations row for one source action.

@@ -11074,6 +11074,32 @@
       "722e00e9708d42c923420af03df05916d542049b585b528aca43a6991e4e6edd",
       "f7bcc7f6b3b7e7fd6eb3e95fa57f93d64128070306fe4e5b3c04edd19497e793"
     ],
+    "edd1a790a104a42d": [
+      "707b1ce9716045efe949f27252ac00fb18c497d71a78d926f99048364a5cdf5c",
+      "9670fb7f8c6a13f8975ec01fd0afc07ad33c5a4abafd3c1000f3a1b976b015d3",
+      "07de4398e131dd3187d3cfb644618cd21335e8250206323bdc3e2e5b7f4079c4",
+      "feb20d01fea7fe214bc107c76876fca120d822c7178c5d7766b49867caf4f7cf",
+      "dcd7f21f09ad1800d6f1892a649d0e1036d6649288e9a414e8bc494c7f7c2f5c",
+      "fdfa374d69381fae47b131b66e80be24618d85058d75fb28189f02c212a4ef4b",
+      "686a88bf12ce1fe057d52f0ff08107b9ec31f2aa255e697e79e91fdcb2057982",
+      "52521a9a70a724ccb419de32cc10abb64d0965a7c9e1f082abe6a347f7d8ddfc",
+      "237b8a92a9348d6160260e5aeb5c8c58c21c6eb63decc2158987205da6442c9d",
+      "c73458b23b2291fcecee14471b92206c603595a7dfecc834bc27c32d6df8c76b",
+      "94fd45d5faa67c9dc57d7bd754e050d9ff2059a7188573de77052eab0e4e95ad",
+      "86bb275b25d7999daa91212b3107184b0ff883137f2c9cd74cafee62da08f13b",
+      "37ef0a5c41c5cf7bd68e2c02637e21fabf8e4be18fd1f13080a4cd6350d081cd",
+      "e1cc6b641b70ac371ef8d75078ca4bbf02270d560d4a879218de6221fbf20e49",
+      "9312b84c4bd37fa2e1d2f20417123bc4dfd9861150baedb336cb50a49b9c1413",
+      "ee86bd69d4b9d1700114e160877094a3e6aea5374a22efb83878602411bfeffe",
+      "79db13af2e1e38cc01b873fdaa04678b202d699f7eea842644bd1887c7d9ca20",
+      "4960e49ab21c3a128cc9b155f3bdcc331bebfa7b7b74bbd32c8eeb0d670081a9",
+      "99a41d8c002d2f4564eeed0b918ac17b8f04cf7dd5a8e51368e8615863a89af6",
+      "d0b72baf50408e61e0fc5977387975b2a37a61b2307f2a5d9525d5ad12c96bfb",
+      "c575e127569087f79bcf29033d3613b1bba3ca6f3cc38d356f29979411acd268",
+      "fea8a598fa55c1642000220bfae60646f0b14dcda66266d3035c08c469abef68",
+      "0817f587c1c4cf388c2368e3ac801f9311591b360399ca3766889f178de867f4",
+      "ba20b93613a7dba8fcf27cebb4220f880478ae6b2a80674b334bf4c785040197"
+    ],
     "ede4c641485c316a": [
       "c57b33092650996672a25c3e453588052c0594ed8c4ac20bfb5cd283d5df5a00",
       "dbf76160e34bd28ecd3c42a0aad7b4946f5a944609e7d5a7d27f028aafa672d1",
@@ -11924,8 +11950,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 937,
-      "titleCount": 8649,
+      "fileCount": 938,
+      "titleCount": 8673,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12081,6 +12107,7 @@
         "test/unit/api/feed_key/feed_key_auth.test.js": "ec2686d831c426bf",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
+        "test/unit/api/hub_api_input_contract.test.js": "edd1a790a104a42d",
         "test/unit/api/hub_list/gethubs.test.js": "249c372dfd6c1afa",
         "test/unit/api/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/api/metrics/hub_metrics.test.js": "35277dab576efcd6",
@@ -12920,8 +12947,8 @@
       }
     },
     "test": {
-      "fileCount": 937,
-      "titleCount": 8649,
+      "fileCount": 938,
+      "titleCount": 8673,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13077,6 +13104,7 @@
         "test/unit/api/feed_key/feed_key_auth.test.js": "ec2686d831c426bf",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
+        "test/unit/api/hub_api_input_contract.test.js": "edd1a790a104a42d",
         "test/unit/api/hub_list/gethubs.test.js": "249c372dfd6c1afa",
         "test/unit/api/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/api/metrics/hub_metrics.test.js": "35277dab576efcd6",
@@ -13863,8 +13891,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1019,
-      "titleCount": 9512,
+      "fileCount": 1020,
+      "titleCount": 9536,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14102,6 +14130,7 @@
         "test/unit/api/feed_key/feed_key_auth.test.js": "ec2686d831c426bf",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
+        "test/unit/api/hub_api_input_contract.test.js": "edd1a790a104a42d",
         "test/unit/api/hub_list/gethubs.test.js": "249c372dfd6c1afa",
         "test/unit/api/jsonrpc_body_guard.test.js": "58706b2a54fa0008",
         "test/unit/api/metrics/hub_metrics.test.js": "35277dab576efcd6",

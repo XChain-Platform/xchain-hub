@@ -81,15 +81,24 @@ function strictInt(value) {
     return Number.isInteger(n) ? n : null;
 }
 
+// External row cursors and read-window bounds must survive conversion to a
+// JavaScript Number without changing value. Negative zero is a distinct JSON
+// numeric spelling and is not a canonical row index.
+function strictSafeInt(value) {
+    let n = strictInt(value);
+    if (n === null || !Number.isSafeInteger(n) || Object.is(n, -0)) return null;
+    return n;
+}
+
 function validateSince(since) {
     if (since !== undefined && since !== null && since !== '') {
         // Empty string stays "unset" here (unlike limit), so the guard sits inside
         // the presence check rather than replacing it.
-        let n = strictInt(since);
+        let n = strictSafeInt(since);
         if (n === null || n < 0)
-            return { error: 'since_id must be a non-negative integer' };
+            return { error: 'since_id must be a non-negative safe integer' };
     }
     return null;
 }
 
-module.exports = { validateChain, rpcParamError, validateLimit, strictInt, validateSince };
+module.exports = { validateChain, rpcParamError, validateLimit, strictInt, strictSafeInt, validateSince };

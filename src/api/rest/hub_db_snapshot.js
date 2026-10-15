@@ -25,10 +25,12 @@ const nodeUtil = require('node:util');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('../../oracle/prices_snapshot_query');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { validateLimit, validateSince } = require('../validate');
+const { mountSnapshotQueryValidation } = require('./hub_db_snapshot_query');
 
 function mountSnapshotRoutes(app, ctx) {
     const helpers = snapshotHelpers(ctx);
     mountSnapshotAuth(app, ctx);
+    mountSnapshotQueryValidation(app);
     mountPriceSnapshots(app, ctx, helpers);
     mountMatchSnapshots(app, ctx, helpers);
     mountRemoteTokenSnapshots(app, ctx, helpers);
@@ -132,6 +134,9 @@ function mountPriceSnapshots(app, ctx, helpers) {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            if (req.query.latest !== undefined &&
+                !['0', '1', 'false', 'true'].includes(req.query.latest))
+                return res.status(400).json({ error: 'latest must be one of: 0, 1, false, true' });
             // `latest=1` serves the dashboard's current-per-feed need (MAX(effective_at)
             // per coin/tick/fiat); absent it, the default ascending since_id page-walk
             // (indexer bootstrap) is unchanged. See oraclePricesSnapshotQuery.js.

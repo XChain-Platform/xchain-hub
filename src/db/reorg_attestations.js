@@ -47,6 +47,6 @@ module.exports = {
     // LIMIT is one this method produced.
     async findReorgAttestations(limit) {
         let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
-        return this.doQuery("SELECT * FROM reorg_attestations ORDER BY created_at DESC LIMIT " + lim);
+        return this.doQuery("SELECT * FROM reorg_attestations ORDER BY created_at DESC, id DESC LIMIT " + lim);
     }
 };
