@@ -15,9 +15,13 @@
 
 const COLUMNS = [
     'snapshot_id', 'snapshot_block', 'network', 'coin', 'tick', 'decimals',
-    'owner', 'source_action_index', 'finalizing_view', 'validator_signatures',
-    'status', 'btc_chain_id'
+    'owner', 'source_action_index', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge',
+    'finalizing_view', 'validator_signatures', 'status', 'btc_chain_id'
 ];
+
+// A row signed below remote_token_admission_activation, or caught up from a peer that does
+// not carry the columns, has no admission keys at all; it is stored with explicit NULLs.
+const ADMIT_COLUMNS = new Set(['admit_block_btc', 'admit_block_ltc', 'admit_block_doge']);
 
 module.exports = {
     async insertRemoteTokenSnapshot(row, btcChainId){
@@ -25,7 +29,7 @@ module.exports = {
         return this.doQuery(
             'INSERT IGNORE INTO remote_token_snapshots (' + COLUMNS.join(', ') + ') VALUES (' +
             COLUMNS.map(() => '?').join(', ') + ')',
-            COLUMNS.map(column => values[column]));
+            COLUMNS.map(column => (ADMIT_COLUMNS.has(column) && values[column] === undefined) ? null : values[column]));
     },
 
     async getRemoteTokenSnapshotById(snapshotId){

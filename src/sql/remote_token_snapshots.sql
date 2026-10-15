@@ -1,4 +1,6 @@
 -- Federation-attested metadata for tokens observed on remote DEX legs.
+-- admit_block_<c> is the signed admission height on chain <c>, stamped from
+-- remote_token_admission_activation at the row's snapshot_block; NULL below it.
 DROP TABLE IF EXISTS remote_token_snapshots;
 CREATE TABLE remote_token_snapshots (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -10,6 +12,9 @@ CREATE TABLE remote_token_snapshots (
     decimals            TINYINT UNSIGNED NOT NULL,
     owner               VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
     source_action_index BIGINT UNSIGNED NOT NULL,
+    admit_block_btc     BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_ltc     BIGINT UNSIGNED DEFAULT NULL,
+    admit_block_doge    BIGINT UNSIGNED DEFAULT NULL,
     finalizing_view     INT NOT NULL DEFAULT 0,
     validator_signatures TEXT NOT NULL,
     status              VARCHAR(20) NOT NULL DEFAULT 'finalized',

@@ -80,6 +80,7 @@ const ADMISSION_WATERMARK_TABLES = Object.freeze({
     bridge_transfers:           Object.freeze({ chains: null,                      round: 'xdex'   }),
     policy_snapshots:           Object.freeze({ chains: null,                      round: 'xdex'   }),
     list_snapshots:             Object.freeze({ chains: null,                      round: 'xdex'   }),
+    remote_token_snapshots:     Object.freeze({ chains: null,                      round: 'xdex'   }),
     price_snapshots:            Object.freeze({ chains: null,                      round: 'price'  }),
     // The unsigned rail: its admission height is a SCALAR on the publishing chain, so its
     // entries are keyed by publishing chain rather than by reading chain. Same frame shape,

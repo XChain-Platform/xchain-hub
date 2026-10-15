@@ -17,9 +17,13 @@ const crypto = require('crypto');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const { SNAPSHOT_BLOCK_TOLERANCE } = require('./bridge/constants.js');
+const gateRegistry = require('../consensus/gate_registry');
+const ah = require('../lib/admission_height.js');
 const logger = getLogger();
 
 const MAX_TOKEN_DECIMALS = 18;
+const REMOTE_TOKEN_TABLE = 'remote_token_snapshots';
+const REMOTE_TOKEN_ADMISSION_KEY = 'remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION';
 const MESSAGE_TYPES = Object.freeze({
     PROPOSE: 'XREMOTE_TOKEN_PROPOSE',
     PREPARE: 'XREMOTE_TOKEN_PREPARE',
@@ -86,11 +90,36 @@ function buildRemoteTokenSnapshot(network, snapshotBlock, coin, offer){
     return row;
 }
 
+// Whether a row is in the admission era: the bare network entry at the row's own BTC
+// snapshot_block, so the bytes a row is signed over are fixed when it is produced and every
+// indexer rebuilds them from the row alone.
+function remoteTokenAdmissionEra(row){
+    return gateRegistry.activeAt(REMOTE_TOKEN_ADMISSION_KEY, row.network, null, Number(row.snapshot_block), null);
+}
+
+// The admission field of the XREMOTE canonical: '' below the era, else '|' and the canonical
+// encoding of the row's admission map. A row in the era with no map throws, so it is never
+// signed and never verified. MUST byte-match the indexer's remoteTokenAdmissionField.
+function remoteTokenAdmissionField(row){
+    if(!remoteTokenAdmissionEra(row)) return '';
+    const map = ah.rowAdmitBlocks(row);
+    if(map === null)
+        throw new Error('remote token snapshot ' + stringField(row.snapshot_id) + ' is in the admission era and carries no admission map');
+    return '|' + ah.encodeAdmitBlocks(map);
+}
+
 function canonicalRemoteTokenSnapshot(row, view){
     return [
         'XREMOTE', stringField(row.snapshot_id), String(Number(view) || 0),
         remoteTokenContent(row)
-    ].join('|');
+    ].join('|') + remoteTokenAdmissionField(row);
+}
+
+// The follower's admission scope: null below the era, where a row carries no map; every
+// chain otherwise, because any chain's ORDER or SWAP create can read the pin.
+function remoteTokenAdmissionScope(row){
+    if(!remoteTokenAdmissionEra(row || {})) return null;
+    return { table: REMOTE_TOKEN_TABLE, readSet: ah.admissionReadSet(REMOTE_TOKEN_TABLE, row, ah.ADMIT_COLUMN_CHAINS) };
 }
 
 function remoteTokenRowShapeOk(row){
@@ -114,8 +143,15 @@ function remoteTokenProposalAgrees(row, offer){
         row.coin,
         offer
     );
-    return observed !== null &&
-        canonicalRemoteTokenSnapshot(observed) === canonicalRemoteTokenSnapshot(row);
+    if(observed === null) return false;
+    // The offer cannot reproduce the leader's admission map; the follower bounds that map on
+    // its own (CrossChainDexConsensus.admissionBoundHolds), so the compare carries it over.
+    if(remoteTokenAdmissionEra(row)){
+        try { Object.assign(observed, ah.admitBlocksToColumns(ah.rowAdmitBlocks(row))); }
+        catch(_error){ return false; }
+    }
+    try { return canonicalRemoteTokenSnapshot(observed) === canonicalRemoteTokenSnapshot(row); }
+    catch(_error){ return false; }
 }
 
 function remoteTokenSnapshotBlockOk(snapshotBlock, followerSnapshotBlock){
@@ -151,6 +187,7 @@ function createRemoteTokenConsensus(parent, Consensus){
         capSnapshot: parent.capSnapshot,
         canonicalMatch: (row, view) => canonicalRemoteTokenSnapshot(row, view),
         validateProposedMatch: row => parent.validateRemoteTokenSnapshot(row),
+        admissionScope: row => remoteTokenAdmissionScope(row),
         persistCapabilitySnapshot: (...args) => parent.persistCapabilitySnapshot(...args)
     };
     return new Consensus(adapter, {
@@ -216,6 +253,10 @@ const enginePart = {
         if(held && held.length) return;
         this._remoteTokenInflight.add(row.snapshot_id);
         try {
+            if(!(await this.stampRemoteTokenAdmission(row))){
+                this._remoteTokenInflight.delete(row.snapshot_id);
+                return;
+            }
             await this.remoteTokenConsensus.propose(row.snapshot_id, {
                 match: row,
                 snapshot: { validators, count: validators.length }
@@ -224,6 +265,24 @@ const enginePart = {
             this._remoteTokenInflight.delete(row.snapshot_id);
             throw error;
         }
+    },
+
+    // In the admission era, stamp the row's admission map (this hub's admission tip plus the
+    // table margin on every chain) before it is proposed. With no fresh tip for a chain the
+    // round is not opened: a guessed height forks the federation, a refusal stalls one pin.
+    // Below the era the row is proposed exactly as before.
+    async stampRemoteTokenAdmission(row){
+        const scope = remoteTokenAdmissionScope(row);
+        if(scope === null) return true;
+        const map = this.hub && typeof this.hub.resolveAdmitBlocks === 'function'
+            ? await this.hub.resolveAdmitBlocks(REMOTE_TOKEN_TABLE, scope.readSet) : null;
+        if(!map){
+            logger.error('CrossChainDex: not proposing remote token snapshot ' + String(row.snapshot_id).substring(0, 16) +
+                '... at snapshot_block ' + row.snapshot_block + '; no fresh admission tip for ' + scope.readSet.join(' / '));
+            return false;
+        }
+        Object.assign(row, ah.admitBlocksToColumns(map));
+        return true;
     },
 
     async validateRemoteTokenSnapshot(row){
@@ -278,8 +337,11 @@ const enginePart = {
 module.exports = {
     MAX_TOKEN_DECIMALS,
     MESSAGE_TYPES,
+    REMOTE_TOKEN_ADMISSION_KEY,
     buildRemoteTokenSnapshot,
     canonicalRemoteTokenSnapshot,
+    remoteTokenAdmissionField,
+    remoteTokenAdmissionScope,
     createRemoteTokenConsensus,
     deriveRemoteTokenSnapshotId,
     remoteTokenProposalAgrees,

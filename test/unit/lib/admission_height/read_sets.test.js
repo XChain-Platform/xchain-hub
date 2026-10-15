@@ -24,6 +24,7 @@ const EXPECTED_READ_SETS = {
     bridge_transfers:           { fields: ['dest_chain'] },
     policy_snapshots:           { every: true },
     list_snapshots:             { every: true },
+    remote_token_snapshots:     { every: true },
     attestation_responses:      { chains: ['BTC'] },
     anchor_reward_attestations: { chains: ['BTC'] },
     oracle_prices:              { publishingChain: true },

@@ -146,6 +146,21 @@
 // catches up by rolling to v10 and only then replaying peer catch-up rows; a
 // row or snapshot stamped with any other version is refused whole, never
 // coerced or partially applied, so a lagging peer halts instead of forking.
-const HUB_SCHEMA_VERSION = 10;
+//
+// v11: remote_token_snapshots gained admit_block_btc, admit_block_ltc and admit_block_doge,
+// the signed admission map a pin carries from remote_token_admission_activation. A v10
+// reader drops the columns on apply, so on an armed venue it could not bind a pin to the
+// block it was admitted at, and a v10 hub serves no admission map at all; strict equality
+// refuses both pairings by name instead. An indexer gets the columns from the
+// 2026-10-14-remote-token-admission migration (mode=auto, applied at startup), and the
+// explorer from its later-column mirror migration.
+//
+// v11 ROLL: the v10 order stands. The hub rolls FIRST and stamps 11, then every indexer and
+// the explorer roll back to back behind it. The whole roll completes BELOW every network's
+// remote_token_admission_activation height.
+//
+// v11 PEER CATCH-UP RULE: the v10 rule stands one version on. A peer hub still on v10 is
+// stale; it rolls to v11 before it replays peer catch-up rows.
+const HUB_SCHEMA_VERSION = 11;
 
 module.exports = { HUB_SCHEMA_VERSION };

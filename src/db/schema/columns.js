@@ -151,6 +151,7 @@ module.exports = {
             attestation_responses:      ['btc'],
             anchor_reward_attestations: ['btc'],
             list_snapshots:             ['btc', 'ltc', 'doge'],
+            remote_token_snapshots:     ['btc', 'ltc', 'doge'],
         };
         for(let table of Object.keys(TABLES))
             for(let chain of TABLES[table])

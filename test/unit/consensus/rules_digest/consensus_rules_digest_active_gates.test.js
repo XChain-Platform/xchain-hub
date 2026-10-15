@@ -34,9 +34,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 46 entries, and contains the gates the last trains append', function () {
+    it('is sorted, has 47 entries, and contains the gates the last trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(46, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(47, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -74,7 +74,8 @@ function registerGateInventoryTest() {
             'price_scale_activation.PRICE_V1_FEE_MAX_LENGTH',
             'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION',
             'list_meta_activation.LIST_META_ACTIVATION',
-            'order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION'
+            'order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION',
+            'remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION'
         ]);
     });
 }
@@ -108,7 +109,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('2a3ac3d9c1a6bdb31de7c73bb6fecdf8f118321a11bfe2e99d2dd4ee2e1c3c02',
+                .to.equal('be489ce1ea0f7d6d809efdbeb973b985905aec4281592ff3bf770b21394d9354',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -147,7 +148,7 @@ function registerGateOrderingTest() {
                 'token_bridge_activation', 'anchor_bundle_order_activation', 'oracle_price_age_hourly_activation',
                 'oracle_hourly_window_activation', 'oracle_round_time_activation', 'price_scale_activation',
                 'list_share_producer_activation', 'list_meta_activation', 'mirror_admission_margin_activation',
-                'order_match_price_cross_activation']);
+                'order_match_price_cross_activation', 'remote_token_admission_activation']);
     });
 }
 
