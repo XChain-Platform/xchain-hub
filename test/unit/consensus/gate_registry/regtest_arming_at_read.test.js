@@ -42,7 +42,7 @@ const SHARED_ROWS_DIR = path.resolve(__dirname, '../../../../src/consensus/gate_
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.resolve(__dirname, '../../../../../xchain-indexer');
 const INDEXER_SHARED_ROWS_DIR = path.join(INDEXER_DIR, 'src', 'protocol_changes');
 const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
-    'shared_rows.js': 'be892c1e4b253b9128a437c9e1a8963a4f216bdef3ed611b359c9e723b31e9ec',
+    'shared_rows.js': '189d14f2f16a2983bb07243808b9e264897a331cbabfbe04b91eaea05f2019a4',
     'shared_rows_1.js': '1ed80849231893f3801d91a2cacc7041b54e26eaa63a680c845dc93aa5e1d278',
     'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
     'shared_rows_3.js': 'd671489c2b683ec2a94d0f45da1056687c38f78959a9f1780825eb7e3a37d6ea',
