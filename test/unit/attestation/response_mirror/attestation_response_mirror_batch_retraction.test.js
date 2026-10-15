@@ -28,6 +28,9 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs     = require('fs');
+const os     = require('os');
+const path   = require('path');
 const sinon  = require('sinon');
 const { expect } = require('chai');
 
@@ -37,41 +40,13 @@ const ValidatorIdentity = require('../../../../src/validators/identity.js');
 const abw = require('../../../../src/lib/attest_batch_wire.js');
 const { isAdmissionEra } = require('../../../../src/consensus/gates/mirror_admission_gate.js');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
+const { queryMarkers } = require('../../../helpers/attest_batch_markers.js');
 
 const ANCHOR       = 941234;
 const ACTION_INDEX = 55501;
 const WINDOW_START = 1780000000;
 const WINDOW_END   = 1780003600;
 const NETWORK      = 'regtest';
-
-function queryMarkers(markers, sql, args){
-    if(/^INSERT INTO attest_published_batches/i.test(sql)){
-        let cols = sql.substring(sql.indexOf('(') + 1, sql.indexOf(')'))
-            .split(',').map(s => s.trim());
-        let row = {};
-        cols.forEach((c, i) => { row[c] = args[i]; });
-        let found = markers.find(r => r.network === row.network &&
-            Number(r.window_start) === Number(row.window_start));
-        if(found) Object.assign(found, row);
-        else markers.push(row);
-        return { affectedRows: found ? 0 : 1 };
-    }
-    if(/^DELETE FROM attest_published_batches/i.test(sql)){
-        let [network, start, end, status] = args;
-        let idx = markers.findIndex(r => r.network === network &&
-            Number(r.window_start) === Number(start) &&
-            Number(r.window_end) === Number(end) && r.status === status);
-        if(idx < 0) return { affectedRows: 0 };
-        markers.splice(idx, 1);
-        return { affectedRows: 1 };
-    }
-    if(/FROM attest_published_batches WHERE network = \? AND window_start = \?/i.test(sql)){
-        let found = markers.find(r => r.network === args[0] &&
-            Number(r.window_start) === Number(args[1]));
-        return found ? [Object.assign({}, found)] : [];
-    }
-    return undefined;
-}
 
 // The mirror table with the four statements this path uses: the INSERT IGNORE and
 // keyed select-back the receive half already needs, the window-scoped select the
@@ -241,33 +216,50 @@ it('refuses a retraction for another network, and one with no usable identity', 
 }
 
 function registerBatchRetractionReopenTest() {
-it('reopens a landed window with no linked rows so the next sweep reconciles it', async function () {
+it('reopens a landed window with no linked rows so a sweep a window of blocks later reconciles it', async function () {
         let db = makeDb(), hub = makeHub({ db });
         hub.resolveIndexerUrl = sinon.stub().resolves('doge-indexer');
         let publisher = new AttestationBatchPublisher(hub);
         hub.attestationBatchPublisher = publisher;
         publisher._floorWindow = WINDOW_START;
         publisher.windowStartFor = sinon.stub().returns(WINDOW_END);
-        publisher.indexerRpc = sinon.stub().resolves({ batches: [], truncated: false });
+        let tip = 100;   // the DOGE tip getlatestblock reports; the regtest 3600 s window waits 60 blocks
+        publisher.indexerRpc = sinon.stub().callsFake(async (url, key, method) =>
+            method === 'getlatestblock' ? { block_index: tip } : { batches: [], truncated: false });
+        let batchReads = () => publisher.indexerRpc.getCalls().filter(c => c.args[2] === 'getattestbatches').length;
         publisher.publishWindow = sinon.stub().resolves(true);
+        let dir = fs.mkdtempSync(path.join(os.tmpdir(), 'retraction-reopen-'));
+        publisher.reopenSeenPath = path.join(dir, 'reopened.json');   // the reopen wait's file, off the repo
 
         await publisher.recordLandedWindow(WINDOW_START, WINDOW_END, 'doge-tx', 1);
         expect(db.marker(WINDOW_START).status).to.equal('landed');
         let result = await new AttestationResponseMirror(hub)
             .retractBatchLink('DOGE', makeRetraction());
         expect(result).to.deep.include({ accepted: true, cleared: 0 });
-        expect(await publisher.sweep(WINDOW_END)).to.deep.equal({ attempted: 1, published: 1 });
-        expect(publisher.indexerRpc.calledOnce).to.equal(true);
-        expect(publisher.publishWindow.calledOnceWithExactly(WINDOW_START, 0, undefined)).to.equal(true);
+        // The first sweep starts the reopen wait; a window's worth of DOGE blocks later it
+        // reconciles and publishes.
+        expect(await publisher.sweep(WINDOW_END)).to.deep.equal({ attempted: 0, published: 0 });
+        tip = 159;
+        expect(await publisher.sweep(WINDOW_END + publisher.windowS)).to.deep.equal({ attempted: 0, published: 0 });
+        expect(batchReads()).to.equal(0);
+        tip = 160;
+        expect(await publisher.sweep(WINDOW_END + publisher.windowS)).to.deep.equal({ attempted: 1, published: 1 });
+        expect(batchReads()).to.equal(1);
+        expect(db.marker(WINDOW_START).status).to.equal('reopened');
+        expect(publisher.publishWindow.calledOnceWithExactly(WINDOW_START, 0, 'reopened')).to.equal(true);
+        fs.rmSync(dir, { recursive: true, force: true });
     });
 
-    it('does not remove a replacement marker with another status or window end', async function () {
+    it('reopens this hub\'s own sent marker, and leaves another status or window end alone', async function () {
         let db = makeDb(), hub = makeHub({ db });
         let publisher = new AttestationBatchPublisher(hub);
         await publisher.recordLandedWindow(WINDOW_START, WINDOW_END, 'doge-tx', 1);
         db.marker(WINDOW_START).status = 'sent';
         await publisher.reopenLandedWindow(WINDOW_START, WINDOW_END);
-        expect(db.marker(WINDOW_START).status).to.equal('sent');
+        expect(db.marker(WINDOW_START).status).to.equal('reopened');
+        db.marker(WINDOW_START).status = 'intent';
+        await publisher.reopenLandedWindow(WINDOW_START, WINDOW_END);
+        expect(db.marker(WINDOW_START).status).to.equal('intent');
         db.marker(WINDOW_START).status = 'landed';
         db.marker(WINDOW_START).window_end = WINDOW_END + 1;
         await publisher.reopenLandedWindow(WINDOW_START, WINDOW_END);

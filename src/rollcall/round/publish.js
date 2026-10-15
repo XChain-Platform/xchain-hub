@@ -26,7 +26,7 @@
 
 'use strict';
 
-const { isAmbiguousSendError }   = require('../../lib/guards/idempotent_broadcast.js');
+const { isAmbiguousSendError, revealFields } = require('../../lib/guards/idempotent_broadcast.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -94,13 +94,35 @@ function pausedMidBatch(self, state, kind, chunks, tokens, i, key){
     // epoch whose chunks never went out. A phase the loader does not know
     // leaves the bare 'intent' standing, which would quarantine the epoch
     // permanently for a hub the operator merely paused and resumed.
-    self.recordSpend({ phase: 'failed', epoch: state.epoch, kind,
+    self.recordSpend({ phase: 'failed', epoch: state.epoch, kind, ledger_hash: state.ledgerHash,
                         delivered: state.sent.size, remaining: chunks.length - i,
                         error: 'operator pause: ' + self.spendGuard.noteBlocked() });
     logger.warn(self.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
                  ', ' + kind + '); ' + (chunks.length - i) + ' of ' + chunks.length +
                  ' chunk(s) not broadcast');
     self._committed.delete(key);
+    return true;
+}
+
+// Balance floor plus the runtime pause and the per-window spend ceiling,
+// checked BEFORE anything is built. A blocked publish is a deferral, not
+// a failure: an inert federation publishes nothing and every epoch closes
+// unrolled, which evicts nobody.
+// A balance source that THROWS reports null, not undefined: undefined means
+// "this hub wired no balance source and the floor is inert", while an
+// unreadable wallet must fail closed rather than look unconfigured.
+async function walletAllows(self, state, kind){
+    let balance;
+    let signer = self.resolveSigner();
+    if(signer.getBalanceFn){
+        try { balance = await signer.getBalanceFn(); } catch(_){ balance = null; }
+        if(balance === undefined) balance = null;
+    }
+    let g = self.spendGuard.check(balance === undefined ? {} : { balance });
+    if(!g.ok){
+        logger.warn('RollcallRound: ' + g.reason + ' (epoch ' + state.epoch + ', ' + kind + '); deferring publish');
+        return false;
+    }
     return true;
 }
 
@@ -116,8 +138,12 @@ function noteChunkSent(self, state, kind, chunk, token, res, myPubkey){
         state.sent.add(p.pubkey);
         if(p.pubkey === myPubkey) state.ownSigOnWire = true;
     }
+    // The chunk's pubkeys go on the line, so a restart knows which signatures it
+    // already paid for and which tail it still owes.
+    let pubkeys = chunk.map(p => p.pubkey);
+    self.rememberDelivered(state, pubkeys, kind);
     self.recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
-                        rank: state.myRank });
+                        rank: state.myRank, ledger_hash: state.ledgerHash, pubkeys, tip: state.dogeTip });
     logger.info('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
                 (txid ? ' txid=' + txid : '') +
                 (state.myRank > 0 ? ' [SWEEPER: rank ' + state.myRank + ' of ' + state.order.length +
@@ -132,10 +158,19 @@ function settleChunkFailure(self, state, kind, chunks, tokens, i, key, e){
         // a real spend and only the untried chunks give their budget back.
         self.spendGuard.commit(tokens[i]);
         for(let j = i + 1; j < tokens.length; j++) self.spendGuard.release(tokens[j]);
+        // The chunk's signatures may be on the wire, so nothing pays for them again,
+        // the self-publish included when this hub's own signature rode it.
+        let pubkeys = chunks[i].map(p => p.pubkey);
+        self.rememberDelivered(state, pubkeys, kind);
+        if(pubkeys.includes(self.ownPubkey())) state.ownSigOnWire = true;
         // Keep the epoch committed and say so on disk, so an operator
-        // reconciling on chain has the epoch without stdout retention.
-        self.recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
-                            error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
+        // reconciling on chain has the epoch without stdout retention, with the
+        // funding and signed reveal a two-phase hook reports after money moved.
+        let reveal = revealFields(e);
+        self.recordSpend(Object.assign({ phase: 'ambiguous', epoch: state.epoch, kind,
+                            txid: reveal.revealTxid || reveal.phase1Txid || null,
+                            ledger_hash: state.ledgerHash, pubkeys, tip: state.dogeTip,
+                            error: e && e.message ? String(e.message).slice(0, 200) : String(e) }, reveal));
         logger.warn(nodeUtil.format('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
                      '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e));
         return 'held';
@@ -145,10 +180,12 @@ function settleChunkFailure(self, state, kind, chunks, tokens, i, key, e){
     // failed send cost the window an allowance it never spent.
     for(let j = i; j < tokens.length; j++) self.spendGuard.release(tokens[j]);
     self.recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
+                        ledger_hash: state.ledgerHash,
                         error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
     logger.warn(nodeUtil.format('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
                  e && e.message ? e.message : e));
     self._committed.delete(key);
+    self.notePublishFailure(state);
     return 'retry';
 }
 
@@ -175,13 +212,19 @@ module.exports = {
     },
 
     async maybePublish(state, myPubkey, since){
+        // What a prior process already sent for this epoch, then whether a reorg has
+        // taken any of this hub's landed signatures back off chain.
+        this._publishTick++;   // one per tick: the clock the publish backoff counts in
+        this.restoreDelivered(state, myPubkey);
+        let read = await this.checkReorgedPublish(state, myPubkey);
         if(state.published) return;
         if(since < this.publishDelayBlocks) return;
         if(!this.rankUnlocked(state.order, myPubkey, since)) return;
         if(state.sigs.size === 0) return;
         if(!this.requireBroadcast()) return;
 
-        let onChain = await this.onChainSigners(state);
+        // The reorg check's read this tick, when it made one, so a tick asks the indexer once.
+        let onChain = read !== undefined ? read : await this.onChainSigners(state);
         // Both branches below also exclude state.sent. Already on the wire from this
         // hub's own earlier chunks is the same answer as already on chain: the DOGE
         // read lags indexing by longer than a tick, so without it the retry after a
@@ -213,11 +256,13 @@ module.exports = {
     },
 
     async maybeSelfPublish(state, myPubkey, since){
-        if(state.selfPublished) return;
+        this.restoreDelivered(state, myPubkey);
         if(since < this.selfPublishBlocks) return;
         let mySig = state.sigs.get(myPubkey);
         if(!mySig) return;                       // nothing of ours to rescue
-        if(state.ownSigOnWire) return;           // our own publish already carried it
+        // Our own publish already carried it, unless it has since been missing from the
+        // chain long enough to count as lost (delivery.js ownSignatureLost).
+        if((state.selfPublished || state.ownSigOnWire) && !(await this.ownSignatureLost(state, myPubkey))) return;
         if(!this.requireBroadcast()) return;
 
         let onChain = await this.onChainSigners(state);
@@ -243,25 +288,13 @@ module.exports = {
                          'publish spend in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
             return 'held';
         }
+        // A pipeline that refused the last attempt is given time before the next one,
+        // and a sweep it keeps refusing is given up (delivery.js publishRetryGate).
+        let gate = this.publishRetryGate(state, kind);
+        if(gate === 'abandon') return 'held';
+        if(gate === 'wait') return 'retry';
 
-        // Balance floor plus the runtime pause and the per-window spend ceiling,
-        // checked BEFORE anything is built. A blocked publish is a deferral, not
-        // a failure: an inert federation publishes nothing and every epoch closes
-        // unrolled, which evicts nobody.
-        // A balance source that THROWS reports null, not undefined: undefined means
-        // "this hub wired no balance source and the floor is inert", while an
-        // unreadable wallet must fail closed rather than look unconfigured.
-        let balance;
-        let signer = this.resolveSigner();
-        if(signer.getBalanceFn){
-            try { balance = await signer.getBalanceFn(); } catch(_){ balance = null; }
-            if(balance === undefined) balance = null;
-        }
-        let g = this.spendGuard.check(balance === undefined ? {} : { balance });
-        if(!g.ok){
-            logger.warn('RollcallRound: ' + g.reason + ' (epoch ' + state.epoch + ', ' + kind + '); deferring publish');
-            return 'retry';
-        }
+        if(!(await walletAllows(this, state, kind))) return 'retry';
 
         let chunks = planChunks(this, state, pairs, kind);
         if(!chunks) return 'retry';
@@ -273,7 +306,8 @@ module.exports = {
         // broadcast is GATED on it: an unwritable audit path must not let a real DOGE
         // fee be spent with no recoverable trace, and a batch the ceiling declined
         // must leave no orphan intent line behind.
-        if(!this.recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
+        if(!this.recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length,
+                                ledger_hash: state.ledgerHash, plan: chunks.map(c => c.map(p => p.pubkey)) })){
             for(let t of tokens) this.spendGuard.release(t);
             logger.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the publish for epoch ' + state.epoch +
@@ -294,6 +328,7 @@ module.exports = {
                 return settleChunkFailure(this, state, kind, chunks, tokens, i, key, e);
             }
         }
+        this._publishRetry.delete(state.epoch);
         return result;
     },
 
@@ -340,6 +375,9 @@ module.exports = {
             out.add(String(pk).toLowerCase());
         }
         state.onChainCount = out.size;
+        // The DOGE tip this answer was read at, which is what a reorg wait counts in.
+        state.dogeTip = (res.tip_block_index === null || res.tip_block_index === undefined)
+            ? null : Number(res.tip_block_index);
         return out;
     }
 };

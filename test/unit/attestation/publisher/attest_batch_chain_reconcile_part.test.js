@@ -71,9 +71,10 @@ function expectRpc(rpc, count){
 
 function registerInterfaceTests(){
 
-    it('exports exactly the four methods installed by the publisher', function(){
+    it('exports exactly the five methods installed by the publisher', function(){
         expect(Object.keys(part)).to.deep.equal([
             'reconcilePendingAgainstChain',
+            'landingIndexer',
             'fetchLandedAttestBatches',
             'chainReconcileFailed',
             'indexerRpc'

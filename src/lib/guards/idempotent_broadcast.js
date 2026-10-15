@@ -58,6 +58,10 @@
  *     work on disk, the next sweep sees the key and drops the stale entry instead
  *     of re-broadcasting (a duplicate on-chain spend).
  *
+ *   revealFields(e)
+ *     The funding txid, reveal txid and signed reveal hex a multi-phase signer hook
+ *     attaches to a failure after money moved, for the caller's durable record.
+ *
  *   broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag, send })
  *     Convenience wrapper composing the at-most-once guard, the shared SpendGuard
  *     pre-send gate (wallet floor via check(), then a budget RESERVATION, because
@@ -232,4 +236,25 @@ function requireBroadcastTxid(result, who){
     throw e;
 }
 
-module.exports = { isAmbiguousSendError, isNeverSentError, isAlreadyKnownTx, AtMostOnce, broadcastOnce, requireBroadcastTxid };
+// What a multi-phase signer hook reported about the money it already moved: the
+// funding txid, the reveal's txid and the signed reveal itself. These are the only
+// record of where the fee went and the only way to finish the publish by hand
+// (rebroadcasting the reveal spends the funded output), so every rail copies them
+// onto its durable failure record. Each field is read on its own, so one whose
+// accessor throws is left out and the others are still recorded; only non-empty
+// strings are kept, so a placeholder never passes for a real txid. An empty object
+// when the error carries none.
+const REVEAL_FIELDS = Object.freeze(['phase1Txid', 'revealTxid', 'revealTxHex']);
+function revealFields(e){
+    let out = {};
+    if (e === null || (typeof e !== 'object' && typeof e !== 'function')) return out;
+    for (let k of REVEAL_FIELDS){
+        let v;
+        try { v = e[k]; } catch (_e){ v = undefined; }
+        if (typeof v === 'string' && v !== '') out[k] = v;
+    }
+    return out;
+}
+
+module.exports = { isAmbiguousSendError, isNeverSentError, isAlreadyKnownTx, AtMostOnce, broadcastOnce,
+                   requireBroadcastTxid, revealFields, REVEAL_FIELDS };

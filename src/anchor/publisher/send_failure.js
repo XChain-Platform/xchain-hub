@@ -39,13 +39,13 @@
 'use strict';
 
 const fs = require('fs');
-const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
+const { isAmbiguousSendError, revealFields, REVEAL_FIELDS } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-// The fields a signer hook sets on a post-funding failure: phase1Txid (the funding
-// transaction on chain), revealTxid and revealTxHex (the signed reveal that spends it).
-const REVEAL_FIELDS = ['phase1Txid', 'revealTxid', 'revealTxHex'];
+// REVEAL_FIELDS and revealFields (the fields a signer hook sets on a post-funding
+// failure: the funding txid and the signed reveal that spends it) are the shared copy
+// in lib/guards/idempotent_broadcast.js, which every DOGE rail records from.
 
 // Everything the classifiers below and broadcastWithRetry read off a failure, copied
 // onto a replacement Error so it classifies exactly as the original would have.
@@ -179,19 +179,6 @@ function sdkRetryAfterMs(e){
     if(safeGet(e, 'code') !== SDK_RATE_LIMITED) return null;
     const seconds = Number(safeGet(e, 'retryAfterSeconds'));
     return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
-}
-
-// The reveal fields present on `e` as non-empty strings, each read on its own, so a
-// field whose accessor throws is left out and the others are still recorded. A
-// placeholder never reaches the record, where it could pass for a real txid.
-function revealFields(e){
-    const out = {};
-    if(!isObjectLike(e)) return out;
-    for(const k of REVEAL_FIELDS){
-        const v = safeGet(e, k);
-        if(typeof v === 'string' && v !== '') out[k] = v;
-    }
-    return out;
 }
 
 function appendDurableLine(filePath, line){

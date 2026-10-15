@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const { expect } = require('chai');
 
 const AttestationBatchPublisher = require('../../../../../src/attestation/batch_publisher.js');
+const { statusReads } = require('../../../../helpers/attest_batch_markers.js');
 const ValidatorIdentity = require('../../../../../src/validators/identity.js');
 
 const WINDOW_S = 10;
@@ -63,7 +64,7 @@ function makeDb(){
     };
     return {
         responses,
-        markers,
+        markers, ...statusReads(markers),   // statusReads: the sweep's reopened-window read
         marker: findMarker,
         async doQuery(){ throw new Error('raw SQL was not expected'); },
         async findAttestationResponsesInBatchWindow(network, from, to, limit){

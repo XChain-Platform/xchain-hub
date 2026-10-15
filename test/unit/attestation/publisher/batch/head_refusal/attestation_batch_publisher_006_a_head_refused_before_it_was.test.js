@@ -127,6 +127,15 @@ function doDbQuery(responses, markers, sql, args){
                 return found ? [Object.assign({}, found)] : [];
             }
             if(/^INSERT (?:IGNORE )?INTO attest_published_batches/i.test(sql)) return insertMarker(markers, sql, args);
+            // The guarded status move the refusal bound uses, ahead of the generic update.
+            if(/^UPDATE attest_published_batches SET status = \? WHERE network = \? AND window_start = \? AND window_end = \? AND status = \?$/i.test(sql)){
+                let [to, network, ws, we, from] = args;
+                let found = markers.find(m => m.network === network && Number(m.window_start) === Number(ws) &&
+                                              Number(m.window_end) === Number(we) && m.status === from);
+                if(!found) return { affectedRows: 0 };
+                found.status = to;
+                return { affectedRows: 1 };
+            }
             if(/^UPDATE attest_published_batches SET status/i.test(sql)) return updateMarker(markers, args);
             throw new Error('unexpected statement: ' + sql);
 }
@@ -285,9 +294,10 @@ function captureErrors(){
 
 
         // A refusal that never clears must not re-propose forever: the federation's
-        // signing capacity is the scarce thing. At the bound it latches like any other
-        // failure, once, and quarantines from then on.
-describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('latches exactly once when the attempt bound is reached', async function () {
+        // signing capacity is the scarce thing. At the bound nothing has been sent, so
+        // the window is dead-lettered once, with every reservation back, and is neither
+        // proposed nor quarantined as a crash from then on.
+describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); afterEach(hookAt10827); describe('a head refused before it was sent', function () { it('dead-letters exactly once when the attempt bound is reached', async function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
@@ -300,16 +310,19 @@ describe('AttestationBatchPublisher', function () { beforeEach(hookAt10719); aft
             try {
                 await p.sweep(now);          // attempt 1: withdrawn, retried
                 await p.sweep(now);          // attempt 2: withdrawn, retried
-                await p.sweep(now);          // attempt 3: the bound, latch
-                await p.sweep(now);          // quarantined, no fourth broadcast attempt
+                await p.sweep(now);          // attempt 3: the bound, dead-lettered
+                await p.sweep(now);          // settled, no fourth broadcast attempt
             } finally { cap.restore(); }
 
             expect(p.stats.windowsRefusalRetried).to.equal(2);
-            expect(p.calls, 'the latched window must not be broadcast again').to.equal(3);
-            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(p.calls, 'the dead-lettered window must not be broadcast again').to.equal(3);
+            expect(hub.db.marker(start).status).to.equal('deadletter');
+            expect(cap.lines.filter(l => /dead-lettered to/.test(l)).length,
+                'a permanently refused window is dead-lettered once, not once per sweep').to.equal(1);
             expect(cap.lines.filter(l => /CRITICAL - wire 1\//.test(l)).length,
-                'a permanently refused window latches once, not once per sweep').to.equal(1);
-            expect(p.stats.windowsQuarantined).to.equal(1);
+                'a window that sent nothing is not reported as a latched send').to.equal(0);
+            expect(p.stats.windowsQuarantined).to.equal(0);
+            expect(p.stats.windowsDeadLettered).to.equal(1);
         }); }); });
 
 // ------------------------------------------------------------ refused before sending

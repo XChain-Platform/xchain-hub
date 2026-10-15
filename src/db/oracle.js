@@ -37,6 +37,18 @@ module.exports = {
         return this.doQuery('DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL', [cutoff]);
     },
 
+    // Records the txid already on the wire for a round whose row stays intent-only,
+    // so it still quarantines; only the first txid recorded is kept.
+    async updateOraclePublishedRoundIntentTxid(txid, round) {
+        return this.doQuery('UPDATE oracle_published_rounds SET txid = ? WHERE round = ? AND sent_at IS NULL AND txid IS NULL', [txid, round]);
+    },
+
+    // Withdraws one round's intent-only marker. The sent_at guard means it can never
+    // remove the record of a round that was broadcast.
+    async deleteOraclePublishedRoundIntent(round) {
+        return this.doQuery('DELETE FROM oracle_published_rounds WHERE round = ? AND sent_at IS NULL', [round]);
+    },
+
     // Deletes from oracle_submissions.
     // Moved here from src/oracle/round.js:1199.
     async deleteOracleSubmission(cutoff) {

@@ -40,7 +40,10 @@ module.exports = {
         let starts = pending.map(window => Number(window.windowStart));
         let from = Math.min(...starts), to = Math.max(...starts);
         let answer = await this.fetchLandedAttestBatches(from, to);
-        if(!answer) return pending;
+        // A reopened window is published only on a chain answer that says its batch is
+        // absent; without one it waits, because the reorged original may be re-mined.
+        if(!answer) return pending.some(window => window.reopened)
+            ? pending.filter(window => !window.reopened) : pending;
 
         this.stats.chainReconcileRuns++;
         let wanted = new Set(starts);
@@ -63,7 +66,8 @@ module.exports = {
         return pending.filter(window => !landed.has(Number(window.windowStart)));
     },
 
-    async fetchLandedAttestBatches(from, to){
+    // The landing chain's indexer as { url, key }, or { failure } naming why not.
+    async landingIndexer(){
         let url = null;
         try {
             if(this.hub && typeof this.hub.resolveIndexerUrl === 'function'){
@@ -72,14 +76,18 @@ module.exports = {
                 url = hubConfig.DOGE_INDEXER_API_URL || hubConfig.DOGE_INDEXER_URL || null;
             }
         } catch(e){
-            return this.chainReconcileFailed('cannot resolve the ' + LANDING_COIN +
-                ' indexer URL: ' + (e && e.message));
+            return { failure: 'cannot resolve the ' + LANDING_COIN + ' indexer URL: ' + (e && e.message) };
         }
-        if(!url) return this.chainReconcileFailed('no ' + LANDING_COIN +
-            ' indexer URL configured (set ' + LANDING_COIN + '_INDEXER_API_URL)');
-
+        if(!url) return { failure: 'no ' + LANDING_COIN + ' indexer URL configured (set ' +
+                                   LANDING_COIN + '_INDEXER_API_URL)' };
         let cfg = (this.hub && this.hub.p2pConfig) || {};
-        let key = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
+        return { url, key: hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '' };
+    },
+
+    async fetchLandedAttestBatches(from, to){
+        let indexer = await this.landingIndexer();
+        if(indexer.failure) return this.chainReconcileFailed(indexer.failure);
+        let { url, key } = indexer;
         let result;
         try {
             result = await this.indexerRpc(url, key, 'getattestbatches',

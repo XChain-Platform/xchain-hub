@@ -166,6 +166,19 @@ module.exports = {
         }
     },
 
+    // A transaction of a latched window is already on the wire; its txid goes on the
+    // intent row, which keeps quarantining. Best-effort like markSent, for the same reason.
+    async recordIntentTxid(windowStart, txid){
+        let db = this.hubDb();
+        if(!db || typeof db.doQuery !== 'function') return;
+        try {
+            await db.updateAttestPublishedBatchIntentTxid(this.network, windowStart, String(txid));
+        } catch(e){
+            logger.error('AttestationBatchPublisher: window ' + windowStart + ' already put ' + txid +
+                ' on the wire but the txid could not be recorded on its intent marker: ' + (e && e.message));
+        }
+    },
+
     async recordDeadLetter(windowStart, windowEnd, rowCount){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
@@ -200,17 +213,26 @@ module.exports = {
         let rows = Number(rowCount);
         this.stats.landedRecorded++;
         this._quarantined.delete(Number(windowStart));
+        this.forgetReopened(windowStart);     // a landed window owes no reopen wait
         await db.setAttestPublishedBatchByNetworkAndWindowStartAndWindowEnd(this.network, windowStart, windowEnd,
             Number.isFinite(rows) && rows >= 0 ? rows : 0, txidOrNull === undefined ? null : txidOrNull, 'landed');
     },
 
-    // A validated DOGE retraction makes the window unresolved again. Delete is the
-    // existing reopen idiom for markers, and the DB predicate keeps a concurrent
-    // transition to any other state intact.
+    // A validated DOGE retraction makes the window unresolved again. The batch it
+    // un-landed is either one the receive half recorded `landed` or this hub's own
+    // `sent` publish whose landing push the reorg beat, so both reopen. The row is kept
+    // as `reopened` rather than deleted: the sweep offers it again after a restart and
+    // even once it is older than the catch-up horizon, which a missing row cannot ask
+    // for. Each statement's status and window-end predicates leave every other row intact.
+    // No client can ask whether the reorged transaction is back in a mempool (the
+    // encoder answers only which block holds a txid), so the republish waits a window's
+    // worth of DOGE blocks and a chain answer that still shows no batch (reopen.js).
     async reopenLandedWindow(windowStart, windowEnd){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function') return;
-        await db.deleteLandedAttestPublishedBatch(this.network, windowStart, windowEnd);
+        await db.updateAttestPublishedBatchStatus(this.network, windowStart, windowEnd, 'landed', 'reopened');
+        await db.updateAttestPublishedBatchStatus(this.network, windowStart, windowEnd, 'sent', 'reopened');
+        this.forgetReopened(windowStart);     // this reopen's wait starts at the next sweep
     },
 
     // ------------------------------------------------------------ the files

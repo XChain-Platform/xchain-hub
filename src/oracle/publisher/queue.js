@@ -142,6 +142,10 @@ module.exports = {
     // The quarantine set is deliberately untouched: a quarantined round's on-chain
     // state is unknown, which a retraction does not resolve, and only an operator may
     // release one.
+    //
+    // Nothing here can ask whether the retracted batch is back in a mempool: the
+    // encoder answers only which block holds a txid (get_tx_block), so a reorged batch
+    // re-mined from the mempool and the recovery re-publish can both land.
     async clearPublishedMarkers(rounds) {
         let list = (Array.isArray(rounds) ? rounds : [rounds])
             .map(r => parseInt(r)).filter(r => Number.isFinite(r));
