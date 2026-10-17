@@ -85,7 +85,9 @@ function registerPredicateTests() {
                 assert.strictEqual(pricesCross('regtest', block, '10', '15'), true, 'P1 under the legacy test');
                 assert.strictEqual(pricesCross('regtest', block, '10', '5'), false, 'P2 under the legacy test');
             }
-            assert.strictEqual(pricesCross('testnet', FAR_HEIGHT, '10', '15'), true, 'testnet is unarmed');
+            // The v0.24.0 cut arms testnet at BTC 156908: the legacy test holds below it, the cross test from it.
+            assert.strictEqual(pricesCross('testnet', 156907, '10', '15'), true, 'testnet below its v0.24.0 height');
+            assert.strictEqual(pricesCross('testnet', FAR_HEIGHT, '10', '15'), false, 'testnet from its v0.24.0 height');
             assert.strictEqual(pricesCross('mainnet', FAR_HEIGHT, '10', '5'), false, 'mainnet is unarmed');
         });
 
