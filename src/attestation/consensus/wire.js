@@ -42,6 +42,31 @@ module.exports = {
         }
     },
 
+    handlePropose(envelope){
+        let admitted = this.admittablePropose(envelope);
+        if(!admitted) return;
+        let { d, rid, pending, senderPubkey } = admitted;
+        let body;
+        try { body = Buffer.from(String(d.body_b64 || ''), 'base64'); }
+        catch (_) { return; }
+        let meta = String(d.meta || '');
+        let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
+        if(wireEffective === undefined) return;
+        let wireAdmit = this.readPeerAdmitBlocks(pending, d);
+        let finish = (read) => {
+            if(!read.ok){
+                logger.warn('AttestationConsensus: PROPOSE admission map rejected from ' + senderPubkey.substring(0,16) +
+                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
+                return;
+            }
+            if(this.pending.get(rid) !== pending || pending.finalized) return;
+            return this.verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, read.admitBlocks);
+        };
+        return wireAdmit && typeof wireAdmit.then === 'function'
+            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: PROPOSE admission check failed: ' + (e && e.message)))
+            : finish(wireAdmit);
+    },
+
     // Maximum allowed base64 length for a peer-supplied body, derived from the
     // provider's configured max_response_bytes (x1.4 base64 expansion factor).
     // The only transport gate on an incoming PROPOSE/PREPARE is the WebSocket

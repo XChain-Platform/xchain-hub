@@ -131,35 +131,8 @@ class AttestationConsensus extends EventEmitter {
             myStatus: myStatus, mirrorEra: mirrorEra, myEffective: myEffective, myAdmit: myAdmit, mySig: mySig });
     }
 
-    handlePropose(envelope){
-        let admitted = this.admittablePropose(envelope);
-        if(!admitted) return;
-        let { d, rid, pending, senderPubkey } = admitted;
-
-        // Decode body and verify signature against canonical bytes
-        let body;
-        try {
-            body = Buffer.from(String(d.body_b64 || ''), 'base64');
-        } catch (_) { return; }
-        let meta = String(d.meta || '');
-        // Mirror era: the proposer signed over ITS OWN stamp, so the canonical that
-        // verifies its signature is built from the wire value, not from this hub's.
-        // Spelling guard first (see readWireEffectiveTime).
-        let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
-        if(wireEffective === undefined) return;
-        let wireAdmit = this.readWireAdmitBlocks(pending, d);
-        let finish = (read) => {
-            if(!read.ok){
-                logger.warn('AttestationConsensus: PROPOSE admission map rejected from ' + senderPubkey.substring(0,16) +
-                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
-                return;
-            }
-            if(this.pending.get(rid) !== pending || pending.finalized) return;
-            return this.verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, read.admitBlocks);
-        };
-        return wireAdmit && typeof wireAdmit.then === 'function'
-            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: PROPOSE admission check failed: ' + (e && e.message)))
-            : finish(wireAdmit);
+    readPeerAdmitBlocks(pending, d){
+        return this.readWireAdmitBlocks(pending, d);
     }
 
     verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, wireAdmitBlocks){
@@ -384,19 +357,16 @@ class AttestationConsensus extends EventEmitter {
             : finish(wireAdmit);
     }
 
-    finishCommitWithAdmit(d, rid, pending, senderPubkey, wireAdmitBlocks){
-
+    finishCommitWithAdmit(d, rid, pending, senderPubkey){
         if(d.sig && d.sig_pubkey){
-            // Over the round's settled canonical, stamp included (see the matching
-            // note on countLatePrepare).
             let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime, pending.admitBlocks);
-            if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
+            if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey))
                 pending.signatures.set(senderPubkey, String(d.sig));
-            }
         }
         pending.commits.add(senderPubkey);
         this.checkCommitQuorum(rid);
     }
+
 }
 
 // The parts are installed as NON-ENUMERABLE prototype methods, the descriptor a

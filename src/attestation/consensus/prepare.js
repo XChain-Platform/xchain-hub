@@ -276,30 +276,6 @@ module.exports = {
         return true;
     },
 
-    prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks){
-        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return true;
-        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
-        let leaderProposal = leader ? pending.proposals.get(leader) : null;
-        let expected = leaderProposal && leaderProposal.admitBlocks != null
-            ? leaderProposal.admitBlocks : pending.admitBlocks;
-        if(!leaderProposal && senderPubkey !== leader){
-            let responsible = pending.responsible || [];
-            let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
-            if(leaderResponsible && pending.proposals.size < responsible.length){
-                this.bufferEarlyMessage(rid, envelope);
-                return false;
-            }
-        } else if(!leaderProposal && senderPubkey === leader) {
-            expected = wireAdmitBlocks;
-        }
-        if(this.admitBlocksKey(expected) !== this.admitBlocksKey(wireAdmitBlocks)){
-            logger.warn('AttestationConsensus: PREPARE admission map differs from the elected leader map from ' +
-                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
-            return false;
-        }
-        return true;
-    },
-
     // A-F1: the leader's signature proves authorship, not honesty. agree()
     // only ever SELECTS one of the collected proposals, so an honest
     // leader's winner must hash-match a proposal this follower collected

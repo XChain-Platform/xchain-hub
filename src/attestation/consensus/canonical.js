@@ -200,6 +200,30 @@ module.exports = {
             Buffer.compare(crypto.createHash('sha256').update(mine.body).digest(), winnerHash) === 0;
     },
 
+    prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks){
+        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return true;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        let leaderProposal = leader ? pending.proposals.get(leader) : null;
+        let expected = leaderProposal && leaderProposal.admitBlocks != null
+            ? leaderProposal.admitBlocks : pending.admitBlocks;
+        if(!leaderProposal && senderPubkey !== leader){
+            let responsible = pending.responsible || [];
+            let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
+            if(leaderResponsible && pending.proposals.size < responsible.length){
+                this.bufferEarlyMessage(rid, envelope);
+                return false;
+            }
+        } else if(!leaderProposal && senderPubkey === leader) {
+            expected = wireAdmitBlocks;
+        }
+        if(this.admitBlocksKey(expected) !== this.admitBlocksKey(wireAdmitBlocks)){
+            logger.warn('AttestationConsensus: PREPARE admission map differs from the elected leader map from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return false;
+        }
+        return true;
+    },
+
     // This hub's admission map for an attest-response round: BTC alone, because the
     // indexer's call-site guard reads attestation_responses on BTC only. Null when the
     // hub cannot produce a fresh BTC admission tip, which the caller turns into a refusal

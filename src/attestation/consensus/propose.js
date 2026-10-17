@@ -28,9 +28,7 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } = 
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { ATTEST_PROPOSE } = require('./constants.js');
-
 module.exports = {
-
     // Premature-eviction proof. Reaching here for a rid this hub already
     // ok-finalized and then evicted means the indexer still listed the request
     // as pending after the ring dropped it, i.e. ATTESTATION_FINALIZED_MAX sits
