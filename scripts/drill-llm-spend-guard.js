@@ -20,7 +20,7 @@
 //      settled as `blocked`.
 //
 // Run inside the regtest hub container (the drill copies itself in):
-//   xchain-hub/scripts/drill-llm-spend-guard.sh dankserver xchain-node-xchain-hub
+//   xchain-hub/scripts/drill-llm-spend-guard.sh <ssh-host> <hub-container>
 // or directly against a checkout:
 //   node scripts/drill-llm-spend-guard.js
 //

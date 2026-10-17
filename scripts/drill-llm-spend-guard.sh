@@ -5,7 +5,7 @@
 # container: the hub's data dir and persisted spend window are left alone.
 #
 #   scripts/drill-llm-spend-guard.sh <ssh-host> <container> [window-ms]
-#   scripts/drill-llm-spend-guard.sh dankserver xchain-node-xchain-hub
+#   scripts/drill-llm-spend-guard.sh <ssh-host> <hub-container>
 #
 # Regtest/testnet venues only; never point this at a mainnet hub.
 set -euo pipefail
