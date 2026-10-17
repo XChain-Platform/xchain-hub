@@ -36,10 +36,35 @@ module.exports = {
 
     handleMessage(envelope){
         switch(envelope.type){
-            case ATTEST_PROPOSE: this.handlePropose(envelope); break;
-            case ATTEST_PREPARE: this.handlePrepare(envelope); break;
-            case ATTEST_COMMIT:  this.handleCommit(envelope);  break;
+            case ATTEST_PROPOSE: return this.handlePropose(envelope);
+            case ATTEST_PREPARE: return this.handlePrepare(envelope);
+            case ATTEST_COMMIT:  return this.handleCommit(envelope);
         }
+    },
+
+    handlePropose(envelope){
+        let admitted = this.admittablePropose(envelope);
+        if(!admitted) return;
+        let { d, rid, pending, senderPubkey } = admitted;
+        let body;
+        try { body = Buffer.from(String(d.body_b64 || ''), 'base64'); }
+        catch (_) { return; }
+        let meta = String(d.meta || '');
+        let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
+        if(wireEffective === undefined) return;
+        let wireAdmit = this.readPeerAdmitBlocks(pending, d);
+        let finish = (read) => {
+            if(!read.ok){
+                logger.warn('AttestationConsensus: PROPOSE admission map rejected from ' + senderPubkey.substring(0,16) +
+                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
+                return;
+            }
+            if(this.pending.get(rid) !== pending || pending.finalized) return;
+            return this.verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, read.admitBlocks);
+        };
+        return wireAdmit && typeof wireAdmit.then === 'function'
+            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: PROPOSE admission check failed: ' + (e && e.message)))
+            : finish(wireAdmit);
     },
 
     // Maximum allowed base64 length for a peer-supplied body, derived from the
@@ -105,7 +130,8 @@ module.exports = {
             status:     pending.status,
             sig_pubkey: pending.myPubkey,
             sig:        sig,
-            ...this.effectiveTimeWireFields(pending)
+            ...this.effectiveTimeWireFields(pending),
+            ...this.admitWireFields(pending)
         });
     }
 

@@ -152,9 +152,10 @@ module.exports = {
     //   - the field is not the unique canonical spelling of a map;
     //   - the map fails this hub's own follower bound against its own tips. The bound is
     //     what lets a follower adopt the proposer's heights without trusting them.
-    async readWireAdmitBlocks(pending, d){
+    readWireAdmitBlocks(pending, d){
         let network = this.hub && this.hub.network;
-        let era     = ah.isAdmissionEra(network, Number(pending.request.block_index));
+        let eraBlock = pending && pending.request ? pending.request.block_index : undefined;
+        let era     = ah.isAdmissionEra(network, Number(eraBlock));
         let raw     = d ? d.admit_blocks : undefined;
         let has     = raw !== undefined && raw !== null;
         if(era !== has)
@@ -163,9 +164,72 @@ module.exports = {
         if(!era) return { ok: true, admitBlocks: null };
         let map = ah.decodeAdmitBlocks(raw);
         if(map === null) return { ok: false, reason: 'admission map is not canonically spelled' };
-        let bound = await ah.checkAdmitBlocksAgainstHub(this.hub, ah.admissionReadSet('attestation_responses'), map);
-        if(!bound.ok) return { ok: false, reason: bound.reason };
-        return { ok: true, admitBlocks: map };
+        return ah.checkAdmitBlocksAgainstHub(this.hub, ah.admissionReadSet('attestation_responses'), map)
+            .then(bound => bound.ok ? { ok: true, admitBlocks: map }
+                                   : { ok: false, reason: bound.reason });
+    },
+
+    admitBlocksKey(map){
+        return map === null || map === undefined ? '' : ah.encodeAdmitBlocks(map);
+    },
+
+    awaitsLeaderAdmitMap(pending){
+        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return false;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        if(!leader || pending.proposals.has(leader)) return false;
+        let responsible = pending.responsible || [];
+        let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
+        return leaderResponsible && pending.proposals.size < responsible.length;
+    },
+
+    settleWinnerAdmitMap(pending){
+        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return null;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        let leaderProposal = leader ? pending.proposals.get(leader) : null;
+        if(leaderProposal && leaderProposal.admitBlocks != null)
+            pending.admitBlocks = leaderProposal.admitBlocks;
+        return pending.admitBlocks;
+    },
+
+    admitMapReSignEligible(pending, winner, winnerHash){
+        if(pending.admitBlocks == null || pending.pinnedConsensusStrategy === 'judge_model' ||
+           !pending.myPubkey || pending.signatures.has(pending.myPubkey) ||
+           !pending.proposals.has(pending.myPubkey)) return false;
+        let mine = pending.proposals.get(pending.myPubkey);
+        return mine && (mine.status || 'ok') === 'ok' && mine.meta === winner.meta &&
+            Buffer.compare(crypto.createHash('sha256').update(mine.body).digest(), winnerHash) === 0;
+    },
+
+    prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks){
+        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return true;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        let leaderProposal = leader ? pending.proposals.get(leader) : null;
+        let expected = leaderProposal && leaderProposal.admitBlocks != null
+            ? leaderProposal.admitBlocks : pending.admitBlocks;
+        if(!leaderProposal && senderPubkey !== leader){
+            let responsible = pending.responsible || [];
+            let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
+            if(leaderResponsible && pending.proposals.size < responsible.length){
+                this.bufferEarlyMessage(rid, envelope);
+                return false;
+            }
+        } else if(!leaderProposal && senderPubkey === leader) {
+            expected = wireAdmitBlocks;
+        }
+        if(this.admitBlocksKey(expected) !== this.admitBlocksKey(wireAdmitBlocks)){
+            logger.warn('AttestationConsensus: PREPARE admission map differs from the elected leader map from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return false;
+        }
+        return true;
+    },
+
+    commitAdmitMapAllowed(pending, rid, senderPubkey, wireAdmitBlocks){
+        if(this.admitBlocksKey(pending.admitBlocks) === this.admitBlocksKey(wireAdmitBlocks))
+            return true;
+        logger.warn('AttestationConsensus: COMMIT admission map differs from the elected leader map from ' +
+            senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+        return false;
     },
 
     // This hub's admission map for an attest-response round: BTC alone, because the
