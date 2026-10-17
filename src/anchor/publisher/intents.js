@@ -82,9 +82,10 @@ module.exports = {
         await this.db.setAnchorPublishedCheckpoint(row.chain, row.network, Number(row.checkpoint_seq));
     },
 
-    // Record that the broadcast returned a txid. Logged, never thrown: the DOGE fee is
-    // already spent, and the surviving intent-only row makes the next flush HOLD instead
-    // of re-broadcasting, which is the fail-safe direction.
+    // Record that the broadcast returned a txid and capture sent_doge_height from the
+    // indexer's current tip. Logged, never thrown: the DOGE fee is already spent, and the
+    // surviving intent-only row makes the next flush HOLD instead of re-broadcasting,
+    // which is the fail-safe direction.
     async markAnchorSent(row, txid){
         let sentDogeHeight = null;
         try {
