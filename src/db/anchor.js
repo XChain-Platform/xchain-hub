@@ -57,7 +57,7 @@ module.exports = {
     // Reads rows from anchor_published_checkpoints.
     // Moved here from src/anchor/publisher.js:5543.
     async findAnchorPublishedCheckpoints(chain, network, checkpoint_seq) {
-        return this.doQuery('SELECT chain, network, checkpoint_seq, txid, intent_at, sent_at FROM anchor_published_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?', [chain, network, checkpoint_seq]);
+        return this.doQuery('SELECT chain, network, checkpoint_seq, txid, sent_doge_height, intent_at, sent_at FROM anchor_published_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?', [chain, network, checkpoint_seq]);
     },
 
     // Reads rows from anchor_reward_attestations.
@@ -93,7 +93,7 @@ module.exports = {
     // Inserts or updates a row in anchor_published_checkpoints.
     // Moved here from src/anchor/publisher.js:5567.
     async setAnchorPublishedCheckpoint(chain, network, checkpoint_seq) {
-        return this.doQuery('INSERT INTO anchor_published_checkpoints (chain, network, checkpoint_seq) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL', [chain, network, checkpoint_seq]);
+        return this.doQuery('INSERT INTO anchor_published_checkpoints (chain, network, checkpoint_seq) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL, sent_doge_height = NULL', [chain, network, checkpoint_seq]);
     },
 
     // Updates anchor_published_archives.
@@ -110,8 +110,8 @@ module.exports = {
 
     // Updates anchor_published_checkpoints.
     // Moved here from src/anchor/publisher.js:5578.
-    async updateAnchorPublishedCheckpoint(txid, chain, network, checkpoint_seq) {
-        return this.doQuery('UPDATE anchor_published_checkpoints SET txid = ?, sent_at = NOW() WHERE chain = ? AND network = ? AND checkpoint_seq = ?', [txid, chain, network, checkpoint_seq]);
+    async updateAnchorPublishedCheckpoint(txid, sentDogeHeight, chain, network, checkpoint_seq) {
+        return this.doQuery('UPDATE anchor_published_checkpoints SET txid = ?, sent_doge_height = ?, sent_at = NOW() WHERE chain = ? AND network = ? AND checkpoint_seq = ?', [txid, sentDogeHeight, chain, network, checkpoint_seq]);
     },
 
     // Retention sweep: deletes confirmed anchor_published_checkpoints markers whose intent

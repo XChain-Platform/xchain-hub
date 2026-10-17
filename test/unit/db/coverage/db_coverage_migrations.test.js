@@ -222,9 +222,23 @@ function registerMigrateIndexTests() {
     });
 }
 
+function registerSentDogeHeightMigrationTests() {
+    describe('sent_doge_height migration', function () {
+        it('requires the nullable checkpoint send-height column', async function () {
+            const { db } = makeDb();
+            db.migrateAddNullableColumn = sinon.stub().resolves();
+            await db.migrateAdmissionColumns();
+            expect(db.migrateAddNullableColumn.calledWithExactly(
+                'anchor_published_checkpoints', 'sent_doge_height',
+                'BIGINT UNSIGNED DEFAULT NULL', true)).to.equal(true);
+        });
+    });
+}
+
 describe('Database: extended coverage', function () {
     registerDatabaseHooks();
     registerMigrateColumnTypeTests();
     registerMigrateEnumColumnTests();
     registerMigrateIndexTests();
+    registerSentDogeHeightMigrationTests();
 });
