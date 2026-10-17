@@ -14,15 +14,17 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-describe('EncoderClient getTxStatus', function () {
-    let axiosStub;
-    let EncoderClient;
+let axiosStub;
+let EncoderClient;
 
+function registerSetup() {
     beforeEach(function () {
         axiosStub = { post: sinon.stub() };
         EncoderClient = proxyquire('../../../src/peers/encoder_client', { axios: axiosStub });
     });
+}
 
+function registerRequestTest() {
     it('sends get_tx_status with the txid and returns the result unchanged', async function () {
         const txid = 'ab'.repeat(32);
         const result = { status: 'mempool', confirmations: 0 };
@@ -39,7 +41,9 @@ describe('EncoderClient getTxStatus', function () {
             id: 1
         });
     });
+}
 
+function registerValidationTests() {
     [
         ['short non-hex text', 'zz'],
         ['uppercase hex', 'AB'.repeat(32)],
@@ -61,7 +65,9 @@ describe('EncoderClient getTxStatus', function () {
             expect(axiosStub.post.notCalled).to.be.true;
         });
     });
+}
 
+function registerRpcErrorTest() {
     it('throws the encoder RPC error', async function () {
         axiosStub.post.resolves({
             data: { error: { code: -1, message: 'node down' } }
@@ -78,4 +84,11 @@ describe('EncoderClient getTxStatus', function () {
         expect(caught.message).to.include('node down');
         expect(axiosStub.post.callCount).to.equal(1);
     });
+}
+
+describe('EncoderClient getTxStatus', function () {
+    registerSetup();
+    registerRequestTest();
+    registerValidationTests();
+    registerRpcErrorTest();
 });
