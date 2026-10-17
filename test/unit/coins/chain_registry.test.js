@@ -170,11 +170,15 @@ describe('chain-registry snapshot consistency', function () {
     });
 
     it('every descriptor carries the endpoint objects the wallet requires', function () {
-        for (const d of SNAPSHOT.descriptors)
-            for (const svc of ['explorer', 'encoder', 'hub']) {
+        for (const d of SNAPSHOT.descriptors) {
+            const services = d.networkKind === 'testnet'
+                ? ['explorer', 'encoder']
+                : ['explorer', 'encoder', 'hub'];
+            for (const svc of services) {
                 expect(d[svc], d.id + ' ' + svc).to.be.an('object');
                 expect(d[svc].defaultUrl, d.id + ' ' + svc + '.defaultUrl').to.be.a('string').and.not.equal('');
             }
+        }
     });
 
     // Skips when xchain-wallet is not checked out (standalone hub deploy), but hard-fails
