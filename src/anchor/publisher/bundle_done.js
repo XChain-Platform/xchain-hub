@@ -25,10 +25,13 @@
 const canonicalForms = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const { activeAt } = require('../../consensus/gate_registry.js');
 const { serialPass } = require('./drain_serial.js');
 const { XANC_SIGN_REQ, XANC_SIGN, XANC_FINALIZED, XANC_BUNDLE_DONE, XANCPUB_SIGN_REQ, XANCPUB_SIGN, XANCARCHPUB_SIGN_REQ, XANCARCHPUB_SIGN, XANCREWARD } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+const BUNDLE_DONE_PUBLISHER_BIND_GATE = 'anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION';
 
 module.exports = {
 
@@ -236,8 +239,21 @@ module.exports = {
         // mirror at/above the flag-day: the attested publisher records its own row and
         // live + recovering indexers both derive the credit from the on-chain attestation.
         // Below the flag-day the mirror remains the only transport.
-        if(!ar.isAnchorRewardActive(snapshotBlock, String(d.network)))
-            this.recordReward('anchor_bundle', snapshotBlock, sender, snapshotBlock, String(d.network));
+        if(!ar.isAnchorRewardActive(snapshotBlock, String(d.network))){
+            let publisherBound = true;
+            if(activeAt(BUNDLE_DONE_PUBLISHER_BIND_GATE, String(d.network), null, snapshotBlock, null)){
+                publisherBound = await this.drainBindingVerdict({
+                    rewardType: 'anchor_bundle',
+                    network: String(d.network),
+                    publisher: String(sender),
+                    roundReference: snapshotBlock,
+                    snapshotBlock: snapshotBlock,
+                    txid: String(d.txid)
+                }) === 'verified';
+            }
+            if(publisherBound)
+                this.recordReward('anchor_bundle', snapshotBlock, sender, snapshotBlock, String(d.network));
+        }
     },
 
     // The string a BUNDLE_DONE sender signs. It binds the network, the bundle's block,

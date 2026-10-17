@@ -26,6 +26,11 @@ function electedBundleDone(bus, txid) {
     let publisher = order[0], receiver = order[1];
     return { publisher, receiver, d: mkBundleDone(bus, publisher, txid) };
 }
+
+function verifyPublisherBindings(bus) {
+    for(let nd of bus.nodes) nd.pub.drainBindingVerdict = async () => 'verified';
+}
+
 let matching = {
     block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
     actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
@@ -97,6 +102,7 @@ function registerElectionGateCases() {
 
     it('handleBundleDone: accepts a BUNDLE_DONE from the rank-unlocked elected publisher', async function () {
         let bus = buildMesh(3);
+        verifyPublisherBindings(bus);
         let order = v0Order(bus, CP_ROW);
         let publisher = order[0];                   // rank 0 is always unlocked
         let receiver  = order[1];
@@ -132,6 +138,7 @@ function registerOnChainVerification() {
 function registerConfirmedAnchorCases() {
     it('ACCEPTS when the DOGE indexer confirms the anchor at depth with matching hashes', async function () {
         let bus = buildMesh(3);
+        verifyPublisherBindings(bus);
         let { publisher, receiver, d } = electedBundleDone(bus, 'ab'.repeat(32));
         // Honest indexer: the announced txid is the tx the anchor landed in.
         receiver.pub.indexerCall = async (coin, method, params) => Object.assign(
@@ -321,6 +328,7 @@ function registerSizeOneCases() {
 
     it("accepts the sole elected publisher's request when the elected set has exactly one member", async function () {
         let bus = buildMesh(2);
+        verifyPublisherBindings(bus);
         let elected  = bus.nodes[0];             // the SOLE elected publisher (rank 0, always unlocked)
         let receiver = bus.nodes[1];             // a peer that holds the checkpoint
         receiver.pub.getActiveOraclePublishPubkeys = async (blk) =>
