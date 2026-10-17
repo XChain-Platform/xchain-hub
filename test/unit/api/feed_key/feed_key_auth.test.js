@@ -126,6 +126,14 @@ function registerSnapshotTests() {
         expect(driveSnapshot(ctx, BULK_KEY).nexted).to.equal(true);
         expect(driveSnapshot(ctx, FEED_KEY).res.statusCode).to.equal(401);
     });
+
+    it('accepts HUB_API_KEY_PREVIOUS on snapshots only while it is set', function () {
+        const ctx = authContext({ HUB_API_KEY_PREVIOUS: 'old-key' });
+        expect(driveSnapshot(ctx, 'old-key').nexted).to.equal(true);
+        expect(driveSnapshot(ctx, BULK_KEY).nexted).to.equal(true);
+        const unset = authContext({ HUB_API_KEY_PREVIOUS: '' });
+        expect(driveSnapshot(unset, 'old-key').res.statusCode).to.equal(401);
+    });
 }
 
 function registerWebSocketTests() {
@@ -146,6 +154,13 @@ function registerWebSocketTests() {
         const ctx = authContext({ HUB_FEED_API_KEY: '' });
         expect(driveUpgrade(ctx, BULK_KEY).wss.handleUpgrade.calledOnce).to.equal(true);
         expect(driveUpgrade(ctx, FEED_KEY).socket.destroy.calledOnce).to.equal(true);
+    });
+
+    it('accepts HUB_API_KEY_PREVIOUS as a WebSocket bearer only while it is set', function () {
+        const ctx = authContext({ HUB_API_KEY_PREVIOUS: 'old-key' });
+        expect(driveUpgrade(ctx, 'old-key').wss.handleUpgrade.calledOnce).to.equal(true);
+        const unset = authContext({ HUB_API_KEY_PREVIOUS: '' });
+        expect(driveUpgrade(unset, 'old-key').socket.destroy.calledOnce).to.equal(true);
     });
 }
 

@@ -55,6 +55,8 @@ module.exports = {
         // destination has not minted: without counting it the invariant would read a false
         // SURPLUS for the whole confirmation window. See getBridgeInvariant.
         this._pendingInFlight = new Map();
+        // The same view split by source chain, so one failed read retains only its chain.
+        this._pendingInFlightByChain = new Map();
 
         // Resolved origin chain per `<network>|<tick>`. A tick's origin is the chain its
         // native row lives on; bridge_transfers carries the chains but never the direction
@@ -119,15 +121,26 @@ module.exports = {
             // "is the bridge live at all" test, and each chain's own flag day is then
             // checked per leg in maybeFinalizeTransfer against that chain's own height.
             if(!this.gateActive('bridge', snapshotBlock, 'BTC')) return;
-            let pending = new Map();
+            let pendingByChain = new Map(this._pendingInFlightByChain);
             for(let coin of ALLOWED_CHAINS){
                 if(!this.indexers[coin] || !this.indexers[coin].url) continue;
-                try { await this.pollPendingTransfers(coin, snapshotBlock, pending); }
+                let chainPending = new Map();
+                try {
+                    await this.pollPendingTransfers(coin, snapshotBlock, chainPending);
+                    pendingByChain.set(coin, chainPending);
+                }
                 catch(e){ logger.warn('CrossChainBridge: pending poll failed on ' + coin + ': ' + (e && e.message)); }
             }
-            // Swap the in-flight view in only after a full sweep, so a chain that failed
-            // mid-pass cannot drop its legs out of the invariant and turn a healthy read
-            // into a phantom surplus.
+            let pending = new Map();
+            for(let chainPending of pendingByChain.values()){
+                for(let [key, amounts] of chainPending){
+                    let combined = pending.get(key) || [];
+                    pending.set(key, combined.concat(amounts));
+                }
+            }
+            // A successful chain replaces its prior view, while a failed chain keeps the
+            // last complete page that protected the invariant from a phantom surplus.
+            this._pendingInFlightByChain = pendingByChain;
             this._pendingInFlight = pending;
             if(this.gateActive('policy', snapshotBlock, 'BTC')){
                 try { await this.pollPolicySnapshots(snapshotBlock); }
@@ -140,12 +153,11 @@ module.exports = {
 
     // Discover confirmed source legs on `coin` and run a transfer round for each.
     async pollPendingTransfers(coin, snapshotBlock, pendingOut){
-        let res;
-        try { res = await this.indexerCall(coin, 'getpendingbridgetransfers', { limit: PENDING_PAGE }); }
-        catch(e){ return; }
-        if(!res || !Array.isArray(res.transfers) || !res.network) return;
+        let res = await this.indexerCall(coin, 'getpendingbridgetransfers', { limit: PENDING_PAGE });
+        if(!res || !Array.isArray(res.transfers) || !res.network)
+            throw new Error('invalid pending transfer response from ' + coin);
         let latest = Number(res.latest_block_index);
-        if(!Number.isFinite(latest)) return;
+        if(!Number.isFinite(latest)) throw new Error('invalid pending transfer response from ' + coin);
         let network = String(res.network);
         // Legs this hub has ALREADY finalized are neither in flight nor proposable, whatever
         // the indexer still lists: its mirror of bridge_transfers can lag the hub's own

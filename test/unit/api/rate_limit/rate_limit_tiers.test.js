@@ -202,6 +202,14 @@ function bucketsSuite() {
     });
 }
 
+function rotatedKeySuite() {
+    it('recognises HUB_API_KEY_PREVIOUS only while it is set', function () {
+        const base = { HUB_API_KEY: 'bulk', HUB_API_KEY_PREVIOUS: 'old' };
+        expect(authenticatedCaller(base)({ headers: { 'x-api-key': 'old' } })).to.equal(true);
+        expect(authenticatedCaller(Object.assign({}, base, { HUB_API_KEY_PREVIOUS: '' }))({ headers: { 'x-api-key': 'old' } })).to.equal(false);
+    });
+}
+
 // Date is faked so window expiry is driven, never waited for.
 function storeSuite() {
     let clock;
@@ -235,5 +243,6 @@ describe('hub JSON-RPC rate-limit tiers', function () {
     afterEach(shutdown);
     describe('batch charging', batchChargingSuite);
     describe('public and authenticated buckets', bucketsSuite);
+    describe('rotated hub key', rotatedKeySuite);
     describe('FixedWindowStore', storeSuite);
 });
