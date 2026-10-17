@@ -166,6 +166,14 @@ class EncoderClient {
         return this.call('broadcast_tx', { tx_hex: txHex });
     }
 
+    // Look up a transaction only when its id is in the encoder's canonical form.
+    async getTxStatus(txid) {
+        if (typeof txid !== 'string' || !/^[0-9a-f]{64}$/.test(txid)) {
+            throw new Error('EncoderClient: txid must be a 64-character lowercase hex string');
+        }
+        return this.call('get_tx_status', { txid: txid });
+    }
+
     // Hand a build's input claims back to the encoder. create_tx RESERVES the inputs it
     // selected and returns the receipt as `result.reservation` ({ id, ... }); selection
     // skips reserved inputs until the encoder's own 5-minute TTL expires. A pipeline that
