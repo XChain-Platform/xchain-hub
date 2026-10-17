@@ -75,7 +75,7 @@ jobs:
     timeout-minutes: 30
     services:
       mariadb:
-        image: mariadb:11.4
+        image: mariadb:11.8
         env:
           # Empty root password: the perf suite's testDb helper defaults to
           # user root / empty password on 127.0.0.1:3306, so the container needs
