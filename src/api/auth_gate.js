@@ -80,7 +80,21 @@ function timingEqual(provided, expected) {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function feedTierRefuses(calls, provided, { HUB_API_KEY, HUB_FEED_API_KEY }) {
+// The bulk key as the caller's header must match it: HUB_API_KEY, or during a
+// rotation HUB_API_KEY_PREVIOUS. Only the variable name is ever logged (debug),
+// never a key value.
+function bulkKeyMatches(provided, ctx) {
+    const { HUB_API_KEY, HUB_API_KEY_PREVIOUS, logger } = ctx;
+    if (HUB_API_KEY && timingEqual(provided, HUB_API_KEY)) return true;
+    if (HUB_API_KEY_PREVIOUS && timingEqual(provided, HUB_API_KEY_PREVIOUS)) {
+        if (logger && logger.debug) logger.debug('auth: request matched HUB_API_KEY_PREVIOUS');
+        return true;
+    }
+    return false;
+}
+
+function feedTierRefuses(calls, provided, ctx) {
+    const { HUB_API_KEY, HUB_FEED_API_KEY } = ctx;
     if (!HUB_FEED_API_KEY) return false;
     let feedRead = calls.some(call => {
         let method = call && call.method;
@@ -88,7 +102,7 @@ function feedTierRefuses(calls, provided, { HUB_API_KEY, HUB_FEED_API_KEY }) {
     });
     if (!feedRead) return false;
     return !(HUB_FEED_API_KEY && timingEqual(provided, HUB_FEED_API_KEY)) &&
-        (!HUB_API_KEY || !timingEqual(provided, HUB_API_KEY));
+        (!HUB_API_KEY || !bulkKeyMatches(provided, ctx));
 }
 
 // With HUB_REORG_API_KEY set, the retraction rails answer ONLY to
@@ -130,7 +144,7 @@ function bulkTierRefuses(calls, provided, ctx) {
             return WRITE_METHODS.has(m) ||
                 (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
         });
-        if (gated && !timingEqual(provided, HUB_API_KEY)) return true;
+        if (gated && !bulkKeyMatches(provided, ctx)) return true;
     }
     return false;
 }
@@ -165,8 +179,9 @@ function authGate(ctx) {
         // passwords keylessly, which is a much larger decision.
         let secretsRequested = calls.some(callWantsConfigSecrets);
         if (secretsRequested) {
-            let expected = HUB_CONFIG_SECRETS_API_KEY || HUB_API_KEY;
-            if (expected && !timingEqual(provided, expected)) return unauthorized();
+            if (HUB_CONFIG_SECRETS_API_KEY) {
+                if (!timingEqual(provided, HUB_CONFIG_SECRETS_API_KEY)) return unauthorized();
+            } else if (HUB_API_KEY && !bulkKeyMatches(provided, ctx)) return unauthorized();
         }
         if (bulkTierRefuses(calls, provided, ctx)) return unauthorized();
         next();
