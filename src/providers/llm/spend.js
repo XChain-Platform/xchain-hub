@@ -235,10 +235,14 @@ class SpendAudit {
     // would inherit a consumed budget. That is precisely why SpendGuard makes persistence
     // opt-in by CALL rather than by config.
     armSpendGuard(cfg, persist) {
+        // Carry an operator pause across the rebuild, which would otherwise drop it with no restart.
+        let held = this._guard && this._guard.isPaused() ? this._guard.pauseReason : null;
         this._guardCfg = cfg || {};
         this._guard    = null;                  // rebuild against the hub's config
         let g = this.spendGuard();
-        return persist ? g.persistTo() : g;
+        if (persist) g.persistTo();
+        if (held !== null && !g.isPaused()) g.pause(held);
+        return g;
     }
     // Operator/health surface: the live window without reaching into the registry.
     // `audit` rides along so a degraded spend-audit sink is a standing, pollable
