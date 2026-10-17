@@ -3573,6 +3573,12 @@
       "bb0fdd5d4d4298f8d261fa1db8cdaf736e52a789d17511c9380bd6ad7b7d1652",
       "7d2d09a93756d7b8b684e6957e4ef2de7efacfe1ac4907758c0924bcb9a7d7aa"
     ],
+    "484ca2212e057b44": [
+      "b9da63cf09e9f898a593de4655a30a52ab28e14e8365aabc406723b2666dbef1",
+      "f598206a6929ea06c6e2825cb2a360805d8e94d16370f2670e85d0126eead264",
+      "7e5598fc63d96e6d49995b1eddc2e2ce7874ffaabd021e15e13df9b55627d8ce",
+      "4d4a21f7deaefefb148b801d1e8099227fe865d14b2771c75282d86bea20b216"
+    ],
     "484d5420c10daa05": [
       "e32ae4249ba225bfa88d293b24d5d1643de89f7984990341e885cff504d99b11",
       "b9382639c618c0e7031ba508caee5c8e9335d806c81adb9bf9e78134f3b9755d",
@@ -12132,6 +12138,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/reward_drain_binding.test.js": "780904a051bf3e9e",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_adopted_bundle_announce_below_gate.test.js": "484ca2212e057b44",
         "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
@@ -13138,6 +13145,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/reward_drain_binding.test.js": "780904a051bf3e9e",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_adopted_bundle_announce_below_gate.test.js": "484ca2212e057b44",
         "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
@@ -14173,6 +14181,7 @@
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_rows.test.js": "ff9dcbcbc97ded17",
         "test/unit/anchor/publisher/reward_drain_binding.test.js": "780904a051bf3e9e",
         "test/unit/anchor/publisher/state_anchor_publisher.test.js": "762a9326f1c8ffbb",
+        "test/unit/anchor/publisher/state_anchor_publisher_adopted_bundle_announce_below_gate.test.js": "484ca2212e057b44",
         "test/unit/anchor/publisher/state_anchor_publisher_blocked_counter.test.js": "21a4b7a60108fb79",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "3aa5d1b5be76ab7f",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
