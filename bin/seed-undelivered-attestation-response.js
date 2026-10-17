@@ -17,7 +17,6 @@
 
 const Database = require('../src/db');
 const seed = require('../src/attestation/response_mirror/seed_undelivered.js');
-const { resolveSecretEnv } = require('../src/secret_env.js');
 
 class CliUsageError extends Error {
     constructor(message){
@@ -56,7 +55,7 @@ function connectionOptions(){
     for(const name of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER']){
         if(!process.env[name]) throw new Error('Missing required env var ' + name);
     }
-    const secret = resolveSecretEnv('HUB_DB_PASS');
+    const secret = process.env.HUB_DB_SECRET;
     if(!secret) throw new Error('Missing required env var HUB_DB_SECRET');
     return {
         host: process.env.HUB_DB_HOST,
