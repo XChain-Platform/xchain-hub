@@ -102,7 +102,7 @@ function feedTierRefuses(calls, provided, ctx) {
     });
     if (!feedRead) return false;
     return !(HUB_FEED_API_KEY && timingEqual(provided, HUB_FEED_API_KEY)) &&
-        (!HUB_API_KEY || !bulkKeyMatches(provided, ctx));
+        (!HUB_API_KEY || !timingEqual(provided, HUB_API_KEY));
 }
 
 // With HUB_REORG_API_KEY set, the retraction rails answer ONLY to
@@ -181,7 +181,7 @@ function authGate(ctx) {
         if (secretsRequested) {
             if (HUB_CONFIG_SECRETS_API_KEY) {
                 if (!timingEqual(provided, HUB_CONFIG_SECRETS_API_KEY)) return unauthorized();
-            } else if (HUB_API_KEY && !bulkKeyMatches(provided, ctx)) return unauthorized();
+            } else if (HUB_API_KEY && !timingEqual(provided, HUB_API_KEY)) return unauthorized();
         }
         if (bulkTierRefuses(calls, provided, ctx)) return unauthorized();
         next();

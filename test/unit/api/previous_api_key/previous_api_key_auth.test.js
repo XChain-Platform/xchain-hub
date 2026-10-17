@@ -27,10 +27,13 @@ function authContext(logs, overrides) {
     }, overrides || {});
 }
 
-function drive(ctx, key) {
+function drive(ctx, key, method, params) {
     let nexted = false;
     const res = { status() { return this; }, json() { return this; } };
-    const req = { body: { method: 'pushchaintip', id: 1 }, headers: key ? { 'x-api-key': key } : {} };
+    const req = {
+        body: { method: method || 'pushchaintip', params, id: 1 },
+        headers: key ? { 'x-api-key': key } : {}
+    };
     authGate(ctx)(req, res, () => { nexted = true; });
     return nexted;
 }
@@ -61,5 +64,19 @@ describe('HUB_API_KEY_PREVIOUS bulk-tier rotation', function () {
         drive(ctx, NEW_KEY);
         expect(logs.some(l => /HUB_API_KEY_PREVIOUS/.test(l))).to.equal(true);
         expect(logs.some(l => l.includes(OLD_KEY) || l.includes(NEW_KEY))).to.equal(false);
+    });
+
+    it('does not widen the feed-read fallback to the previous bulk key', function () {
+        const ctx = authContext([], { HUB_FEED_API_KEY: 'feed-key' });
+        expect(drive(ctx, 'feed-key', 'gethubs')).to.equal(true);
+        expect(drive(ctx, NEW_KEY, 'gethubs')).to.equal(true);
+        expect(drive(ctx, OLD_KEY, 'gethubs')).to.equal(false);
+    });
+
+    it('does not widen the config-secrets fallback to the previous bulk key', function () {
+        const ctx = authContext([]);
+        const params = { include_secrets: true };
+        expect(drive(ctx, NEW_KEY, 'getallconfigs', params)).to.equal(true);
+        expect(drive(ctx, OLD_KEY, 'getallconfigs', params)).to.equal(false);
     });
 });
