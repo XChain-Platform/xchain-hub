@@ -52,9 +52,10 @@ function usage(){
 }
 
 function connectionOptions(){
-    for(const name of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER']){
-        if(!process.env[name]) throw new Error('Missing required env var ' + name);
-    }
+    if(!process.env.HUB_DB_HOST) throw new Error('Missing required env var HUB_DB_HOST');
+    if(!process.env.HUB_DB_PORT) throw new Error('Missing required env var HUB_DB_PORT');
+    if(!process.env.HUB_DB_NAME) throw new Error('Missing required env var HUB_DB_NAME');
+    if(!process.env.HUB_DB_USER) throw new Error('Missing required env var HUB_DB_USER');
     const secret = process.env.HUB_DB_SECRET;
     if(!secret) throw new Error('Missing required env var HUB_DB_SECRET');
     return {
