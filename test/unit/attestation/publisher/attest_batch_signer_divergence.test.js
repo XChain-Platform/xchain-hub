@@ -65,6 +65,7 @@ function makeHub(me, members, rows, sent){
         capabilitySnapshot: { async getWeightSnapshot(){ return snapshot; }, async getSnapshot(){ return snapshot; } },
         peerManager: { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } }
     };
+    hub.resolveFreshPushedBtcTip = async () => hub.db.getChainTip('BTC', hub.network);
     hub.attestationConsensus = Object.create(AttestationConsensus.prototype);
     hub.attestationConsensus.hub = hub;
     return hub;
