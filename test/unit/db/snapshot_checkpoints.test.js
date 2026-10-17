@@ -81,10 +81,13 @@ describe('snapshot checkpoints hub table', function () {
 
         expect(await db.listUncheckpointedSnapshotBlocks('regtest', 1000, 6, 250)).to.equal(due);
         expect(db.calls[0].sql).to.match(/^SELECT DISTINCT cs\.snapshot_block/);
+        expect(db.calls[0].sql).to.include('INNER JOIN configs network_scope');
+        expect(db.calls[0].sql).to.include('network_scope.network = ?');
+        expect(db.calls[0].sql).to.include('network_scope.param_value = cs.btc_chain_id');
         expect(db.calls[0].sql).to.include('cs.snapshot_block >= ?');
         expect(db.calls[0].sql).to.include('NOT EXISTS');
         expect(db.calls[0].sql).to.include('sc.block_index = cs.snapshot_block - ?');
         expect(db.calls[0].sql).to.match(/ORDER BY cs\.snapshot_block ASC LIMIT \?$/);
-        expect(db.calls[0].args).to.deep.equal([1000, 'BTC', 'regtest', 6, 100]);
+        expect(db.calls[0].args).to.deep.equal(['regtest', 1000, 'BTC', 'regtest', 6, 100]);
     });
 });

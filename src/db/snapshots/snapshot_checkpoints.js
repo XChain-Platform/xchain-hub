@@ -51,10 +51,14 @@ module.exports = {
             : 100;
         return this.doQuery(
             'SELECT DISTINCT cs.snapshot_block FROM capability_snapshots cs ' +
+            'INNER JOIN configs network_scope ON network_scope.network = ? ' +
+            "AND network_scope.module = 'chain_tips' AND network_scope.param_name = 'chain_id' " +
+            "AND LOWER(network_scope.coin) IN ('bitcoin', 'btc') " +
+            'AND network_scope.param_value = cs.btc_chain_id ' +
             'WHERE cs.snapshot_block >= ? AND NOT EXISTS (' +
             'SELECT 1 FROM snapshot_checkpoints sc WHERE sc.chain = ? AND sc.network = ? ' +
             'AND sc.block_index = cs.snapshot_block - ?) ' +
             'ORDER BY cs.snapshot_block ASC LIMIT ?',
-            [fromSnapshotBlock, 'BTC', network, burial, cappedLimit]);
+            [network, fromSnapshotBlock, 'BTC', network, burial, cappedLimit]);
     }
 };
