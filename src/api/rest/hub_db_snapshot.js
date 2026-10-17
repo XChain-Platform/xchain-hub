@@ -86,7 +86,7 @@ function snapshotHelpers({ hub, HUB_NETWORK }) {
     return { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot };
 }
 
-function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
+function mountSnapshotAuth(app, { HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY }) {
     // Hub DB sync channel: REST snapshot endpoints
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
@@ -99,10 +99,12 @@ function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
     // can lock its hub-DB mirror to authenticated indexers. The indexer's hub_db_sync
     // bootstrap sends the key as `x-api-key` (matching the write-method header), so
     // we check the same header with the same constant-time compare.
+    // HUB_API_KEY_PREVIOUS is also accepted so a key rotation does not cut off
+    // indexers still holding the old key; unset, it admits nothing.
     app.use('/hub-db/snapshot', (req, res, next) => {
-        if (!HUB_API_KEY && !HUB_FEED_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_API_KEY_PREVIOUS && !HUB_FEED_API_KEY) return next();
         let provided = req.headers['x-api-key'] || '';
-        let matches = [HUB_API_KEY, HUB_FEED_API_KEY].filter(Boolean).some(expected => {
+        let matches = [HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY].filter(Boolean).some(expected => {
             let a = Buffer.from(provided), b = Buffer.from(expected);
             return a.length === b.length && crypto.timingSafeEqual(a, b);
         });
