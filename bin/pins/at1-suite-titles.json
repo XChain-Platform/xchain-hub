@@ -2570,6 +2570,23 @@
       "0d560bd2a465139d9bab32a0d9134e9fc575bbc19c4268864ab6085d22c0469b",
       "16b0124931a3add4d35eb1571da1957f1df485541eccadd63972befd81696233"
     ],
+    "346c734be0bbfc5c": [
+      "6a0bf74b9add85b0e807635875b1492c44b791d7c59291c3b8425bbec646c36e",
+      "e36e0a88e26b464334e8095b5ac67bb9ecd6975f717047bcb4360198aed449fa",
+      "f662483ae71a41fa62a213857091b62b99a287b3d5d27944ff995a1d3ae292ce",
+      "2b61027f39876f49a6c32306b3a2c8db6d87e8425af46381824f9669ec744475",
+      "16740f77a416928b38a8b9029ef2a47b886456bde242494a3c0242ac412e2e52",
+      "a9452ce26148c668000a8b648a080155349545257653828329cbd03e148b18e9",
+      "df3b35d1d0babb2c48d293f855804331ecd17885b77f559c8ab4c51cb8465082",
+      "bac6a1004ca4824b5bbd58d090e8cea7ef99e0c55d08670d71ba50ab3705c479",
+      "9b2e1471c8906485a2c9dee7c4d68b7e8f93d517d6e2078cac399a1e8fbb3a8b",
+      "cdd9c86f30630438b270c941662b7c9e70f377f3e355005e22f0fcfdfaeab941",
+      "b5f4a5a6cd2fcc4346ba48bd57f96239ba12b826aaecc250cbe852caf152e8a3",
+      "0bebce2c752545a860739b6b49326758e495c4081c33aa0ebab095cede49b024",
+      "129b6a5321133c0735e927762c9e5fe855075ba8e86c47fce5a2077236325222",
+      "5d7dfb61abdc76407a79f67ac051690210f4d14fe7c98e059f80b0de351b8d63",
+      "96e8961a598833f26ae0216f2b839a6ba6a00972c49458ce6965c100f3415b7e"
+    ],
     "347026abb4cf0287": [
       "c5e992b8e42c8b2c7e5caae1e3babb73d42e7cb3251d2ab03f9882834c709fe5",
       "daad204568e8698b888718e3235b4a0c849fc352cadf47e718544cc2ba4925d8",
@@ -3299,6 +3316,20 @@
       "ba8694e2fed4fe5b2d18aa1e796950fc6925d11b62ef7862f48b5f337d3b40a9",
       "18f63ff895bd0858e03b5fd2f5bf56278dd503c7ac5da05580c988e800d38cb5",
       "f0ad359649172988f5aa85618aed327854a08b9b1ae90b6a4030e6ad4a159442"
+    ],
+    "440e36db1af7ec3b": [
+      "c4c1d31fac29134a1af3adad647e73f246303438f61d5bcfb4502dcac8688312",
+      "6a025fd8d33aaceece5cfd33da86ac9ea3bf99c5544cc60b672116604cc545e1",
+      "12ea2006b3e4860c7b3d4042f4ce814265d56479fc0fcb9659553c5f640a9683",
+      "6e0b7eaba7eb6c219eeddb1700c87d8c307af6009a6487715834d8902838b37e",
+      "ee9bff0d9127a2363109d4b0c49aef773b8b9fa10b897fd3b2b7285d89e0039f",
+      "85738a1e9e1bc7ed99ea97ab496425dddd5217b0f1104c921574ca495faf6078",
+      "2cf190f3f8e35354f7dea19a9f8208f94825f6bb917e0c328360eccc88ddeabe",
+      "4f0b0937aae2e85480f3812f9149cf114adac2ff3b26b8e62c7141a2eaeffe26",
+      "01cfd58b25699a55c3394c3c0c86fca9480a76df5e6247959471cf29189d0fcc",
+      "9cdfece69e837c955d1aecf9a03c6fc06c706fe96df8c1b4ab0fccc080e5a026",
+      "690efab7a873ec48252f851826e934cc7c83fe00a48198977717fb03ee2956b8",
+      "b312002af7b1b9dd9c10ca82cb9820b567bbf0c8a54b700a3814f3ef95be7498"
     ],
     "44149c03a88d9344": [
       "44149c03a88d934487792c9d48e5e466d810884754e451502342f0e4bf50cb4f"
@@ -4805,6 +4836,12 @@
       "9d0946e76218dea2d46ca9782c595bb5ed9f7479d97999ad42c49f86c872f7aa",
       "95d08dd968ccb89b80df8425d74f2d926feec5ba778efe4eebff5a7d12ea4de3"
     ],
+    "613781da26cf67ce": [
+      "187a2b6158554ec92119a6826833cd906b5e0c264b45e79156ae15af16c1e1ea",
+      "4ecf78dd06ec7c3b6bfa228965fd43cdc7091682305bfadfc24b740d4dc2ce32",
+      "bdf6c96f9c5b220bd623d1d67e832868ab1ea21c42eeef5336015ddb3ab674e3",
+      "30266657c9f001d0bbe502c0ef1f143a68e45b9564167456463b346671063bad"
+    ],
     "6226aae9e1cdc9cf": [
       "baa5a20ad32ccc5be9aeb25833a7a44fcb0854104b235662446f65742c85d7a0",
       "5239d17731d6c39b53bc392fabdbae839bc4c2662583fc9e11a656cf4ad8b641",
@@ -5476,19 +5513,6 @@
       "a18078cceeab7d968f0e925c3d8f5842d145072447b598ec0cecb3ad4a65aa10",
       "faaa50178e2fd1e3d1b7ffe3e8821baad9fa923c3b07a6e48c139be4f97de5af",
       "63e5743cd38c1610e3d00dcdb76073a8e5f63ef7169efac369623ade13e713eb"
-    ],
-    "69746c4eee6b308b": [
-      "c4c1d31fac29134a1af3adad647e73f246303438f61d5bcfb4502dcac8688312",
-      "6a025fd8d33aaceece5cfd33da86ac9ea3bf99c5544cc60b672116604cc545e1",
-      "12ea2006b3e4860c7b3d4042f4ce814265d56479fc0fcb9659553c5f640a9683",
-      "6e0b7eaba7eb6c219eeddb1700c87d8c307af6009a6487715834d8902838b37e",
-      "ee9bff0d9127a2363109d4b0c49aef773b8b9fa10b897fd3b2b7285d89e0039f",
-      "85738a1e9e1bc7ed99ea97ab496425dddd5217b0f1104c921574ca495faf6078",
-      "2cf190f3f8e35354f7dea19a9f8208f94825f6bb917e0c328360eccc88ddeabe",
-      "4f0b0937aae2e85480f3812f9149cf114adac2ff3b26b8e62c7141a2eaeffe26",
-      "01cfd58b25699a55c3394c3c0c86fca9480a76df5e6247959471cf29189d0fcc",
-      "9cdfece69e837c955d1aecf9a03c6fc06c706fe96df8c1b4ab0fccc080e5a026",
-      "690efab7a873ec48252f851826e934cc7c83fe00a48198977717fb03ee2956b8"
     ],
     "6a5e7a72cad8819f": [
       "0f3ee2f3c3b7feee89447acc90dcf6b99c208880a759b4f7578174e7e17dd583",
@@ -8831,22 +8855,6 @@
       "24e64e61a21d48d785d4de6fc31febf593da707a52e1377f4c939928d7d9d3eb",
       "fe18e78ea8d3059130ca7aff0ca4270133c16325d7a98652d8384d6962dbacf3"
     ],
-    "b52afd470094fd2b": [
-      "6a0bf74b9add85b0e807635875b1492c44b791d7c59291c3b8425bbec646c36e",
-      "e36e0a88e26b464334e8095b5ac67bb9ecd6975f717047bcb4360198aed449fa",
-      "f662483ae71a41fa62a213857091b62b99a287b3d5d27944ff995a1d3ae292ce",
-      "2b61027f39876f49a6c32306b3a2c8db6d87e8425af46381824f9669ec744475",
-      "16740f77a416928b38a8b9029ef2a47b886456bde242494a3c0242ac412e2e52",
-      "a9452ce26148c668000a8b648a080155349545257653828329cbd03e148b18e9",
-      "df3b35d1d0babb2c48d293f855804331ecd17885b77f559c8ab4c51cb8465082",
-      "9b2e1471c8906485a2c9dee7c4d68b7e8f93d517d6e2078cac399a1e8fbb3a8b",
-      "cdd9c86f30630438b270c941662b7c9e70f377f3e355005e22f0fcfdfaeab941",
-      "b5f4a5a6cd2fcc4346ba48bd57f96239ba12b826aaecc250cbe852caf152e8a3",
-      "0bebce2c752545a860739b6b49326758e495c4081c33aa0ebab095cede49b024",
-      "129b6a5321133c0735e927762c9e5fe855075ba8e86c47fce5a2077236325222",
-      "5d7dfb61abdc76407a79f67ac051690210f4d14fe7c98e059f80b0de351b8d63",
-      "96e8961a598833f26ae0216f2b839a6ba6a00972c49458ce6965c100f3415b7e"
-    ],
     "b573b7385706cfea": [
       "887cc63d32535c59cf2a41c1712814ea8b10ec66c0bfd0a827d825c4cc092823",
       "06099a87aeb3307d2d3d618f2a6953af1fa0cadb64eadbb1d568bb0645a33c28",
@@ -10481,6 +10489,12 @@
     "db7f4c3b4ebab637": [
       "db7f4c3b4ebab637a78db4b42af6233cc3a49753c837503f6a29181d71d1d627"
     ],
+    "db9d428676b6980c": [
+      "d2ee787f238f137663eb5c464ebad9c0dca65fd4b56ffab03b3eaf648e320d70",
+      "4071897e2f987eb748cd1a355803426b0ceeaea18459977c9110d59e3d6fb374",
+      "20d5a5e9f5d38fe29e081b3f32c150ede11f0f963e625ac74b42663f46d10bc7",
+      "d2523b24d571c6363f4c32191126cff3c405280c2cec6dbe5370bd9698ee3672"
+    ],
     "dbb8e3899e3315c8": [
       "d3613924234437c084f6f36ed5d5c527cbd798c48d01c74593f2cd4e34379bb7",
       "945e60d64d05d45d3698b2c041f79d3531561083c946704fba6df08f8ec66fa4",
@@ -11967,8 +11981,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 941,
-      "titleCount": 8684,
+      "fileCount": 943,
+      "titleCount": 8694,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12014,6 +12028,7 @@
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
         "test/unit/anchor/publisher/admission_ttl_clamp.test.js": "db7f4c3b4ebab637",
+        "test/unit/anchor/publisher/anchor_intent/sent_doge_height.test.js": "db9d428676b6980c",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent.test.js": "e4c278af81dffab2",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_publish.test.js": "aafee76b85796b6d",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_retention.test.js": "b1d0a9af0ecabd7b",
@@ -12508,9 +12523,9 @@
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
         "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
-        "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
+        "test/unit/db/coverage/db_coverage_migrations.test.js": "440e36db1af7ec3b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
-        "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",
+        "test/unit/db/coverage/db_coverage_schema.test.js": "346c734be0bbfc5c",
         "test/unit/db/datetime/db_datetime_column_migrations.test.js": "675159fd50436df5",
         "test/unit/db/datetime/db_migration_statement_timeout.test.js": "8b804f255f830800",
         "test/unit/db/datetime/sql_datetime_ddl_anchor_oracle_price.test.js": "92fd6f7448bc928b",
@@ -12582,6 +12597,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -12967,8 +12983,8 @@
       }
     },
     "test": {
-      "fileCount": 941,
-      "titleCount": 8684,
+      "fileCount": 943,
+      "titleCount": 8694,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13014,6 +13030,7 @@
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
         "test/unit/anchor/publisher/admission_ttl_clamp.test.js": "db7f4c3b4ebab637",
+        "test/unit/anchor/publisher/anchor_intent/sent_doge_height.test.js": "db9d428676b6980c",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent.test.js": "e4c278af81dffab2",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_publish.test.js": "aafee76b85796b6d",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_retention.test.js": "b1d0a9af0ecabd7b",
@@ -13508,9 +13525,9 @@
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
         "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
-        "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
+        "test/unit/db/coverage/db_coverage_migrations.test.js": "440e36db1af7ec3b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
-        "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",
+        "test/unit/db/coverage/db_coverage_schema.test.js": "346c734be0bbfc5c",
         "test/unit/db/datetime/db_datetime_column_migrations.test.js": "675159fd50436df5",
         "test/unit/db/datetime/db_migration_statement_timeout.test.js": "8b804f255f830800",
         "test/unit/db/datetime/sql_datetime_ddl_anchor_oracle_price.test.js": "92fd6f7448bc928b",
@@ -13582,6 +13599,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -13914,8 +13932,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1023,
-      "titleCount": 9547,
+      "fileCount": 1025,
+      "titleCount": 9557,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14043,6 +14061,7 @@
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
         "test/unit/anchor/publisher/admission_ttl_clamp.test.js": "db7f4c3b4ebab637",
+        "test/unit/anchor/publisher/anchor_intent/sent_doge_height.test.js": "db9d428676b6980c",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent.test.js": "e4c278af81dffab2",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_publish.test.js": "aafee76b85796b6d",
         "test/unit/anchor/publisher/anchor_intent/state_anchor_publisher_anchor_intent_retention.test.js": "b1d0a9af0ecabd7b",
@@ -14537,9 +14556,9 @@
         "test/unit/db/archive/db_archive_price_skipped_excluded.test.js": "f79098c484d11d6c",
         "test/unit/db/archive/db_archive_price_tombstone_rearm.test.js": "341036533a8483e8",
         "test/unit/db/chain_tip_atomic_write.test.js": "c32df9a3b4c47fe5",
-        "test/unit/db/coverage/db_coverage_migrations.test.js": "69746c4eee6b308b",
+        "test/unit/db/coverage/db_coverage_migrations.test.js": "440e36db1af7ec3b",
         "test/unit/db/coverage/db_coverage_runtime.test.js": "d2c9c3b82858e43b",
-        "test/unit/db/coverage/db_coverage_schema.test.js": "b52afd470094fd2b",
+        "test/unit/db/coverage/db_coverage_schema.test.js": "346c734be0bbfc5c",
         "test/unit/db/datetime/db_datetime_column_migrations.test.js": "675159fd50436df5",
         "test/unit/db/datetime/db_migration_statement_timeout.test.js": "8b804f255f830800",
         "test/unit/db/datetime/sql_datetime_ddl_anchor_oracle_price.test.js": "92fd6f7448bc928b",
@@ -14611,6 +14630,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
