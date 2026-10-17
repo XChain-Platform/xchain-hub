@@ -31,58 +31,58 @@ function signer() {
     };
 }
 
+let keys;
+let trustSet;
+let checkpoint;
+
+function signatures(signers, signedCheckpoint = checkpoint) {
+    const payload = Buffer.from(snapshotCheckpointCanonical(signedCheckpoint), 'utf8');
+    return signers.map((entry) => ({
+        pubkey: entry.pubkey,
+        sig: crypto.sign(null, payload, entry.privateKey).toString('hex'),
+    }));
+}
+
+function message(overrides = {}, signers = keys.slice(0, 3)) {
+    const cp = Object.assign({}, checkpoint, overrides);
+    return { snapshot_block: 106, cp, signatures: signatures(signers, cp) };
+}
+
+function malformedCheckpoint(overrides) {
+    const msg = message();
+    Object.assign(msg.cp, overrides);
+    return msg;
+}
+
+function view(overrides = {}) {
+    return Object.assign({
+        network: 'testnet',
+        gateActive: true,
+        expectedBlock: 100,
+        trustSet,
+        verify: ValidatorIdentity.verify,
+        stored: null,
+    }, overrides);
+}
+
+beforeEach(function () {
+    keys = [signer(), signer(), signer(), signer(), signer()];
+    trustSet = keys.slice(0, 4).map((entry, index) => ({
+        pubkey: entry.pubkey,
+        weight: '1',
+        source: 'source-' + index,
+    }));
+    checkpoint = {
+        chain: 'BTC',
+        network: 'testnet',
+        block_index: 100,
+        block_hash: hash('a'),
+        state_root: hash('b'),
+        state_root_version: 2,
+    };
+});
+
 describe('snapshot checkpoint finalize policy', function () {
-    let keys;
-    let trustSet;
-    let checkpoint;
-
-    function signatures(signers, signedCheckpoint = checkpoint) {
-        const payload = Buffer.from(snapshotCheckpointCanonical(signedCheckpoint), 'utf8');
-        return signers.map((entry) => ({
-            pubkey: entry.pubkey,
-            sig: crypto.sign(null, payload, entry.privateKey).toString('hex'),
-        }));
-    }
-
-    function message(overrides = {}, signers = keys.slice(0, 3)) {
-        const cp = Object.assign({}, checkpoint, overrides);
-        return { snapshot_block: 106, cp, signatures: signatures(signers, cp) };
-    }
-
-    function malformedCheckpoint(overrides) {
-        const msg = message();
-        Object.assign(msg.cp, overrides);
-        return msg;
-    }
-
-    function view(overrides = {}) {
-        return Object.assign({
-            network: 'testnet',
-            gateActive: true,
-            expectedBlock: 100,
-            trustSet,
-            verify: ValidatorIdentity.verify,
-            stored: null,
-        }, overrides);
-    }
-
-    beforeEach(function () {
-        keys = [signer(), signer(), signer(), signer(), signer()];
-        trustSet = keys.slice(0, 4).map((entry, index) => ({
-            pubkey: entry.pubkey,
-            weight: '1',
-            source: 'source-' + index,
-        }));
-        checkpoint = {
-            chain: 'BTC',
-            network: 'testnet',
-            block_index: 100,
-            block_hash: hash('a'),
-            state_root: hash('b'),
-            state_root_version: 2,
-        };
-    });
-
     it('exports its frozen refusal vocabulary', function () {
         expect(FINALIZE_REFUSAL).to.deep.equal({
             MALFORMED: 'malformed',
@@ -114,7 +114,9 @@ describe('snapshot checkpoint finalize policy', function () {
         msg.signatures = [];
         expect(snapshotFinalizedRefusal(msg, view())).to.equal('below_quorum');
     });
+});
 
+describe('snapshot checkpoint finalize policy', function () {
     it('refuses malformed envelope fields', function () {
         const cases = [
             null,
@@ -141,7 +143,9 @@ describe('snapshot checkpoint finalize policy', function () {
         expect(snapshotFinalizedRefusal(message(), null)).to.equal('malformed');
         expect(snapshotFinalizedRefusal(hostile, view())).to.equal('malformed');
     });
+});
 
+describe('snapshot checkpoint finalize policy', function () {
     it('checks the gate before the expected block', function () {
         expect(snapshotFinalizedRefusal(message(), view({ gateActive: false })))
             .to.equal('gate_inactive');
@@ -153,7 +157,9 @@ describe('snapshot checkpoint finalize policy', function () {
         expect(snapshotFinalizedRefusal(message({ block_index: 99 }), view()))
             .to.equal('wrong_block');
     });
+});
 
+describe('snapshot checkpoint finalize policy', function () {
     it('requires more than two-thirds of source stake', function () {
         expect(snapshotFinalizedRefusal(message({}, keys.slice(0, 2)), view()))
             .to.equal('below_quorum');
@@ -189,7 +195,9 @@ describe('snapshot checkpoint finalize policy', function () {
         expect(snapshotFinalizedRefusal(message(), view({ verify: null })))
             .to.equal('below_quorum');
     });
+});
 
+describe('snapshot checkpoint finalize policy', function () {
     it('checks quorum before a stored conflict', function () {
         const stored = Object.assign({}, checkpoint, { block_hash: hash('d') });
         expect(snapshotFinalizedRefusal(message({}, keys.slice(0, 2)), view({ stored })))
