@@ -7354,6 +7354,16 @@
     "9039fb06c56c7cc0": [
       "9039fb06c56c7cc03c1e0cf0ae0247276be60fb721f1b66f3b40b7d611100a0d"
     ],
+    "904ca9cd1a9f7e0b": [
+      "749a3487a89a1b6cfe32a0d77f414cb6df89eb234c8acf97847fbac79dcf85da",
+      "9ee031577bb9e7cd4ad1e645f02e78a1ecfafa76c7a7e88547b3faf3d74dc3dc",
+      "77eeff7f4415fe5c52a5e0e982fb5db7ffd30bdc3734d1c75150d74bc3d350c3",
+      "68c88149f16028eaabc3e566c8a2897a906304ddd7ab1b4e689ab47061107b9c",
+      "1bedd1db52897be542be1cf83573b43eb86281e611032e5d6d39eb57d4aee258",
+      "6057527786942dbc5cfd2355861633d73a378097d88eaffdc691396a8b81c05b",
+      "de52022bd5f033e500fded352bcf3d3d36136c5c4d85529e2f423365b9848675",
+      "04dc6fea74f62d987c6a95bfc554f649501a74046e75934abab8ffc2bb291114"
+    ],
     "90733449f1bd7176": [
       "91c5e6fdfc7c2eb740c9aeae2a5f3918031a23996b8cca41a37408b40cd8ca0c",
       "f4d23704e4e7f64f7557f0df9cd276ff4e80368bbfbaacd75b38311a72fc680d",
@@ -12074,8 +12084,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 955,
-      "titleCount": 8763,
+      "fileCount": 956,
+      "titleCount": 8771,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12235,6 +12245,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
@@ -13088,8 +13099,8 @@
       }
     },
     "test": {
-      "fileCount": 955,
-      "titleCount": 8763,
+      "fileCount": 956,
+      "titleCount": 8771,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13249,6 +13260,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
@@ -14049,8 +14061,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1037,
-      "titleCount": 9626,
+      "fileCount": 1038,
+      "titleCount": 9634,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14292,6 +14304,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
