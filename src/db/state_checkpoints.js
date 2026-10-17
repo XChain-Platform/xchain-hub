@@ -136,6 +136,10 @@ module.exports = {
         return this.doQuery('UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL', [txid, chain, network, block_index, checkpoint_seq]);
     },
 
+    async updateStateCheckpointClearStamp(txid, chain, network, block_index, checkpoint_seq) {
+        return this.doQuery('UPDATE state_checkpoints SET anchor_txid = NULL WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid = ?', [chain, network, block_index, checkpoint_seq, txid]);
+    },
+
     // Reads the pending anchor checkpoints across every network, for a hub with no
     // configured network (the legacy unscoped behavior).
     // Moved here from src/anchor/publisher.js:1065, the unscoped branch.
