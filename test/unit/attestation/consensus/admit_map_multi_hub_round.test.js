@@ -122,7 +122,9 @@ describe('attestation admission map across a multi-hub round', function () {
             cleanup(nodes);
         }
     });
+});
 
+describe('attestation admission map on COMMIT', function () {
     it('refuses a bounded COMMIT map that differs from the settled leader map', async function () {
         const { nodes } = makeFederation([1000, 1001, 1002]);
         try {
