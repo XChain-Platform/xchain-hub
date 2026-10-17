@@ -26,7 +26,7 @@ const CP_ROW = {
 
 function makePub() {
     const rows = [];
-    const verifiedTxids = [];
+    const verifications = [];
     const checkpoint = Object.assign({}, CP_ROW);
     const db = { ...DB_METHODS,
         async doQuery(sql, params) {
@@ -43,12 +43,12 @@ function makePub() {
         }
     };
     const pub = new StateAnchorPublisher({ db, getIdentity: () => null, hubDbBroadcaster: null });
-    pub.verifyAnchorOnChain = async (_row, expected) => {
-        verifiedTxids.push(expected.txid);
+    pub.verifyAnchorOnChain = async (row, expected) => {
+        verifications.push({ txid: expected.txid, checkpointTxid: row.anchor_txid });
         return 'verified';
     };
     pub.drainBindingVerdict = async () => 'verified';
-    return { pub, checkpoint, rows, verifiedTxids };
+    return { pub, checkpoint, rows, verifications };
 }
 
 function queuePublish(pub, checkpoint, txid, sigByte) {
@@ -68,16 +68,27 @@ describe('StateAnchorPublisher same-publisher re-publish reward dedup', function
     afterEach(() => sinon.restore());
 
     it('writes one anchor_reward_attestations row for attestations queued on both txids', async function () {
-        const { pub, checkpoint, rows, verifiedTxids } = makePub();
+        const { pub, checkpoint, rows, verifications } = makePub();
 
         queuePublish(pub, checkpoint, TXID_1, '34');
         checkpoint.anchor_txid = null;
-        queuePublish(pub, checkpoint, TXID_2, '56');
-
-        expect(pub._deferredRewardAttest.size, 'both txid-specific attestations are queued').to.equal(2);
         await pub.drainDeferredRewardAttest();
 
-        expect(verifiedTxids, 'both the original publish and re-publish are proved').to.deep.equal([TXID_1, TXID_2]);
+        expect(verifications, 'the original publish is proved while its checkpoint stamp is cleared').to.deep.equal([
+            { txid: TXID_1, checkpointTxid: null }
+        ]);
+        expect(rows, 'the cleared stamp does not suppress its confirmed reward').to.have.lengthOf(1);
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+
+        queuePublish(pub, checkpoint, TXID_2, '56');
+
+        expect(pub._deferredRewardAttest.size, 'the re-publish attestation is queued').to.equal(1);
+        await pub.drainDeferredRewardAttest();
+
+        expect(verifications, 'the re-publish is proved against its replacement stamp').to.deep.equal([
+            { txid: TXID_1, checkpointTxid: null },
+            { txid: TXID_2, checkpointTxid: TXID_2 }
+        ]);
         expect(rows, 'uq_reward_tuple excludes the txid').to.have.lengthOf(1);
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
