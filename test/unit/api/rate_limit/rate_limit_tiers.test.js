@@ -192,12 +192,6 @@ function bucketsSuite() {
         expect(authenticatedCaller({})({ headers: { 'x-api-key': '' } })).to.equal(false);
     });
 
-    it('recognises HUB_API_KEY_PREVIOUS only while it is set', function () {
-        const base = { HUB_API_KEY: 'bulk', HUB_API_KEY_PREVIOUS: 'old' };
-        expect(authenticatedCaller(base)({ headers: { 'x-api-key': 'old' } })).to.equal(true);
-        expect(authenticatedCaller(Object.assign({}, base, { HUB_API_KEY_PREVIOUS: '' }))({ headers: { 'x-api-key': 'old' } })).to.equal(false);
-    });
-
     it('defaults the authenticated tier to the fleet value, never below the public one', function () {
         expect(DEFAULT_AUTH_RPM).to.equal(60000);
         expect(parseAuthRpm(undefined, 100)).to.equal(60000);
@@ -205,6 +199,14 @@ function bucketsSuite() {
         expect(parseAuthRpm('0', 100)).to.equal(60000);
         expect(parseAuthRpm(undefined, 90000)).to.equal(90000);
         expect(parseAuthRpm('5000', 100)).to.equal(5000);
+    });
+}
+
+function rotatedKeySuite() {
+    it('recognises HUB_API_KEY_PREVIOUS only while it is set', function () {
+        const base = { HUB_API_KEY: 'bulk', HUB_API_KEY_PREVIOUS: 'old' };
+        expect(authenticatedCaller(base)({ headers: { 'x-api-key': 'old' } })).to.equal(true);
+        expect(authenticatedCaller(Object.assign({}, base, { HUB_API_KEY_PREVIOUS: '' }))({ headers: { 'x-api-key': 'old' } })).to.equal(false);
     });
 }
 
@@ -241,5 +243,6 @@ describe('hub JSON-RPC rate-limit tiers', function () {
     afterEach(shutdown);
     describe('batch charging', batchChargingSuite);
     describe('public and authenticated buckets', bucketsSuite);
+    describe('rotated hub key', rotatedKeySuite);
     describe('FixedWindowStore', storeSuite);
 });
