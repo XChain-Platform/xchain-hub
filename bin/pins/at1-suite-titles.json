@@ -11624,6 +11624,24 @@
       "40f1cd67b113954b34113014856b102f1c14d83254aaa7da0826cfcb60a975d9",
       "6712fdfb3335578831a6044a4ad2c0afcaa08c32ff6315c529d4ca809132c43c"
     ],
+    "f4aa8f91110ef8e2": [
+      "71bcbf51fed66bb57c80358a974586bea949f66fbb7252efad0a69cf2ec6cabe",
+      "1906adfb907333f7b7a1053c4743fe4046e62000c82b1409bcf05cdc54243a42",
+      "cffcaacceb30562c0e212236d107becc3dc021c56d08560205795438c25cce54",
+      "8838c18f11ed47e3ce69ff7376faee394c89439fceabe11900c0173cd06fafef",
+      "e6f2946da6aa1072f1eba764cfdbf4da21af71cee3c58066ef7b7379bfb2b239",
+      "d1ea1d1e4fbb89a91a165eb11936202859cd5413a5a3e5f16c99f8ca22765c0f",
+      "67d55f73c4796fb8771cfdd5b9a7b4286fa2a79dfb7fe12725298796d886699c",
+      "6902258c900c48e0df97015a58043bf4507438b54905c124f6a88a59005d7fe8",
+      "82ca514c72b43dc25fe825ca3c65360171a1ba8d924198a5947563157fc8c36f",
+      "4ef9e6496843fe38a5242b46abb4a0733128ad95cbe35a735a04125270920c27",
+      "796af6d292d2c0a0c5b07c8bbcf3b895443ccac90d5be41f083aabd55c30ab89",
+      "da6210e0f1ac266e901eb0481addaa496ed22e646d44a598b2186a03d73518dd",
+      "bae49f259df7be7ea442591704f139dc1eae1a45463a62aa2fa2efa319ef29d0",
+      "7eaa973efec858d3c19cf73f2bcf82eab1e87c455fb50b9611257718cd4d83e4",
+      "a6c23d93608d73d181e5c4e2defb8585e8a972cb6d9e9366a8575607d6456e0a",
+      "7850a22e27e8f86e6192f1f4f1276a823354f4da3d613c11698207dba71b857a"
+    ],
     "f4b47f846dde3b4d": [
       "45c2dfbe3389cdf74de39f043bd98c75f779c53580c3bee35758a30bae280cd9",
       "8858dd504f4fa1734a5cda40b4d7365afd7a3952fa00aa8890ec550edc205b8f",
@@ -12153,8 +12171,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 961,
-      "titleCount": 8830,
+      "fileCount": 962,
+      "titleCount": 8846,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12312,6 +12330,7 @@
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
+        "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
@@ -13173,8 +13192,8 @@
       }
     },
     "test": {
-      "fileCount": 961,
-      "titleCount": 8830,
+      "fileCount": 962,
+      "titleCount": 8846,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13332,6 +13351,7 @@
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
+        "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
@@ -14140,8 +14160,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1043,
-      "titleCount": 9693,
+      "fileCount": 1044,
+      "titleCount": 9709,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14381,6 +14401,7 @@
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
+        "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
