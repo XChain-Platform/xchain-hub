@@ -146,6 +146,7 @@ const archiveRowMethods            = require('./publisher/archive/rows.js');
 const signerMethods                = require('./publisher/signers.js');
 const broadcastMethods             = require('./publisher/broadcast.js');
 const intentMethods                = require('./publisher/intents.js');
+const anchorStampSweepMethods      = require('./publisher/anchor_stamp_sweep.js');
 const optionMethods                = require('./publisher/options.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -177,6 +178,7 @@ class StateAnchorPublisher {
         this.initIndexers(cfg);
         this.initDeferralQueues(cfg);
         this.initMarkerRetention(cfg);
+        this.initAnchorStampSweep(cfg);
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -316,6 +318,7 @@ const PART_METHODS = [
     signerMethods,
     broadcastMethods,
     intentMethods,
+    anchorStampSweepMethods,
     optionMethods
 ];
 installParts(StateAnchorPublisher.prototype, PART_METHODS);
