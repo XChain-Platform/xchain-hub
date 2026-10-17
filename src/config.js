@@ -139,6 +139,7 @@ const config = {
     get HUB_ADMISSION_RELAY() { return process.env.HUB_ADMISSION_RELAY; },
     get HUB_ALLOW_UNAUTHENTICATED() { return process.env.HUB_ALLOW_UNAUTHENTICATED; },
     get HUB_API_KEY() { return process.env.HUB_API_KEY; },
+    get HUB_API_KEY_PREVIOUS() { return process.env.HUB_API_KEY_PREVIOUS; },
     get HUB_AUTH_RATE_LIMIT_RPM() { return process.env.HUB_AUTH_RATE_LIMIT_RPM; },
     get HUB_CAPABILITY_CONFIG() { return process.env.HUB_CAPABILITY_CONFIG; },
     get HUB_CONFIG_SECRETS_API_KEY() { return process.env.HUB_CONFIG_SECRETS_API_KEY; },

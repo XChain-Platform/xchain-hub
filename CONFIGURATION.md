@@ -42,6 +42,15 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Clients then send it on each request (the indexer reads the same value as
 `HUB_API_KEY`, the encoder-facing services as their `*_ENCODER_API_KEY`, etc.).
 
+### `HUB_API_KEY_PREVIOUS` - the outgoing bulk key during a rotation
+
+Optional. While set, the bulk tier accepts `HUB_API_KEY_PREVIOUS` as well as
+`HUB_API_KEY`, so callers can move to a new key without a window of 401s: set
+the new key as `HUB_API_KEY`, the old one here, roll the callers, then unset
+this variable. Unset or empty, only `HUB_API_KEY` is accepted. A request that
+matches it logs the variable name at debug level, never a key value. It does
+not widen the feed, reorg or config-secrets tiers' own keys.
+
 ### `SIGNING_PRIVKEY_HEX` - empty means unsigned P2P messages / no federation identity
 
 `SIGNING_PRIVKEY_HEX` is the Ed25519 private key (a 32-byte seed, encoded as 64
@@ -82,6 +91,7 @@ signatures.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty means the hub refuses to boot unless `HUB_ALLOW_UNAUTHENTICATED=true` - see above.** |
+| `HUB_API_KEY_PREVIOUS` | No | _empty_ | Outgoing bulk key accepted beside `HUB_API_KEY` during a rotation. See above. |
 | `HUB_ALLOW_UNAUTHENTICATED` | No | _unset_ | Declares that this hub knowingly runs with an unauthenticated write surface. Only consulted when `HUB_API_KEY` is empty. |
 | `HUB_CONSENSUS_INPUT_ALERT_AFTER` | No | `3` | Consecutive consensus-input fetch failures before the hub alerts and `/health` reports degraded. |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | The PUBLIC budget: requests per minute per client IP for callers without a hub key, on every route EXCEPT `/hub-db/snapshot/*` (see below), on every role including a validator hub. A JSON-RPC batch costs one token per call, not one per HTTP request. Over the limit the hub answers `429` with a JSON-RPC error body (code `-32029`) naming the limit, the window and the wait, alongside `Retry-After` and `RateLimit-*` headers. |
