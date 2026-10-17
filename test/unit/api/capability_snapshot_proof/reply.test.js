@@ -60,7 +60,9 @@ describe('capabilityProofReply', function () {
         expect(reply(CHECKPOINT, { answer: { error: 'NO_BLOCK' } }))
             .to.deep.equal(PROOF_UNAVAILABLE);
     });
+});
 
+describe('capabilityProofReply', function () {
     it('returns the proof and only the public checkpoint fields', function () {
         const proof = {
             block_index: 100,
