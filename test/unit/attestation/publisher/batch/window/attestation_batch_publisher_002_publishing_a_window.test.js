@@ -196,6 +196,7 @@ function makeHub(opts){
     return {
         network:  opts.network || 'regtest',
         db:       db,
+        resolveFreshPushedBtcTip: () => db.getChainTip('BTC', opts.network || 'regtest'),
         p2pConfig: Object.assign({
             ATTEST_BATCH_WINDOW_S_OVERRIDE: String(WINDOW_S),
             ATTEST_BATCH_BUFFER_PATH: path.join(opts.dir, 'attest-batch-buffer.jsonl'),
