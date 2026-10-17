@@ -60,7 +60,9 @@ describe('Seed undelivered attestation response', function () {
         expect(second.request_id).to.match(/^[0-9a-f]{64}$/);
         expect(first.request_id).not.to.equal(second.request_id);
     });
+});
 
+describe('Seed undelivered attestation response', function () {
     it('builds the inert marker row and hashes its payload bytes', function () {
         const row = seed.buildSeedRow('regtest', 1770000123, () => Buffer.alloc(32, 0xab));
         expect(row).to.include({
