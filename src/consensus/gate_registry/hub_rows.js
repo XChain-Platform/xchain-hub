@@ -92,3 +92,5 @@ addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UN
 // oracle/consensus/commit
 // Count-mode quorum uses the verified signer set at and above this BTC height.
 addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
+addGate('anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
