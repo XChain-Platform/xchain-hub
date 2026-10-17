@@ -26,6 +26,7 @@ const NEW_HASH = 'f'.repeat(64);
 const OLD_HASHES = ['a', 'b', 'c'].map(value => value.repeat(64));
 const REORG_HEIGHT = 500;
 const NOW = 1700000000000;
+let clock;
 
 function snapshotHub(self, network, btcBlockHeight) {
     const registry = new Map(VALIDATORS_4.map(validator => [validator.addr, validator.pubkey]));
@@ -111,18 +112,7 @@ async function sendByzantineAlerts(cluster, btcBlockHeight) {
     return reorgId;
 }
 
-describe('reorg digest v2 multi-hub regression with four hubs', function () {
-    let clock;
-
-    beforeEach(function () {
-        clock = sinon.useFakeTimers({ now: NOW });
-    });
-
-    afterEach(function () {
-        clock.restore();
-        sinon.restore();
-    });
-
+function registerFragmentationTest() {
     it('fragments Byzantine oldHash variants below the gate and never reaches quorum', async function () {
         const btcBlockHeight = snapshotLock.REORG_SNAPSHOT_ACTIVATION.testnet;
         const cluster = fourHubs('testnet', btcBlockHeight);
@@ -155,7 +145,9 @@ describe('reorg digest v2 multi-hub regression with four hubs', function () {
         expect(timeouts.map(events => events[0].prepares)).to.deep.equal([1, 1, 1]);
         expect(cluster.honest.every(node => !node.handler.pendingReorgs.has(reorgId))).to.equal(true);
     });
+}
 
+function registerConvergenceTest() {
     it('converges at the gate and each honest hub executes rollback exactly once', async function () {
         const cluster = fourHubs('regtest', 0);
         const reorgId = await sendByzantineAlerts(cluster, 0);
@@ -181,4 +173,18 @@ describe('reorg digest v2 multi-hub regression with four hubs', function () {
         }
         expect(cluster.nodes[0].handler.executeRollback.callCount).to.equal(0);
     });
+}
+
+describe('reorg digest v2 multi-hub regression with four hubs', function () {
+    beforeEach(function () {
+        clock = sinon.useFakeTimers({ now: NOW });
+    });
+
+    afterEach(function () {
+        clock.restore();
+        sinon.restore();
+    });
+
+    registerFragmentationTest();
+    registerConvergenceTest();
 });
