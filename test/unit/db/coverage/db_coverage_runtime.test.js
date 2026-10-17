@@ -228,11 +228,27 @@ function registerGetConfigWatermarkTests() {
     });
 }
 
+function registerAnchorStampSweepQueryTests() {
+    describe('anchor stamp sweep query', function () {
+        it('selects only matching local stamps at or below the DOGE height bound', async function () {
+            const { db, mockConn } = makeDb();
+            const rows = [{ chain: 'BTC', txid: 'ab'.repeat(32) }];
+            mockConn.query.resolves(rows);
+
+            expect(await db.findOwnAnchorCheckpointStamps(900)).to.equal(rows);
+            const [sql, args] = mockConn.query.firstCall.args;
+            expect(sql).to.include('apc.sent_doge_height <= ?');
+            expect(sql).to.include('sc.anchor_txid = apc.txid');
+            expect(args).to.deep.equal([900]);
+        });
+    });
+}
+
 describe('Database: extended coverage', function () {
     registerDatabaseHooks();
     registerGetConnectionTests();
     registerChainTipHelpersTests();
     registerGetAllConfigsIncrementalCursorTests();
     registerGetConfigWatermarkTests();
+    registerAnchorStampSweepQueryTests();
 });
-

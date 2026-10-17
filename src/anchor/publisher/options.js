@@ -278,6 +278,11 @@ module.exports = {
         this.checkpointIntervalBlocks = checkpointCadence.checkpointIntervalBlocks;
     },
 
+    initAnchorStampSweep(cfg){
+        this.anchorStampReorgDepth = positiveIntConfig(
+            hubConfig.REORG_MAX_DEPTH || cfg.REORG_MAX_DEPTH, 2000, 'REORG_MAX_DEPTH');
+    },
+
     initDogePipeline(cfg){
         this.dogeAddress   = hubConfig.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
         this.dogePubkeyHex = hubConfig.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
