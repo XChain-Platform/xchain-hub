@@ -71,6 +71,12 @@ addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'hei
 // exercises them from genesis.
 addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: 156230, regtest: 0 });
 
+// Reorg digest v2 keeps the stamped round bound to its replacement hash and
+// BTC snapshot height without binding it to a reporter-specific orphan hash.
+// Regtest exercises the form from genesis; public networks wait for a
+// coordinated activation.
+addGate('anchor/reorg_handler/snapshot_round.REORG_DIGEST_V2_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
 // Effective allow/block-list enforcement: armed on testnet, inert on mainnet
 // and regtest until coordinated activation. A regtest venue arms it at read
 // time from XC_OFFER_LIST_REGTEST_ACTIVATION (the entry, gate_registry.js,
