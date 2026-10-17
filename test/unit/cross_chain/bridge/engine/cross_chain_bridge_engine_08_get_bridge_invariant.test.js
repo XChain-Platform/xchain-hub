@@ -250,6 +250,8 @@ function registerFeature10getBridgeInvariantPart3() {
     const inv = await engine.getBridgeInvariant('XCHAIN');
     expect(inv.XCHAIN.BTC.escrow).to.equal(null);
   });
+}
+function registerFeature10getBridgeInvariantFailedChain() {
   it('keeps a failed chain prior legs while healthy chains refresh their invariant view', async function () {
     const { engine } = makeEngine({ policyActive: false });
     let cycle = 1;
@@ -325,6 +327,7 @@ function registerFeature10getBridgeInvariant() {
     registerFeature10getBridgeInvariantPart1();
     registerFeature10getBridgeInvariantPart2();
     registerFeature10getBridgeInvariantPart3();
+    registerFeature10getBridgeInvariantFailedChain();
     registerFeature10getBridgeInvariantCopyNames();
   });
 }
