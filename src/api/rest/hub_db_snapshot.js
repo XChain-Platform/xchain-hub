@@ -25,10 +25,12 @@ const nodeUtil = require('node:util');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('../../oracle/prices_snapshot_query');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { validateLimit, validateSince } = require('../validate');
+const { mountSnapshotQueryValidation } = require('./hub_db_snapshot_query');
 
 function mountSnapshotRoutes(app, ctx) {
     const helpers = snapshotHelpers(ctx);
     mountSnapshotAuth(app, ctx);
+    mountSnapshotQueryValidation(app);
     mountPriceSnapshots(app, ctx, helpers);
     mountMatchSnapshots(app, ctx, helpers);
     mountRemoteTokenSnapshots(app, ctx, helpers);
@@ -41,7 +43,7 @@ function mountSnapshotRoutes(app, ctx) {
 function snapshotHelpers({ hub, HUB_NETWORK }) {
     // The per-table per-chain admission height watermark, for the REST carriers.
     //
-    // It rides all ELEVEN snapshot pages as well as the heartbeat and the ready frame:
+    // It rides every snapshot page as well as the heartbeat and the ready frame:
     // a poll-mode consumer never receives a heartbeat at all, so without it a poll-mode
     // bootstrap never establishes a baseline and every height-keyed barrier defers forever
     // rather than for one interval.
@@ -84,7 +86,7 @@ function snapshotHelpers({ hub, HUB_NETWORK }) {
     return { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot };
 }
 
-function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
+function mountSnapshotAuth(app, { HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY }) {
     // Hub DB sync channel: REST snapshot endpoints
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
@@ -97,10 +99,12 @@ function mountSnapshotAuth(app, { HUB_API_KEY, HUB_FEED_API_KEY }) {
     // can lock its hub-DB mirror to authenticated indexers. The indexer's hub_db_sync
     // bootstrap sends the key as `x-api-key` (matching the write-method header), so
     // we check the same header with the same constant-time compare.
+    // HUB_API_KEY_PREVIOUS is also accepted so a key rotation does not cut off
+    // indexers still holding the old key; unset, it admits nothing.
     app.use('/hub-db/snapshot', (req, res, next) => {
-        if (!HUB_API_KEY && !HUB_FEED_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_API_KEY_PREVIOUS && !HUB_FEED_API_KEY) return next();
         let provided = req.headers['x-api-key'] || '';
-        let matches = [HUB_API_KEY, HUB_FEED_API_KEY].filter(Boolean).some(expected => {
+        let matches = [HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY].filter(Boolean).some(expected => {
             let a = Buffer.from(provided), b = Buffer.from(expected);
             return a.length === b.length && crypto.timingSafeEqual(a, b);
         });
@@ -132,6 +136,9 @@ function mountPriceSnapshots(app, ctx, helpers) {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            if (req.query.latest !== undefined &&
+                !['0', '1', 'false', 'true'].includes(req.query.latest))
+                return res.status(400).json({ error: 'latest must be one of: 0, 1, false, true' });
             // `latest=1` serves the dashboard's current-per-feed need (MAX(effective_at)
             // per coin/tick/fiat); absent it, the default ascending since_id page-walk
             // (indexer bootstrap) is unchanged. See oraclePricesSnapshotQuery.js.

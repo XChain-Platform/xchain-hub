@@ -22,7 +22,7 @@
  ********************************************************************/
 
 const configRedaction = require('../config_redaction.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants');
+const { resolveRoundCadence } = require('../../oracle/round_cadence.js');
 const { makeAdmissionTipProbe, raceTimeout } = require('./health_probes.js');
 const { validateChain } = require('../validate');
 const carrierLogicPin = require('../../../bin/lib/carrier_logic_pin.js');
@@ -235,7 +235,7 @@ async function probeOracleFreshness(hub, hubConfig, dbOk, p2pConfig, DB_PROBE_TI
     let oracleThresholdS = null;
     if (dbOk && p2pConfig) {
         try {
-            let roundIntervalMs = p2pConfig.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
+            let roundIntervalMs = resolveRoundCadence(p2pConfig).roundInterval;
             // Default to 2x the round interval; an operator can override for
             // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
             oracleThresholdS = parseInt(hubConfig.ORACLE_STALENESS_THRESHOLD_S)

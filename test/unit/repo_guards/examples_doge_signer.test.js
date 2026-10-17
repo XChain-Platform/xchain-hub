@@ -76,46 +76,100 @@ function loadSigner(encoder, wallet) {
 
 // The reason this matters: the hub reads a definitive encoder rejection as a
 // clean pre-send failure and requeues, which re-enters broadcast(), runs
-// createTx over fresh UTXOs and funds the same payload a SECOND time. Once
-// phase 1 is on the wire the signer owes the caller the fact that money moved.
+// createTx over fresh UTXOs and funds the same payload a SECOND time. The
+// template builds and signs the reveal BEFORE broadcasting phase 1, so a reveal
+// the encoder refuses or the key cannot sign stops the publish with nothing on
+// chain, and only a reveal BROADCAST failure is left to happen after funding.
 function registerPostFundingFailureTests(PHASE1, encoderStub, wallet) {
-    it('marks a definitive spendP2sh rejection as funds-committed, keeping the original error', async function () {
+    it('refuses a spendP2sh rejection before any broadcast, tagged neverSent, keeping the original error', async function () {
+        const sent = [];
         const signer = loadSigner(encoderStub({
-            spendP2sh: async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent'); }
+            spendP2sh:   async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent'); },
+            broadcastTx: async (hex) => { sent.push(hex); return { txid: PHASE1 }; }
         }), wallet);
         let caught = null;
         try { await signer.broadcast('wire'); } catch (e) { caught = e; }
-        assert.ok(caught, 'the phase-2 failure must still propagate');
-        assert.strictEqual(caught.fundsCommitted, true);
-        assert.strictEqual(caught.phase1Txid, PHASE1);
+        assert.ok(caught, 'the reveal build failure must still propagate');
+        assert.deepStrictEqual(sent, [], 'phase 1 must not be broadcast when the reveal cannot be built');
+        assert.strictEqual(caught.neverSent, true);
+        assert.strictEqual(caught.fundsCommitted, undefined);
         assert.strictEqual(caught.message, 'Encoder RPC error: bad-txns-inputs-missingorspent');
     });
 
-    it('marks a reveal-broadcast failure too, not only the spend build', async function () {
-        let calls = 0;
+    it('refuses a reveal that cannot be signed before any broadcast, tagged neverSent', async function () {
+        const sent = [];
         const signer = loadSigner(encoderStub({
-            broadcastTx: async () => {
-                calls++;
-                if (calls === 1) return { txid: PHASE1 };
+            broadcastTx: async (hex) => { sent.push(hex); return { txid: PHASE1 }; }
+        }), Object.assign({}, wallet, {
+            signRevealPsbt: () => { throw new Error('Reveal PSBT finalization failed'); }
+        }));
+        let caught = null;
+        try { await signer.broadcast('wire'); } catch (e) { caught = e; }
+        assert.ok(caught);
+        assert.deepStrictEqual(sent, [], 'phase 1 must not be broadcast when the reveal cannot be signed');
+        assert.strictEqual(caught.neverSent, true);
+        assert.strictEqual(caught.fundsCommitted, undefined);
+    });
+
+}
+
+function registerBroadcastOrderTests(PHASE1, encoderStub, wallet) {
+    it('marks a reveal-broadcast failure funds-committed with the signed reveal to rebroadcast', async function () {
+        const sent = [];
+        const signer = loadSigner(encoderStub({
+            broadcastTx: async (hex) => {
+                sent.push(hex);
+                if (sent.length === 1) return { txid: PHASE1 };
                 throw new Error('Encoder RPC error: min relay fee not met');
             }
         }), wallet);
         let caught = null;
         try { await signer.broadcast('wire'); } catch (e) { caught = e; }
         assert.ok(caught);
+        assert.deepStrictEqual(sent, ['hex-1', 'hex-2'], 'phase 1, then the pre-signed reveal');
         assert.strictEqual(caught.fundsCommitted, true);
         assert.strictEqual(caught.phase1Txid, PHASE1);
+        assert.strictEqual(caught.revealTxid, 'e'.repeat(64));
+        assert.strictEqual(caught.revealTxHex, 'hex-2');
+        assert.strictEqual(caught.message, 'Encoder RPC error: min relay fee not met');
+    });
+
+    it('leaves a phase-1 broadcast failure untagged, for the hub to classify', async function () {
+        const signer = loadSigner(encoderStub({
+            broadcastTx: async () => {
+                throw Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' });
+            }
+        }), wallet);
+        let caught = null;
+        try { await signer.broadcast('wire'); } catch (e) { caught = e; }
+        assert.ok(caught);
+        assert.strictEqual(caught.neverSent, undefined);
+        assert.strictEqual(caught.fundsCommitted, undefined);
+        assert.strictEqual(caught.code, 'ECONNABORTED');
+    });
+
+    it('builds and signs the reveal before the first broadcast', async function () {
+        const steps = [];
+        const signer = loadSigner(encoderStub({
+            spendP2sh:   async () => { steps.push('spendP2sh'); return { psbt: 'psbt-2' }; },
+            broadcastTx: async (hex) => { steps.push('broadcast:' + hex); return { txid: PHASE1 }; }
+        }), Object.assign({}, wallet, {
+            signRevealPsbt: () => { steps.push('signReveal'); return { txHex: 'hex-2', txid: 'e'.repeat(64) }; }
+        }));
+        await signer.broadcast('wire');
+        assert.deepStrictEqual(steps, ['spendP2sh', 'signReveal', 'broadcast:hex-1', 'broadcast:hex-2']);
     });
 }
 
 function registerFundingOutcomeTests(PHASE1, encoderStub, wallet) {
-    it('leaves a PRE-funding failure untagged, so it stays cleanly retryable', async function () {
+    it('tags a PRE-funding failure neverSent, so it stays cleanly retryable', async function () {
         const signer = loadSigner(encoderStub({
             createTx: async () => { throw new Error('Encoder RPC error: no UTXOs available'); }
         }), wallet);
         let caught = null;
         try { await signer.broadcast('wire'); } catch (e) { caught = e; }
         assert.ok(caught);
+        assert.strictEqual(caught.neverSent, true);
         assert.strictEqual(caught.fundsCommitted, undefined,
             'nothing was funded, so the round must stay retryable');
     });
@@ -151,5 +205,6 @@ describe('examples/doge-signer (post-funding failures)', function () {
     };
 
     registerPostFundingFailureTests(PHASE1, encoderStub, wallet);
+    registerBroadcastOrderTests(PHASE1, encoderStub, wallet);
     registerFundingOutcomeTests(PHASE1, encoderStub, wallet);
 });

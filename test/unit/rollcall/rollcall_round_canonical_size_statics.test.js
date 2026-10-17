@@ -51,7 +51,8 @@ describe('RollcallRound size statics dispatch through the class', function () {
         RollcallRound.chunkPairs = (pairs, max) => { calls.push(['chunk', pairs.length, max]); return [pairs]; };
         const eng = Object.create(RollcallRound.prototype);
         Object.assign(eng, {
-            _committed: new Set(), spendLogPath: 'unused', resolveSigner: () => ({}),
+            _committed: new Set(), _publishRetry: new Map(), _publishTick: 0,
+            spendLogPath: 'unused', resolveSigner: () => ({}),
             spendGuard: { check: () => ({ ok: true }), reserve: () => 'token', release: (t) => released.push(t) },
             recordSpend: () => false   // the intent write fails, so nothing is ever sent
         });

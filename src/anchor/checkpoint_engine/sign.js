@@ -39,16 +39,16 @@ module.exports = {
         let sender   = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;                            // our own broadcast
 
-        // Third of the guard's three call sites (propose, co-sign, persist). The
-        // indexer byte-match further down rebuilds `mine` with the network OUR OWN
-        // indexer reports, so it catches record-vs-indexer drift and is blind to the
+        // One of the guard's call sites (propose, co-sign, peer finalized, persist,
+        // catch-up). The indexer byte-match further down rebuilds `mine` with the network
+        // OUR OWN indexer reports, so it catches record-vs-indexer drift and is blind to the
         // record-vs-DEPLOYMENT drift this predicate exists for: resolveCapabilityValidators
         // resolves the stake-weighted-quorum gate on `this.network`, so a hub whose
         // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
         // then refuse the finalized checkpoint under the other. Placed before the tip
-        // resolve and the validator resolve, like the persist path, so a cross-network
-        // record costs no lookups. A throw is caught by the XCHK_SIGN_REQ .catch in
-        // handleMessage; an unscoped hub (this.network === '') is warned, not refused.
+        // resolve and the validator resolve, like the propose and peer FINALIZED paths, so
+        // a cross-network record costs no lookups. A throw is caught by the XCHK_SIGN_REQ
+        // .catch in handleMessage; an unscoped hub (this.network === '') is warned, not refused.
         this.assertCheckpointNetwork(cp, 'co-sign');
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
@@ -57,7 +57,6 @@ module.exports = {
         // reach leader-selection (grinding), the validator-set resolve, or the flag-
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
-
         // Both declines here run before the sender is authenticated, so any peer can
         // trigger them: noteCosignDecline throttles its warning per reason for that.
         let myBtc = await this.resolveSnapshotBlock();
@@ -78,7 +77,8 @@ module.exports = {
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
-        if(this.declinesOffCadence(cp)) return;                    // too soon after the last checkpoint
+        this.supersedeOwnAttempt(myBtc);                           // our tip moved past a round we led
+        if(this.declinesOffCadence(cp, true)) return;              // too soon after the last checkpoint
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
@@ -108,17 +108,18 @@ module.exports = {
             ' (declines for this reason so far: ' + declines[reason] + ')');
     },
 
-    // Refuse a round that starts less than intervalBlocks after our last checkpoint, the
-    // follower half of the leader's gate in tick; without it a slot holder can checkpoint at
-    // every block it leads and pick the snapshot_block that keys the bundle election. A
-    // snapshot_block EQUAL to the latch is the same round (one SIGN_REQ per chain, and the
-    // first chain's FINALIZED may already have moved the latch there), so it still passes.
-    declinesOffCadence(cp){
-        let latch = this._lastCheckpointBtcBlock;
-        let snap  = Number(cp.snapshot_block);
-        if(latch == null || snap === latch || snap >= latch + this.intervalBlocks) return false;
-        this.noteCosignDecline('off_cadence', cp,
-            'proposed ' + snap + ', last checkpoint ' + latch + ', interval ' + this.intervalBlocks);
+    // Refuse a round that starts less than intervalBlocks after our last FINALIZED
+    // checkpoint, or inside the interval of another round this hub signed that may still
+    // finalize (cadenceConflict in cadence.js): the follower half of the leader's gate in
+    // tick. Without it a slot holder can checkpoint at every block it leads and pick the
+    // snapshot_block that keys the bundle election. Called with `finalizedOnly` before the
+    // indexer read, which spares the read for a stale round, and in full just before the
+    // signature leaves: by then a FINALIZED or another co-signature may have landed, and
+    // this hub may have yielded its own round to this one (yieldToLowerRound).
+    declinesOffCadence(cp, finalizedOnly){
+        let conflict = finalizedOnly ? this.finalizedConflict(cp.snapshot_block) : this.cadenceConflict(cp.snapshot_block);
+        if(conflict == null) return false;
+        this.noteCosignDecline('off_cadence', cp, 'proposed ' + Number(cp.snapshot_block) + ', ' + conflict);
         return true;
     },
 
@@ -174,7 +175,10 @@ module.exports = {
         // two payloads at one sequence; every check above has already passed for BOTH of
         // them. Last thing before the co-signature leaves the hub, so a proposal this hub
         // would have declined anyway never claims the sequence.
+        this.yieldToLowerRound(cp);
+        if(this.declinesOffCadence(cp)) return;
         if(!this.claimSeqSignature(cp, canonical)) return;
+        this.noteRoundSignature(cp.snapshot_block);
 
         this.peerManager.broadcast(XCHK_SIGN, {
             id: this.roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)

@@ -52,6 +52,12 @@
  * `ci:full` shells out to a script and the two mutation tiers run stryker, so
  * there are no titles to collect and the pin says so in as many words.
  *
+ * COLLECTION IS REPO-LOCAL. Adjacent xchain checkouts are hidden while mocha
+ * loads suite declarations. Data-driven cases sourced from a sibling are not
+ * collected by the standalone CI layout, so an ambient platform checkout must
+ * not make a regenerated pin differ. xchain-sync, xchain-explorer and
+ * xchain-indexer share this collection contract.
+ *
  * THE SHAPE ON DISK. Titles are stored once in `titleSets`, keyed by a hash of
  * the list, and each script's `files` map points a test file at the set it
  * contributed. Written out flat the pin is six megabytes of text repeated
@@ -86,10 +92,92 @@
 const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
+const Module = require('module');
+const assert = require('assert');
+
+/** Is `candidate` inside an adjacent xchain checkout other than `root`? */
+function isSiblingPath(root, candidate) {
+    if (typeof candidate !== 'string' && !Buffer.isBuffer(candidate)) return false;
+    const rel = path.relative(path.dirname(root), path.resolve(String(candidate)));
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    const entry = rel.split(path.sep)[0];
+    return entry !== path.basename(root) && entry.startsWith('xchain-');
+}
+
+function missingSibling(method, candidate) {
+    const error = new Error(`ENOENT: no such file or directory, ${method} '${String(candidate)}'`);
+    error.code = 'ENOENT';
+    error.errno = -2;
+    error.path = String(candidate);
+    error.syscall = method;
+    return error;
+}
+
+/** Make one mocha child see the same repo-local filesystem as standalone CI. */
+function installSiblingMask(root) {
+    const hide = (method) => {
+        const original = fs[method];
+        fs[method] = function maskedSibling(candidate, ...args) {
+            if (isSiblingPath(root, candidate)) {
+                if (method === 'existsSync') return false;
+                throw missingSibling(method.replace(/Sync$/, ''), candidate);
+            }
+            return original.call(fs, candidate, ...args);
+        };
+    };
+    ['accessSync', 'existsSync', 'lstatSync', 'readFileSync', 'readdirSync', 'realpathSync', 'statSync']
+        .forEach(hide);
+
+    const resolveFilename = Module._resolveFilename;
+    Module._resolveFilename = function maskedSiblingModule(request, parent, isMain, options) {
+        const resolved = resolveFilename.call(this, request, parent, isMain, options);
+        if (path.isAbsolute(resolved) && isSiblingPath(root, resolved)) {
+            const error = new Error(`Cannot find module '${request}'`);
+            error.code = 'MODULE_NOT_FOUND';
+            throw error;
+        }
+        return resolved;
+    };
+}
+
+// XCHAIN_SUITE_TITLE_REPO_ROOT is set only by buildMap below, for the mocha
+// children it spawns; every variable here is read by literal name so the
+// environment-variable documentation gate can see it.
+if (process.env.XCHAIN_SUITE_TITLE_REPO_ROOT) {
+    installSiblingMask(path.resolve(process.env.XCHAIN_SUITE_TITLE_REPO_ROOT));
+}
 
 const {
-    getRepoRoot, setRepoRoot, splitCommand, segmentCommand, mochaArgsFor, collect, buildMap,
+    getRepoRoot, setRepoRoot, splitCommand, segmentCommand, mochaArgsFor, collect, buildMap: collectMap,
 } = require('./lib/suite_title_map/collect.js');
+
+/** Collect with adjacent repositories hidden from every spawned mocha process. */
+function buildMap(only) {
+    const saved = {
+        repoRoot: process.env.XCHAIN_SUITE_TITLE_REPO_ROOT,
+        nodeOptions: process.env.NODE_OPTIONS,
+        docsDir: process.env.XCHAIN_DOCS_DIR,
+        indexerDir: process.env.XCHAIN_INDEXER_DIR,
+    };
+    process.env.XCHAIN_SUITE_TITLE_REPO_ROOT = getRepoRoot();
+    process.env.NODE_OPTIONS = [saved.nodeOptions, `--require=${__filename}`].filter(Boolean).join(' ');
+    // Sibling-checkout overrides would point the children back at the trees the mask hides.
+    delete process.env.XCHAIN_DOCS_DIR;
+    delete process.env.XCHAIN_INDEXER_DIR;
+    try {
+        return collectMap(only);
+    } finally {
+        // Assigning undefined to process.env stores the string "undefined", so an unset one is deleted.
+        if (saved.repoRoot === undefined) delete process.env.XCHAIN_SUITE_TITLE_REPO_ROOT;
+        else process.env.XCHAIN_SUITE_TITLE_REPO_ROOT = saved.repoRoot;
+        if (saved.nodeOptions === undefined) delete process.env.NODE_OPTIONS;
+        else process.env.NODE_OPTIONS = saved.nodeOptions;
+        if (saved.docsDir === undefined) delete process.env.XCHAIN_DOCS_DIR;
+        else process.env.XCHAIN_DOCS_DIR = saved.docsDir;
+        if (saved.indexerDir === undefined) delete process.env.XCHAIN_INDEXER_DIR;
+        else process.env.XCHAIN_INDEXER_DIR = saved.indexerDir;
+    }
+}
 
 /** sha256 hex of one full title: the form a committed pin stores it in. */
 function titleDigest(title) {
@@ -242,7 +330,56 @@ function main() {
     if (failed) process.exitCode = 1;
 }
 
+function registerSiblingLayoutTest() {
+    if (typeof global.describe !== 'function' || typeof global.it !== 'function') return;
+    global.describe('bin/suite-title-map.js', () => {
+        global.describe('--root', () => {
+            global.it('collects the checkout it is given, not the one it lives in', () => {
+                const originalRoot = getRepoRoot();
+                const scratchRoot = path.join(originalRoot, 'tmp');
+                fs.mkdirSync(scratchRoot, { recursive: true });
+                const fixtureBase = fs.mkdtempSync(path.join(scratchRoot, 'suite-title-map-'));
+                const fixtureRoot = path.join(fixtureBase, 'xchain-hub');
+                try {
+                    fs.mkdirSync(path.join(fixtureRoot, 'test'), { recursive: true });
+                    fs.symlinkSync(path.join(originalRoot, 'node_modules'),
+                        path.join(fixtureRoot, 'node_modules'), 'dir');
+                    fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+                        scripts: { test: "mocha --no-config 'test/**/*.test.js'" },
+                    }));
+                    fs.writeFileSync(path.join(fixtureRoot, 'test', 'sibling.test.js'), [
+                        "'use strict';",
+                        "const fs = require('fs');",
+                        "const path = require('path');",
+                        "const cases = ['local'];",
+                        "const sibling = path.resolve(__dirname, '../../xchain-indexer/cases.json');",
+                        "if (fs.existsSync(sibling)) cases.push(...JSON.parse(fs.readFileSync(sibling, 'utf8')));",
+                        "describe('fixture', () => cases.forEach((name) => it(name, () => {})));",
+                    ].join('\n'));
+
+                    setRepoRoot(fixtureRoot);
+                    const standalone = buildMap('test');
+                    assert.ok(!standalone.scripts.test.error, standalone.scripts.test.error);
+                    assert.deepStrictEqual(expand(standalone, 'test'), {
+                        'test/sibling.test.js': ['fixture local'],
+                    }, 'the fixture must collect its local control title');
+                    const siblingRoot = path.join(fixtureBase, 'xchain-indexer');
+                    fs.mkdirSync(siblingRoot);
+                    fs.writeFileSync(path.join(siblingRoot, 'cases.json'), JSON.stringify(['from sibling']));
+                    const platform = buildMap('test');
+                    assert.deepStrictEqual(platform, standalone,
+                        'an adjacent checkout must not add titles absent from standalone CI');
+                } finally {
+                    setRepoRoot(originalRoot);
+                    fs.rmSync(fixtureBase, { recursive: true, force: true });
+                }
+            });
+        });
+    });
+}
+
 if (require.main === module) main();
+else registerSiblingLayoutTest();
 
 module.exports = {
     buildMap,
@@ -252,6 +389,7 @@ module.exports = {
     splitCommand,
     compare,
     expand,
+    isSiblingPath,
     serialize,
     setRepoRoot,
     titleDigest,

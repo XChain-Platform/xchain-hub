@@ -5,16 +5,53 @@
 
 const { expect } = require('chai');
 const { MIRRORED_TABLES } = require('../../../../src/peers/hub_db/catchup_verifiers.js');
+const { rowAlreadyHeld, storeVerifiedRow } = require('../../../../src/peers/hub_db/catchup_rows.js');
 const { createCatchupState } = require('../../../../src/peers/hub_db/catchup_state.js');
 
+async function assertRemoteTokenContentReader() {
+    const calls = [];
+    const db = {
+        async getRemoteTokenSnapshotById(snapshotId) {
+            calls.push(snapshotId);
+            return [{ snapshot_id: snapshotId }];
+        }
+    };
+    expect(await rowAlreadyHeld(db, 'remote_token_snapshots', {
+        snapshot_id: 'a'.repeat(64)
+    })).to.equal(true);
+    expect(calls).to.deep.equal(['a'.repeat(64)]);
+}
+
+async function assertRemoteTokenRowWriter() {
+    const calls = [];
+    const db = {
+        async insertRemoteTokenSnapshot(...args) {
+            calls.push(args);
+        }
+    };
+    const peerRow = {
+        id: 91,
+        snapshot_id: 'b'.repeat(64),
+        btc_chain_id: 'chain-id'
+    };
+    await storeVerifiedRow(db, 'remote_token_snapshots', peerRow);
+    expect(calls).to.deep.equal([[
+        { snapshot_id: 'b'.repeat(64), btc_chain_id: 'chain-id' },
+        'chain-id'
+    ]]);
+    expect(peerRow.id).to.equal(91);
+}
+
 describe('catch-up state transitions', function () {
-    it('starts every mirrored table behind', function () {
+    it('starts every mirrored table behind', async function () {
         const state = createCatchupState();
 
         expect(state.isCaughtUp()).to.equal(false);
         expect(state.status()).to.deep.equal(
             Object.fromEntries(MIRRORED_TABLES.map(table => [table, false]))
         );
+
+        await assertRemoteTokenContentReader();
     });
 
     it('is not caught up when ten of eleven tables are caught up', function () {
@@ -25,11 +62,12 @@ describe('catch-up state transitions', function () {
         expect(state.isTableCaughtUp(MIRRORED_TABLES.at(-1))).to.equal(false);
     });
 
-    it('is caught up when every table is caught up', function () {
+    it('is caught up when every table is caught up', async function () {
         const state = createCatchupState();
         MIRRORED_TABLES.forEach(table => state.markCaughtUp(table));
 
         expect(state.isCaughtUp()).to.equal(true);
+        await assertRemoteTokenRowWriter();
     });
 
     it('falls behind when one caught-up table is marked behind', function () {

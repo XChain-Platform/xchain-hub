@@ -82,12 +82,24 @@ module.exports = {
         await this.db.setAnchorPublishedCheckpoint(row.chain, row.network, Number(row.checkpoint_seq));
     },
 
-    // Record that the broadcast returned a txid. Logged, never thrown: the DOGE fee is
-    // already spent, and the surviving intent-only row makes the next flush HOLD instead
-    // of re-broadcasting, which is the fail-safe direction.
+    // Record txid and sent_doge_height when broadcast returns. Logged, never thrown: the
+    // DOGE fee is already spent, and the surviving intent-only row makes the next flush
+    // HOLD instead of re-broadcasting, which is the fail-safe direction.
     async markAnchorSent(row, txid){
+        let sentDogeHeight = null;
         try {
-            await this.db.updateAnchorPublishedCheckpoint(txid || null, row.chain, row.network, Number(row.checkpoint_seq));
+            const tip = await this.indexerCall('DOGE', 'getlatestblock', {});
+            const rawHeight = tip && tip.block_index;
+            const height = Number(rawHeight);
+            if(rawHeight !== null && rawHeight !== undefined && rawHeight !== '' &&
+               Number.isSafeInteger(height) && height >= 0) sentDogeHeight = height;
+        } catch(e){
+            logger.warn('StateAnchorPublisher: could not read the DOGE tip after broadcasting anchor ' + txid +
+                        '; its sent marker will carry no height: ' + (e && e.message));
+        }
+        try {
+            await this.db.updateAnchorPublishedCheckpoint(txid || null, sentDogeHeight, row.chain, row.network,
+                                                          Number(row.checkpoint_seq));
         } catch(e){
             logger.error(nodeUtil.format('StateAnchorPublisher: anchor for ' + row.chain + '/' + row.network + ' @ ' +
                           row.block_index + ' broadcast as ' + txid + ' but its durable sent marker could not be ' +

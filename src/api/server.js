@@ -69,15 +69,16 @@ function startServer(app, ctx, observability) {
     installShutdown({ hub, logger, server, wss, pingInterval, telemetryCleanupInterval, observability });
 }
 
-function upgradeHandler(wss, { hub, logger, HUB_API_KEY, HUB_FEED_API_KEY }) {
+function upgradeHandler(wss, { hub, logger, HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY }) {
     return (request, socket, head) => {
         // Authenticate using either read-only feed credential
         // (enforced only when a key is configured; an unconditional fail-closed
         // here 401s every indexer's hub_db_sync subscription on managed deploys,
         // severing the price-sync barrier and the state_checkpoints mirror).
-        if (HUB_API_KEY || HUB_FEED_API_KEY) {
+        // HUB_API_KEY_PREVIOUS keeps the old bearer valid during a key rotation.
+        if (HUB_API_KEY || HUB_API_KEY_PREVIOUS || HUB_FEED_API_KEY) {
             let authHeader = request.headers['authorization'];
-            let matches = [HUB_API_KEY, HUB_FEED_API_KEY].filter(Boolean).some(key => {
+            let matches = [HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_API_KEY].filter(Boolean).some(key => {
                 let bearer = 'Bearer ' + key;
                 let a = Buffer.from(authHeader || ''), b = Buffer.from(bearer);
                 return Boolean(authHeader) && a.length === b.length && crypto.timingSafeEqual(a, b);

@@ -148,8 +148,10 @@ module.exports = {
     // With no DOGE indexer wired, or with a response that omits the anchor rows, there is
     // no binding evidence. Feed that empty set through judgeAnchors so it remains unknown
     // rather than inheriting verifyAnchorOnChain's checkpoint-only verdict.
-    // Returns 'verified' | 'rejected' | 'unknown'.
-    async drainBindingVerdict(e){
+    // Returns 'verified' | 'rejected' | 'unknown'. `minConfirmations` defaults to the
+    // drain's burial depth; the adoption ownership check passes 0.
+    async drainBindingVerdict(e, minConfirmations){
+        let minConf = (minConfirmations != null) ? Number(minConfirmations) : this.dogeConfirmations;
         if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
             this._rewardBundleRoundMismatch = (this._rewardBundleRoundMismatch || 0) + 1;
             logger.warn('StateAnchorPublisher: anchor_bundle reward entry with round_reference ' + e.roundReference +
@@ -167,14 +169,14 @@ module.exports = {
                 if(err && /^no indexer url for /.test(err.message)) return judgeAnchors([], {
                     rewardType: e.rewardType, network: e.network, publisher: e.publisher,
                     roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                    minConfirmations: this.dogeConfirmations
+                    minConfirmations: minConf
                 });
                 throw err;
             }
             if(r && r.exists && r.anchors === undefined) return judgeAnchors([], {
                 rewardType: e.rewardType, network: e.network, publisher: e.publisher,
                 roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                minConfirmations: this.dogeConfirmations
+                minConfirmations: minConf
             });
             if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
             anchors = anchors.concat(r.anchors);
@@ -182,7 +184,7 @@ module.exports = {
                 return judgeAnchors(anchors, {
                     rewardType: e.rewardType, network: e.network, publisher: e.publisher,
                     roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                    minConfirmations: this.dogeConfirmations
+                    minConfirmations: minConf
                 });
             }
             let next = Number(r.next_after_action_index);
@@ -252,6 +254,53 @@ module.exports = {
                              ' re-verification error: ' + (err && err.message));
             }
         }
+    },
+
+    // Record the reward for an adopted bundle only when the indexer binds it to THIS hub
+    // (our own lost-ACK send), since no other hub ever writes that attestation row. Never
+    // throws: the caller announces BUNDLE_DONE right after, and peers must hear it.
+    async recordAdoptedBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion){
+        try {
+            if(!attested || !me){
+                logger.info('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
+                            snapshotBlock + '; reward push skipped');
+                return;
+            }
+            let owner = await this.adoptedBundleOwnership(txid, network, snapshotBlock, me);
+            if(owner === 'ours'){
+                logger.info('StateAnchorPublisher: adopted our OWN bundle for ' + network + ' @ ' + snapshotBlock +
+                            ' (lost ACK, txid ' + txid + '); recording its reward attestation');
+                this.recordOwnBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion);
+            } else if(owner === 'peer'){
+                logger.info('StateAnchorPublisher: adopted a peer bundle for ' + network + ' @ ' +
+                            snapshotBlock + '; reward push skipped');
+            } else {
+                this._adoptedOwnershipUndetermined = (this._adoptedOwnershipUndetermined || 0) + 1;
+                logger.warn('StateAnchorPublisher: adopted bundle ' + txid + ' for ' + network + ' @ ' + snapshotBlock +
+                            ' has no readable publisher binding; reward skipped (' +
+                            this._adoptedOwnershipUndetermined + ' undetermined adoptions)');
+            }
+        } catch(e){
+            logger.warn('StateAnchorPublisher: adopted-bundle reward check failed for ' + network + ' @ ' +
+                        snapshotBlock + ': ' + (e && e.message));
+        }
+    },
+
+    // Whose bundle is the adopted txid? The indexer's publisher binding, read through the
+    // drain's own judgeAnchors rule at any depth: 'ours' | 'peer' | 'undetermined'.
+    async adoptedBundleOwnership(txid, network, snapshotBlock, me){
+        let verdict;
+        try {
+            verdict = await this.drainBindingVerdict({
+                rewardType: 'anchor_bundle', network: network, publisher: String(me).toLowerCase(),
+                roundReference: snapshotBlock, snapshotBlock: snapshotBlock, txid: txid
+            }, 0);
+        } catch(_e){
+            return 'undetermined';
+        }
+        if(verdict === 'verified') return 'ours';
+        if(verdict === 'rejected') return 'peer';
+        return 'undetermined';
     }
 
 };

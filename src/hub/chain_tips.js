@@ -23,7 +23,7 @@
 const { axiosFor } = require('./indexer_http.js');
 const admissionHeight = require('../lib/admission_height.js');
 const { blockIntervalS } = require('../lib/relay_margin.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
+const { resolveRoundCadence } = require('../oracle/round_cadence.js');
 const hubConfig = require('../config');
 const { selectReading } = require('../peers/hub_db/landing_watermark.js');
 const nodeUtil = require('node:util');
@@ -158,7 +158,7 @@ class ChainTips {
     btcPushedTipFresh(tip){
         let maxAge = Number(hubConfig.MAX_TIP_AGE_S);
         if(!Number.isFinite(maxAge) || maxAge <= 0){
-            let roundIntervalMs = (this.p2pConfig && Number(this.p2pConfig.ORACLE_ROUND_INTERVAL)) || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
+            let roundIntervalMs = resolveRoundCadence(this.p2pConfig).roundInterval;
             maxAge = Math.floor((2 * roundIntervalMs) / 1000);
         }
         let blockTime = Number(tip.blockTime);

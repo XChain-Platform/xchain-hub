@@ -239,6 +239,7 @@ it('the heartbeat carries ts AND heights, and ts is still the wall clock in seco
             bridge_transfers:             { BTC: 899999 },
             policy_snapshots:             { BTC: 899999 },
             list_snapshots:               { BTC: 899999 },
+            remote_token_snapshots:       { BTC: 899999 },
             price_snapshots:              { BTC: 899999 },
             oracle_prices:                { BTC: 899999 },
             attestation_responses:        { BTC: 899999 },

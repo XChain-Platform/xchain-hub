@@ -46,6 +46,11 @@ const MATCH_ROW = {
     effective_time: 10, finalizing_view: 0, validator_signatures: '[]', status: 'settled'
 };
 
+// A pre-send failure as the built-in pipeline reports it: tagged neverSent.
+function noUtxosNeverSent() {
+    return Object.assign(new Error('no UTXOs available for Dpub1'), { neverSent: true });
+}
+
 // A db double that records every statement and keeps a real in-memory
 // anchor_published_archives table, so the hold/settle semantics are exercised through
 // the SQL the publisher actually issues rather than through a stubbed return value.
@@ -317,7 +322,7 @@ function registerArchivePublishTests() {
             const { pub, identity } = mkPub(db);
             let threw = false;
             try {
-                await pub.publishArchive(mkRound(pub, identity, async () => { throw new Error('no UTXOs available for Dpub1'); }, 7));
+                await pub.publishArchive(mkRound(pub, identity, async () => { throw noUtxosNeverSent(); }, 7));
             } catch(e){ threw = true; }
             expect(threw).to.equal(true);
             expect(sqlHits(db, 'DELETE FROM anchor_published_archives')).to.have.length(1);

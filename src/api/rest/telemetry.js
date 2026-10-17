@@ -22,6 +22,7 @@
 
 const crypto = require('crypto');
 const nodeUtil = require('node:util');
+const { strictSafeInt } = require('../validate.js');
 
 // POST /telemetry: anonymous usage ping receiver for xchain-node operators.
 // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
@@ -29,6 +30,14 @@ const nodeUtil = require('node:util');
 // Fire-and-forget: always returns quickly; a bad body or DB hiccup never errors the client.
 const TELEMETRY_EVENTS = new Set(['install', 'update', 'start', 'heartbeat']);
 const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
+
+function telemetryWindowDays(raw) {
+    if (raw === undefined) return { days: 30 };
+    const parsed = strictSafeInt(raw);
+    if (parsed === null || parsed < 1 || parsed > 365)
+        return { error: 'days must be a positive integer no greater than 365' };
+    return { days: parsed };
+}
 
 function mountTelemetryRoutes(app, ctx) {
     const { logger, TELEMETRY_ENABLED, TELEMETRY_IP_SALT } = ctx;
@@ -112,9 +121,9 @@ function mountTelemetrySummary(app, { hub, logger, TELEMETRY_ENABLED }) {
         try {
             // Bounded integer window (sanitised -> safe to inline; not a bound param
             // because MariaDB won't bind inside an INTERVAL literal cleanly).
-            let days = req.query.days ? parseInt(req.query.days, 10) : 30;
-            if (!Number.isFinite(days) || days < 1) days = 30;
-            if (days > 365) days = 365;
+            let parsedDays = telemetryWindowDays(req.query.days);
+            if (parsedDays.error) return res.status(400).json({ error: parsedDays.error });
+            let days = parsedDays.days;
 
             // Latest ping per install within the window. install_id is used only to
             // dedupe + group here; it is dropped before the response.
@@ -216,9 +225,9 @@ function mountTelemetryOperators(app, { hub, logger, TELEMETRY_ENABLED, TELEMETR
           if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
             return res.status(401).json({ error: 'Unauthorized' }); } }
         try {
-            let days = req.query.days ? parseInt(req.query.days, 10) : 30;
-            if (!Number.isFinite(days) || days < 1) days = 30;
-            if (days > 365) days = 365;
+            let parsedDays = telemetryWindowDays(req.query.days);
+            if (parsedDays.error) return res.status(400).json({ error: parsedDays.error });
+            let days = parsedDays.days;
 
             // Latest ping per install in the window: the current state of each server.
             let rows = await hub.db.findLatestTelemetryOperatorPingPerInstall(days);

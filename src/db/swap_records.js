@@ -47,13 +47,13 @@ module.exports = {
     // Reads the newest swap_records rows, any status.
     // Moved here from src/cross_chain/swap_tracker.js:69, the branch that adds no status filter.
     async findSwapRecords(limit) {
-        return this.doQuery("SELECT * FROM swap_records ORDER BY created_at DESC LIMIT ?", [limit]);
+        return this.doQuery("SELECT * FROM swap_records ORDER BY created_at DESC, id DESC LIMIT ?", [limit]);
     },
 
     // Reads the newest swap_records rows in one status.
     // Moved here from src/cross_chain/swap_tracker.js:69, the branch that filters on status.
     async findSwapRecordsByStatus(status, limit) {
-        return this.doQuery("SELECT * FROM swap_records WHERE status = ? ORDER BY created_at DESC LIMIT ?", [status, limit]);
+        return this.doQuery("SELECT * FROM swap_records WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?", [status, limit]);
     },
 
     // Updates one swap_records row's status, leaving its attestation id alone.

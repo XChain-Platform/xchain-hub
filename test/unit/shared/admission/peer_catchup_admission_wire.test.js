@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 const EventEmitter = require('events');
 const sinon = require('sinon');
@@ -42,7 +43,7 @@ describe('peer catch-up admission wiring', function () {
         const lastTablePage = new Promise(resolve => { releaseLastTable = resolve; });
         const lastTableStarted = new Promise(resolve => { reachedLastTable = resolve; });
         const fetchPage = sinon.stub().callsFake(async (peer, table) => {
-            if (table !== MIRRORED_TABLES[MIRRORED_TABLES.length - 1]) return { table, rows: [] };
+            if (table !== MIRRORED_TABLES[MIRRORED_TABLES.length - 1]) return { table, schema_version: HUB_SCHEMA_VERSION, rows: [] };
             reachedLastTable();
             return lastTablePage;
         });
@@ -75,7 +76,7 @@ describe('peer catch-up admission wiring', function () {
         expect(waitingReady.caught_up).to.equal(false);
         expect(waitingReady.heights).to.deep.equal({ cross_chain_matches: { BTC: 50 } });
 
-        releaseLastTable({ table: MIRRORED_TABLES[MIRRORED_TABLES.length - 1], rows: [] });
+        releaseLastTable({ table: MIRRORED_TABLES[MIRRORED_TABLES.length - 1], schema_version: HUB_SCHEMA_VERSION, rows: [] });
         await running;
         expect(catchup.isCaughtUp()).to.equal(true);
 

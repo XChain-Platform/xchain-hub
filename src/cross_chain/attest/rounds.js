@@ -50,6 +50,7 @@ module.exports = {
         if (this.finalized.has(attestationId)) {
             return await this.getStoredAttestation(attestationId);
         }
+        this.refuseWhileStoring(attestationId);
 
         // Resolve the cross_chain validator set at the current BTC block
         // boundary so every hub locks the same quorum for this attestation,
@@ -85,6 +86,15 @@ module.exports = {
             this.openAttestationRound({ attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest, quorum, memberPubkeys, btcBlockHeight }, resolve, reject);
         });
+    },
+
+    // Throw while a round under this id that reached quorum is still re-driving its store:
+    // a new round would replace it and drop the quorum peers already signed.
+    refuseWhileStoring(attestationId) {
+        let inFlight = this.pendingAttestations.get(attestationId);
+        if (inFlight && inFlight.quorate) {
+            throw new Error('Attestation ' + attestationId + ' reached quorum but is not stored yet (persistence pending, retrying)');
+        }
     },
 
     // The single-operator fast path: store and announce an attestation no peer co-signs,
@@ -149,8 +159,14 @@ module.exports = {
         if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
         this.pendingAttestations.set(attestationId, pending);
 
-        // Timeout
+        // Timeout. The caller always hears back at the deadline. A round that reached commit
+        // quorum stays in memory, because its store re-drive must still write the row peers hold.
         pending.timer = setTimeout(() => {
+            pending.timer = null;
+            if (pending.quorate) {
+                reject(new Error('Attestation ' + attestationId + ' reached quorum but is not stored yet (persistence pending, retrying)'));
+                return;
+            }
             if (!pending.finalized) {
                 pending.finalized = true;
                 this.pendingAttestations.delete(attestationId);
@@ -320,7 +336,7 @@ module.exports = {
     openFollowerRound(round) {
         let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest,
             btcBlockHeight, quorum, memberPubkeys } = round;
-        this.pendingAttestations.set(attestationId, {
+        let pending = {
             attestationId, sourceChain, sourceActionIndex, destChain,
             confirmations, digest,
             memberPubkeys,
@@ -329,11 +345,16 @@ module.exports = {
             prepares: new Set(),
             commits:  new Set(),
             finalized: false,
-            timer: setTimeout(() => {
-                this.pendingAttestations.delete(attestationId);
-            }, this.timeout * 2),
+            timer: null,
             resolve: null, reject: null
-        });
+        };
+        // Evict a round that never reached commit quorum; a quorate one is kept until its store lands.
+        pending.timer = setTimeout(() => {
+            pending.timer = null;
+            if (pending.quorate) return;
+            this.pendingAttestations.delete(attestationId);
+        }, this.timeout * 2);
+        this.pendingAttestations.set(attestationId, pending);
     },
 
     handlePrepare(envelope) {

@@ -35,9 +35,10 @@ module.exports = {
 
     // Archive round (v1/v2).
     // Leader = hash-order rank 0 over the oracle_publish set, with the same
-    // failover ladder as the checkpoint leg: the election key is anchored on the archive
-    // CONTENT (wrapper checkpoint + batch seq; deterministic + identical on
-    // every hub, and stable while the batch is stalled), and each further rank
+    // failover ladder as the checkpoint leg: the election key is the WRAPPER
+    // checkpoint identity only (chain|network|checkpoint_seq; deterministic + identical
+    // on every hub, and stable while the batch is stalled). The hub-local batch seq is
+    // never part of it (see archiveElectionKey in build.js). Each further rank
     // unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS past the wrapper
     // checkpoint's snapshot_block. Without the ladder a signer-less elected
     // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could

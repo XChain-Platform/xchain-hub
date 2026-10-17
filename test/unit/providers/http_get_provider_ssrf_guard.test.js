@@ -164,12 +164,12 @@ function registerHttpGetFetchSSRFGuardSuite1Part3() {
     process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
     process.env.HUB_NETWORK = 'mainnet';
     let logged = [];
-    let orig = console.log;
-    console.log = (...a) => logged.push(a.join(' '));
+    let orig = console.warn;
+    console.warn = (...a) => logged.push(a.join(' '));
     try {
       await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://127.0.0.1/local');
     } finally {
-      console.log = orig;
+      console.warn = orig;
     }
     expect(logged.some(l => /ATTESTATION_HTTP_GET_ALLOW_PRIVATE.*IGNORED on mainnet/.test(l)), 'the ignored hatch names itself and the network').to.be.true;
   });

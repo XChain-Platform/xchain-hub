@@ -145,7 +145,7 @@ async function raceRound() {
             await flush();
             // p1 fetched the same body; p2's own fetch failed, so its proposal is an
             // error report. That is what makes the round advance on two ok bodies
-            // while p2 still has standing to send a signed no_quorum PREPARE.
+            // while p2 still has standing to send a signed provider_error PREPARE.
             c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
             await flush();
             c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
@@ -154,10 +154,11 @@ async function raceRound() {
             expect(pending._agreeing).to.equal(true);   // judge call in flight
             expect(pending.winner).to.equal(null);
 
-            // The race: a responsible peer's signed no_quorum PREPARE is adopted.
-            c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'no_quorum'));
+            // The race: a responsible peer's signed provider_error PREPARE is adopted
+            // (any sender may record an outage; a judge_model no_quorum is leader-only).
+            c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
             await flush();
-            expect(pending.status).to.equal('no_quorum');
+            expect(pending.status).to.equal('provider_error');
 
             release();
             await flush();
@@ -173,7 +174,7 @@ async function raceRound() {
     // Every signature in the map must verify over the round's FINAL canonical.
 describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('lets the raced outcome stand rather than overwriting it', async function () {
             let pending = await raceRound();
-            expect(pending.status).to.equal('no_quorum');
+            expect(pending.status).to.equal('provider_error');
             expect(pending.winner.body.length).to.equal(0);
             expect(pending.winner.meta).to.equal('');
         }); }); });

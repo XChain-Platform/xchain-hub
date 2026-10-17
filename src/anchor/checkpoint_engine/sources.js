@@ -24,6 +24,13 @@
 const axios = require('axios');
 const swq   = require('../../consensus/stake_weighted_quorum.js');
 
+// A block height as a non-negative safe integer, or null for anything else.
+function blockHeight(value){
+    if(value == null || value === '') return null;
+    let n = Number(value);
+    return (Number.isSafeInteger(n) && n >= 0) ? n : null;
+}
+
 module.exports = {
 
     // Mirror CrossChainDexEngine.resolveCapabilityValidators (incl. regtest seam).
@@ -64,9 +71,14 @@ module.exports = {
         return validators;
     },
 
+    // The BTC height this hub would checkpoint at, as an integer, or null. Normalized here
+    // because both callers do arithmetic on it: tick adds intervalBlocks to it, which on a
+    // string tip is concatenation ('100' + 6 is '1006') and a round every block, and the
+    // co-sign freshness guard needs a finite Number or it declines everything.
     async resolveSnapshotBlock(){
         let b = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-        if(b != null) return b;
+        let height = blockHeight(b);
+        if(height != null) return height;
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },
 

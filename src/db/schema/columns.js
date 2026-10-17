@@ -151,6 +151,7 @@ module.exports = {
             attestation_responses:      ['btc'],
             anchor_reward_attestations: ['btc'],
             list_snapshots:             ['btc', 'ltc', 'doge'],
+            remote_token_snapshots:     ['btc', 'ltc', 'doge'],
         };
         for(let table of Object.keys(TABLES))
             for(let chain of TABLES[table])
@@ -163,6 +164,9 @@ module.exports = {
         // it against heights[oracle_prices][source_chain] rather than against the reading
         // chain's own B, and every chain reads the row without needing an entry of its own.
         await this.migrateAddNullableColumn('oracle_prices', 'admit_block', 'BIGINT UNSIGNED DEFAULT NULL', true);
+
+        await this.migrateAddNullableColumn('anchor_published_checkpoints', 'sent_doge_height',
+            'BIGINT UNSIGNED DEFAULT NULL', true);
 
         await this.migrateAddNullableColumn('list_snapshots', 'name',
             'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true);

@@ -105,6 +105,9 @@ module.exports = {
             // Nonzero means a leader went silent and this hub declined to cover it on a deaf
             // feed (takeoverArmed alone cannot tell that from failover never being needed).
             takeoverDeclinedUnproven:     this.takeoverDeclinedUnproven,
+            // Nonzero means this hub's own DB blocked a takeover, which would otherwise read as
+            // "the leader landed"; the window is not retried by this hub.
+            takeoverDeclinedReadError:    this.takeoverDeclinedReadError,
             // Takeovers past the election that never reached enqueueWindowWires. An oldest
             // window that stays put across polls is a takeover wedged before the queue.
             takeoverUnlandedWindows:      this._takeoverUnlanded.size,

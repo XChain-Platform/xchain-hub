@@ -30,6 +30,11 @@ class Governance {
         if(!this.peerManager) return;
         const { ReorgHandler } = this.constructor.modules;
         this.reorgHandler = new ReorgHandler(this);
+        // A reorg rollback disputes price_snapshots rows in place; the handler re-emits
+        // them so indexer mirrors apply the dispute (see emitDisputedPriceRows).
+        this.reorgHandler.on('row:inserted', (event) => {
+            if(this.hubDbBroadcaster) this.hubDbBroadcaster.broadcastRow(event);
+        });
         let validators = await this.loadValidatorSet();
         this.reorgHandler.setValidatorSet(validators);
         await this.reorgHandler.start();

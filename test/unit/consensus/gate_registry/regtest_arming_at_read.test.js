@@ -42,12 +42,12 @@ const SHARED_ROWS_DIR = path.resolve(__dirname, '../../../../src/consensus/gate_
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.resolve(__dirname, '../../../../../xchain-indexer');
 const INDEXER_SHARED_ROWS_DIR = path.join(INDEXER_DIR, 'src', 'protocol_changes');
 const CANONICAL_SHARED_ROWS_SHA256 = Object.freeze({
-    'shared_rows.js': '1db6bd06818eca6fc27a57858ac820592e6dc9e366e87e75be28ea099f8780dc',
+    'shared_rows.js': '3cc60b513c4d8a1c31eebe010d19c3320f9c2dc126bfad853c3717207d8f7348',
     'shared_rows_1.js': '1ed80849231893f3801d91a2cacc7041b54e26eaa63a680c845dc93aa5e1d278',
     'shared_rows_2.js': '8c9ddc10be60387322faa3facbda25b7f17ac1c5ecefaf6340e78bb96dd7e496',
     'shared_rows_3.js': 'd671489c2b683ec2a94d0f45da1056687c38f78959a9f1780825eb7e3a37d6ea',
     'shared_rows_4.js': '08e0e852d04c0736d88c19c6ae2c63d0061591c3dc700a22a9018a23a1d3069d',
-    'shared_rows_5.js': 'dbdace4fbc23a3dfaf1a1383083731d23a266d39efed58ce9b89961bc7221065',
+    'shared_rows_5.js': '40c1b7d3d28dde2703b40badf1a268b7e673618f3f374c681fd898e73945ad3a',
 });
 
 function sha256(bytes) {

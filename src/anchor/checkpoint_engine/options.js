@@ -124,7 +124,11 @@ module.exports = {
         // Leader-side rounds in flight: Map<id, pending>. id = chain|network|block_index|seq.
         this.pending = new Map();
 
-        this._lastCheckpointBtcBlock = null;     // leader cadence latch
+        this._lastCheckpointBtcBlock = null;     // snapshot block of the last FINALIZED checkpoint
+        this._attemptedCheckpointBtcBlock = null; // block of this hub's latest led round, finalized or not
+        // Map<snapshot block, expiry ms>: rounds this hub signed that may still finalize
+        // (cadence.js cadenceConflict), so it signs at most one round per interval.
+        this._roundSignatures = new Map();
         this._pollTimer      = null;
         this._messageHandler = null;
         this._ticking        = false;
@@ -168,6 +172,11 @@ module.exports = {
                                  indexer_read_failed: 0, indexer_no_block: 0 };
         this._lastCosignDeclineReason = null;
         this._cosignDeclineLoggedAt   = {};   // per-reason warn throttle, on the cadence-stall window
+        // Leader self-accepts that failed after quorum (queueSelfAccept): Map<roundId, held>,
+        // re-run on each tick, plus lifetime counts of failed attempts and of retries given up.
+        this._selfAcceptRetries   = new Map();
+        this._selfAcceptFailures  = 0;
+        this._selfAcceptsAbandoned = 0;
     },
 
     initCadenceMeters(cfg){
@@ -208,6 +217,13 @@ module.exports = {
         // Surfaced by getStats so an operator reading getcheckpointstats sees why
         // no checkpoint is being cut without a per-tick stall record to read it from.
         this._observerIdle = false;
+
+        // Per-chain rounds this hub led that threw before proposing (noteRoundFailure). The
+        // latch has already advanced, so a failing chain is otherwise only a warn line while
+        // the stall meter reads clean. The last reason clears only on that chain's next good round.
+        this._roundFailures             = 0;
+        this._roundFailuresByChain      = {};
+        this._lastRoundFailureByChain   = {};
     }
 
 };

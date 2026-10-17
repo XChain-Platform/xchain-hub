@@ -44,7 +44,7 @@ function registerSplitSuitePart1() {
     let calls = 0;
     const broadcaster = async () => {
       calls++;
-      if (calls < 3) throw new Error('no UTXOs available for Dpub1');
+      if (calls < 3) throw Object.assign(new Error('no UTXOs available for Dpub1'), { neverSent: true });
       return {
         txid: 'tx-ok'
       };
@@ -76,7 +76,7 @@ function registerSplitSuitePart1() {
       checks = 0;
     const broadcaster = async () => {
       calls++;
-      throw new Error('definitive reject');
+      throw new Error('Encoder RPC error: definitive reject');
     };
     const res = await pub.broadcastWithRetry(broadcaster, 'P', 5, async () => {
       checks++;

@@ -24,6 +24,7 @@
 
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { mainnetWritesOpen } = require('../../lib/mainnet_write_window.js');
 const logger = getLogger();
 
 module.exports = {
@@ -66,6 +67,8 @@ module.exports = {
             return;
         }
 
+        if (this.mainnetWindowClosed()) return;
+
         let entries = this.readQueue();
         if (entries.length === 0) return;
 
@@ -85,16 +88,7 @@ module.exports = {
         // Defer the pass instead: entries stay on the durable queue, nothing is
         // dead-lettered, and no attempt counter is burned, because this is not a
         // broadcast failure. Fail soft, see confirmedUtxoAvailable.
-        if (!(await this.confirmedUtxoAvailable())) {
-            this.noConfirmedUtxoDeferrals++;
-            this.lastNoConfirmedUtxoAt = Date.now();
-            let seen = this.lastUtxoReserve || { unconfirmed: 0 };
-            logger.warn('OraclePublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
-                ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
-                'an unconfirmed chain); deferring this publish pass, ' + entries.length +
-                ' round(s) remain queued and retry once a publish confirms');
-            return;
-        }
+        if (await this.deferForNoConfirmedUtxo(entries)) return;
 
         // A new pass: no wire of ours is in flight from it yet, so no unconfirmed
         // output is eligible until this pass sends one. Cleared here rather than at
@@ -110,6 +104,28 @@ module.exports = {
 
         this.rebuildQueueAfterPass(entries, pass.remaining);
         this.sweepRetentionAfterPass(pass.publishedThisPass);
+    },
+
+    // The confirmed-UTXO deferral, as its own verdict. True skips the pass with
+    // everything still queued.
+    async deferForNoConfirmedUtxo(entries) {
+        if (await this.confirmedUtxoAvailable()) return false;
+        this.noConfirmedUtxoDeferrals++;
+        this.lastNoConfirmedUtxoAt = Date.now();
+        let seen = this.lastUtxoReserve || { unconfirmed: 0 };
+        logger.warn('OraclePublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
+            ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
+            'an unconfirmed chain); deferring this publish pass, ' + entries.length +
+            ' round(s) remain queued and retry once a publish confirms');
+        return true;
+    },
+
+    // Mainnet writes are shut until the window opens: the pass is skipped whole and
+    // every round stays on the durable queue to publish once the window opens.
+    mainnetWindowClosed() {
+        if (mainnetWritesOpen(this.network, Math.floor(Date.now() / 1000))) return false;
+        logger.info('OraclePublisher: mainnet write window closed; skipping publish pass (rounds stay queued)');
+        return true;
     },
 
     // The fail-closed balance gate, as its own verdict so the pass reads as the

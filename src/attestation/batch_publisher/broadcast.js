@@ -25,7 +25,8 @@
 const { forwardableUtxos }  = require('../../lib/encoder/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('../../lib/guards/two_phase_guard.js');
 const { abandonBuild } = require('../../lib/encoder/encoder_reservation.js');
-const { isAmbiguousSendError, isNeverSentError } = require('../../lib/guards/idempotent_broadcast.js');
+const { isAmbiguousSendError, isNeverSentError, requireBroadcastTxid,
+        revealFields } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -73,7 +74,7 @@ module.exports = {
         for(let i = 0; i < encoded.wires.length; i++){
             let result;
             try {
-                result = await broadcaster(encoded.wires[i]);
+                result = requireBroadcastTxid(await broadcaster(encoded.wires[i]), 'AttestationBatchPublisher');
             } catch(e){
                 let ambiguous = isAmbiguousSendError(e);
                 // THE HEAD IS THE ONLY WIRE WHOSE FAILURE CAN PROVE THE WINDOW IS UNTOUCHED.
@@ -84,8 +85,8 @@ module.exports = {
                 // testnet window dropped by one transient encoder refusal). A failure on a LATER wire leaves the head on chain and is
                 // handled by the latch below unchanged, as is every ambiguous failure.
                 if(i === 0 && !ambiguous && isNeverSentError(e) &&
-                   await this.retryRefusedHead(window, e, tokens)) return false;
-                this.latchWireFailure(window, encoded, tokens, i, e, ambiguous);
+                   await this.retryRefusedHead(window, batchKey, e, tokens)) return false;
+                await this.latchWireFailure(window, encoded, tokens, i, e, ambiguous, batchKey, headTxid);
                 return false;
             }
             this.spendGuard.commit(tokens[i]);
@@ -120,8 +121,9 @@ module.exports = {
 
     // A wire that failed with the window already committed to: the wire that threw is
     // charged for (it may have left the process), every later reservation goes back, and
-    // the window keeps its intent marker so nothing re-publishes it automatically.
-    latchWireFailure(window, encoded, tokens, i, e, ambiguous){
+    // the window keeps its intent marker so nothing re-publishes it automatically. What
+    // already went out is recorded for the operator who reconciles it.
+    async latchWireFailure(window, encoded, tokens, i, e, ambiguous, batchKey, headTxid){
         this.spendGuard.commit(tokens[i]);   // a send that may have left the process is a spend
         for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
         logger.error('AttestationBatchPublisher: CRITICAL - wire ' + (i + 1) + '/' +
@@ -129,6 +131,26 @@ module.exports = {
             ' failed to broadcast' + (ambiguous ? ' AMBIGUOUSLY (it may still have landed)' : '') +
             ': ' + (e && e.message) + '. The window keeps its intent marker and will NOT be ' +
             're-published automatically; operator reconciliation required.');
+        await this.recordLatchEvidence(window, batchKey, encoded, i, e, headTxid);
+    },
+
+    // What a latched window already put on chain, kept where an operator reconciles it.
+    // A later wire's failure leaves the head on chain, and a multi-phase hook that
+    // failed after funding names its funding and reveal; without these the intent row
+    // says only "something may have been sent". The marker keeps `intent`, so the
+    // window still quarantines, and gains the txid; the dead-letter file gets the rest.
+    async recordLatchEvidence(window, batchKey, encoded, i, e, headTxid){
+        let evidence = revealFields(e);
+        // The head is the reveal on a two-phase hook, so a head that failed after funding
+        // is named by its reveal txid first; a later wire's failure names the head itself.
+        let txid = i > 0 ? headTxid : (evidence.revealTxid || evidence.phase1Txid || null);
+        if(txid) await this.recordIntentTxid(window.window_start, txid);
+        this.deadLetter(Object.assign({
+            window_start: window.window_start, window_end: window.window_end,
+            batch_key: batchKey, row_count: window.row_count,
+            failed_wire: i + 1, wires: encoded.wires.length, head_txid: headTxid
+        }, evidence), 'wire ' + (i + 1) + '/' + encoded.wires.length + ' failed to broadcast (' +
+            (e && e.message) + '); the window keeps its intent marker, verify on chain before replay');
     },
 
     // The published window's own bookkeeping, in the order it ran inline.
@@ -144,7 +166,8 @@ module.exports = {
     },
 
     // Hand a window whose HEAD was provably never sent back to the sweep, or decline to
-    // and let the caller latch it. True means "released, unmarked, retry next cycle".
+    // and let the caller latch it. True means handled: "released, unmarked, retry next
+    // cycle", or at the refusal bound "released and dead-lettered".
     //
     // WHY DELETING THE INTENT ROW IS SAFE HERE, AND ONLY HERE. The marker's whole job is
     // to stop a SECOND fee being paid for a window that may already carry a transaction.
@@ -156,13 +179,12 @@ module.exports = {
     // line is never touched, and a delete that removes no row leaves the window exactly
     // as the latch below expects it. Rebuilt content is byte-identical (the rows are
     // unchanged in the mirror), which is the same property the no-quorum retry relies on.
-    async retryRefusedHead(window, e, tokens){
+    async retryRefusedHead(window, batchKey, e, tokens){
         let attempt = (this._refusalAttempts.get(window.window_start) || 0) + 1;
         this._refusalAttempts.set(window.window_start, attempt);
-        // At the bound the window latches like any other failure, exactly once: the
-        // intent marker it keeps is what makes the next sweep quarantine it instead of
-        // proposing it again.
-        if(attempt >= this.maxRefusalAttempts) return false;
+        // At the bound nothing has still been sent, so the window is dead-lettered as a
+        // refusal rather than left with an intent marker that reads as a crash.
+        if(attempt >= this.maxRefusalAttempts) return await this.deadLetterRefusedWindow(window, batchKey, e, tokens, attempt);
 
         try {
             await this.clearIntent(window.window_start);
@@ -186,6 +208,38 @@ module.exports = {
             '); nothing left this process, so its publish-intent marker is withdrawn and the ' +
             'window is rebuilt on the next sweep (attempt ' + attempt + ' of ' +
             this.maxRefusalAttempts + ').');
+        return true;
+    },
+
+    // A window refused before its head was sent on every allowed attempt. Nothing was
+    // spent, so every reservation goes back; the intent row becomes `deadletter` under
+    // its status guard, which stops the sweep proposing it without a quarantine that
+    // tells the operator to look for a transaction that never existed, and the content
+    // goes to the dead-letter file for a replay. True once handled; false (the caller
+    // latches, and the window quarantines) when the marker could not be moved.
+    async deadLetterRefusedWindow(window, batchKey, e, tokens, attempt){
+        try {
+            let db = this.hubDb();
+            if(db && typeof db.doQuery === 'function')
+                await db.updateAttestPublishedBatchStatus(this.network, window.window_start,
+                    window.window_end, 'intent', 'deadletter');
+        } catch(err){
+            logger.error('AttestationBatchPublisher: window ' + window.window_start + ' reached its refusal ' +
+                'bound but its marker could not be moved to deadletter (' + (err && err.message) +
+                '); it will quarantine instead.');
+            return false;
+        }
+        for(let t of tokens) this.spendGuard.release(t);
+        this._refusalAttempts.delete(window.window_start);
+        this.stats.windowsDeadLettered++;
+        this.deadLetter({ window_start: window.window_start, window_end: window.window_end,
+                          batch_key: batchKey, row_count: window.row_count, never_sent: true },
+            'refused before its head could be sent on ' + attempt + ' attempt(s) (' + (e && e.message) +
+            '); nothing was broadcast, replay when the refusal clears');
+        logger.error('AttestationBatchPublisher: window ' + window.window_start + '-' + window.window_end +
+            ' was refused before its head could be sent on all ' + attempt + ' attempt(s) (' +
+            (e && e.message) + '); nothing was broadcast. It is dead-lettered to ' + this.deadLetterPath +
+            ' and NOT published; chain coverage for this window is missing until an operator replays it.');
         return true;
     },
 
@@ -237,6 +291,9 @@ module.exports = {
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
         } catch(e){
             await abandonBuild(this.encoder, psbtResult, 'AttestationBatchPublisher');
+            // Signing hands back hex for broadcast_tx below and puts nothing on a wire, so
+            // its failure, a timeout included, is a pre-send refusal like a build failure.
+            if(e && typeof e === 'object') e.neverSent = true;
             throw e;
         }
         return (await this.encoder.broadcastTx(txHex)) || { txid: null };

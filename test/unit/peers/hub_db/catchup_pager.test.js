@@ -1,4 +1,5 @@
 'use strict';
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -29,7 +30,7 @@ function registerPagingCases() {
         ];
         const fetchImpl = async (url, options) => {
             requests.push({ url, options });
-            return response({ table: TABLE, rows: pages.shift(), count: 2 });
+            return response({ table: TABLE, schema_version: HUB_SCHEMA_VERSION, rows: pages.shift(), count: 2 });
         };
         const fetchPage = createSnapshotFetcher({ apiUrl: 'https://peer.test/', fetchImpl });
         const handedOff = [];
@@ -53,7 +54,7 @@ function registerPagingCases() {
         let calls = 0;
         const result = await pageSnapshotTable({
             table: TABLE,
-            fetchPage: async () => { calls++; return { table: TABLE, rows: [] }; },
+            fetchPage: async () => { calls++; return { table: TABLE, schema_version: HUB_SCHEMA_VERSION, rows: [] }; },
             onRow: async () => { throw new Error('must not run'); }
         });
 
@@ -78,7 +79,7 @@ function registerIncompleteCases() {
     it('ends incomplete for a response naming the wrong table', async function () {
         const result = await pageSnapshotTable({
             table: TABLE,
-            fetchPage: async () => ({ table: 'oracle_prices', rows: [] }),
+            fetchPage: async () => ({ table: 'oracle_prices', schema_version: HUB_SCHEMA_VERSION, rows: [] }),
             onRow: async () => {}
         });
 
@@ -90,7 +91,7 @@ function registerIncompleteCases() {
         const handedOff = [];
         const result = await pageSnapshotTable({
             table: TABLE,
-            fetchPage: async () => ({ table: TABLE, rows: [{ id: '9' }, { id: '10' }, { id: '10' }] }),
+            fetchPage: async () => ({ table: TABLE, schema_version: HUB_SCHEMA_VERSION, rows: [{ id: '9' }, { id: '10' }, { id: '10' }] }),
             onRow: async row => handedOff.push(row.id),
             limit: 3
         });
@@ -105,7 +106,7 @@ function registerIncompleteCases() {
         const handedOff = [];
         const result = await pageSnapshotTable({
             table: TABLE,
-            fetchPage: async () => ({ table: TABLE, rows: [{ id: 1 }, { id: 2 }] }),
+            fetchPage: async () => ({ table: TABLE, schema_version: HUB_SCHEMA_VERSION, rows: [{ id: 1 }, { id: 2 }] }),
             onRow: async row => {
                 if (row.id === 2) throw failure;
                 handedOff.push(row.id);
@@ -167,7 +168,7 @@ function registerAuthenticationCases() {
             apiUrl: 'https://peer.test',
             fetchImpl: async (url, options) => {
                 headers = options.headers;
-                return response({ table: TABLE, rows: [] });
+                return response({ table: TABLE, schema_version: HUB_SCHEMA_VERSION, rows: [] });
             }
         });
 

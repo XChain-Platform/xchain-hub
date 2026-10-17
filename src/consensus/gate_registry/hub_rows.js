@@ -72,7 +72,9 @@ addGate('peers/hub_db/landing_watermark.LANDING_CLEAR_FRONTIER_ACTIVATION', 'hei
 addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, testnet: 156230, regtest: 0 });
 
 // Effective allow/block-list enforcement: armed on testnet, inert on mainnet
-// and regtest until coordinated activation.
+// and regtest until coordinated activation. A regtest venue arms it at read
+// time from XC_OFFER_LIST_REGTEST_ACTIVATION (the entry, gate_registry.js,
+// carries that overlay because this part is data only).
 addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'height', {
     mainnet: UNARMED,
     'BTC:testnet': 156230,
@@ -86,3 +88,7 @@ addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'heigh
 // Extends federation detection beyond live quorum at the anchor height.
 // Armed on regtest and testnet; mainnet waits on coordinated activation.
 addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: 156230, regtest: 0 });
+
+// oracle/consensus/commit
+// Count-mode quorum uses the verified signer set at and above this BTC height.
+addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });

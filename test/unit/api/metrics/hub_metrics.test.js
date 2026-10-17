@@ -282,3 +282,24 @@ describe('hub governance overdue proposal metric', function () {
       .to.match(/^xchain_governance_overdue_proposals 0$/m);
   });
 });
+
+describe('hub oracle abandoned-round counter', function () {
+  afterEach(function () {
+    resetObservability();
+  });
+
+  it('counts abandoned rounds apart from timeouts and never walks backwards', function () {
+    const observability = realObservability();
+    const oracle = { currentRound: 11, oracleConsensus: { _roundTimeouts: 1, _abandonedRounds: 3 } };
+    installHubOracleMetrics(observability, { getOracle: () => oracle });
+    expect(observability.registry.render()).to.match(/^xchain_oracle_abandoned_rounds_total 3$/m);
+    oracle.oracleConsensus = { _roundTimeouts: 0, _abandonedRounds: 0 };
+    expect(observability.registry.render()).to.match(/^xchain_oracle_abandoned_rounds_total 3$/m);
+  });
+
+  it('renders no abandoned-round sample before the consensus handle exists', function () {
+    const observability = realObservability();
+    installHubOracleMetrics(observability, { getOracle: () => ({ currentRound: 1 }) });
+    expect(observability.registry.render()).to.not.match(/^xchain_oracle_abandoned_rounds_total /m);
+  });
+});

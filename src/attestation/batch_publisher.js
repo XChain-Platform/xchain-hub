@@ -92,12 +92,14 @@ const gateRegistry = require('../consensus/gate_registry');
 const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
 const { initBatchFiles, initBatchTimeouts, initBatchRuntime } = require('./batch_publisher/options.js');
+const { mainnetWritesOpen } = require('../lib/mainnet_write_window.js');
 const windows   = require('./batch_publisher/window.js');
 const anchor    = require('./batch_publisher/anchor.js');
 const signing   = require('./batch_publisher/signing.js');
 const broadcast = require('./batch_publisher/broadcast.js');
 const markers   = require('./batch_publisher/markers.js');
 const chainReconcile = require('./batch_publisher/chain_reconcile.js');
+const reopen    = require('./batch_publisher/reopen.js');
 const signerDivergence = require('./batch_publisher/signer_divergence.js');
 const { XATTESTB_SIGN_REQ, XATTESTB_SIGN, MAX_CATCHUP_WINDOWS,
         ANCHOR_MAX_LAG_BLOCKS } = require('./batch_publisher/constants.js');
@@ -272,6 +274,9 @@ class AttestationBatchPublisher {
                         'skipping this window');
             return { attempted: 0 };
         }
+        // Mainnet writes are shut until the window opens: windows stay owed and publish after.
+        if(!mainnetWritesOpen(this.network, Number.isFinite(nowSec) ? Number(nowSec) : this.nowSeconds()))
+            return { attempted: 0, skipped: 'mainnet_window_closed' };
         this._sweeping = true;
         let attempted = 0, published = 0;
         try {
@@ -281,7 +286,8 @@ class AttestationBatchPublisher {
                 pending = await this.reconcilePendingAgainstChain(pending);
             for(let w of pending){
                 attempted++;
-                let done = await this.publishWindow(w.windowStart, w.age, w.reopenedSkipped);
+                let done = await this.publishWindow(w.windowStart, w.age,
+                    w.reopenedSkipped ? 'skipped' : (w.reopened ? 'reopened' : undefined));
                 if(done) published++;
             }
         } finally {
@@ -342,7 +348,7 @@ function installParts(target, parts){
 }
 
 installParts(AttestationBatchPublisher.prototype,
-    [windows, anchor, signing, broadcast, markers, chainReconcile, signerDivergence]);
+    [windows, anchor, signing, broadcast, markers, chainReconcile, reopen, signerDivergence]);
 
 module.exports = Object.assign(AttestationBatchPublisher, {
     XATTESTB_SIGN_REQ,

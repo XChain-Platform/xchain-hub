@@ -61,10 +61,10 @@ module.exports = {
                              'oracle_publish set at announced snapshot_block ' + d.snapshot_block +
                              '; NOT mirroring the archive reward');
             } else {
-                // XANC-REWARD-THEFT-1 (archive half, LIVE): anchor_archive is NOT
-                // retired by the anchor-reward flag-day (RewardTracker only derives
-                // anchor_<CHAIN>), so a forged mirror mints COLLECT-spendable XCHAIN
-                // TODAY. Gate the mirror on the batch's checkpoint being really
+                // XANC-REWARD-THEFT-1 (archive half): below the archive-reward flag-day
+                // this mirror is the peer rail for anchor_archive, so a forged mirror
+                // would mint COLLECT-spendable XCHAIN (at/above it the mirror is skipped,
+                // see below). Gate the mirror on the batch's checkpoint being really
                 // anchored on DOGE at depth: an elected-yet-Byzantine leader that
                 // announces a FINALIZED for an archive it never published earns
                 // nothing. ABSTAIN (no mirror) on an unverifiable / absent / shallow

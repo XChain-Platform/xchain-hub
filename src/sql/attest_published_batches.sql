@@ -44,6 +44,11 @@
 --             `pushattestbatch`. Authoritative across the whole federation rather
 --             than for this hub alone: any hub's batch landing covers the window,
 --             so a hub that never published one stops considering it.
+--   reopened - a validated DOGE retraction un-landed the batch for this window
+--             (from `landed`, or from `sent` when the reorg beat the landing push).
+--             The sweep offers it again even below the catch-up horizon, and the
+--             pre-send claim removes it under that status guard. A re-landing of
+--             the original batch overwrites it with `landed`.
 --
 -- A window with no row at all is simply unpublished, which is the state a window
 -- whose signing round found no quorum is deliberately left in: the rows are still

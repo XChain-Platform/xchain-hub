@@ -50,6 +50,7 @@
 const hubConfig = require('../config');   // the environment's one home: lazy getters, nothing evaluated at load
 const core = require('./gate_registry/core.js');
 const { registerRows } = require('./gate_registry/shared_rows.js');
+const { regtestHeight } = require('./gate_registry/regtest_env.js');
 
 // The SHARED block, loaded for effect: each part queues its rows into
 // shared_rows.js as it loads; registerRows() below replays them, in part
@@ -63,7 +64,7 @@ require('./gate_registry/shared_rows_5.js');
 
 // HUB-ONLY GATES: the rows no other repo twins, queued after the block so the
 // block's order is untouched. Every module SHARED_GATES names is an indexer
-// twin or a shared carrier, so all 41 of the digest's value rows are in the
+// twin or a shared carrier, so all 43 of the digest's value rows are in the
 // block (its other 4 keys are admission FUNCTIONS, read from their carrier);
 // nothing in hub_rows.js is a digest input. The four hub-only activation files
 // keep their literals and are not rows (decision D34); the governance snapshot
@@ -72,6 +73,26 @@ require('./gate_registry/hub_rows.js');
 
 const { registry } = core;
 registerRows(registry, hubConfig.env());
+
+// HUB-ONLY REGTEST ARMING: the offer-list enforcement row is not in the block,
+// so REGTEST_ARMING (a byte twin) cannot name it. The entry composes a second
+// step over the block's overlay instead: a regtest venue arms the row from
+// XC_OFFER_LIST_REGTEST_ACTIVATION at each read, by the same grammar, cached
+// per raw value. Unset or refused leaves the committed (UNARMED) entry.
+const OFFER_LIST_KEY = 'cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT';
+const blockOverlay = registry.overlay;
+const env = hubConfig.env();
+let offerListHit = null;
+registry.setReadOverlay((key, table) => {
+    const base = blockOverlay(key, table);
+    if (key !== OFFER_LIST_KEY) return base;
+    const raw = env.XC_OFFER_LIST_REGTEST_ACTIVATION;
+    if (offerListHit && offerListHit.raw === raw && offerListHit.base === base) return offerListHit.value;
+    const height = regtestHeight(raw, 0, 'OFFER LIST', 'XC_OFFER_LIST_REGTEST_ACTIVATION');
+    const value = height === null ? base : Object.freeze(Object.assign({}, base, { regtest: height }));
+    offerListHit = { raw, base, value };
+    return value;
+});
 
 module.exports = {
     get: (key) => registry.get(key),

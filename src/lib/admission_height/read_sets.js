@@ -41,6 +41,7 @@
  *   bridge_transfers         consensus/bridge_settle.js                dest_chain
  *   policy_snapshots         consensus/bridge_settle.js                no chain clause at all
  *   list_snapshots           consensus/list_share_settle.js            no chain clause at all
+ *   remote_token_snapshots   actions/cross_chain_remote_token.js        any chain's ORDER or SWAP create
  *   attestation_responses    XChainIndexer.js:1517 call-site guard     BTC only
  *   anchor_reward_attestations  XChainIndexer.js:1495 same guard       BTC only
  *   oracle_prices            XChainIndexer.js:1336                     every chain
@@ -56,6 +57,7 @@ const ADMISSION_READ_SETS = Object.freeze({
     bridge_transfers:           Object.freeze({ fields: Object.freeze(['dest_chain']) }),
     policy_snapshots:           Object.freeze({ every: true }),
     list_snapshots:             Object.freeze({ every: true }),
+    remote_token_snapshots:     Object.freeze({ every: true }),
     attestation_responses:      Object.freeze({ chains: Object.freeze(['BTC']) }),
     anchor_reward_attestations: Object.freeze({ chains: Object.freeze(['BTC']) }),
     // The one UNSIGNED rail, and the one that takes a scalar rather than a map. It carries no

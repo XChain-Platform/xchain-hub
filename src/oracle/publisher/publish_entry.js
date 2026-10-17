@@ -26,6 +26,8 @@
 'use strict';
 
 const nodeUtil = require('node:util');
+const { requireBroadcastTxid, isNeverSentError,
+        revealFields } = require('../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -91,10 +93,13 @@ module.exports = {
         }
 
         // Quarantined round (an intent-only durable marker from a pre-crash broadcast
-        // whose on-chain state is unknown). NEVER re-broadcast: drop the stale queue
-        // entry and leave it for operator replay. Surfaced at startup in hydratePublishedMarkers.
+        // whose on-chain state is unknown). NEVER re-broadcast. The entry leaves the
+        // queue for the dead-letter file, which holds the finished wire an operator
+        // replays from; the marker table alone names the round but not its content.
+        // Surfaced at startup in hydratePublishedMarkers.
         if (entryRounds.some(r => this._quarantinedRounds.has(r))) {
-            logger.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
+            logger.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); moving its queue entry to ' + this.deadLetterPath + ' without re-broadcast, awaiting operator replay');
+            this.deadLetter(entry, 'quarantined: publish intent recorded before a restart and its on-chain state is unknown; verify on chain before replay');
             return true;
         }
         return false;
@@ -171,11 +176,18 @@ module.exports = {
         }
 
         try {
-            let result = await broadcaster(payload);
+            let result;
+            try {
+                result = requireBroadcastTxid(await broadcaster(payload), 'OraclePublisher');
+            } catch (sendErr) {
+                // A send that answered without a txid has an unknown outcome: dead-letter, never re-send.
+                if (sendErr && sendErr.missingTxid) sendErr.oracleAmbiguousSend = true;
+                throw sendErr;
+            }
             await this.notePublishedEntry(entry, entryRounds, result, spendToken, pass);
             // Successfully published. Drop from queue (do not add to remaining).
         } catch (err) {
-            this.handlePublishFailure(entry, err, spendToken, pass);
+            await this.handlePublishFailure(entry, err, spendToken, pass, entryRounds);
         }
     },
 
@@ -257,7 +269,7 @@ module.exports = {
     // a get_utxos timeout, permanently removing a never-broadcast round from
     // automatic retry. A custom broadcastFn sets no tag, so an unknown
     // broadcaster keeps the conservative default it has today.
-    handlePublishFailure(entry, err, spendToken, pass) {
+    async handlePublishFailure(entry, err, spendToken, pass, entryRounds) {
         if (!(err && err.oraclePreSend)
             && (this.isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend))) {
             // COMMIT, not release: this branch has already decided the tx may be
@@ -269,7 +281,13 @@ module.exports = {
             logger.error(nodeUtil.format('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
                 ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
                 'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err));
-            this.deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
+            // A hook that failed after funding names the funding and the signed reveal;
+            // the record keeps them, because rebroadcasting that reveal finishes the
+            // publish without paying for it again.
+            let reveal = revealFields(err);
+            this.deadLetter(Object.assign({}, entry, reveal),
+                'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
+            await this.recordIntentTxid(entryRounds || this.entryRounds(entry), reveal.revealTxid || reveal.phase1Txid);
             // The same tx that must not be auto-retried here must not
             // be re-published by this hub's own takeover of the window either.
             if (entry.batch) this.noteAmbiguousWindow(parseInt(entry.batch.windowIndex));
@@ -279,11 +297,43 @@ module.exports = {
         // requeued for a later attempt, so the budget goes back (the invariant
         // the old post-send record() gave for free).
         this.spendGuard.release(spendToken);
+        await this.withdrawNeverSentIntent(entry, err, entryRounds);
         entry.attempts++;
         logger.error(nodeUtil.format('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err));
         if (pass.balance !== null && pass.balance < 0.01) {
             logger.error('OraclePublisher: insufficient DOGE balance for round ' + entry.round);
         }
         pass.remaining.push(entry);
+    },
+
+    // The txid a hook named after funding goes on the round's intent-only rows, which
+    // keep quarantining: the marker table then says which transaction to look for.
+    async recordIntentTxid(rounds, txid) {
+        if (!this.db || !txid) return;
+        for (let r of rounds) {
+            try {
+                await this.db.updateOraclePublishedRoundIntentTxid(txid, r);
+            } catch (e) {
+                logger.error(nodeUtil.format('OraclePublisher: round ' + r + ' already put ' + txid +
+                    ' on the wire but the txid could not be recorded on its intent marker: ', e));
+            }
+        }
+    },
+
+    // A failure PROVEN not to have left the process leaves intent rows that record an
+    // attempt that did not happen. Kept, a restart would quarantine the round and drop
+    // a publish nothing ever sent, so they are withdrawn here, and only here. A named
+    // node rejection is definitive but not never-sent and keeps its rows. The delete is
+    // guarded on sent_at IS NULL, and a row that cannot be withdrawn stays to quarantine.
+    async withdrawNeverSentIntent(entry, err, entryRounds) {
+        if (!this.db || !(isNeverSentError(err) || (err && err.oraclePreSend))) return;
+        for (let r of (entryRounds || this.entryRounds(entry))) {
+            try {
+                await this.db.deleteOraclePublishedRoundIntent(r);
+            } catch (e) {
+                logger.error(nodeUtil.format('OraclePublisher: round ' + r + ' was refused before any send but its ' +
+                    'publish-intent marker could not be withdrawn; a restart will quarantine it: ', e));
+            }
+        }
     }
 };

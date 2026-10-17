@@ -127,7 +127,7 @@ function registerRateLimitBudgetTests() {
         const broadcaster = async () => {
             calls++;
             if (calls === 1) throw rateLimitErr(60);
-            if (calls <= 5) throw new Error('no UTXOs available for Dpub1');
+            if (calls <= 5) throw Object.assign(new Error('no UTXOs available for Dpub1'), { neverSent: true });
             return { txid: 'tx-ok' };
         };
         const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);
@@ -158,7 +158,7 @@ function registerRateLimitFallbackTests() {
         let calls = 0;
         const broadcaster = async () => {
             calls++;
-            if (calls < 3) throw new Error('no UTXOs available for Dpub1');
+            if (calls < 3) throw Object.assign(new Error('no UTXOs available for Dpub1'), { neverSent: true });
             return { txid: 'tx-ok' };
         };
         const res = await pub.broadcastWithRetry(broadcaster, 'P', 5);

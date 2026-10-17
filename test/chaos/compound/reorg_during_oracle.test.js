@@ -101,8 +101,13 @@ function registerReorgDuringActiveOracleRoundBothTest() {
                 expect(reorgDeletes.length).to.equal(1);
 
                 let reorgUpdates = dbCalls.filter(c =>
-                    c.query.includes('disputed'));
+                    c.query.includes('UPDATE price_snapshots') && c.query.includes('disputed'));
                 expect(reorgUpdates.length).to.equal(1);
+
+                // The rollback then re-reads the rows it disputed once, to broadcast them to mirrors.
+                let disputedRereads = dbCalls.filter(c =>
+                    c.query.includes('SELECT') && c.query.includes("status = 'disputed'"));
+                expect(disputedRereads.length).to.equal(1);
 
                 let reorgInserts = dbCalls.filter(c =>
                     c.query.includes('reorg_attestations'));

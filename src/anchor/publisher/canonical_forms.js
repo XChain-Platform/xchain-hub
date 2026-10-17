@@ -31,7 +31,7 @@ const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
-const { canonicalBatchCrc } = require('./fold/wrapper_canonical.js');
+const { foldArchiveSuffix } = require('./fold/wrapper_canonical.js');
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
@@ -53,8 +53,8 @@ function isCheckpointAnchorRow(row){
 
 function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
     let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
-              checkpointForms.checkpointRootSuffix(checkpoint) + '|' +
-              [String(batchSeq), String(count), canonicalBatchCrc(crc), String(totalChunks)].join('|');
+              checkpointForms.checkpointRootSuffix(checkpoint) + foldArchiveSuffix({
+                  MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
     if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
             checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +

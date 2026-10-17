@@ -142,6 +142,10 @@ module.exports = {
     // The quarantine set is deliberately untouched: a quarantined round's on-chain
     // state is unknown, which a retraction does not resolve, and only an operator may
     // release one.
+    //
+    // Nothing here can ask whether the retracted batch is back in a mempool: the
+    // encoder answers only which block holds a txid (get_tx_block), so a reorged batch
+    // re-mined from the mempool and the recovery re-publish can both land.
     async clearPublishedMarkers(rounds) {
         let list = (Array.isArray(rounds) ? rounds : [rounds])
             .map(r => parseInt(r)).filter(r => Number.isFinite(r));
@@ -172,8 +176,8 @@ module.exports = {
 
     // Read the durable marker for a round, or null when none exists / no DB is wired.
     // Shape: { round, txid, sent_at }. A row with a non-null sent_at is the
-    // authoritative "already broadcast" signal (txid may legitimately be null if the
-    // broadcaster returned none, so sent_at, not txid, gates re-broadcast).
+    // authoritative "already broadcast" signal (txid is null on rows written before a
+    // txid-less send was refused as ambiguous, so sent_at, not txid, gates re-broadcast).
     // Throws on a DB error so the caller can FAIL CLOSED (never broadcast when we
     // cannot prove the round is unpublished).
     async getPublishedMarker(round) {

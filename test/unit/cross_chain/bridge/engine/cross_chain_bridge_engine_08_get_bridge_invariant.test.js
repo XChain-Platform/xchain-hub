@@ -251,6 +251,27 @@ function registerFeature10getBridgeInvariantPart3() {
     expect(inv.XCHAIN.BTC.escrow).to.equal(null);
   });
 }
+function registerFeature10getBridgeInvariantFailedChain() {
+  it('keeps a failed chain prior legs while healthy chains refresh their invariant view', async function () {
+    const { engine } = makeEngine({ policyActive: false });
+    let cycle = 1;
+    engine.resolveSnapshotBlock = sinon.stub().resolves(150);
+    engine.pollPendingTransfers = sinon.stub().callsFake(async (coin, snapshotBlock, pending) => {
+      if(cycle === 2 && coin === 'BTC') throw new Error('BTC indexer unavailable');
+      if(coin === 'BTC') engine.recordPending(pending, pendingLeg({ dest_chain: 'DOGE', amount: '5' }));
+      if(coin === 'DOGE') engine.recordPending(pending, pendingLeg({ dest_chain: 'LTC', amount: cycle === 1 ? '4' : '7' }));
+    });
+
+    await engine.poll();
+    cycle = 2;
+    await engine.poll();
+    engine.chainStateReader = async () => null;
+
+    const inv = await engine.getBridgeInvariant('XCHAIN');
+    expect(inv.XCHAIN.DOGE.in_flight).to.equal('5');
+    expect(inv.XCHAIN.LTC.in_flight).to.equal('7');
+  });
+}
 // A bridged token's copy is a DIFFERENT tick on every chain but its origin: the child of the
 // origin's coin root, origin + '.' + tick (xchain-indexer bridge_settle/policy.js). The at7_at8
 // rail leg read FUFU's DOGE copy under 'FUFU', found no such tick, and reported its whole copy
@@ -306,6 +327,7 @@ function registerFeature10getBridgeInvariant() {
     registerFeature10getBridgeInvariantPart1();
     registerFeature10getBridgeInvariantPart2();
     registerFeature10getBridgeInvariantPart3();
+    registerFeature10getBridgeInvariantFailedChain();
     registerFeature10getBridgeInvariantCopyNames();
   });
 }

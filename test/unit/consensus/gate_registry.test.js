@@ -216,6 +216,19 @@ describe('src/consensus/gate_registry.js: the shared layout', function () {
         const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
         expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });
+
+    // TWINS is a hand list, so hold it to both directory listings: a part added on
+    // either side fails here until it is vendored and listed, never skipped silently.
+    it('lists every indexer twin part in TWINS and leaves no file under gate_registry/ unclassified', function () {
+        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part set guard')) return;
+        const listJs = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+            .filter((d) => d.isFile() && d.name.endsWith('.js')).map((d) => d.name).sort();
+        const isTwinName = (f) => f === 'regtest_env.js' || /^shared_rows(_\d+)?\.js$/.test(f);
+        const unclassified = listJs(PARTS_DIR).filter((f) => f !== 'core.js' && !HUB_PARTS.includes(f) && !TWINS.includes(f));
+        expect(unclassified, 'files under src/consensus/gate_registry/ that are neither core.js, a hub-owned part nor in TWINS').to.deep.equal([]);
+        expect(TWINS.slice().sort(), 'TWINS against the twin parts under xchain-indexer/src/protocol_changes/')
+            .to.deep.equal(listJs(INDEXER_PARTS).filter(isTwinName));
+    });
 });
 
 describe('src/consensus/gate_registry.js: the readers', function () {

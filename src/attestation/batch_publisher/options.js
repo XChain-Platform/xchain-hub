@@ -37,6 +37,9 @@ function initBatchFiles(self, cfg){
     self.bufferPath = hubConfig.ATTEST_BATCH_BUFFER_PATH || cfg.ATTEST_BATCH_BUFFER_PATH ||
                       './data/attest-batch-buffer.jsonl';
     self.deadLetterPath = self.bufferPath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
+    // When each reopened window was first seen by a sweep (reopen.js).
+    self.reopenSeenPath = self.bufferPath.replace(/\.jsonl$/, '') + '.reopened.json';
+    self._reopenSeen = null;
 
     // Its OWN spend guard: a separate per-window ceiling and pause switch, so an
     // operator can halt attestation batches without halting price publishing.
@@ -106,6 +109,9 @@ function initBatchRuntime(self){
     // such an attempt is the ABSENCE of a marker, and a restart that re-tried a
     // refused window from zero costs nothing because nothing was ever sent or spent.
     self._refusalAttempts = new Map();
+    // Sweeps that have offered each window a retraction reopened below the catch-up
+    // horizon; the count is the publisher rank that may take it on the next offer.
+    self._reopenedOffers = new Map();
     // Why the last anchor read came back null, and which reason has already been
     // logged. Both null while the anchor resolves.
     self._anchorFailure = null;

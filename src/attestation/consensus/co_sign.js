@@ -92,6 +92,8 @@ module.exports = {
     //                    equivalence verdict is checkable by a
     //                    follower (only the leader runs the judge), so
     //                    participation is the strongest local check.
+    //                    On judge_model this relies on the sender being
+    //                    the leader, which nonOkDerivationRefuses enforces.
     mayCoSignNonOk(myProposal, status){
         // Require the claimed status to match the failure mode THIS hub
         // itself observed, not merely that our own fetch failed. For

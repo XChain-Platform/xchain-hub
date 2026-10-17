@@ -92,7 +92,7 @@ function registerLostChunkCase() {
         let nd = bus.nodes[0];
         let dropChunks = true;
         nd.pub.setBroadcastHook(async (payload) => {
-            if (dropChunks && payload.split('|')[1] === '2') throw new Error('txn-mempool-conflict');
+            if (dropChunks && payload.split('|')[1] === '2') throw new Error('Encoder RPC error: 258: txn-mempool-conflict');
             nd.published.push(payload);
             return { txid: 'txid' + nd.published.length };
         });

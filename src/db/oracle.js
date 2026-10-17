@@ -25,10 +25,28 @@
  ********************************************************************/
 
 module.exports = {
+    async getPriceSnapshotsDisputedRoundSummary() {
+        return this.doQuery(
+            "SELECT COUNT(DISTINCT round_number) AS disputed_count, " +
+            "MAX(round_number) AS last_disputed_round FROM price_snapshots WHERE status = 'disputed'");
+    },
+
     // Deletes from oracle_published_rounds.
     // Moved here from src/oracle/publisher.js:2878.
     async deleteOraclePublishedRound(cutoff) {
         return this.doQuery('DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL', [cutoff]);
+    },
+
+    // Records the txid already on the wire for a round whose row stays intent-only,
+    // so it still quarantines; only the first txid recorded is kept.
+    async updateOraclePublishedRoundIntentTxid(txid, round) {
+        return this.doQuery('UPDATE oracle_published_rounds SET txid = ? WHERE round = ? AND sent_at IS NULL AND txid IS NULL', [txid, round]);
+    },
+
+    // Withdraws one round's intent-only marker. The sent_at guard means it can never
+    // remove the record of a round that was broadcast.
+    async deleteOraclePublishedRoundIntent(round) {
+        return this.doQuery('DELETE FROM oracle_published_rounds WHERE round = ? AND sent_at IS NULL', [round]);
     },
 
     // Deletes from oracle_submissions.

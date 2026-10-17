@@ -43,13 +43,18 @@ const LOCAL_DIR = path.join(__dirname, '..', '..', '..', 'src');
 const DOCS_DIR  = process.env.XCHAIN_DOCS_DIR || path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation');
 const CANON_DIR = path.join(DOCS_DIR, 'protocol', 'reference-impl');
 const VEC_DIR   = path.join(DOCS_DIR, 'protocol', 'test-vectors');
+// Judge the vector directory before loading it, so a lane whose documentation entry
+// links into a live main checkout never reads behaviour vectors no commit holds.
+const VEC_VERDICT = siblingCheckout(__dirname, VEC_DIR);
 
 let quorumVec = null, equivVec = null, activationVec = null;
-try {
-    quorumVec     = require(path.join(VEC_DIR, 'stake_weighted_quorum.json'));
-    equivVec      = require(path.join(VEC_DIR, 'equivocation_header.json'));
-    activationVec = require(path.join(VEC_DIR, 'activation_predicates.json'));
-} catch(e){ /* sibling xchain-documentation absent */ }
+if(VEC_VERDICT.usable){
+    try {
+        quorumVec     = require(path.join(VEC_DIR, 'stake_weighted_quorum.json'));
+        equivVec      = require(path.join(VEC_DIR, 'equivocation_header.json'));
+        activationVec = require(path.join(VEC_DIR, 'activation_predicates.json'));
+    } catch(e){ /* sibling xchain-documentation absent */ }
+}
 
 // Every copy now shares ONE signature: meetsStakeThreshold(validators, signers),
 // and every copy exports totalStake(). No per-repo adapter remains.
@@ -64,7 +69,7 @@ function vecValidators(c){
 function meets(c){ return swq.meetsStakeThreshold(vecValidators(c), c.signers); }
 
 describe('consensus-primitive conformance: canonical vectors @regression', function(){
-    before(function(){ if(!quorumVec || !equivVec){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but consensus test-vectors not found (sibling xchain-documentation missing)'); this.skip(); } });
+    before(function(){ if(!skipOrFail(this, VEC_VERDICT, 'the consensus test-vector guard')) return; if(!quorumVec || !equivVec){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but consensus test-vectors not found (sibling xchain-documentation missing)'); this.skip(); } });
 
     describe('stake_weighted_quorum.meetsStakeThreshold', function(){
         (quorumVec ? quorumVec.meetsStakeThreshold : []).forEach(function(c){
@@ -115,7 +120,7 @@ function decodeSnapshotBlock(v){
 // and so through its own gate registry, which byte identity alone never reaches.
 describe('consensus-primitive conformance: activation predicate vectors @regression', function(){
     const srb = require('../../../src/consensus/snapshot_reorg_buffer.js');
-    before(function(){ if(!activationVec){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but activation_predicates.json not found (sibling xchain-documentation missing)'); this.skip(); } });
+    before(function(){ if(!skipOrFail(this, VEC_VERDICT, 'the activation predicate vector guard')) return; if(!activationVec){ if(process.env.XCHAIN_REQUIRE_SIBLINGS==='1') throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but activation_predicates.json not found (sibling xchain-documentation missing)'); this.skip(); } });
     const groups = activationVec || {};
 
     it('every group this repo runs is a non-empty list', function(){

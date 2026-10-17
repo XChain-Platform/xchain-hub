@@ -152,6 +152,76 @@ it('accepts a testnet DOGE address on a testnet hub', async function () {
     });
 }
 
+// Base58 of a 25-byte P2PKH payload whose hash and checksum bytes are all `fill`:
+// the lowest (0x00) and highest (0xff) addresses one version byte can produce.
+function dogeP2pkhBound(versionByte, fill) {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let n = BigInt(versionByte);
+    for (let i = 0; i < 24; i++) n = (n << 8n) | BigInt(fill);
+    let out = '';
+    while (n > 0n) { out = ALPHABET[Number(n % 58n)] + out; n /= 58n; }
+    return out;
+}
+
+function registerOraclePublishRegistryPrefixTests() {
+    const coins = require('../../../src/coins');
+    const DOGE_REGTEST_M = 'mvs8WdppEhzQLxfcYwrr1eoKA2nUFi55ff';
+
+    it('accepts an m-prefixed regtest DOGE address on a regtest hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'regtest',
+            oracle_publish: { doge_address: DOGE_REGTEST_M, doge_wallet: '/path' }
+        });
+        expect(r.ok, r.reason).to.be.true;
+    });
+
+    it('rejects an m-prefixed address on a testnet hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'testnet',
+            oracle_publish: { doge_address: DOGE_REGTEST_M, doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE testnet address');
+    });
+
+    it('names both m and n in the regtest rejection message', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'regtest',
+            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE regtest address');
+        expect(r.reason).to.include("'m' or 'n'");
+    });
+
+    // The prefix table is a hand copy of the registry's pubKeyHash bytes, so pin it:
+    // both extremes of every network's version byte must pass on that network.
+    it('accepts the lowest and highest P2PKH address of each network registry pubKeyHash', async function () {
+        for (const network of ['mainnet', 'testnet', 'regtest']) {
+            const version = coins.getCoinConfig('DOGE', network).net.pubKeyHash;
+            for (const fill of [0x00, 0xff]) {
+                const address = dogeP2pkhBound(version, fill);
+                let r = await oraclePub.selfTest({
+                    HUB_NETWORK: network,
+                    oracle_publish: { doge_address: address, doge_wallet: '/path' }
+                });
+                expect(r.ok, network + ' ' + address + ': ' + r.reason).to.be.true;
+            }
+        }
+    });
+
+    it('accepts every P2PKH literal in the registry regtest address book on a regtest hub', async function () {
+        const book = coins.getCoinConfig('DOGE', 'regtest').addresses;
+        for (const key of ['BURN', 'GAS', 'DONATE1', 'DONATE2', 'FEE_DESTINATION']) {
+            let r = await oraclePub.selfTest({
+                HUB_NETWORK: 'regtest',
+                oracle_publish: { doge_address: book[key], doge_wallet: '/path' }
+            });
+            expect(r.ok, key + ' ' + book[key] + ': ' + r.reason).to.be.true;
+        }
+    });
+}
+
 function registerOraclePublishCoreTests() {
 it('returns ok=false when oracle_publish config is missing', async function () {
         let r = await oraclePub.selfTest({});
@@ -188,6 +258,10 @@ describe('capabilities/oracle_publish selfTest()', function () {
     // to mainnet 'D', which rejected the correct address on every non-mainnet
     // deployment and made oracle_publish unreachable there.
     registerOraclePublishShapeTests();
+
+    // Regtest reuses the Bitcoin-testnet version byte 0x6f, which encodes as 'm' or
+    // 'n', so the accepted prefixes follow the registry rather than DOGE testnet.
+    registerOraclePublishRegistryPrefixTests();
 
     // Fails closed rather than assuming mainnet: guessing is what would let a
     // testnet hub validate a mainnet address and spend real DOGE.

@@ -189,8 +189,8 @@ handler, governance, and attestation subsystems are **all enabled only when
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ORACLE_ROUND_INTERVAL` | No | `600000` | Round length (ms). |
-| `ORACLE_SUBMISSION_WINDOW` | No | `180000` | Submission window within a round (ms). |
+| `ORACLE_ROUND_INTERVAL` | No | `600000` | Round length (ms). It must be uniform across the federation so each hub computes the same round number from `ORACLE_EPOCH_START`. Every reader (the API config, batch signer, publisher, admission watermark, chain tips and the health probe) takes the value from one per-process resolver, so a hub never runs two cadences. The environment variable is honoured on regtest only; on every other network (an unset `HUB_NETWORK` included) it is ignored with a set-but-IGNORED warning and the default applies. |
+| `ORACLE_SUBMISSION_WINDOW` | No | `180000` | Submission window within a round (ms). It must be uniform across the federation so every hub closes submissions at the same point in each round. It resolves through the same per-process resolver as `ORACLE_ROUND_INTERVAL`, so it too is honoured on regtest only and ignored with a warning elsewhere (default `180000`). |
 | `ORACLE_REWARD_PER_ROUND` | No | `10.00000000` | Reward per round, a positive plain decimal; any other form fails reward distribution with "Invalid reward amount". |
 | `ORACLE_FINALIZATION_TIMEOUT` | No | `120000` | Finalization timeout (ms). |
 | `ORACLE_MIN_SUBMISSIONS` | No | `1` | Minimum submissions to finalize a round. |
@@ -476,15 +476,16 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 
 ## State-anchor publisher (`StateAnchorPublisher`)
 
-ANCHOR v7/v1/v2 on-chain publishing of finalized checkpoints (published on
+ANCHOR v0/v1/v2 on-chain publishing of finalized checkpoints (published on
 DOGE; wallet/encoder settings are in the DOGE oracle publisher section). Each
 variable also resolves from `p2pConfig`; the env var wins.
 
-One ANCHOR v7 per network per cycle carries every chain's newest un-anchored
+One ANCHOR v0 per network per cycle carries every chain's newest un-anchored
 checkpoint as a SECTION, so a cycle runs one election, one publisher
 attestation round and one DOGE spend rather than one of each per chain. The
-superseded per-chain wires (v0/v3/v4/v5) are gone. The archive leg (v1 head, v2
-continuation chunks) is unchanged.
+superseded per-chain wires (pre-restart v4/v5) are gone; since the version
+restart, v3 is the fold wire, valid once its fold gate arms and credited as a
+bundle. The archive leg (v1 head, v2 continuation chunks) is unchanged.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -501,13 +502,14 @@ continuation chunks) is unchanged.
 | `ANCHOR_ROUND_TIMEOUT_MS` | No | `120000` | Quorum signing-round timeout (ms). |
 | `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` | Ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
+| `ANCHOR_DEADLETTER_PATH` | No | `./data/anchor-publish.deadletter.jsonl` | Append-only JSONL record of an anchor send that a signer hook failed after funding its phase-one transaction. Each line carries the payload, `phase1Txid`, `revealTxid` and the signed `revealTxHex`, so an operator can verify the funding on chain and rebroadcast the exact reveal instead of republishing. |
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
 | `ANCHOR_STARTUP_FLUSH_MS` | No | `60000` (1m) | Delay before the one normal (leader) flush a hub runs after start. The interval timer first fires a full `ANCHOR_INTERVAL_MS` after start and the rank wake is failover-only, so without this a hub restarted more often than once per interval never anchored anything. Idempotent across a rolling restart. `0` disables. |
 | `ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS` | No | `false` | Whether an anchor may be funded from this address's own unconfirmed change. Off, each anchor stands on its own fee rate (Dogecoin Core 1.14 miners score a transaction alone, so a child never lifts a stuck parent); a flush with no confirmed output defers with `NO_CONFIRMED_UTXO` and the next rank wake retries it as a normal flush. Archive chunks always spend the head's change by design. Set `true` only on venues that mine on demand. |
 | `ANCHOR_CONFIRM_CHECK_MS` | No | `300000` (5m) | How often the confirmation watchdog re-reads the publisher address to see which of this hub's own anchor broadcasts have mined. `0` disables. |
 | `ANCHOR_CONFIRM_STALE_MS` | No | `1800000` (30m) | Age past which a still-unconfirmed anchor broadcast is logged as `UNCONFIRMED_ANCHOR` on every watchdog pass. Nothing is re-broadcast or fee-bumped. |
 | `ANCHOR_RANK_WAKE_MS` | No | `900000` (15m) | How often a BACKUP re-checks whether its failover rank has unlocked, between `ANCHOR_INTERVAL_MS` ticks. The wake flush runs in failover-only mode, so it never publishes an election this hub leads and a healthy leader keeps its interval and size-trigger cadence. |
-| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. That knob governs the hub's stamp/attest gate only; the BTC indexer's anchor-reward mint gate applies a frozen ledger depth (`ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS`, equal to the per-coin DOGE default) that no environment variable moves. On regtest, where a lowered override is honoured, the hub therefore attests before the indexer will mint and BTC block processing defers until the anchor reaches the frozen depth. |
+| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_BUNDLE_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. That knob governs the hub's stamp/attest gate only; the BTC indexer's anchor-reward mint gate applies a frozen ledger depth (`ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS`, equal to the per-coin DOGE default) that no environment variable moves. On regtest, where a lowered override is honoured, the hub therefore attests before the indexer will mint and BTC block processing defers until the anchor reaches the frozen depth. |
 | `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_INTENT_TTL_MS` | No | `21600000` | How long a durable broadcast intent (`anchor_published_checkpoints`) HOLDS its checkpoint when no anchor has mined for it. The publisher arms the marker before the send and stamps `anchor_txid` after it, so a crash in between is the one state where DOGE may have paid with nothing recording it; the hold stops the next flush rebuilding a second transaction from different UTXOs. Same `~6x` the 60-conf DOGE window bound as `ANCHOR_ANNOUNCE_RETRY_TTL_MS`, past which a send that never relayed is not coming back and holding the row costs more than re-broadcasting it. |
@@ -600,7 +602,10 @@ Runtime pause is operator-driven via JSON-RPC (auth-gated): `pauseeffectorspend`
 / `resumeeffectorspend` take `{ label }` (the effector's guard label, e.g.
 `OraclePublisher`), and `geteffectorspendstatus` lists every effector's live
 state. A pause halts the effector's primary/leader spend path immediately, with
-no restart.
+no restart. Once the effector's `start()` has armed `<PREFIX>_SPEND_STATE_PATH`,
+the pause is saved with the spend window and survives a restart, and the reply's
+`durable` field says whether it was written. A corrupt or unreadable state file
+restores unpaused (its window reads as spent), so re-pause after that warning.
 
 ## Cross-chain DEX / XCALL relay (`CrossChainDexEngine`)
 

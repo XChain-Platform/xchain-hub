@@ -64,10 +64,13 @@ module.exports = {
 
     // Closed windows to offer, oldest first. A late row makes a skipped marker eligible
     // again, but the marker stays durable until the pre-send claim. `age` is the required
-    // publisher rank, which staggers fallback when the elected leader is dark.
+    // publisher rank, which staggers fallback when the elected leader is dark. Windows a
+    // retraction reopened come back only after their wait (reopen.js), those below the
+    // horizon first.
     async pendingWindows(nowSec){
         let current = this.windowStartFor(nowSec);
-        let out = [];
+        let reopened = await this.reopenedState();
+        let out = this.reopenedBelowHorizon(current, reopened);
         for(let i = MAX_CATCHUP_WINDOWS; i >= 1; i--){
             let start = current - i * this.windowS;
             if(start < 0) continue;
@@ -78,6 +81,10 @@ module.exports = {
                 if(!(await this.skippedWindowHasRows(start))) continue;
                 marker = null;
                 reopenedSkipped = true;
+            }
+            if(marker && String(marker.status) === 'reopened'){
+                if(this.reopenedReady(start, reopened.tip)) out.push({ windowStart: start, age: i - 1, reopened: true });
+                continue;
             }
             if(marker && String(marker.status) !== 'intent') continue;   // sent, landed or dead-lettered
             if(marker){
@@ -125,8 +132,9 @@ module.exports = {
     },
 
     // Publish one window, or leave it for a later attempt. Returns true only when a
-    // batch for this window actually went out.
-    async publishWindow(windowStart, age, reopenedSkipped){
+    // batch for this window actually went out. `reopenedFrom` names the marker status
+    // ('skipped' or 'reopened') the pre-send claim must remove, or is absent.
+    async publishWindow(windowStart, age, reopenedFrom){
         let windowEnd = this.windowEndFor(windowStart);
         let rows = await this.readWindowRows(windowStart, windowEnd);
         if(rows === null) return false;
@@ -136,7 +144,7 @@ module.exports = {
             return false;
         }
 
-        if(!reopenedSkipped) this.reportCoverageGap(windowStart);
+        if(!reopenedFrom) this.reportCoverageGap(windowStart);
 
         if(rows.length > abw.ATTEST_BATCH_MAX_ROWS){
             this.deadLetterOverCap(windowStart, windowEnd, rows.length);
@@ -183,7 +191,7 @@ module.exports = {
             return false;
         }
 
-        return await this.signAndBroadcastWindow(window, batchKey, reopenedSkipped);
+        return await this.signAndBroadcastWindow(window, batchKey, reopenedFrom);
     },
 
     // A row-bearing window below a newer marker is one an earlier sweep walked past.
@@ -216,7 +224,7 @@ module.exports = {
     // The second half of publishWindow, from the signing round on: a window this hub
     // has decided it is this one's turn to publish either reaches a quorum and goes out
     // as encoded wires, or leaves the table untouched for a later attempt.
-    async signAndBroadcastWindow(window, batchKey, reopenedSkipped){
+    async signAndBroadcastWindow(window, batchKey, reopenedFrom){
         let windowStart = window.window_start;
         let windowEnd   = window.window_end;
         let rows        = window.rows;
@@ -255,7 +263,7 @@ module.exports = {
         // complete that read before either one sends.
         let claimed = Object.create(this);
         claimed.recordIntent = async (candidate, key) => {
-            if(!(await this.claimWindowForBroadcast(candidate, key, reopenedSkipped))){
+            if(!(await this.claimWindowForBroadcast(candidate, key, reopenedFrom))){
                 let error = new Error('window already has a durable publication claim');
                 error.code = 'ATTEST_BATCH_WINDOW_CLAIMED';
                 throw error;
@@ -269,18 +277,22 @@ module.exports = {
     // marker row from every other attempt on it. This runs inside broadcastWindow after
     // its pipeline, balance and spend reservations have passed, preserving the rule
     // that a window unable to attempt a send leaves no intent marker.
-    async claimWindowForBroadcast(window, batchKey, reopenedSkipped){
+    async claimWindowForBroadcast(window, batchKey, reopenedFrom){
         let db = this.hubDb();
         if(!db || typeof db.doQuery !== 'function')
             throw new Error('no hub DB for durable batch-window claim');
 
         // A tracking row is a coverage floor, not a publication claim. A reopened
-        // skipped row stays in place through every deferral and must be the exact row
-        // removed at this pre-send claim. Either guarded delete leaves outcomes alone.
-        let status = reopenedSkipped ? 'skipped' : 'tracking';
+        // skipped or retracted row stays in place through every deferral and must be the
+        // exact row removed at this pre-send claim. Every guarded delete leaves outcomes alone.
+        let status = reopenedFrom || 'tracking';
         let removed = await db.deleteAttestPublishedBatch(
             this.network, window.window_start, status);
-        if(reopenedSkipped && (!removed || Number(removed.affectedRows) !== 1)) return false;
+        if(reopenedFrom && (!removed || Number(removed.affectedRows) !== 1)) return false;
+        if(reopenedFrom === 'reopened'){
+            this._reopenedOffers.delete(Number(window.window_start));
+            this.forgetReopened(window.window_start);
+        }
         let result = await db.setAttestPublishedBatchByNetwork(
             this.network, window.window_start, window.window_end,
             batchKey, window.row_count, 'intent');

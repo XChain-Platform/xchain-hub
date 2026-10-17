@@ -186,6 +186,22 @@ function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHoldsPart1() {
     expect(reads[0].params).to.deep.equal(['regtest', 'BTC', 41, 42, 43]);
     expect(reads[0].sql).to.contain("status <> 'retracted'");
   });
+  it('throws when a failed chain read cannot return a pending page', async function () {
+    const { engine } = makeEngine();
+    engine.indexerCall = sinon.stub().rejects(new Error('BTC indexer unavailable'));
+    let error;
+    try { await engine.pollPendingTransfers('BTC', 150, new Map()); }
+    catch(e){ error = e; }
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).to.equal('BTC indexer unavailable');
+
+    engine.indexerCall = sinon.stub().resolves({ network: 'regtest', transfers: [] });
+    error = null;
+    try { await engine.pollPendingTransfers('BTC', 150, new Map()); }
+    catch(e){ error = e; }
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).to.equal('invalid pending transfer response from BTC');
+  });
 }
 function registerFeature5thePendingPollAgainstLegsThisHubAlreadyHolds() {
   describe('the pending poll against legs this hub already holds', function () {

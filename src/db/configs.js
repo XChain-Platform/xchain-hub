@@ -179,10 +179,12 @@ module.exports = {
         // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
         // appears as an abbreviation-keyed phantom coin in the served config tree.
         let key = normalizeCoin(coin);
-        await this.setParam(key, net, 'chain_tips', 'block_height', String(blockHeight));
-        await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
-        if(typeof chainId === 'string' && chainId)
-            await this.setParam(key, net, 'chain_tips', 'chain_id', chainId);
+        // One statement, so a concurrent getChainTip never pairs the new height with the
+        // old block_time (which dates the pushed tip's freshness) or the old chain_id.
+        let tipParam = (paramName, paramValue) => ({ coin: key, network: net, module: 'chain_tips', paramName, paramValue });
+        let rows = [tipParam('block_height', String(blockHeight)), tipParam('block_time', String(blockTime))];
+        if(typeof chainId === 'string' && chainId) rows.push(tipParam('chain_id', chainId));
+        await this.setParams(rows);
     },
 
     // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.

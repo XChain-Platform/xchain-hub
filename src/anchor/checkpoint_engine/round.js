@@ -35,18 +35,24 @@ const logger = getLogger();
 // sequence at or below the highest one already seated, so an evicted sequence is fenced
 // by the DB as soon as any later checkpoint finalizes.
 const CHECKPOINT_SIGNED_SEQ_MEMORY = 512;
+// Re-leads of one timed-out round at its snapshot block before the cadence moves on.
+const CHECKPOINT_ROUND_RETRIES = 3;
+// Ticks a failed leader self-accept is re-run on, and how many distinct ones are held.
+const CHECKPOINT_SELF_ACCEPT_RETRIES = 30;
+const CHECKPOINT_SELF_ACCEPT_MEMORY  = 64;
 
 module.exports = {
 
-    async runRound(chain, snapshotBlock, validators){
-        // Checkpoint the chain's tip minus a confirmation margin, so every peer's
-        // indexer/replica has indexed the block and a shallow reorg can't race the round.
-        let tip = await this.indexerCall(chain, 'getblockhashes', {});
-        if(!tip || tip.block_index == null) throw new Error('no tip block hashes from ' + chain + ' indexer');
-        let target = Number(tip.block_index) - this.confirmations;
-        if(target < 0) target = Number(tip.block_index);
-        let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
-        if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
+    // `retry` ({ attempt, blockIndex }) marks a re-lead of a round that timed out unfinalized.
+    async runRound(chain, snapshotBlock, validators, retry){
+        let bh = await this.roundTargetBlock(chain);
+
+        // A retry re-proposes the SAME payload. If the tip moved the target off the timed-out
+        // block, a re-lead would be a second payload at the sequence (refused, and logged as
+        // equivocation); drop it, the signatures on the first payload cannot be reused anyway.
+        // A round that threw before proposing has no block yet (blockIndex null) and signed
+        // nothing, so its retry proposes whatever the indexer serves now.
+        if(retry && retry.blockIndex != null && Number(bh.block_index) !== Number(retry.blockIndex)) return;
 
         let network = String(bh.network || '');
         if(!network) throw new Error(chain + ' indexer returned no network (refusing a network-agnostic checkpoint)');
@@ -74,9 +80,13 @@ module.exports = {
         // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
         this.assertCheckpointNetwork(cp, 'propose');
+        // The interval rule, re-read here because a peer's FINALIZED or this hub's own
+        // co-signature on another round of the interval may have landed during the reads above.
+        if(this.declinesOwnRound(cp)) return;
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
         if(!this.claimSeqSignature(cp, canonical)) return;
+        this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
@@ -86,11 +96,30 @@ module.exports = {
         // Single-node self-sign fast path. Below SWQ this is snapCount<=1 (one row).
         let soleSelf = this.isSoleSelfFederation(validators, myPubkey);
         if(snapCount <= 1 || (weighted && soleSelf)){
-            await this.acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
+            await this.acceptSoleSelf(cp, [{ pubkey: myPubkey, sig: mySig }], quorum);
             return;
         }
 
-        this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig });
+        this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt: retry ? retry.attempt : 0 });
+    },
+
+    // Checkpoint the chain's tip minus a confirmation margin, so every peer's
+    // indexer/replica has indexed the block and a shallow reorg can't race the round.
+    async roundTargetBlock(chain){
+        let tip = await this.indexerCall(chain, 'getblockhashes', {});
+        if(!tip || tip.block_index == null) throw new Error('no tip block hashes from ' + chain + ' indexer');
+        let target = Number(tip.block_index) - this.confirmations;
+        if(target < 0) target = Number(tip.block_index);
+        let bh = (target === Number(tip.block_index)) ? tip : await this.indexerCall(chain, 'getblockhashes', { block_index: target });
+        if(!bh || bh.block_index == null || !bh.block_hash) throw new Error('no block hashes for ' + chain + ' @ ' + target);
+        return bh;
+    },
+
+    // No peer holds a sole-self checkpoint, so a failed write is queued for retry and still
+    // thrown, which meters the round failure for this chain.
+    async acceptSoleSelf(cp, sigs, quorum){
+        try { await this.acceptFinalized(cp, sigs, quorum, true); }
+        catch(e){ this.queueSelfAccept(cp, sigs, quorum, e); throw e; }
     },
 
     // The checkpoint record a leader proposes from its own indexer's block hashes `bh` at
@@ -134,7 +163,7 @@ module.exports = {
     // Open the leader's round for a proposal that needs peer signatures: the pending entry
     // and its timeout, the SIGN_REQ, then a quorum check the leader's own signature seeds.
     openLeaderRound(round){
-        let { id, cp, canonical, quorum, weighted, validators, myPubkey, mySig } = round;
+        let { id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt } = round;
         // Re-map to the signer-verification shape, preserving the truncation flag so
         // checkQuorum's meetsStakeThreshold still fails closed on an over-cap snapshot
         // (the .map would otherwise drop it, same defect class as the resolver above).
@@ -153,14 +182,25 @@ module.exports = {
             if(!pending.done){
                 this._roundTimeouts++;
                 logger.warn('StateCheckpointEngine: round ' + id + ' timed out at ' +
-                    pending.signatures.size + '/' + quorum + ' sigs, retrying next cadence; missing: ' +
+                    pending.signatures.size + '/' + quorum + ' sigs, retrying; missing: ' +
                     this.missingSigners(pending));
+                this.queueRoundRetry(cp, attempt || 0);
             }
         }, this.roundTimeoutMs);
         if(pending.timer.unref) pending.timer.unref();
 
         this.peerManager.broadcast(XCHK_SIGN_REQ, { checkpoint: cp, sig_pubkey: myPubkey, sig: mySig });
         this.checkQuorum(id);
+    },
+
+    // Remember a timed-out (or thrown) round so the next tick re-leads it at the same
+    // snapshot block. tick treats a tip still at this hub's attempt as already led, so
+    // without this a frozen tip never re-leads and the chain is never checkpointed.
+    // Bounded per chain.
+    queueRoundRetry(cp, attempt){
+        if(attempt >= CHECKPOINT_ROUND_RETRIES) return;
+        if(!this._roundRetries) this._roundRetries = new Map();
+        this._roundRetries.set(cp.chain, { snapshotBlock: cp.snapshot_block, blockIndex: cp.block_index, attempt: attempt + 1 });
     },
 
     // The validators that did not sign a timed-out round, sorted and deduped (a weighted
@@ -195,11 +235,54 @@ module.exports = {
         pending.done = true;
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
         this.pending.delete(id);
+        // A checkpoint inside this interval finalized while the signatures came in (two
+        // slot holders led one interval): this round yields and no retry is queued.
+        if(this.declinesOwnRound(pending.cp)) return;
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
         this.peerManager.broadcast(XCHK_FINALIZED, { checkpoint: pending.cp, signatures: sigs });
         this.acceptFinalized(pending.cp, sigs, pending.quorum, true)
-            .catch(e => logger.error('StateCheckpointEngine: accept error: ' + (e && e.message)));
+            .catch(e => this.queueSelfAccept(pending.cp, sigs, pending.quorum, e));
+    },
+
+    // Hold a leader self-accept that failed after quorum (a DB blip on the snapshot or the
+    // checkpoint write) so the next tick writes the row again. Peers persist it from the
+    // FINALIZED broadcast; without this the leader alone would lack it until a restart.
+    queueSelfAccept(cp, sigs, quorum, err){
+        if(!this._selfAcceptRetries) this._selfAcceptRetries = new Map();
+        this._selfAcceptFailures = (this._selfAcceptFailures || 0) + 1;
+        let id   = this.roundId(cp);
+        let held = this._selfAcceptRetries.get(id);
+        this._selfAcceptRetries.set(id, { cp: cp, sigs: sigs, quorum: quorum, attempts: held ? held.attempts : 0 });
+        while(this._selfAcceptRetries.size > CHECKPOINT_SELF_ACCEPT_MEMORY){
+            this._selfAcceptRetries.delete(this._selfAcceptRetries.keys().next().value);
+            this._selfAcceptsAbandoned = (this._selfAcceptsAbandoned || 0) + 1;
+        }
+        logger.error('StateCheckpointEngine: accept error (leader, ' + id + '), retrying on the next tick: ' + (err && err.message));
+    },
+
+    // Re-run each held self-accept once. Safe to repeat: the writes are INSERT IGNORE, and a
+    // different payload already seated at the sequence returns without writing anything.
+    async retryFailedSelfAccepts(){
+        if(!this._selfAcceptRetries || this._selfAcceptRetries.size === 0) return;
+        for(let [id, held] of [...this._selfAcceptRetries]){
+            try {
+                await this.acceptFinalized(held.cp, held.sigs, held.quorum, true);
+                this._selfAcceptRetries.delete(id);
+                this.clearRoundFailure(held.cp.chain);
+            } catch(e){
+                this._selfAcceptFailures = (this._selfAcceptFailures || 0) + 1;
+                held.attempts++;
+                if(held.attempts < CHECKPOINT_SELF_ACCEPT_RETRIES){
+                    logger.warn('StateCheckpointEngine: leader accept retry ' + held.attempts + ' failed for ' + id + ': ' + (e && e.message));
+                    continue;
+                }
+                this._selfAcceptRetries.delete(id);
+                this._selfAcceptsAbandoned = (this._selfAcceptsAbandoned || 0) + 1;
+                logger.error('StateCheckpointEngine: gave up writing leader checkpoint ' + id + ' after ' +
+                             held.attempts + ' retries (peer catch-up restores it on reconnect or restart): ' + (e && e.message));
+            }
+        }
     },
 
     roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; },
@@ -214,8 +297,8 @@ module.exports = {
     // flight and re-proposes a new block at the same snapshot_block, and for a reorg that
     // moves the block under one: both are indistinguishable from equivocation to every
     // peer, and the signatures already collected on the first payload can still be
-    // assembled by anyone. The cost is that one round; the cadence latch has already
-    // advanced, so the next snapshot_block checkpoints normally.
+    // assembled by anyone. The cost is that one round; the next block's cadence leader
+    // retries the interval, since only a FINALIZED checkpoint moves the latch.
     claimSeqSignature(cp, canonical){
         let key  = cp.chain + '|' + cp.network + '|' + Number(cp.checkpoint_seq);
         let held = this._signedAtSeq.get(key);

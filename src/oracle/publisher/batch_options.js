@@ -25,7 +25,7 @@
 
 const hubConfig = require('../../config');
 const { positiveIntConfig } = require('../../lib/config_int.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../../constants.js');
+const { resolveRoundCadence } = require('../round_cadence.js');
 const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
         LEGACY_BATCH_WINDOW_ROUNDS } = require('../price_batch_cadence.js');
@@ -131,9 +131,7 @@ module.exports = {
     // honouring it does not give the operator a cheaper rail, it gives them a chain
     // whose fees cannot be priced.
     initBatchWindow(cfg) {
-        this.roundIntervalMs      = positiveIntConfig(
-            hubConfig.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
-            DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
+        this.roundIntervalMs      = resolveRoundCadence(cfg).roundInterval;
         this.batchLandingReserveMs = nonNegativeIntConfig(
             hubConfig.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
             DEFAULT_BATCH_LANDING_RESERVE_MS, 'ORACLE_BATCH_LANDING_RESERVE_MS');

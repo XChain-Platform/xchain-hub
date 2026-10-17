@@ -155,9 +155,9 @@ function registerSplitSuitePart1() {
     pub.getActiveOraclePublishPubkeys = async () => [me];
     pub.getNextBatchSeq = async () => 3;
     let captured = null;
-    pub.archiveElectionKey = (cp, batchSeq) => {
+    pub.archiveElectionKey = (cp) => {
       captured = cp;
-      return 'k|' + batchSeq;
+      return 'k';
     };
     pub.rankUnlocked = () => false; // bail right after the wrapper pick
 

@@ -42,7 +42,7 @@ module.exports = {
     // Bitcoin indexer has never called `pushchaintip`, which is a one-line
     // configuration gap that otherwise presents as every window deferring forever with
     // nothing on chain and no coverage.
-    // TWO SOURCES, PUSHED FIRST. A `chain_tips` row exists only on the hub a Bitcoin
+    // TWO SOURCES, PUSHED FIRST. A fresh `chain_tips` row exists only on the hub a Bitcoin
     // indexer pushes to, and a federation that shares one indexer has exactly one such
     // hub; measured on testnet 2026-09-07, four of five validators deferred every
     // window and refused every co-sign for want of it, so no batch could reach its
@@ -52,28 +52,21 @@ module.exports = {
     // widening step already trust. The pushed row keeps precedence where it exists so
     // the one hub that has it behaves exactly as before.
     async resolveAnchor(){
-        let db = this.hubDb();
-        if(!db){
-            this._anchorFailure = 'this hub has no database handle';
-            return null;
-        }
-        let tip = null, pushedFailure;
+        let tip = null, pushedFailure = null;
         try {
-            if(typeof db.getChainTip !== 'function'){
-                this._anchorFailure = 'the database layer exposes no getChainTip()';
-                return null;
-            }
-            tip = await db.getChainTip('BTC', this.network);
+            tip = this.hub && typeof this.hub.resolveFreshPushedBtcTip === 'function'
+                ? await this.hub.resolveFreshPushedBtcTip(this.network) : null;
         } catch(e){
-            this._anchorFailure = 'reading the BTC chain tip failed (' + (e && e.message) + ')';
-            return null;
+            pushedFailure = 'resolving the fresh pushed BTC chain tip failed (' + (e && e.message) + ')';
         }
         let n = Number(tip && tip.blockHeight);
         if(Number.isFinite(n) && n > 0) return this.anchorResolved(Math.trunc(n), 'pushed');
-        pushedFailure = tip
-            ? 'the BTC chain_tips row holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
-            : 'no BTC chain_tips row exists for network ' + (this.network || '<unset>') +
-              '; the Bitcoin indexer has not called pushchaintip on this hub';
+        if(!pushedFailure){
+            pushedFailure = tip
+                ? 'the fresh pushed BTC tip holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
+                : 'no fresh BTC chain_tips row exists for network ' + (this.network || '<unset>') +
+                  '; the Bitcoin indexer may not have called pushchaintip on this hub';
+        }
 
         let observed = this.observedBtcTip();
         let o = Number(observed && observed.blockHeight);

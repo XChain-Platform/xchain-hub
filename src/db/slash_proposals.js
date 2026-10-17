@@ -48,7 +48,7 @@ module.exports = {
     // any status.
     // Moved here from src/validators/slash_detector.js:471.
     async findRecentSlashProposalsByValidator(validatorPubkey) {
-        return this.doQuery("SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50", [validatorPubkey]);
+        return this.doQuery("SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC, id DESC LIMIT 50", [validatorPubkey]);
     },
 
     // Reads rows from slash_proposals, narrowed to whichever of status and validator

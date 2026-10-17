@@ -35,7 +35,7 @@
 //         DOGE at depth before the suppressing column is written, and because the
 //         announcement rides at 0 confirmations the back-fill splits - the seq stamps
 //         now under the '__partial__' sentinel (which keeps the rows eligible) and the
-//         announced statuses + txid stamp later, from the same V0_DONE-style
+//         announced statuses + txid stamp later, from the same BUNDLE_DONE-style
 //         defer-and-re-verify queue.
 
 const { expect }           = require('chai');

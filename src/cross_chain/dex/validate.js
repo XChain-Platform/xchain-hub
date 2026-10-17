@@ -43,8 +43,9 @@ module.exports = {
         await offerLists.prepareOfferLists(this, [a, b], Number(row.snapshot_block));
         // Re-derive the WHOLE match (kind, fill amounts, filled-before offsets, match_id)
         // independently from our own view: offers + our committed ledger. The proposer's
-        // a/b are canonical (a_chain <= b_chain), so tryMatch(a, b) keeps lo=a, hi=b.
-        let desc = this.tryMatch(a, b);
+        // a/b are canonical (a_chain <= b_chain), so tryMatch(a, b) keeps lo=a, hi=b. The
+        // price-cross era is the proposed row's snapshot_block, as on the leader.
+        let desc = this.tryMatch(a, b, Number(row.snapshot_block));
         if(!desc) return false;
         if(desc.loKind !== row.a_kind || desc.hiKind !== row.b_kind) return false;
         if(!this.amountsEqual(desc.loFill, row.a_amount) || !this.amountsEqual(desc.hiFill, row.b_amount)) return false;

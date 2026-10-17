@@ -103,6 +103,7 @@ const electionPart = require('./round/election.js');
 const publishPart  = require('./round/publish.js');
 const railPart     = require('./round/doge_rail.js');
 const recordsPart  = require('./round/records.js');
+const deliveryPart = require('./round/delivery.js');
 const { MAX_PAIRS_PER_ACTION, ACTION_DATA_CEILING, BYTES_PER_PAIR, XROLLCALL_SIGN } = wirePart;
 
 // Per-network defaults for the three publish tunables. These are hub POLICY, not
@@ -345,6 +346,7 @@ function initRoundState(self){
     // separate self-publish commitments. The rounds map is empty after a
     // restart, so it cannot answer either question.
     self._committed     = new Set();  // key: <epoch> | <epoch>:self
+    self.initDeliveryMemory();      // round/delivery.js, rebuilt from the spend log
     self._timer         = null;
     self._ticking       = false;
     self._loggedNoBroadcast = false;
@@ -374,7 +376,7 @@ function installParts(target, parts) {
 
 wirePart.bindRoundClass(RollcallRound);
 installParts(RollcallRound.prototype, [wirePart.methods, epochPart, gossipPart, regossipPart, electionPart,
-                                       publishPart, railPart, recordsPart]);
+                                       publishPart, railPart, recordsPart, deliveryPart]);
 installParts(RollcallRound, [wirePart.statics]);
 
 module.exports = Object.assign(RollcallRound, {

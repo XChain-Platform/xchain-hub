@@ -130,12 +130,15 @@ function registerChainTipHelpersTests() {
     describe('chain tip helpers', function () {
         it('setChainTip normalizes the coin abbreviation to its full name, defaulting network to mainnet', async function () {
             const { db } = makeDb();
-            const setParam = sinon.stub(db, 'setParam').resolves();
+            const setParams = sinon.stub(db, 'setParams').resolves(2);
             await db.setChainTip('BTC', null, 840000, 1718000000);
             // 'BTC' normalizes to 'bitcoin' so chain_tips co-locate under the
             // canonical coin key (not a phantom abbreviation-keyed coin).
-            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_height', '840000')).to.be.true;
-            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_time', '1718000000')).to.be.true;
+            expect(setParams.calledOnce).to.be.true;
+            expect(setParams.firstCall.args[0]).to.deep.equal([
+                { coin: 'bitcoin', network: 'mainnet', module: 'chain_tips', paramName: 'block_height', paramValue: '840000' },
+                { coin: 'bitcoin', network: 'mainnet', module: 'chain_tips', paramName: 'block_time', paramValue: '1718000000' }
+            ]);
         });
 
         it('getChainTip returns null when no tip has been set', async function () {
@@ -225,11 +228,27 @@ function registerGetConfigWatermarkTests() {
     });
 }
 
+function registerAnchorStampSweepQueryTests() {
+    describe('anchor stamp sweep query', function () {
+        it('selects only matching local stamps at or below the DOGE height bound', async function () {
+            const { db, mockConn } = makeDb();
+            const rows = [{ chain: 'BTC', txid: 'ab'.repeat(32) }];
+            mockConn.query.resolves(rows);
+
+            expect(await db.findOwnAnchorCheckpointStamps(900)).to.equal(rows);
+            const [sql, args] = mockConn.query.firstCall.args;
+            expect(sql).to.include('apc.sent_doge_height <= ?');
+            expect(sql).to.include('sc.anchor_txid = apc.txid');
+            expect(args).to.deep.equal([900]);
+        });
+    });
+}
+
 describe('Database: extended coverage', function () {
     registerDatabaseHooks();
     registerGetConnectionTests();
     registerChainTipHelpersTests();
     registerGetAllConfigsIncrementalCursorTests();
     registerGetConfigWatermarkTests();
+    registerAnchorStampSweepQueryTests();
 });
-

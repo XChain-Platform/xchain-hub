@@ -161,7 +161,7 @@ module.exports = {
         }
         if (where.length) query += " WHERE " + where.join(" AND ");
         let lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
-        query += " ORDER BY created_at DESC LIMIT " + lim;
+        query += " ORDER BY created_at DESC, id DESC LIMIT " + lim;
         return this.doQuery(query, args);
     },
 

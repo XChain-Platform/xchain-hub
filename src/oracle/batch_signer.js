@@ -43,7 +43,7 @@ const swq               = require('../consensus/stake_weighted_quorum.js');
 const gateRegistry      = require('../consensus/gate_registry');
 const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
 const { positiveIntConfig } = require('../lib/config_int.js');
-const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('../constants.js');
+const { resolveRoundCadence } = require('./round_cadence.js');
 const hubConfig         = require('../config');
 const { maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
@@ -85,9 +85,7 @@ function nonNegativeInt(raw, dflt) {
 }
 
 function signerWindowPlan(network, cfg, enabled) {
-    let roundIntervalMs = positiveIntConfig(
-        hubConfig.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
-        DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
+    let roundIntervalMs = resolveRoundCadence(cfg).roundInterval;
     let graceMs = positiveIntConfig(
         hubConfig.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
         300000, 'ORACLE_BATCH_GRACE_MS');

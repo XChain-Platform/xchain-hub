@@ -45,7 +45,7 @@ describe('StateAnchorPublisher', function () {
 });
 
 // XANC-V0DONE partial: the peer back-fill UPDATE now keys on checkpoint_seq, exactly like
-// the publisher's own stamp, so one V0_DONE cannot mark a DIFFERENT/other seq row at the
+// the publisher's own stamp, so one BUNDLE_DONE cannot mark a DIFFERENT/other seq row at the
 // height. (The full suppression fix - verifying the announced txid on-chain - is an open item.)
 function registerBundleDoneStampCase() {
     it('handleBundleDone: stamps anchor_txid keyed on checkpoint_seq', async function () {

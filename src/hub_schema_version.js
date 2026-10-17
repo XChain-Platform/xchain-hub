@@ -19,12 +19,12 @@
  * when ANY table in the indexer's mirror set gains a DDL change a stale indexer
  * cannot interpret, and equally when the mirror SET itself gains a table (a table
  * a stale indexer does not know about is a row shape it cannot interpret either,
- * it just fails by omission instead of by column). As of now that set is eleven
+ * it just fails by omission instead of by column). As of now that set is twelve
  * tables: oracle_prices, price_snapshots, cross_chain_matches, cross_chain_calls,
  * capability_snapshots, state_checkpoints, anchor_reward_attestations,
- * attestation_responses, bridge_transfers, policy_snapshots, list_snapshots (see
- * xchain-indexer/src/hub/hub_db_sync/mirror_tables.js RETRACTION_COLUMNS +
- * CROSS_CHAIN_TABLES + HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
+ * attestation_responses, bridge_transfers, policy_snapshots, list_snapshots,
+ * remote_token_snapshots (see MIRRORED_TABLES in
+ * xchain-indexer/src/hub/hub_db_sync/mirror_tables.js). oracle_prices and cross_chain_matches gate the settlement
  * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
  * is a ledger-fork risk. The indexer rejects a version mismatch so a hub-side
  * column added before the indexer migrates cannot be silently dropped and fork
@@ -127,6 +127,40 @@
 // v9 ROLL: the v8 order stands. This hub rolls FIRST and stamps 9, then every
 // indexer and the explorer roll back to back behind it. The whole roll completes
 // BELOW every network's LIST_META_ACTIVATION height.
-const HUB_SCHEMA_VERSION = 9;
+//
+// v10: the mirror set gained remote_token_snapshots, the validator-signed
+// remote-token records (tick, decimals and owner per source action). Like v3,
+// the table entered the mirror set under v9 without a bump of its own, so a v9
+// reader missing it was not refused; v10 restores the gate. A v9 reader cannot
+// be told apart from a current one on the wire otherwise, and a stream it
+// half-understands is the fork shape this handshake exists to refuse. A stale
+// reader must reject this stream until it has the table: an indexer gets it
+// from the 2026-10-09-remote-token-snapshots migration (mode=auto, applied at
+// startup, not a deploy precondition), and a vendored mirror client creates it
+// from its hub-mirror copy of the same table.
+//
+// v10 ROLL: the v9 order stands. This hub rolls FIRST and stamps 10, then every
+// indexer and the explorer roll back to back behind it.
+//
+// v10 PEER CATCH-UP RULE: a peer hub still on v9 is stale, not compatible. It
+// catches up by rolling to v10 and only then replaying peer catch-up rows; a
+// row or snapshot stamped with any other version is refused whole, never
+// coerced or partially applied, so a lagging peer halts instead of forking.
+//
+// v11: remote_token_snapshots gained admit_block_btc, admit_block_ltc and admit_block_doge,
+// the signed admission map a pin carries from remote_token_admission_activation. A v10
+// reader drops the columns on apply, so on an armed venue it could not bind a pin to the
+// block it was admitted at, and a v10 hub serves no admission map at all; strict equality
+// refuses both pairings by name instead. An indexer gets the columns from the
+// 2026-10-14-remote-token-admission migration (mode=auto, applied at startup), and the
+// explorer from its later-column mirror migration.
+//
+// v11 ROLL: the v10 order stands. The hub rolls FIRST and stamps 11, then every indexer and
+// the explorer roll back to back behind it. The whole roll completes BELOW every network's
+// remote_token_admission_activation height.
+//
+// v11 PEER CATCH-UP RULE: the v10 rule stands one version on. A peer hub still on v10 is
+// stale; it rolls to v11 before it replays peer catch-up rows.
+const HUB_SCHEMA_VERSION = 11;
 
 module.exports = { HUB_SCHEMA_VERSION };

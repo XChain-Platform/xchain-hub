@@ -170,7 +170,7 @@ class Prices {
         // quote and every health poll, so a per-call line would bury the log.
         if (v !== pinned && !this._warnedOracleMaxAgeOverride) {
             this._warnedOracleMaxAgeOverride = true;
-            logger.info('WARNING: ORACLE_MAX_PRICE_AGE_SECONDS=' + v + ' is set but IGNORED on ' +
+            logger.warn('WARNING: ORACLE_MAX_PRICE_AGE_SECONDS=' + v + ' is set but IGNORED on ' +
                 (this.network || '<unset>') + '; using the consensus-pinned bound (' + pinned + '). ' +
                 'To change the staleness gate, change the pinned coin bundle.');
         }

@@ -41,13 +41,17 @@ const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
 
-// Bounded retry for persisting a quorum-finalized attestation.
-// Sized to ride out a DB blip well inside DEFAULT_ATTESTATION_TIMEOUT, which
-// remains the terminal backstop for a store that never lands.
+// Bounded retry for persisting a quorum-finalized attestation, sized to ride out a DB blip.
+// A burst that still fails hands the round to the store re-drive below, never to the round timer.
 const DEFAULT_STORE_RETRY_ATTEMPTS = 4;
 
 const DEFAULT_STORE_RETRY_BASE_MS  = 100;
 
 const STORE_RETRY_MAX_DELAY_MS     = 2000;
 
-module.exports = { XCHAIN_ATTEST_PROPOSE, XCHAIN_ATTEST_PREPARE, XCHAIN_ATTEST_COMMIT, DEFAULT_CONFIRMATIONS, ALLOWED_CHAINS, DEFAULT_ATTESTATION_TIMEOUT, DEFAULT_STORE_RETRY_ATTEMPTS, DEFAULT_STORE_RETRY_BASE_MS, STORE_RETRY_MAX_DELAY_MS };
+// Backoff for re-driving the store of a round that reached commit quorum, until the row lands.
+const STORE_REDRIVE_BASE_MS = 1000;
+
+const STORE_REDRIVE_MAX_MS  = 30000;
+
+module.exports = { XCHAIN_ATTEST_PROPOSE, XCHAIN_ATTEST_PREPARE, XCHAIN_ATTEST_COMMIT, DEFAULT_CONFIRMATIONS, ALLOWED_CHAINS, DEFAULT_ATTESTATION_TIMEOUT, DEFAULT_STORE_RETRY_ATTEMPTS, DEFAULT_STORE_RETRY_BASE_MS, STORE_RETRY_MAX_DELAY_MS, STORE_REDRIVE_BASE_MS, STORE_REDRIVE_MAX_MS };

@@ -97,9 +97,73 @@ function registerMonitorTests() {
     });
 }
 
+function registerSnapshotRetryTests(state) {
+    it('retries two 429s in one read and records only the success', async function () {
+        const { axiosStub, snap } = state;
+        axiosStub.post.onCall(0).rejects(err(429));
+        axiosStub.post.onCall(1).rejects(err(429));
+        axiosStub.post.onCall(2).resolves({ data: { result: {
+            block_index: 94, count: 0, validators: [] } } });
+
+        const result = await snap.getActiveValidatorSnapshot(100);
+
+        expect(result).to.include({ blockIndex: 94, count: 0 });
+        expect(axiosStub.post.callCount).to.equal(3);
+        expect(snap.monitor.failures).to.equal(0);
+        expect(snap.monitor.ok).to.equal(1);
+    });
+
+    it('records one rate-limited failure after three attempts are exhausted', async function () {
+        const { axiosStub, snap } = state;
+        axiosStub.post.rejects(err(429));
+        expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
+        expect(axiosStub.post.callCount).to.equal(3);
+        expect(snap.monitor.byReason.rate_limited).to.equal(1);
+        expect(snap.monitor.failures).to.equal(1);
+    });
+
+    it('does not retry a non-429 HTTP failure', async function () {
+        const { axiosStub, snap } = state;
+        axiosStub.post.rejects(err(500));
+        expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
+        expect(axiosStub.post.callCount).to.equal(1);
+        expect(snap.monitor.byReason.http_error).to.equal(1);
+    });
+}
+
+function registerSnapshotWindowTests(state) {
+    it('sends no further request while backed off after retry exhaustion', async function () {
+        const { axiosStub, snap } = state;
+        axiosStub.post.rejects(err(429));
+        expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
+        expect(axiosStub.post.callCount).to.equal(3);
+
+        expect(await snap.getActiveValidatorSnapshot(101)).to.equal(null);
+        expect(await snap.getActiveWeightSnapshot(101)).to.equal(null);
+        expect(await snap.getSnapshot('attestation', 120)).to.equal(null);
+        expect(await snap.getWeightSnapshot('attestation', 120)).to.equal(null);
+        expect(axiosStub.post.callCount).to.equal(3);
+        expect(snap.monitor.failures).to.equal(1);
+    });
+
+    it('fetches again once the window has passed', async function () {
+        const { axiosStub, snap } = state;
+        axiosStub.post.onCall(0).rejects(err(429));
+        axiosStub.post.onCall(1).rejects(err(429));
+        axiosStub.post.onCall(2).rejects(err(429));
+        axiosStub.post.onCall(3).resolves({ data: { result: {
+            block_index: 94, count: 0, validators: [] } } });
+        expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
+        snap.monitor.backoffUntil = 0;
+        const res = await snap.getActiveValidatorSnapshot(100);
+        expect(res).to.not.equal(null);
+        expect(axiosStub.post.callCount).to.equal(4);
+    });
+}
+
 function registerSnapshotTests() {
     describe('CapabilitySnapshot', function () {
-        let axiosStub, snap;
+        const state = {};
         const hub = {
             resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
             btcIndexerHeaders: () => ({})
@@ -107,41 +171,18 @@ function registerSnapshotTests() {
         const noMinStake = () => ({ ok: true, minStake: null });
 
         beforeEach(function () {
-            axiosStub = { post: sinon.stub() };
+            state.axiosStub = { post: sinon.stub() };
             const logStub = { debug() {}, info() {}, warn() {}, error() {} };
             const CapabilitySnapshot = proxyquire('../../../src/validators/capability_snapshot', {
-                axios: axiosStub,
+                axios: state.axiosStub,
                 '../observability': { getLogger: () => logStub, '@global': true }
             });
-            snap = new CapabilitySnapshot(hub);
-            snap.snapshotThreshold = noMinStake;
+            state.snap = new CapabilitySnapshot(hub);
+            state.snap.snapshotThreshold = noMinStake;
         });
         afterEach(function () { sinon.restore(); });
-
-        it('sends no further request while backed off after a 429', async function () {
-            axiosStub.post.rejects(err(429));
-            expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
-            expect(axiosStub.post.callCount).to.equal(1);
-            expect(snap.monitor.byReason.rate_limited).to.equal(1);
-
-            expect(await snap.getActiveValidatorSnapshot(101)).to.equal(null);
-            expect(await snap.getActiveWeightSnapshot(101)).to.equal(null);
-            expect(await snap.getSnapshot('attestation', 120)).to.equal(null);
-            expect(await snap.getWeightSnapshot('attestation', 120)).to.equal(null);
-            expect(axiosStub.post.callCount).to.equal(1);
-            expect(snap.monitor.failures).to.equal(1);
-        });
-
-        it('fetches again once the window has passed', async function () {
-            axiosStub.post.onFirstCall().rejects(err(429));
-            axiosStub.post.onSecondCall().resolves({ data: { result: {
-                block_index: 94, count: 0, validators: [] } } });
-            expect(await snap.getActiveValidatorSnapshot(100)).to.equal(null);
-            snap.monitor.backoffUntil = 0;
-            const res = await snap.getActiveValidatorSnapshot(100);
-            expect(res).to.not.equal(null);
-            expect(axiosStub.post.callCount).to.equal(2);
-        });
+        registerSnapshotRetryTests(state);
+        registerSnapshotWindowTests(state);
     });
 }
 

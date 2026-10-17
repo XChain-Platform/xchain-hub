@@ -364,7 +364,7 @@ function registerFrozenTipRecoveryTests() {
         await engine.tick();
 
         const stats = await engine.getStats();
-        expect(engine._lastCheckpointBtcBlock, 'we led the round').to.equal(state.btcBlock);
+        expect([engine._attemptedCheckpointBtcBlock, engine._lastCheckpointBtcBlock], 'we led the round (open, not finalized)').to.deep.equal([state.btcBlock, null]);
         expect(stats.cadence_stall_reason).to.equal(null);
         expect(stats.frozen_tip_ticks).to.equal(0);
         expect(stats.frozen_tip_block).to.equal(null);

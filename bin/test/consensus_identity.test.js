@@ -40,6 +40,12 @@ const schema   = require('../../src/hub_schema_version.js');
 // read is the same read.
 let value;
 
+// Read the arming variables the entry's own overlay reads from its source, so the expectation never comes from the tool.
+function hubOnlyArming() {
+    const src = require('fs').readFileSync(path.join(__dirname, '../../src/consensus/gate_registry.js'), 'utf8');
+    return Array.from(new Set(Array.from(src.matchAll(/\benv\.(XC_[A-Z0-9_]+)/g), (m) => m[1]))).sort();
+}
+
 describe('bin/consensus-identity.js', function () {
     this.timeout(60000);
 
@@ -252,7 +258,7 @@ describe('bin/consensus-identity.js', function () {
     const { REGTEST_ARMING } = require('../../src/consensus/gate_registry/shared_rows.js');
     const BIN = path.resolve(__dirname, '../consensus-identity.js');
     const PIN = path.resolve(__dirname, '../pins/at1-consensus-identity.json');
-    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort();
+    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env).concat(hubOnlyArming()))).sort();
     const BARE = Object.fromEntries(NAMES.map((name) => [name, null]));
 
     // The child env is built explicitly, so the runner's own arming never decides a case.
@@ -303,6 +309,54 @@ describe('bin/consensus-identity.js', function () {
     });
 });
 
+// The hub-only overlay in the registry entry arms the offer-list row from the venue,
+// so its variable must be recorded too, or an armed venue reads as drift (exit 1).
+describe('bin/consensus-identity.js', function () {
+    this.timeout(60000);
+
+    const fs = require('fs');
+    const os = require('os');
+    const { spawnSync } = require('child_process');
+    const { REGTEST_ARMING } = require('../../src/consensus/gate_registry/shared_rows.js');
+    const BIN = path.resolve(__dirname, '../consensus-identity.js');
+    const PIN = path.resolve(__dirname, '../pins/at1-consensus-identity.json');
+    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env).concat(hubOnlyArming()))).sort();
+    const ARMED = { XC_OFFER_LIST_REGTEST_ACTIVATION: 'armed' };
+
+    // Strip every arming variable from the child, then apply `armed`.
+    function run(args, armed = {}) {
+        const env = Object.assign({}, process.env);
+        for (const name of NAMES) delete env[name];
+        return spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env: Object.assign(env, armed) });
+    }
+
+    describe('the hub-only arming env', () => {
+        it('records every variable the registry entry overlay arms from', () => {
+            const overlay = hubOnlyArming();
+            assert.ok(overlay.includes('XC_OFFER_LIST_REGTEST_ACTIVATION'), 'the scan must find the offer-list variable');
+            const recorded = Object.keys(identity.armingEnv({}));
+            for (const name of overlay) assert.ok(recorded.includes(name), `${name} arms a hub-only row but is not recorded in env`);
+        });
+
+        it('exits 2 naming the offer-list variable when the venue arms it and the pin did not', () => {
+            const r = run(['--compare', PIN], ARMED);
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.match(r.stderr, /XC_OFFER_LIST_REGTEST_ACTIVATION: pin unset, now "armed"/);
+            assert.strictEqual(r.stdout, '');
+        });
+
+        it('holds against a pin taken under the same offer-list arming, whose hub-only digest moved', () => {
+            const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'consensus-identity-offer-')), 'pin.json');
+            assert.strictEqual(run(['--out', file], ARMED).status, 0);
+            const armedPin = JSON.parse(fs.readFileSync(file, 'utf8'));
+            assert.strictEqual(armedPin.env.XC_OFFER_LIST_REGTEST_ACTIVATION, 'armed');
+            assert.notStrictEqual(armedPin.hub_only_rules_digest, JSON.parse(fs.readFileSync(PIN, 'utf8')).hub_only_rules_digest);
+            const r = run(['--compare', file], ARMED);
+            assert.strictEqual(r.status, 0, r.stdout + r.stderr);
+        });
+    });
+});
+
 // Under --root the recorded arming list is the MEASURED tree's, the one that armed
 // its digest, never the list of the checkout this script lives in. Driven on scratch
 // trees whose REGTEST_ARMING differs from this one, the case --root exists for.
@@ -314,7 +368,7 @@ describe('bin/consensus-identity.js', function () {
     const { spawnSync } = require('child_process');
     const REPO_ROOT = path.resolve(__dirname, '../..');
     const { REGTEST_ARMING } = require('../../src/consensus/gate_registry/shared_rows.js');
-    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env))).sort();
+    const NAMES = Array.from(new Set(Object.values(REGTEST_ARMING).map((rule) => rule.env).concat(hubOnlyArming()))).sort();
 
     // A scratch hub whose shared_rows.js ends with `tail`, a statement that edits its REGTEST_ARMING.
     function scratchHubWith(tail) {
@@ -352,6 +406,29 @@ describe('bin/consensus-identity.js', function () {
             const r = runRoot(root);
             assert.strictEqual(r.status, 0, r.stderr);
             assert.deepStrictEqual(Object.keys(JSON.parse(r.stdout).env), NAMES.filter((name) => name !== dropped));
+        });
+    });
+
+    // The absent-gate filter compares against the measured tree's own sentinel, never a local copy.
+    describe('--root and the absent-gate sentinel', () => {
+        function scratchRulesWith(tail) {
+            const root = scratchHubWith('');
+            fs.appendFileSync(path.join(root, 'src/consensus_rules_digest.js'), `\n${tail}\n`);
+            return root;
+        }
+
+        it('takes the sentinel from the rules module it is handed', () => {
+            assert.strictEqual(identity.absentSentinel(digest), digest.ABSENT);
+            assert.strictEqual(identity.absentSentinel({ ABSENT: '<gone>' }), '<gone>');
+        });
+
+        it('refuses a rules module that exports no sentinel rather than filtering on undefined', () => {
+            assert.throws(() => identity.absentSentinel({}), /exports no ABSENT sentinel/);
+            assert.throws(() => identity.absentSentinel({ ABSENT: '' }), /exports no ABSENT sentinel/);
+            const r = runRoot(scratchRulesWith('module.exports.ABSENT = undefined;'));
+            assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+            assert.strictEqual(r.stdout, '');
+            assert.match(r.stderr, /exports no ABSENT sentinel/);
         });
     });
 });

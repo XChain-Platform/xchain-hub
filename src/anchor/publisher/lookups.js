@@ -26,6 +26,11 @@ const axios = require('axios');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// ANCHOR versions that carry no light-client roots: the v1 archive head and the v2
+// archive chunk. A denylist, so a future checkpoint version binds the roots by default
+// (mirrors the indexer's checkpoint-section family, which this service cannot import).
+const ROOTLESS_ANCHOR_VERSIONS = [1, 2];
+
 module.exports = {
 
     // On-chain ANCHOR verification (XANC-ELECTED-FORGE-1 / XANC-V0DONE-SUPPRESS-1
@@ -122,15 +127,14 @@ module.exports = {
            want.rejectVersions.map(Number).includes(Number(res.version))) return 'rejected:version';
         // Byte-match the decoded on-chain payload against our own checkpoint. The
         // four core hashes are present on every checkpoint version; state_root and
-        // block_merkle_root are compared only when the on-chain anchor is a
-        // root-bearing version (v0, the bundle), matching the payload the publisher
-        // signed. The v1 archive heads carry no roots and are rejected by
-        // rejectVersions above.
+        // block_merkle_root are compared on every version except the rootless
+        // archive ones (ROOTLESS_ANCHOR_VERSIONS), so the v0 bundle and v3 fold
+        // sections both bind the roots the checkpoint signers signed.
         if(!this.anchorHashEq(res.block_hash,    cp.block_hash)    ||
            !this.anchorHashEq(res.ledger_hash,   cp.ledger_hash)   ||
            !this.anchorHashEq(res.actions_hash,  cp.actions_hash)  ||
            !this.anchorHashEq(res.contract_hash, cp.contract_hash)) return 'rejected:mismatch';
-        if(Number(res.version) === 0){
+        if(!ROOTLESS_ANCHOR_VERSIONS.includes(Number(res.version))){
             if(!this.anchorHashEq(res.state_root,        cp.state_root) ||
                !this.anchorHashEq(res.block_merkle_root, cp.block_merkle_root)) return 'rejected:mismatch';
         }
@@ -169,7 +173,7 @@ module.exports = {
     // double-spend regardless of whether it is deep enough to 'verify' yet.
     //
     // getanchoraction does NOT serve checkpoint anchors only. Its
-    // CHECKPOINT_VERSIONS set (indexer anchor_action_query.js: [0,1])
+    // CHECKPOINT_VERSIONS set (indexer db/anchor_sql.js: [0,1,3])
     // carries the v1 ARCHIVE HEADS as well, and an archive head wraps a
     // checkpoint under the SAME (chain, network, block_index, checkpoint_seq)
     // identity it is keyed on, so an UNFILTERED lookup answers with whichever
@@ -191,11 +195,10 @@ module.exports = {
         if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
         // ANCHOR versions carrying an archive batch (v1 head, v2 continuation
         // chunk) and the ones that really anchor a checkpoint. Mirrors the
-        // rejectVersions/{0} split the receiver paths already use. The version set
-        // RESTARTED at 0 pre-launch (spec anchor-v0-single-wire.md): {0,1,2} is the
-        // complete set, and every legacy number is unparseable at/above
-        // ANCHOR_ACTIVATION, so asking for one would be a lookup that can only ever
-        // answer absent.
+        // rejectVersions/{0} split the receiver paths already use. This probe serves
+        // the v0 bundle only: a v3 fold send checks existence through
+        // findExistingFoldedBundle instead, and every legacy number is unparseable
+        // at/above ANCHOR_ACTIVATION, so asking for one could only ever answer absent.
         const ARCHIVE_VERSIONS    = [1, 2];
         const CHECKPOINT_VERSIONS = [0];
         let ask = async (version) => {

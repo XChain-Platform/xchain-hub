@@ -25,6 +25,7 @@
 const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
+const { anchorSendMayHaveLanded } = require('./send_failure.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -200,12 +201,11 @@ module.exports = {
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
-            // withdraw the intents rather than hold the sections for the TTL over a
-            // send that never happened. An AMBIGUOUS send keeps its intents: that
-            // case is exactly what the markers are for.
-            if(!(e && e.anchorAmbiguousSend)) for(let s of group) await this.withdrawAnchorIntent(s);
-            if(archiveSection && !(e && e.anchorAmbiguousSend))
-                await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
+            // withdraw the intents rather than hold the sections for the TTL. An
+            // AMBIGUOUS or funds-committed send keeps them: that is what they are for.
+            const keep = anchorSendMayHaveLanded(e);
+            if(!keep) for(let s of group) await this.withdrawAnchorIntent(s);
+            if(archiveSection && !keep) await this.withdrawArchiveIntent(String(group[0].network), archiveSection.batchSeq);
             throw e;
         }
         return result;
@@ -256,7 +256,7 @@ module.exports = {
                         : ''));
     },
 
-    recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid, anchorVersion){
+    async recordBundleReward(group, me, attested, attestSigs, result, network, snapshotBlock, txid, anchorVersion){
         // At/above the anchor-reward flag-day the reward is DERIVED on-chain from the
         // v0 publisher attestation (the hub push is retired), and the indexer credits
         // NOTHING for a bundle whose tail carries no attestation. Recording the reward
@@ -265,34 +265,40 @@ module.exports = {
         // archived row, forking the COLLECT-spendable ledger live-vs-recovered.
         if(result && result.exists){
             // Adoption path: we did not pay for THIS bundle in this call (a prior
-            // lost-ACK broadcast or a peer did). The on-chain payload, not the one we
-            // just built, names the earner. Stamp + announce, but never push.
-            logger.info('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
-                        snapshotBlock + '; reward push skipped');
+            // lost-ACK broadcast of ours or a peer did). The on-chain payload names
+            // the earner, so only a bundle the indexer binds to this hub earns here.
+            await this.recordAdoptedBundleReward(group, me, attested, attestSigs, network, snapshotBlock,
+                                                 txid, anchorVersion);
         } else if(attested || !ar.isAnchorRewardActive(snapshotBlock, network)){
-            // ONE anchor_bundle reward and ONE attestation per (network, SNAPSHOT_BLOCK),
-            // even when the byte-budget split emits multiple bundles (D3, D21).
-            this.recordReward('anchor_bundle', snapshotBlock, me, snapshotBlock, network);
-            if(attested)
-                this.deferRewardAttestation({
-                    // The identity the mined-anchor proof re-SELECTs and re-verifies
-                    // against: the FIRST section (chain-ascending), which carries the
-                    // same txid as every other. The attestation ROW's chain is 'DOGE'
-                    // (D21), resolved in recordRewardAttestation from the reward type.
-                    chain: String(group[0].chain), network: network,
-                    blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
-                    txid: txid, anchorVersion: Number(anchorVersion) || 0,
-                    rewardType: 'anchor_bundle', roundReference: snapshotBlock,
-                    snapshotBlock: snapshotBlock,
-                    publisher: String(me).toLowerCase(), attestSigs: attestSigs,
-                    // We are the publisher, so we own the fan-out: once the drain proves
-                    // this anchor mined, the confirmed row goes to every peer (XANCREWARD).
-                    federate: true
-                });
+            this.recordOwnBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion);
         } else {
             logger.info('StateAnchorPublisher: degraded bundle (no attestation) at/above the reward flag-day for ' +
                         network + ' @ ' + snapshotBlock + '; reward withheld (no live indexer derives it)');
         }
+    },
+
+    // Record the reward for a bundle this hub paid for: the fresh send and the proven
+    // own adoption share this one body, so the two paths cannot drift.
+    recordOwnBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion){
+        // ONE anchor_bundle reward and ONE attestation per (network, SNAPSHOT_BLOCK),
+        // even when the byte-budget split emits multiple bundles (D3, D21).
+        this.recordReward('anchor_bundle', snapshotBlock, me, snapshotBlock, network);
+        if(attested)
+            this.deferRewardAttestation({
+                // The identity the mined-anchor proof re-SELECTs and re-verifies
+                // against: the FIRST section (chain-ascending), which carries the
+                // same txid as every other. The attestation ROW's chain is 'DOGE'
+                // (D21), resolved in recordRewardAttestation from the reward type.
+                chain: String(group[0].chain), network: network,
+                blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
+                txid: txid, anchorVersion: Number(anchorVersion) || 0,
+                rewardType: 'anchor_bundle', roundReference: snapshotBlock,
+                snapshotBlock: snapshotBlock,
+                publisher: String(me).toLowerCase(), attestSigs: attestSigs,
+                // We are the publisher, so we own the fan-out: once the drain proves
+                // this anchor mined, the confirmed row goes to every peer (XANCREWARD).
+                federate: true
+            });
     },
 
     announceBundleDone(group, network, snapshotBlock, txid){
@@ -374,7 +380,7 @@ module.exports = {
             await this.stampBundleSections(group, txid, anchored);
             await this.completeFoldArchive(archiveSection, signer, txid);
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
-            this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
+            await this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
                                     network, snapshotBlock, txid, foldActive ? 3 : 0);
             this.announceBundleDone(group, network, snapshotBlock, txid);
         } catch(e){

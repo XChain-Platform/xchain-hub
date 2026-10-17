@@ -33,12 +33,12 @@ const proxyquire = require('proxyquire');
 const { createMockHub } = require('../../../helpers/mockHub');
 
 const SUBMISSIONS_INFO_KEYS = [
-    'currentRound', 'roundInterval', 'submissions',
+    'currentRound', 'roundInterval', 'submissions', 'expectedPairs', 'expectedPairsRound',
     'skippedRounds', 'skippedCount', 'skippedRoundsReadError',
     'droppedPairs', 'droppedPairCount', 'droppedPairsReadError',
     'roundBand', 'implausibleRounds', 'implausibleRoundCount', 'implausibleRoundRejections',
     'failedSubmissionPersists', 'lastSubmissionPersistFailureRound', 'lastSubmissionPersistFailureCount',
-    'submissionsPruneFailures', 'lastSubmissionsPruneFailureRound', 'consecutiveSkippedRounds',
+    'submissionsPruneFailures', 'lastSubmissionsPruneFailureRound', 'consecutiveSkippedRounds', 'freshnessHydrateError',
     'round_timeouts', 'abandoned_rounds', 'lastAbandonedRound',
     'single_source_rounds', 'lastSingleSourceRound', 'oracle_fetch_failures',
     'lastSuccessfulRoundTime', 'lastSuccessAgeMs', 'usingFallback', 'chainTipFetchFailures',

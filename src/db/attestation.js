@@ -59,11 +59,14 @@ module.exports = {
         return this.doQuery('DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND status = ?', [network, windowStart, status]);
     },
 
-    // Reopens only the landed marker for the exact batch window a validated chain
-    // retraction names. The window-end and status predicates leave a replacement
-    // marker or any non-landed publication outcome untouched.
-    async deleteLandedAttestPublishedBatch(network, windowStart, windowEnd) {
-        return this.doQuery('DELETE FROM attest_published_batches WHERE network = ? AND window_start = ? AND window_end = ? AND status = ?', [network, windowStart, windowEnd, 'landed']);
+    // Moves the exact window's marker between two statuses, guarded on the window end
+    // and on the status it must still hold, so a replacement row is never touched.
+    async updateAttestPublishedBatchStatus(network, windowStart, windowEnd, fromStatus, toStatus) {
+        return this.doQuery('UPDATE attest_published_batches SET status = ? WHERE network = ? AND window_start = ? AND window_end = ? AND status = ?', [toStatus, network, windowStart, windowEnd, fromStatus]);
+    },
+    // The first txid already on the wire for a window whose row stays `intent`.
+    async updateAttestPublishedBatchIntentTxid(network, windowStart, txid) {
+        return this.doQuery('UPDATE attest_published_batches SET txid = ? WHERE network = ? AND window_start = ? AND status = ? AND txid IS NULL', [txid, network, windowStart, 'intent']);
     },
 
     // Deletes from attest_published_requests.
@@ -259,13 +262,13 @@ module.exports = {
     // Reads the newest attestations rows, any status.
     // Moved here from src/cross_chain/engine.js:295, the branch that adds no status filter.
     async findAttestations(limit) {
-        return this.doQuery("SELECT * FROM attestations ORDER BY created_at DESC LIMIT ?", [limit]);
+        return this.doQuery("SELECT * FROM attestations ORDER BY created_at DESC, id DESC LIMIT ?", [limit]);
     },
 
     // Reads the newest attestations rows in one status.
     // Moved here from src/cross_chain/engine.js:295, the branch that filters on status.
     async findAttestationsByStatus(status, limit) {
-        return this.doQuery("SELECT * FROM attestations WHERE status = ? ORDER BY created_at DESC LIMIT ?", [status, limit]);
+        return this.doQuery("SELECT * FROM attestations WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?", [status, limit]);
     },
 
     // Reads the newest attestations row for one source action.

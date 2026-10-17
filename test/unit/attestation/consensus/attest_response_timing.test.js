@@ -43,7 +43,10 @@ it('regtest THROWS an actionable error on a value that is not a non-negative int
 
     it('off regtest a differing override is IGNORED, with the warning latched once per process', function () {
         let logged = [];
-        sinon.stub(console, 'log').callsFake((...a) => logged.push(a.join(' ')));
+        let infoLines = [];
+        // Warn level, not info: LOG_LEVEL=warn drops info lines and alerting keys on level.
+        sinon.stub(console, 'warn').callsFake((...a) => logged.push(a.join(' ')));
+        sinon.stub(console, 'log').callsFake((...a) => infoLines.push(a.join(' ')));
 
         // First differing value on a live network: ignored, warned.
         expect(resolveAttestResponseForwardS('testnet', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 2 })).to.equal(120);
@@ -54,6 +57,7 @@ it('regtest THROWS an actionable error on a value that is not a non-negative int
         expect(resolveAttestResponseForwardS('mainnet', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 9 })).to.equal(120);
         expect(resolveAttestResponseForwardS('', { [ATTEST_RESPONSE_FORWARD_S_OVERRIDE]: 'garbage' })).to.equal(120);
         expect(logged.filter(l => l.indexOf(ATTEST_RESPONSE_FORWARD_S_OVERRIDE) !== -1)).to.have.lengthOf(1);
+        expect(infoLines.filter(l => l.indexOf(ATTEST_RESPONSE_FORWARD_S_OVERRIDE) !== -1)).to.have.lengthOf(0);
     });
 
     it('off regtest, garbage is ignored rather than thrown: the value is inert there', function () {
