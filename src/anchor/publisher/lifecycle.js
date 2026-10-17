@@ -364,7 +364,7 @@ module.exports = {
         if(!failoverOnly) this._leaderRetryDue = false;
         try {
             await this.drainDeferredAnnouncements();
-            await this.sweepAnchorStamps();
+            if(typeof this.sweepAnchorStamps === 'function') await this.sweepAnchorStamps();
             let btcBlock = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
             let signer   = this.resolveSigner();
             let refused  = await this.flushRefusal(signer);
