@@ -114,7 +114,8 @@ async function sendByzantineAlerts(cluster, btcBlockHeight) {
 
 function registerFragmentationTest() {
     it('fragments Byzantine oldHash variants below the gate and never reaches quorum', async function () {
-        const btcBlockHeight = snapshotLock.REORG_SNAPSHOT_ACTIVATION.testnet;
+        const btcBlockHeight = snapshotLock.REORG_SNAPSHOT_ACTIVATION.testnet - 1;
+        expect(snapshotLock.isReorgSnapshotActive(btcBlockHeight, 'testnet')).to.equal(false);
         const cluster = fourHubs('testnet', btcBlockHeight);
         const timeouts = cluster.honest.map(node => {
             const events = [];
@@ -130,7 +131,9 @@ function registerFragmentationTest() {
         for (const [index, round] of rounds.entries()) {
             expect(round.oldHash).to.equal(OLD_HASHES[index]);
             expect(round.quorum).to.equal(3);
-            expect(round.preparePubkeys.size).to.equal(1);
+            expect(round.snapshotActive).to.equal(false);
+            expect(round.prepares.size).to.equal(1);
+            expect(round.preparePubkeys.size).to.equal(0);
             expect(round._commitSent).to.equal(undefined);
         }
         expect(cluster.honest.map(node => node.handler.executeRollback.callCount))
