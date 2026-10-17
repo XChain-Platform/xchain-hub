@@ -68,7 +68,9 @@ describe('parseCapabilityProofQuery', function () {
         expect(parse({ snapshot_block: '5', capability: 'anchor', pubkeys: maximum.join(',') }).pubkeys)
             .to.deep.equal(maximum);
     });
+});
 
+describe('parseCapabilityProofQuery', function () {
     it('refuses a missing, repeated, non-string, or malformed snapshot block', function () {
         const refused = [
             undefined, '', '-1', '1.5', 'abc', ' 1', '1 ', '+1', '1e3',
