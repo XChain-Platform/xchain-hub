@@ -157,6 +157,14 @@ function registerParseExpectedColumnsTests() {
             const cols = db.parseExpectedColumns('CREATE TABLE t (id INT,, onlyname, b VARCHAR(2));');
             expect(cols.map(c => c.name)).to.deep.equal(['id', 'b']);
         });
+
+        it('parses sent_doge_height as a nullable checkpoint column with a default', function () {
+            const sql = require('fs').readFileSync(
+                require('path').join(__dirname, '../../../../src/sql/anchor_published_checkpoints.sql'), 'utf8');
+            const cols = db.parseExpectedColumns(sql);
+            const column = cols.find(c => c.name === 'sent_doge_height');
+            expect(column).to.include({ nullable: true, hasDefault: true });
+        });
     });
 }
 

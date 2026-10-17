@@ -3,6 +3,7 @@ CREATE TABLE anchor_published_checkpoints (
     network        VARCHAR(20)     NOT NULL,             -- mainnet/testnet/regtest
     checkpoint_seq BIGINT UNSIGNED NOT NULL,             -- state_checkpoints.checkpoint_seq (its uq_chain_seq identity)
     txid           VARCHAR(64),                          -- DOGE txid once the broadcast returned one (NULL while intent-only)
+    sent_doge_height BIGINT UNSIGNED DEFAULT NULL,       -- DOGE tip observed immediately after the broadcast returned
     intent_at      DATETIME DEFAULT CURRENT_TIMESTAMP,  -- when broadcast intent was durably recorded, BEFORE the send
     sent_at        DATETIME NULL DEFAULT NULL,          -- when the broadcast returned a txid; NULL = intent only
     PRIMARY KEY (chain, network, checkpoint_seq),
