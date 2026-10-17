@@ -24,6 +24,7 @@
 
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
+const gateRegistry      = require('../../consensus/gate_registry.js');
 const { ORACLE_COMMIT } = require('./constants.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
@@ -34,6 +35,8 @@ const logger = getLogger();
 // brief, caps low enough that a recovered DB is picked up within half a minute.
 const FINALIZE_RETRY_BASE_MS = 1000;
 const FINALIZE_RETRY_MAX_MS  = 30000;
+const COUNT_QUORUM_SIGNED_ACTIVATION =
+    'oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION';
 
 function sortedSignatures(pending) {
     return [...pending.signatures]
@@ -84,15 +87,20 @@ module.exports = {
         if (pending.weighted)
             return swq.meetsStakeThreshold(pending.validators, [...pending.signatures.keys()]);
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this.getQuorum();
+        let tally = voteSet;
+        if (gateRegistry.activeAt(COUNT_QUORUM_SIGNED_ACTIVATION,
+                this.hub && this.hub.network, 'BTC', pending.btcBlockHeight, null)) {
+            tally = new Set(pending.signatures.keys());
+        }
         // Count-mode quorum tallies DISTINCT MEMBER KEYS. The quorum above is sized
-        // from the snapshot's qualified set, so a vote from a key with no qualifying
+        // from the snapshot's qualified set, so an entry from a key with no qualifying
         // stake must not count toward it. Null memberPubkeys keeps the raw count
         // (graceful degradation, matching the quorum fallback).
-        return this.countDistinctMembers(pending, voteSet) >= quorum;
+        return this.countDistinctMembers(pending, tally) >= quorum;
     },
 
-    // Distinct qualified MEMBER-KEY tally for one of the round's vote sets. The
-    // sets already hold proven signing keys (one entry per key however many
+    // Distinct qualified MEMBER-KEY tally for one of the round's tally sets. The
+    // sets hold signing keys (one entry per key however many
     // senders it named), so this only has to intersect them with the round's
     // snapshot membership. Null memberPubkeys (no usable snapshot) degrades to the
     // raw count, matching the quorum fallback. Defined once so the finalization

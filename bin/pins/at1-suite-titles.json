@@ -4794,6 +4794,12 @@
       "9d0946e76218dea2d46ca9782c595bb5ed9f7479d97999ad42c49f86c872f7aa",
       "95d08dd968ccb89b80df8425d74f2d926feec5ba778efe4eebff5a7d12ea4de3"
     ],
+    "613781da26cf67ce": [
+      "187a2b6158554ec92119a6826833cd906b5e0c264b45e79156ae15af16c1e1ea",
+      "4ecf78dd06ec7c3b6bfa228965fd43cdc7091682305bfadfc24b740d4dc2ce32",
+      "bdf6c96f9c5b220bd623d1d67e832868ab1ea21c42eeef5336015ddb3ab674e3",
+      "30266657c9f001d0bbe502c0ef1f143a68e45b9564167456463b346671063bad"
+    ],
     "6226aae9e1cdc9cf": [
       "baa5a20ad32ccc5be9aeb25833a7a44fcb0854104b235662446f65742c85d7a0",
       "5239d17731d6c39b53bc392fabdbae839bc4c2662583fc9e11a656cf4ad8b641",
@@ -11954,8 +11960,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 939,
-      "titleCount": 8675,
+      "fileCount": 940,
+      "titleCount": 8679,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12567,6 +12573,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -12952,8 +12959,8 @@
       }
     },
     "test": {
-      "fileCount": 939,
-      "titleCount": 8675,
+      "fileCount": 940,
+      "titleCount": 8679,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13565,6 +13572,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -13897,8 +13905,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1021,
-      "titleCount": 9538,
+      "fileCount": 1022,
+      "titleCount": 9542,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14592,6 +14600,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",

@@ -88,3 +88,7 @@ addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'heigh
 // Extends federation detection beyond live quorum at the anchor height.
 // Armed on regtest and testnet; mainnet waits on coordinated activation.
 addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: 156230, regtest: 0 });
+
+// oracle/consensus/commit
+// Count-mode quorum uses the verified signer set at and above this BTC height.
+addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
