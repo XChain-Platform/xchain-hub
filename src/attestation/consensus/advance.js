@@ -61,6 +61,7 @@ module.exports = {
         let need = Math.min(pending.redundancy, pending.responsible.length);
         if(pending.proposals.size < need) return;
         if(this.awaitsLeaderStamp(pending)) return;
+        if(this.awaitsLeaderAdmitMap(pending)) return;
         let proposalsArr = this.okProposalsForRound(rid, pending);
         if(!proposalsArr) return;
         let providerModule = this.roundProviderModule(rid, pending);
@@ -96,6 +97,7 @@ module.exports = {
         // settleWinnerEffectiveTime for the rule and why judge_model cannot take
         // the same one byte_equality does.
         this.settleWinnerEffectiveTime(pending, pending.status);
+        this.settleWinnerAdmitMap(pending);
         let winnerHash = this.collectWinnerSignatures(rid, pending, winner);
         this.resignJudgeWinner(rid, pending, winner);
         this.resignMirrorWinner(rid, pending, winner, winnerHash);
@@ -135,6 +137,7 @@ module.exports = {
         // behind the leader gate and carries the judge call's latency with it. See
         // settleWinnerEffectiveTime.
         this.settleWinnerEffectiveTime(pending, status);
+        this.settleWinnerAdmitMap(pending);
         return pending;
     },
 
@@ -266,7 +269,8 @@ module.exports = {
             // must not be logged as one: at redundancy 3 it would print twice
             // per round forever and bury the genuine status-mismatch case this
             // warning exists for.
-            if(!(pending.mirrorEra && p.effectiveTime !== pending.effectiveTime))
+            if(!(pending.mirrorEra && p.effectiveTime !== pending.effectiveTime) &&
+               this.admitBlocksKey(p.admitBlocks) === this.admitBlocksKey(pending.admitBlocks))
                 logger.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
         } else if(strategy === 'byte_equality' && (p.status || 'ok') === 'ok' && this.hub.slashDetector){
             // Diverged OK proposal under byte_equality; record as slash

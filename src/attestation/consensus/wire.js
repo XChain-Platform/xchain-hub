@@ -36,9 +36,9 @@ module.exports = {
 
     handleMessage(envelope){
         switch(envelope.type){
-            case ATTEST_PROPOSE: this.handlePropose(envelope); break;
-            case ATTEST_PREPARE: this.handlePrepare(envelope); break;
-            case ATTEST_COMMIT:  this.handleCommit(envelope);  break;
+            case ATTEST_PROPOSE: return this.handlePropose(envelope);
+            case ATTEST_PREPARE: return this.handlePrepare(envelope);
+            case ATTEST_COMMIT:  return this.handleCommit(envelope);
         }
     },
 
@@ -105,7 +105,8 @@ module.exports = {
             status:     pending.status,
             sig_pubkey: pending.myPubkey,
             sig:        sig,
-            ...this.effectiveTimeWireFields(pending)
+            ...this.effectiveTimeWireFields(pending),
+            ...this.admitWireFields(pending)
         });
     }
 

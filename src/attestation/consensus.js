@@ -147,12 +147,28 @@ class AttestationConsensus extends EventEmitter {
         // Spelling guard first (see readWireEffectiveTime).
         let wireEffective = this.readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this.buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
+        let wireAdmit = this.readWireAdmitBlocks(pending, d);
+        let finish = (read) => {
+            if(!read.ok){
+                logger.warn('AttestationConsensus: PROPOSE admission map rejected from ' + senderPubkey.substring(0,16) +
+                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
+                return;
+            }
+            if(this.pending.get(rid) !== pending || pending.finalized) return;
+            return this.verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, read.admitBlocks);
+        };
+        return wireAdmit && typeof wireAdmit.then === 'function'
+            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: PROPOSE admission check failed: ' + (e && e.message)))
+            : finish(wireAdmit);
+    }
+
+    verifyAndAdmitProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, wireAdmitBlocks){
+        let canonical = this.buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective, wireAdmitBlocks);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig || ''), senderPubkey)){
             logger.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
             return;
         }
-        this.admitVerifiedProposal(pending, rid, d, body, meta, senderPubkey, wireEffective);
+        this.admitVerifiedProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, wireAdmitBlocks);
     }
 
     // Walk back through the proposals and collect any sigs that match the winner.
@@ -196,7 +212,8 @@ class AttestationConsensus extends EventEmitter {
     // MIRROR ERA, byte_equality: re-sign a winner our own PROPOSE signature
     // could not cover (why, and the gate: mirrorReSignEligible).
     resignMirrorWinner(rid, pending, winner, winnerHash){
-        if(!this.mirrorReSignEligible(pending, winner, winnerHash)) return;
+        if(!this.mirrorReSignEligible(pending, winner, winnerHash) &&
+           !this.admitMapReSignEligible(pending, winner, winnerHash)) return;
         let reSig = this.signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime);
         if(reSig) pending.signatures.set(pending.myPubkey, reSig);
     }
@@ -232,16 +249,16 @@ class AttestationConsensus extends EventEmitter {
     // not choose, so this is where the two guards belong. Spelling first
     // (D59, and buildResponseCanonicalRaw throws on a bad one), bounds
     // immediately after the signature verify.
-    verifyNonOkPrepare(pending, d, rid, body, meta, status, senderPubkey){
+    verifyNonOkPrepare(pending, d, rid, body, meta, status, senderPubkey, wireAdmitBlocks){
         let wireEffective = this.readWireEffectiveTime(pending, d, 'non-ok PREPARE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
+        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective, wireAdmitBlocks);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
             logger.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
             return;
         }
         if(this.wireEffectiveOutOfWindow(wireEffective, 'non-ok PREPARE', senderPubkey, rid)) return;
-        return { wireEffective: wireEffective, canonical: canonical };
+        return { wireEffective: wireEffective, wireAdmitBlocks: wireAdmitBlocks, canonical: canonical };
     }
 
     // Co-sign a non-ok winner, but only one this hub can stand behind
@@ -265,16 +282,16 @@ class AttestationConsensus extends EventEmitter {
     // WINNER-ESTABLISHING BLOCK (ok path). Same two guards, same order, same
     // reasons as the non-ok block above: this is the first point at which a
     // follower adopts a leader-chosen field.
-    verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey){
+    verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey, wireAdmitBlocks){
         let wireEffective = this.readWireEffectiveTime(pending, d, 'PREPARE', senderPubkey, rid);
         if(wireEffective === undefined) return;
-        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
+        let canonical = this.buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective, wireAdmitBlocks);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
             logger.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
             return;
         }
         if(this.wireEffectiveOutOfWindow(wireEffective, 'PREPARE', senderPubkey, rid)) return;
-        return { wireEffective: wireEffective, canonical: canonical };
+        return { wireEffective: wireEffective, wireAdmitBlocks: wireAdmitBlocks, canonical: canonical };
     }
 
     // judge_model follower: re-sign the leader's winner, once this hub has
@@ -352,10 +369,27 @@ class AttestationConsensus extends EventEmitter {
         if(!admitted) return;
         let { d, rid, pending, senderPubkey } = admitted;
 
+        let wireAdmit = this.readWireAdmitBlocks(pending, d);
+        let finish = (read) => {
+            if(!read.ok){
+                logger.warn('AttestationConsensus: COMMIT admission map rejected from ' + senderPubkey.substring(0,16) +
+                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
+                return;
+            }
+            if(this.pending.get(rid) !== pending || pending.finalized) return;
+            return this.finishCommitWithAdmit(d, rid, pending, senderPubkey, read.admitBlocks);
+        };
+        return wireAdmit && typeof wireAdmit.then === 'function'
+            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: COMMIT admission check failed: ' + (e && e.message)))
+            : finish(wireAdmit);
+    }
+
+    finishCommitWithAdmit(d, rid, pending, senderPubkey, wireAdmitBlocks){
+
         if(d.sig && d.sig_pubkey){
             // Over the round's settled canonical, stamp included (see the matching
             // note on countLatePrepare).
-            let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
+            let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime, pending.admitBlocks);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             }
@@ -380,4 +414,3 @@ module.exports = Object.assign(AttestationConsensus, {
     ATTEST_PREPARE,
     ATTEST_COMMIT
 });
-

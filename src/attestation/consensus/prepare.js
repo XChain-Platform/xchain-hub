@@ -48,6 +48,23 @@ module.exports = {
 
         if(!this.envelopeWithinCaps(pending, d, 'PREPARE', senderPubkey, rid)) return;
 
+        let wireAdmit = this.readWireAdmitBlocks(pending, d);
+        let finish = (read) => {
+            if(!read.ok){
+                logger.warn('AttestationConsensus: PREPARE admission map rejected from ' + senderPubkey.substring(0,16) +
+                    '... for ' + rid.substring(0,16) + '... (' + read.reason + ')');
+                return;
+            }
+            if(this.pending.get(rid) !== pending || pending.finalized) return;
+            return this.handlePrepareWithAdmit(envelope, pending, rid, d, senderPubkey, read.admitBlocks);
+        };
+        return wireAdmit && typeof wireAdmit.then === 'function'
+            ? wireAdmit.then(finish).catch(e => logger.warn('AttestationConsensus: PREPARE admission check failed: ' + (e && e.message)))
+            : finish(wireAdmit);
+    },
+
+    handlePrepareWithAdmit(envelope, pending, rid, d, senderPubkey, wireAdmitBlocks){
+
         // If we haven't picked a winner yet, this PREPARE tells us what the leader/sender
         // believes is the winning body. Adopt it after sig verification.
         let body;
@@ -72,9 +89,9 @@ module.exports = {
             return;
         }
         if(!pending.winner && status !== 'ok'){
-            if(!this.adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey)) return;
+            if(!this.adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks)) return;
         } else if(!pending.winner){
-            if(!this.adoptOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey)) return;
+            if(!this.adoptOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks)) return;
         } else if(d.sig && d.sig_pubkey){
             this.countLatePrepare(pending, rid, d, senderPubkey);
         }
@@ -91,7 +108,7 @@ module.exports = {
     // trusting the sender. The one exception is a judge_model no_quorum,
     // which only the leader can derive, so it is leader-only (see
     // nonOkDerivationRefuses).
-    adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey){
+    adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks){
         if(body.length !== 0 || meta !== ''){
             logger.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
             return false;
@@ -113,8 +130,9 @@ module.exports = {
             logger.warn('AttestationConsensus: unsigned non-ok PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
             return false;
         }
-        let verified = this.verifyNonOkPrepare(pending, d, rid, body, meta, status, senderPubkey);
+        let verified = this.verifyNonOkPrepare(pending, d, rid, body, meta, status, senderPubkey, wireAdmitBlocks);
         if(!verified) return false;
+        if(!this.prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks)) return false;
         // Adoption is deferred to the commit point below (item 6491), as on the
         // ok path: the self-derivation gate can still refuse this PREPARE, and a
         // refused one must leave the round's bytes exactly as it found them or a
@@ -125,6 +143,7 @@ module.exports = {
         // The co-sign below signs those exact bytes (`canonical` was built over
         // wireEffective, so this leaves the two in step).
         pending.effectiveTime = verified.wireEffective;
+        pending.admitBlocks = verified.wireAdmitBlocks;
         pending.signatures.set(senderPubkey, String(d.sig));
         pending.winner = { body: body, meta: meta };
         pending.status = status;
@@ -207,7 +226,7 @@ module.exports = {
     // established" path below and verifies over the canonical winner) or the
     // round expires. byte_equality is deterministic (independently-fetched
     // identical bodies) and stays first-verified-PREPARE-wins.
-    adoptOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey){
+    adoptOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks){
         if(pending.pinnedConsensusStrategy === 'judge_model' && pending.leaderPubkey &&
            senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
             this.bufferEarlyMessage(rid, envelope);
@@ -223,8 +242,9 @@ module.exports = {
             logger.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
             return false;
         }
-        let verified = this.verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey);
+        let verified = this.verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey, wireAdmitBlocks);
         if(!verified) return false;
+        if(!this.prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks)) return false;
         // Adoption itself is deferred to the point the winner is actually set,
         // below: the A-F1 and A-F4 body checks can still refuse this PREPARE,
         // and a refused one must leave the round's bytes exactly as it found
@@ -234,11 +254,13 @@ module.exports = {
         if(pending.pinnedConsensusStrategy === 'judge_model'){
             if(!this.leaderBodyMatchesProposal(envelope, pending, rid, d, meta, senderPubkey, prepBodyHash)) return false;
         } else {
-            if(!this.byteEqualityCorroborated(pending, rid, d, meta, status, senderPubkey, prepBodyHash, verified.wireEffective)) return false;
+            if(!this.byteEqualityCorroborated(pending, rid, d, meta, status, senderPubkey, prepBodyHash,
+                verified.wireEffective, wireAdmitBlocks)) return false;
         }
         // Every check has passed: adopt the establisher's bytes, stamp included,
         // and only now.
         pending.effectiveTime = verified.wireEffective;
+        pending.admitBlocks = verified.wireAdmitBlocks;
         pending.signatures.set(senderPubkey, String(d.sig));
         pending.winner = { body: body, meta: meta };
         pending.status = status;
@@ -250,6 +272,30 @@ module.exports = {
             } else {
                 this.coSignByteEqualWinner(pending, rid, verified.canonical, body, meta, status, myProposal);
             }
+        }
+        return true;
+    },
+
+    prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks){
+        if(pending.admitBlocks === null || pending.admitBlocks === undefined) return true;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        let leaderProposal = leader ? pending.proposals.get(leader) : null;
+        let expected = leaderProposal && leaderProposal.admitBlocks != null
+            ? leaderProposal.admitBlocks : pending.admitBlocks;
+        if(!leaderProposal && senderPubkey !== leader){
+            let responsible = pending.responsible || [];
+            let leaderResponsible = responsible.some(v => String((v && v.pubkey) || v).toLowerCase() === leader);
+            if(leaderResponsible && pending.proposals.size < responsible.length){
+                this.bufferEarlyMessage(rid, envelope);
+                return false;
+            }
+        } else if(!leaderProposal && senderPubkey === leader) {
+            expected = wireAdmitBlocks;
+        }
+        if(this.admitBlocksKey(expected) !== this.admitBlocksKey(wireAdmitBlocks)){
+            logger.warn('AttestationConsensus: PREPARE admission map differs from the elected leader map from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return false;
         }
         return true;
     },
@@ -297,7 +343,7 @@ module.exports = {
     // the same body+meta+status. A lone Byzantine responsible peer racing
     // its divergent body in first can otherwise wedge this hub's round
     // (honest sigs then "don't verify over winner" and never count).
-    byteEqualityCorroborated(pending, rid, d, meta, status, senderPubkey, prepBodyHash, wireEffective){
+    byteEqualityCorroborated(pending, rid, d, meta, status, senderPubkey, prepBodyHash, wireEffective, wireAdmitBlocks){
         let ownMatches = false;
         let myP = pending.proposals.get(pending.myPubkey);
         if(myP && (myP.status || 'ok') === 'ok'){
@@ -316,7 +362,8 @@ module.exports = {
             // for every legacy-era sender, so the suffix is constant there
             // and the grouping is exactly the pre-mirror one; the key is a
             // process-local map key and is not observable anywhere else.
-            let key = prepBodyHash + '|' + meta + '|' + status + '|' + String(wireEffective);
+            let key = prepBodyHash + '|' + meta + '|' + status + '|' + String(wireEffective) + '|' +
+                this.admitBlocksKey(d.admit_blocks === undefined ? null : wireAdmitBlocks);
             // One live candidate per sender (AF4-R1): a re-announce replaces the
             // sender's previous body rather than accumulating. Without this a
             // Byzantine responsible peer streaming distinct self-signed bodies

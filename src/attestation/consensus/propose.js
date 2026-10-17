@@ -154,7 +154,8 @@ module.exports = {
         let pending = this.buildPendingRound(rid, roundState, my);
 
         if(myPubkey && myBody && mySig && !myBodyOverCap){
-            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus, effectiveTime: myEffective });
+            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus,
+                effectiveTime: myEffective, admitBlocks: myAdmit });
             // Same record the wire path keeps for peers, so this hub never proves
             // ITSELF silent as leader on a retry round after its own round timed out.
             this.recordProposer(rid, myPubkey);
@@ -175,7 +176,8 @@ module.exports = {
                 status:     myStatus,
                 sig_pubkey: myPubkey,
                 sig:        mySig,
-                ...this.effectiveTimeWireFields(pending)
+                ...this.effectiveTimeWireFields(pending),
+                ...this.admitWireFields(pending)
             });
         }
         // Replay messages that arrived before our round was set up. With
@@ -334,7 +336,7 @@ module.exports = {
 
     // A PROPOSE whose signature has verified over its sender's own canonical:
     // bound its stamp, measure its decoded body, and record the vote.
-    admitVerifiedProposal(pending, rid, d, body, meta, senderPubkey, wireEffective){
+    admitVerifiedProposal(pending, rid, d, body, meta, senderPubkey, wireEffective, wireAdmitBlocks){
         // Bound it here as well as at the PREPARE adoption sites, because the
         // ELECTED LEADER's proposal is where resolveRoundEffectiveTime takes the
         // round's stamp from: an unbounded value reaching that resolver would be a
@@ -371,7 +373,8 @@ module.exports = {
         // Store (idempotent; dedup by sender pubkey). Status is trusted only
         // because the sig was just verified over a canonical that binds it.
         if(!pending.proposals.has(senderPubkey)){
-            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok'), effectiveTime: wireEffective });
+            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok'),
+                effectiveTime: wireEffective, admitBlocks: wireAdmitBlocks });
             // A-F1 liveness: a judge_model leader PREPARE that arrived before this
             // follower had collected `need` proposals was buffered (see
             // handlePrepare) so it could be hash-checked against real proposals
