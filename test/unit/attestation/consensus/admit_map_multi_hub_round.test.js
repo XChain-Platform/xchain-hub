@@ -122,4 +122,36 @@ describe('attestation admission map across a multi-hub round', function () {
             cleanup(nodes);
         }
     });
+
+    it('refuses a bounded COMMIT map that differs from the settled leader map', async function () {
+        const { nodes } = makeFederation([1000, 1001, 1002]);
+        try {
+            const sender = nodes[1];
+            const target = nodes[2];
+            await target.engine.propose(RID, roundState(nodes, target));
+            const pending = target.engine.pending.get(RID);
+            pending.winner = { body: BODY, meta: META };
+            pending.admitBlocks = { BTC: 1004 };
+
+            const canonical = target.engine.buildCanonical(
+                RID, PROVIDER, BODY, 'ok', META, BLOCK, null, pending.admitBlocks);
+            const envelope = { type: 'ATTEST_COMMIT', data: {
+                requestId: RID,
+                sig_pubkey: sender.pubkey,
+                sig: sender.identity.sign(canonical.toString('utf8')),
+                admit_blocks: 'BTC:1005'
+            } };
+            expect(await target.engine.readWireAdmitBlocks(pending, envelope.data))
+                .to.deep.equal({ ok: true, admitBlocks: { BTC: 1005 } });
+            expect(ValidatorIdentity.verify(canonical.toString('utf8'), envelope.data.sig, sender.pubkey))
+                .to.equal(true);
+
+            await target.engine.handleMessage(envelope);
+
+            expect(pending.commits.has(sender.pubkey)).to.equal(false);
+            expect(pending.signatures.has(sender.pubkey)).to.equal(false);
+        } finally {
+            cleanup(nodes);
+        }
+    });
 });

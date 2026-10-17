@@ -357,7 +357,8 @@ class AttestationConsensus extends EventEmitter {
             : finish(wireAdmit);
     }
 
-    finishCommitWithAdmit(d, rid, pending, senderPubkey){
+    finishCommitWithAdmit(d, rid, pending, senderPubkey, wireAdmitBlocks){
+        if(!this.commitAdmitMapAllowed(pending, rid, senderPubkey, wireAdmitBlocks)) return;
         if(d.sig && d.sig_pubkey){
             let canonical = this.buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime, pending.admitBlocks);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey))

@@ -224,6 +224,14 @@ module.exports = {
         return true;
     },
 
+    commitAdmitMapAllowed(pending, rid, senderPubkey, wireAdmitBlocks){
+        if(this.admitBlocksKey(pending.admitBlocks) === this.admitBlocksKey(wireAdmitBlocks))
+            return true;
+        logger.warn('AttestationConsensus: COMMIT admission map differs from the elected leader map from ' +
+            senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+        return false;
+    },
+
     // This hub's admission map for an attest-response round: BTC alone, because the
     // indexer's call-site guard reads attestation_responses on BTC only. Null when the
     // hub cannot produce a fresh BTC admission tip, which the caller turns into a refusal
