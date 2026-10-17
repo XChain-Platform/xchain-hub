@@ -26,7 +26,7 @@ function blockHashes(overrides) {
     }, overrides);
 }
 
-describe('snapshotCheckpointFromBlockHashes', function () {
+function registerPayloadShapeTests() {
     it('builds only the six signed fields from a rooted block', function () {
         expect(snapshotCheckpointFromBlockHashes('testnet', blockHashes(), 100)).to.deep.equal({
             chain: 'BTC',
@@ -49,7 +49,9 @@ describe('snapshotCheckpointFromBlockHashes', function () {
                 state_root_version: 2,
             });
     });
+}
 
+function registerInputRefusalTests() {
     it('refuses a missing or non-object block-hashes answer without throwing', function () {
         expect(snapshotCheckpointFromBlockHashes('testnet', null, 100)).to.equal(null);
         expect(snapshotCheckpointFromBlockHashes('testnet', 'block', 100)).to.equal(null);
@@ -95,4 +97,9 @@ describe('snapshotCheckpointFromBlockHashes', function () {
         Object.defineProperty(bh, 'block_hash', { get() { throw new Error('unavailable'); } });
         expect(snapshotCheckpointFromBlockHashes('testnet', bh, 100)).to.equal(null);
     });
+}
+
+describe('snapshotCheckpointFromBlockHashes', function () {
+    registerPayloadShapeTests();
+    registerInputRefusalTests();
 });
