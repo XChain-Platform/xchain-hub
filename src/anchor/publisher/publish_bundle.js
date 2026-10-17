@@ -24,10 +24,13 @@
 
 const canonicalForms = require('./canonical_forms.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
+const { activeAt } = require('../../consensus/gate_registry.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
 const { anchorSendMayHaveLanded } = require('./send_failure.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+const BUNDLE_DONE_PUBLISHER_BIND_GATE = 'anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION';
 
 module.exports = {
 
@@ -382,7 +385,9 @@ module.exports = {
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
             await this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
                                     network, snapshotBlock, txid, foldActive ? 3 : 0);
-            this.announceBundleDone(group, network, snapshotBlock, txid);
+            if(!(result && result.exists &&
+                 activeAt(BUNDLE_DONE_PUBLISHER_BIND_GATE, network, null, snapshotBlock, null)))
+                this.announceBundleDone(group, network, snapshotBlock, txid);
         } catch(e){
             // A mid-flush deferral: an earlier anchor in this same pass spent the last
             // confirmed output. Not a failure of anything; the sections stay pending and
