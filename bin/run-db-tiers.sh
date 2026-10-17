@@ -50,7 +50,7 @@ cd "$REPO_ROOT"
 CONTAINER="xchain-hub-dbtier"
 DB_PORT="${DB_PORT:-23321}"
 DB_PASS="test"                 # fixture value: throwaway container, dropped on exit
-IMAGE="mariadb:11.4"
+IMAGE="mariadb:11.8"
 KEEP=0
 TIERS=()
 MOCHA_ARGS=()

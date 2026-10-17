@@ -43,7 +43,7 @@
 # ci-gate.sh from venue.env); else localhost root with the empty password the
 # workflow's MariaDB service container uses (MARIADB_ALLOW_EMPTY_ROOT_PASSWORD)
 # against the xchain_hub_test database, so a hand-run beside a stock
-# `mariadb:11.4` container behaves like CI.
+# `mariadb:11.8` container behaves like CI.
 #
 # SKIPPED-BY-DESIGN: none. Every run-step of every job is transcribed; the
 # untranscribed steps are all actions-only bookkeeping (actions/checkout,
