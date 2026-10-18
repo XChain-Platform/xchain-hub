@@ -75,7 +75,7 @@ addGate('anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION', 'height'
 // BTC snapshot height without binding it to a reporter-specific orphan hash.
 // Regtest exercises the form from genesis; public networks wait for a
 // coordinated activation.
-addGate('anchor/reorg_handler/snapshot_round.REORG_DIGEST_V2_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157040, 'LTC:testnet': 4928000, 'DOGE:testnet': 68008400, testnet: 157040, regtest: 0 });
+addGate('anchor/reorg_handler/snapshot_round.REORG_DIGEST_V2_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157053, 'LTC:testnet': 4928170, 'DOGE:testnet': 68008790, testnet: 157053, regtest: 0 });
 
 // Effective allow/block-list enforcement: armed on testnet, inert on mainnet
 // and regtest until coordinated activation. A regtest venue arms it at read
@@ -97,8 +97,8 @@ addGate('consensus/federation.FEDERATED_HUB_ACTIVATION', 'height', { mainnet: UN
 
 // oracle/consensus/commit
 // Count-mode quorum uses the verified signer set at and above this BTC height.
-addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157040, 'LTC:testnet': 4928000, 'DOGE:testnet': 68008400, testnet: UNARMED, regtest: 0 });
+addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157053, 'LTC:testnet': 4928170, 'DOGE:testnet': 68008790, testnet: UNARMED, regtest: 0 });
 
-addGate('anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157040, 'LTC:testnet': 4928000, 'DOGE:testnet': 68008400, testnet: 157040, regtest: 0 });
+addGate('anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157053, 'LTC:testnet': 4928170, 'DOGE:testnet': 68008790, testnet: 157053, regtest: 0 });
 
-addGate('anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157040, 'LTC:testnet': 4928000, 'DOGE:testnet': 68008400, testnet: UNARMED, regtest: 0 });
+addGate('anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157053, 'LTC:testnet': 4928170, 'DOGE:testnet': 68008790, testnet: UNARMED, regtest: 0 });

@@ -62,10 +62,10 @@ describe('reorg digest v2 gate', function () {
         // The v0.25.0 cut arms the per-chain keys and the bare testnet key at the BTC height.
         expect(row).to.deep.equal({
             mainnet: gateRegistry.UNARMED,
-            'BTC:testnet': 157040,
-            'LTC:testnet': 4928000,
-            'DOGE:testnet': 68008400,
-            testnet: 157040,
+            'BTC:testnet': 157053,
+            'LTC:testnet': 4928170,
+            'DOGE:testnet': 68008790,
+            testnet: 157053,
             regtest: 0
         });
     });
