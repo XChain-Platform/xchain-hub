@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "be489ce1ea0f7d6d809efdbeb973b985905aec4281592ff3bf770b21394d9354",
+  "consensus_rules_digest": "cac4806586d5e35020f85dd9f0a6b8106f9838a259c9a4b94a6c6cecb2678c06",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -46,8 +46,8 @@
     "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"mainnet\":null,\"regtest\":0}",
     "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16,\"remote_token_snapshots\":14}}",
-    "order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":null,\"testnet\":9999999999}"
+    "order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":156908}",
+    "remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":null,\"testnet\":156908}"
   },
   "gate_key_count": 47,
   "absent_gates": [],

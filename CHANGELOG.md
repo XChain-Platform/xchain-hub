@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-17
+
+### Added
+- Added remote token snapshot catch-up, remote token pin admission and the order-match price-cross rule, each behind an activation height.
+- Added the oracle round cadence resolver, disputed round diagnostics and expected pairs in the submissions info.
+- Added an encoder transaction status lookup and a sweep that clears abandoned anchor transaction stamps.
+- Added a count quorum gate on verified oracle signers, unarmed on mainnet and testnet.
+
+### Changed
+- Raised the hub schema version and refused peer catch-up pages at a different schema version.
+- Skipped oracle, attestation and anchor publishing while the mainnet write window is closed.
+- Accepted a previous hub API key beside the current one on snapshot, websocket and rate-limit authentication.
+- Armed ORDER_MATCH_PRICE_CROSS_ACTIVATION on BTC:testnet at 156908.
+- Armed ORDER_MATCH_PRICE_CROSS_ACTIVATION on LTC:testnet at 4927400.
+- Armed ORDER_MATCH_PRICE_CROSS_ACTIVATION on DOGE:testnet at 68005165.
+- Armed REMOTE_TOKEN_ADMISSION_ACTIVATION on BTC:testnet at 156908.
+- Armed REMOTE_TOKEN_ADMISSION_ACTIVATION on LTC:testnet at 4927400.
+- Armed REMOTE_TOKEN_ADMISSION_ACTIVATION on DOGE:testnet at 68005165.
+
+### Fixed
+- Published attestation, oracle and roll-call transactions once across refusals, reorgs and restarts, and kept one checkpoint per cadence interval.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added
