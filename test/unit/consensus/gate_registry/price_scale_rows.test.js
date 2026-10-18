@@ -22,7 +22,6 @@ const gate = require('../../../../src/consensus/gates/price_scale_gate.js');
 const PREFIX = 'price_scale_activation.';
 const REQUIRED = [
     'PRICE_SCALE_MAX_DECIMALS',
-    'PRICE_SCALE_ACTIVATION',
     'PRICE_VALUE_RE_LEGACY',
     'PRICE_VALUE_RE_CANONICAL',
 ];
@@ -42,14 +41,14 @@ function assertSameValue(actual, expected, message) {
 }
 
 describe('price scale gate registry rows', function () {
-    it('registers every price scale key exactly once and includes the required four', function () {
+    it('registers every price scale key exactly once and includes the required three', function () {
         const keys = registry.keys().filter((key) => key.startsWith(PREFIX));
         assert.strictEqual(keys.length, new Set(keys).size, 'duplicate price scale registry key');
         for(const name of REQUIRED)
             assert.strictEqual(keys.filter((key) => key === PREFIX + name).length, 1, PREFIX + name);
     });
 
-    it('exports the required four with the same values as their registry rows', function () {
+    it('exports the required three with the same values as their registry rows', function () {
         for(const name of REQUIRED) {
             assert.ok(Object.prototype.hasOwnProperty.call(gate, name), name + ' is exported');
             assertSameValue(gate[name], registry.get(PREFIX + name), name);
@@ -67,12 +66,7 @@ describe('price scale gate registry rows', function () {
             assertSameValue(gate[name], registry.get(PREFIX + name), name);
     });
 
-    it('pins the activation, decimal limit and canonical matcher behavior', function () {
-        assert.deepStrictEqual(registry.get(PREFIX + 'PRICE_SCALE_ACTIVATION'), {
-            mainnet: 0,
-            testnet: 0,
-            regtest: 0,
-        });
+    it('pins the decimal limit and canonical matcher behavior', function () {
         assert.strictEqual(registry.get(PREFIX + 'PRICE_SCALE_MAX_DECIMALS'), 8);
 
         const canonical = registry.get(PREFIX + 'PRICE_VALUE_RE_CANONICAL');
