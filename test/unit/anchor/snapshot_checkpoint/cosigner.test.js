@@ -216,6 +216,7 @@ describe('answerSnapshotSignRequest malformed dependencies', function () {
         const record = createSnapshotSignedRecord();
         expect(answerSnapshotSignRequest(request(), context(record, { identity: {} })))
             .to.deep.equal(refusal('malformed'));
+        expect(record.size()).to.equal(0);
     });
 
     it('never throws when a dependency throws', function () {

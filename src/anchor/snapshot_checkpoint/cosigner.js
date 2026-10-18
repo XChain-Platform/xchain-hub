@@ -13,6 +13,12 @@ function refused(reason) {
     return { refusal: reason, reply: null };
 }
 
+function canSign(identity) {
+    return Boolean(identity) &&
+        typeof identity.sign === 'function' &&
+        typeof identity.getPubkeyHex === 'function';
+}
+
 function answerSnapshotSignRequest(req, ctx) {
     try {
         if(ctx === null || typeof ctx !== 'object' ||
@@ -34,6 +40,7 @@ function answerSnapshotSignRequest(req, ctx) {
         );
         if(cosignRefusal !== null) return refused(cosignRefusal);
 
+        if(!canSign(ctx.identity)) return refused('malformed');
         if(ctx.record.claim(req.cp) !== true) return refused('conflicting_payload');
 
         return {
