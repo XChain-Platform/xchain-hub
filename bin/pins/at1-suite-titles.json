@@ -3566,6 +3566,12 @@
       "56943c73f19cec6d3f57fdb6348de41cdbc89f790407e3a1dac1e35b8b379290",
       "db9a1bd7934fa610e700256a47cecc7d8896302d51bc521af647cacbc86eb4fd"
     ],
+    "4752cda52a6f5d58": [
+      "187a2b6158554ec92119a6826833cd906b5e0c264b45e79156ae15af16c1e1ea",
+      "468dab0f336be5b38c900cb8931069b11867fd8ffddb949ad485bc653f408078",
+      "bdf6c96f9c5b220bd623d1d67e832868ab1ea21c42eeef5336015ddb3ab674e3",
+      "30266657c9f001d0bbe502c0ef1f143a68e45b9564167456463b346671063bad"
+    ],
     "477e0bddd2edb7d2": [
       "928cca18209c92eaa31a4b4db0e837c7631072659a36fa58017dc0d8531c24d4",
       "436de5cfd87a8b40e749c5488c300eaae973819f71065fb0bd6cc1d0468ceea8",
@@ -3714,15 +3720,6 @@
       "92d9cba11f6ab5ca0b26b11dfa784c081578d68d79057ec436ec415b233e7af3",
       "37e4947a54ddbb6e57b9afa37c7fb224b559e20e632c8e9c15787dc2c9a25e4a",
       "c2cd62a97ff6fbd5db266ad4a5ec7969292bd86baadfc01e5015c1a0ba8ae9ec"
-    ],
-    "4a2a5d76f6a71b51": [
-      "424f665828c7570d1c38d2066bd59488e3caabcb5e5727ef9bd3e03b7b527af5",
-      "b2008846af2f5b29f4e50f39f18b63bbe66a5a8767eee4308086de919c049a4f",
-      "af451ba71193ea6f1b8412d28d789f2268ddf5556a82bcc7b8f9ed8f93e882d0",
-      "d90cd1547dee32077ee52b4e7a69f78be9cf2215a918a6efba2c3f4d08066751",
-      "7ff7853f397a3b3b3cc92f0a074536ef3d201ef7e0b374332867028f2f3a83dc",
-      "082e22af4af5bbd01137d0ad45ee49603b2373c0ec90aafa2c6fe9850ac90347",
-      "424554373416e0dd738d31784584d399da22684cd4b97a1ca5d320ecb12c8c16"
     ],
     "4a590d714ed67ac5": [
       "5d21842dfa5b528621ec6a1df9eca8f462056be43adc0837b0af4d4e553f941c",
@@ -4923,12 +4920,6 @@
       "9d0946e76218dea2d46ca9782c595bb5ed9f7479d97999ad42c49f86c872f7aa",
       "95d08dd968ccb89b80df8425d74f2d926feec5ba778efe4eebff5a7d12ea4de3"
     ],
-    "613781da26cf67ce": [
-      "187a2b6158554ec92119a6826833cd906b5e0c264b45e79156ae15af16c1e1ea",
-      "4ecf78dd06ec7c3b6bfa228965fd43cdc7091682305bfadfc24b740d4dc2ce32",
-      "bdf6c96f9c5b220bd623d1d67e832868ab1ea21c42eeef5336015ddb3ab674e3",
-      "30266657c9f001d0bbe502c0ef1f143a68e45b9564167456463b346671063bad"
-    ],
     "6226aae9e1cdc9cf": [
       "baa5a20ad32ccc5be9aeb25833a7a44fcb0854104b235662446f65742c85d7a0",
       "5239d17731d6c39b53bc392fabdbae839bc4c2662583fc9e11a656cf4ad8b641",
@@ -5444,6 +5435,12 @@
       "bfd8dd2a89f4c875a03a80d27345ed3aa82cbca05370fa1810687dd01a25ced2",
       "56c2eb1336cf5ad5151ec3b2176cf5a2a078e459364675ca1bbb9e0a6486b8b1",
       "8d260f8132d63baeb4cf06dc2a8f94b5d06b0e69487aa071d12e05eed772df39"
+    ],
+    "680ca55465d28db1": [
+      "fcbcfb089123286a8089e42c111477033751d8591ad3d172211963ad4355e742",
+      "6d0cb576990ca5e6ddf4d72bf9820478ad8895ae4118d0159c2691f42e9fa9e5",
+      "c3d34733d9fb2b2698f844f83663f5cde21aa6a9420a12f7da2572774a08cc1f",
+      "86ef11b0e3cda713eb59f2e84a3ca3caca79b94c3359dfe1777af11164295f20"
     ],
     "6822c386d873b8e9": [
       "223e7ef6974ad336a594245bfc170e0c60edb222e3c23fc05dc408f052a6cb61",
@@ -7055,12 +7052,6 @@
       "dcf288e425f2e4ed9f16f9a33cc73385ace0b86f337dcf11d1d1e4e3a421c130",
       "59f84f7b81a78abb9bae206af367b3fc538167dafca10a49d928e1863ca9ce4b"
     ],
-    "86d40e8c20d62b3e": [
-      "fcbcfb089123286a8089e42c111477033751d8591ad3d172211963ad4355e742",
-      "6d0cb576990ca5e6ddf4d72bf9820478ad8895ae4118d0159c2691f42e9fa9e5",
-      "c3d34733d9fb2b2698f844f83663f5cde21aa6a9420a12f7da2572774a08cc1f",
-      "18a26136e8f644e56b08eb0e233daebd1fe7773b53d6abe84553a1b985da35b4"
-    ],
     "86e05d7db846547d": [
       "3578afdd3955ebb87932c0f217416a63115aa0949634d701172dbb9633a9a8e4",
       "d12a72089625df11d3ed41baf26b7f8e9975cce2e86bef76234ed0b7c0aa42ac",
@@ -7241,6 +7232,15 @@
       "82af9aed8deb74a2381fa659077fbb9f41605037c9d659ff77d6356fdb6e6b52",
       "f6a195dc76f263696e2146afb86cbf5bdae1a94661751c2ec08fa0008ad93d91"
     ],
+    "8cabb1d27f1a85ea": [
+      "424f665828c7570d1c38d2066bd59488e3caabcb5e5727ef9bd3e03b7b527af5",
+      "b2008846af2f5b29f4e50f39f18b63bbe66a5a8767eee4308086de919c049a4f",
+      "af451ba71193ea6f1b8412d28d789f2268ddf5556a82bcc7b8f9ed8f93e882d0",
+      "8747b0932222d798a7b199d11030ed33ef9ca65d984d506f6deb3b82b98eafce",
+      "7ff7853f397a3b3b3cc92f0a074536ef3d201ef7e0b374332867028f2f3a83dc",
+      "082e22af4af5bbd01137d0ad45ee49603b2373c0ec90aafa2c6fe9850ac90347",
+      "424554373416e0dd738d31784584d399da22684cd4b97a1ca5d320ecb12c8c16"
+    ],
     "8d3506263b0caeab": [
       "13af98c9c13d5b411b60984d60469fae932e4630a7a57fa0eb766007f9be5bc5",
       "c8fdb934b2bea311cf00a1a04539f04e3837c9159cd80a931d3809cd5f0fd635",
@@ -7398,18 +7398,6 @@
       "16285ae29a414d0c85cbe458f9946124171f70f0e893fa3b23b057ebce18fa0f",
       "b8f79828aa57deab85cad25864a45d51c87d381d917bd92aa2d0f52accf3097f",
       "5a757f32d4a1b29825b0404a126d84be832681601feffad19339023cffa1ef73"
-    ],
-    "8fc743fa36f9d5ff": [
-      "3b79a3ebfefe128bbc45e240364ce796d40e713c0ec2725ad10a48a1419bb187",
-      "83693962e9e0b7c2ee8c9c1111e5151ce153c53ebb6ab935ccfcc6dabd76deea",
-      "d88d2e9e39b4bc0df68181e4f4208a13d84ff7f46a400a110d18ed8216b4e6ea",
-      "61b38e2301b82d05bcf3d56ee849c18f9f006d7f0e0eccec3ee4d4bd9ba6a10c",
-      "d3d94a6685a1edefa11cffc83cb06aefee94d9d8735bdad66d0841e56a145df6",
-      "c821ffcff386e8bb3feddcb4af16f7a849bbecbd0d486b209590936a54d63c00",
-      "8023da44af2fe94abf193bf234e40f70cc6130bd7037791b10cf2da2da318aae",
-      "2f37f87dce72a3dd7a088aaef804883d4500b97c89d286acc2193dfc3758ee3e",
-      "8bf7cb0e40505627769acc2f93f739a64b43b5faa682be22dd102079f8b70dbf",
-      "9d9f9c6ae95349d760cf0d08424a0ca050daec9fc4066a06be5ec1cc63f3a048"
     ],
     "8fdc774d4dd17c7e": [
       "744738d4d8e51425c027315ec21457699b106c86c368277f4d3771a407b26417",
@@ -8691,6 +8679,18 @@
     "abb73cf505edd7e7": [
       "8d0f53a2c0425688e94994b001ec9b30bfd4ef9b1243b7588b84c2c3cd506496",
       "128109303bf37df8b9b4d2490f5b3f05af8129b9bb570c6047967f91f42560b7"
+    ],
+    "ac77bed6f461ebe4": [
+      "3b79a3ebfefe128bbc45e240364ce796d40e713c0ec2725ad10a48a1419bb187",
+      "83693962e9e0b7c2ee8c9c1111e5151ce153c53ebb6ab935ccfcc6dabd76deea",
+      "d88d2e9e39b4bc0df68181e4f4208a13d84ff7f46a400a110d18ed8216b4e6ea",
+      "61b38e2301b82d05bcf3d56ee849c18f9f006d7f0e0eccec3ee4d4bd9ba6a10c",
+      "d3d94a6685a1edefa11cffc83cb06aefee94d9d8735bdad66d0841e56a145df6",
+      "4c05a32f8f4552ce09768755600ef18d57372e4cc0c5e581d50c6d006bf8d0e8",
+      "8023da44af2fe94abf193bf234e40f70cc6130bd7037791b10cf2da2da318aae",
+      "2f37f87dce72a3dd7a088aaef804883d4500b97c89d286acc2193dfc3758ee3e",
+      "8bf7cb0e40505627769acc2f93f739a64b43b5faa682be22dd102079f8b70dbf",
+      "9d9f9c6ae95349d760cf0d08424a0ca050daec9fc4066a06be5ec1cc63f3a048"
     ],
     "ac9f4e185da72c18": [
       "b58b96174318db9311f30047d93a1c6a419eb9b0f4d16a59904c4e9b78ac49aa",
@@ -12432,7 +12432,7 @@
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_signing.test.js": "13349708ce76e412",
         "test/unit/anchor/publisher/reward/republish_reward_dedup.test.js": "c07a6e25fae9b719",
-        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "4a2a5d76f6a71b51",
+        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "8cabb1d27f1a85ea",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_finalized_reward_mirror.test.js": "65babceef70dc55e",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_own_adoption_reward.test.js": "b8f0a94b91ce8532",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_attest_durability.test.js": "8237e3940f27f04c",
@@ -12459,7 +12459,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_sign_req.test.js": "d058a53bd846c5de",
         "test/unit/anchor/publisher/state_anchor_publisher_stats_and_guards.test.js": "1ca68a9954875ad9",
         "test/unit/anchor/publisher/state_anchor_publisher_v3_root_binding.test.js": "7c2d19e5611113d0",
-        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "86d40e8c20d62b3e",
+        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "680ca55465d28db1",
         "test/unit/anchor/reorg_handler/reorg_digest_v2_multi_hub.test.js": "1c29af9455cceb7c",
         "test/unit/anchor/reorg_handler/reorg_handler.test.js": "42257c2109959575",
         "test/unit/anchor/reorg_handler/reorg_handler_dispute_unit.test.js": "8ff7b964bbdce9b2",
@@ -12480,7 +12480,7 @@
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
-        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "8fc743fa36f9d5ff",
+        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "ac77bed6f461ebe4",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
@@ -12963,7 +12963,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
-        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "4752cda52a6f5d58",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -13465,7 +13465,7 @@
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_signing.test.js": "13349708ce76e412",
         "test/unit/anchor/publisher/reward/republish_reward_dedup.test.js": "c07a6e25fae9b719",
-        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "4a2a5d76f6a71b51",
+        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "8cabb1d27f1a85ea",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_finalized_reward_mirror.test.js": "65babceef70dc55e",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_own_adoption_reward.test.js": "b8f0a94b91ce8532",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_attest_durability.test.js": "8237e3940f27f04c",
@@ -13492,7 +13492,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_sign_req.test.js": "d058a53bd846c5de",
         "test/unit/anchor/publisher/state_anchor_publisher_stats_and_guards.test.js": "1ca68a9954875ad9",
         "test/unit/anchor/publisher/state_anchor_publisher_v3_root_binding.test.js": "7c2d19e5611113d0",
-        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "86d40e8c20d62b3e",
+        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "680ca55465d28db1",
         "test/unit/anchor/reorg_handler/reorg_digest_v2_multi_hub.test.js": "1c29af9455cceb7c",
         "test/unit/anchor/reorg_handler/reorg_handler.test.js": "42257c2109959575",
         "test/unit/anchor/reorg_handler/reorg_handler_dispute_unit.test.js": "8ff7b964bbdce9b2",
@@ -13513,7 +13513,7 @@
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
-        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "8fc743fa36f9d5ff",
+        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "ac77bed6f461ebe4",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
@@ -13996,7 +13996,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
-        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "4752cda52a6f5d58",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",
@@ -14527,7 +14527,7 @@
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_signing.test.js": "13349708ce76e412",
         "test/unit/anchor/publisher/reward/republish_reward_dedup.test.js": "c07a6e25fae9b719",
-        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "4a2a5d76f6a71b51",
+        "test/unit/anchor/publisher/reward/state_anchor_publisher_bundle_done_publisher_bind.test.js": "8cabb1d27f1a85ea",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_finalized_reward_mirror.test.js": "65babceef70dc55e",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_own_adoption_reward.test.js": "b8f0a94b91ce8532",
         "test/unit/anchor/publisher/reward/state_anchor_publisher_reward_attest_durability.test.js": "8237e3940f27f04c",
@@ -14554,7 +14554,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_sign_req.test.js": "d058a53bd846c5de",
         "test/unit/anchor/publisher/state_anchor_publisher_stats_and_guards.test.js": "1ca68a9954875ad9",
         "test/unit/anchor/publisher/state_anchor_publisher_v3_root_binding.test.js": "7c2d19e5611113d0",
-        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "86d40e8c20d62b3e",
+        "test/unit/anchor/reorg_handler/reorg_digest_v2_gate.test.js": "680ca55465d28db1",
         "test/unit/anchor/reorg_handler/reorg_digest_v2_multi_hub.test.js": "1c29af9455cceb7c",
         "test/unit/anchor/reorg_handler/reorg_handler.test.js": "42257c2109959575",
         "test/unit/anchor/reorg_handler/reorg_handler_dispute_unit.test.js": "8ff7b964bbdce9b2",
@@ -14575,7 +14575,7 @@
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
-        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "8fc743fa36f9d5ff",
+        "test/unit/anchor/snapshot_checkpoint/engine.test.js": "ac77bed6f461ebe4",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
@@ -15058,7 +15058,7 @@
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference.test.js": "850e9fad605cdbbd",
         "test/unit/oracle/consensus/clamp/oracle_consensus_clamp_reference_writers.test.js": "5694816d3878deac",
         "test/unit/oracle/consensus/commit/commit_stored_signature_proof.test.js": "930d444aa7dc8636",
-        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "613781da26cf67ce",
+        "test/unit/oracle/consensus/count_quorum_signed_gate.test.js": "4752cda52a6f5d58",
         "test/unit/oracle/consensus/oracle_consensus.test.js": "fd5f5723e1f4bb41",
         "test/unit/oracle/consensus/oracle_consensus_aggregate_exact_order.test.js": "bffb1550f6408669",
         "test/unit/oracle/consensus/oracle_consensus_derived_pair_markers.test.js": "92efbf880bb53978",

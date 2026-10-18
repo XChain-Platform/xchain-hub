@@ -98,15 +98,20 @@ function harness(options = {}) {
 }
 
 function registerGateTests() {
-    it('reads a BTC-height hub gate armed only on regtest', function () {
+    it('reads a BTC-height hub gate armed on regtest and on testnet at its v0.25.0 heights', function () {
         const row = gateRegistry.get(GATE);
+        // The v0.25.0 cut arms BTC:testnet at 157040.
         expect(row).to.deep.equal({
             mainnet: gateRegistry.UNARMED,
+            'BTC:testnet': 157040,
+            'LTC:testnet': 4928000,
+            'DOGE:testnet': 68008400,
             testnet: gateRegistry.UNARMED,
             regtest: 0,
         });
         expect(gateRegistry.activeAt(GATE, 'regtest', 'BTC', 0, 0)).to.equal(true);
-        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 1000000, 0)).to.equal(false);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157039, 0)).to.equal(false);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157040, 0)).to.equal(true);
         expect(gateRegistry.activeAt(GATE, 'mainnet', 'BTC', 1000000, 0)).to.equal(false);
     });
 

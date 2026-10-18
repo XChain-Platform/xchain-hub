@@ -35,9 +35,13 @@ function context(network) {
 }
 
 describe('oracle count quorum signed activation', function () {
-    it('is armed from genesis only on regtest', function () {
+    it('is armed from regtest genesis and on testnet at its v0.25.0 heights', function () {
+        // The v0.25.0 cut arms BTC:testnet 157040, LTC:testnet 4928000, DOGE:testnet 68008400.
         expect(registry.get(KEY)).to.deep.equal({
             mainnet: registry.UNARMED,
+            'BTC:testnet': 157040,
+            'LTC:testnet': 4928000,
+            'DOGE:testnet': 68008400,
             testnet: registry.UNARMED,
             regtest: 0,
         });
