@@ -29,6 +29,7 @@ const { leadsSnapshotSlot } = require('./leader.js');
 const { pickDueSnapshot } = require('./due.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
+const snapshotRound = require('./round.js');
 
 const logger = getLogger();
 const SNAPSHOT_CHECKPOINT_ACTIVATION =
@@ -61,39 +62,54 @@ function distinctValidators(validators) {
             byPubkey.set(pubkey, Object.assign({}, validator, { pubkey }));
         }
     }
-    return [...byPubkey.values()].sort((left, right) =>
+    const result = [...byPubkey.values()].sort((left, right) =>
         left.pubkey.localeCompare(right.pubkey));
+    if (validators.truncated === true) result.truncated = true;
+    return result;
 }
 
 class SnapshotCheckpointEngine {
 
     constructor(stateCheckpoints) {
         this.source = stateCheckpoints;
-        this.db = stateCheckpoints && stateCheckpoints.db;
-        this.identity = stateCheckpoints && stateCheckpoints.identity;
-        this.network = stateCheckpoints && stateCheckpoints.network;
-        this.confirmations = stateCheckpoints && stateCheckpoints.confirmations;
-        this.pollMs = stateCheckpoints && stateCheckpoints.pollMs;
+        this.hub = stateCheckpoints && stateCheckpoints.hub;
+        this.db = stateCheckpoints && (stateCheckpoints.db || this.hub && this.hub.db);
+        this.identity = stateCheckpoints && (stateCheckpoints.identity ||
+            this.hub && this.hub.getIdentity && this.hub.getIdentity());
+        this.peerManager = stateCheckpoints && (stateCheckpoints.peerManager ||
+            this.hub && this.hub.getPeerManager && this.hub.getPeerManager());
+        this.network = stateCheckpoints && (stateCheckpoints.network ||
+            this.hub && this.hub.network);
+        const config = this.hub && this.hub.p2pConfig || {};
+        this.confirmations = numberOption(
+            stateCheckpoints && stateCheckpoints.confirmations,
+            config.CHECKPOINT_CONFIRMATIONS, 6, true);
+        this.pollMs = numberOption(
+            stateCheckpoints && stateCheckpoints.pollMs,
+            config.CHECKPOINT_POLL_MS, 60000, false);
+        this.roundTimeoutMs = numberOption(
+            stateCheckpoints && stateCheckpoints.roundTimeoutMs,
+            config.CHECKPOINT_ROUND_TIMEOUT_MS, 60000, false);
         this.signedRecord = createSnapshotSignedRecord();
         this.ticking = false;
         this.pollTimer = null;
+        snapshotRound.initialize(this);
     }
 
     async start() {
         if (!this.source || !this.db) return;
-        const pollMs = Number.isSafeInteger(this.pollMs) && this.pollMs > 0
-            ? this.pollMs
-            : 60000;
+        snapshotRound.start(this);
         this.pollTimer = setInterval(() => {
             this.tick().catch(error => logger.error(nodeUtil.format(
                 'SnapshotCheckpointEngine: tick error:', error && error.message)));
-        }, pollMs);
+        }, this.pollMs);
         if (this.pollTimer.unref) this.pollTimer.unref();
     }
 
     async stop() {
         if (this.pollTimer) clearInterval(this.pollTimer);
         this.pollTimer = null;
+        snapshotRound.stop(this);
     }
 
     gateHeight() {
@@ -110,8 +126,11 @@ class SnapshotCheckpointEngine {
     }
 
     async btcTip() {
-        if (!this.source || typeof this.source.resolveSnapshotBlock !== 'function') return null;
-        return this.source.resolveSnapshotBlock();
+        if (this.source && typeof this.source.resolveSnapshotBlock === 'function')
+            return this.source.resolveSnapshotBlock();
+        if (this.hub && typeof this.hub.resolveBtcLatestBlock === 'function')
+            return this.hub.resolveBtcLatestBlock();
+        return null;
     }
 
     async indexerCall(method, params) {
@@ -134,7 +153,7 @@ class SnapshotCheckpointEngine {
             const rows = await this.db.listUncheckpointedSnapshotBlocks(
                 this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
             const due = pickDueSnapshot(snapshotBlocks(rows), {
-                inFlight: false,
+                inFlight: this.snapshotRounds.size > 0,
                 gateActive: block => this.gateActive(block),
                 blockOf: block => snapshotCheckpointBlock(block, this.network),
                 btcTip: await this.btcTip(),
@@ -166,7 +185,7 @@ class SnapshotCheckpointEngine {
                 await this.persistSoleCheckpoint(cp, signature);
                 return;
             }
-            await this.leadRound(cp, validators);
+            await this.leadRound(cp, validators, due.snapshot_block, signature);
         } finally {
             this.ticking = false;
         }
@@ -200,10 +219,18 @@ class SnapshotCheckpointEngine {
         }
     }
 
-    async leadRound(cp, validators) {
-        logger.info('SnapshotCheckpointEngine: peer round deferred for BTC/' + cp.network + '/' +
-            cp.block_index + ' across ' + validators.length + ' validators');
+    async leadRound(cp, validators, snapshotBlock, signature) {
+        return snapshotRound.lead(this, cp, validators, snapshotBlock, signature);
     }
+}
+
+function numberOption(primary, secondary, fallback, allowZero) {
+    for (const value of [primary, secondary]) {
+        const number = Number(value);
+        if (Number.isSafeInteger(number) && (allowZero ? number >= 0 : number > 0))
+            return number;
+    }
+    return fallback;
 }
 
 module.exports = Object.assign(SnapshotCheckpointEngine, {
