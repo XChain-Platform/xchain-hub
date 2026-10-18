@@ -48,6 +48,8 @@ function mountSnapshots() {
         HUB_API_KEY: '',
         HUB_FEED_API_KEY: '',
     });
+    // The proof route is a parameterised read that answers 400 without its query, not a mirror feed.
+    delete routes['/hub-db/snapshot/capability_snapshot_proof'];
     return routes;
 }
 
