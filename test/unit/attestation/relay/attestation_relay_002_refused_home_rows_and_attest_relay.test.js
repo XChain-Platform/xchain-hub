@@ -44,10 +44,6 @@ const path       = require('path');
 
 const AttestationRelay = require('../../../../src/attestation/relay.js');
 const eq               = require('../../../../src/consensus/equivocation_header.js');
-// The reject-slot rule is a registry row (W5); discovery reads it through the
-// registry module object, which is where the fixture below moves its threshold.
-const gateRegistry     = require('../../../../src/consensus/gate_registry');
-const REJECT_SLOT_KEY  = 'attest_relay_reject_slot_activation.ATTEST_RELAY_REJECT_SLOT_ACTIVATION';
 
 const REQ_ID    = 'd'.repeat(64);
 const PUBKEY_A  = 'a'.repeat(64);
@@ -175,8 +171,7 @@ const refusedHomeRow = () => homeRelayedRow({
                 meta:                  null,
             });
 
-// A hub whose BTC chain_tips row carries `blockTime`, which is the plane the
-            // gate resolves on (the indexer half reads the landing block's own time).
+// A hub whose BTC chain_tips row carries `blockTime`.
             const hubWithTipTime = (blockTime) => ({
                 db: {
                     doQuery:     sinon.stub().resolves([]),
@@ -184,36 +179,18 @@ const refusedHomeRow = () => homeRelayedRow({
                 },
             });
 
-// Drive a threshold rather than the armed map, so both sides of the arm are
-            // reachable wherever the networks are armed today: activeAt answers the
-            // reject-slot key against `value` on the time plane for `network` and every
-            // other key as before. Restored after the call.
-            function withThreshold(network, value, fn) {
-                const real = gateRegistry.activeAt;
-                const stub = sinon.stub(gateRegistry, 'activeAt').callsFake((key, net, coin, height, time) => {
-                    if (key !== REJECT_SLOT_KEY || net !== network) return real(key, net, coin, height, time);
-                    const t = parseInt(time);
-                    return Number.isFinite(t) && t >= value;
-                });
-                return fn().finally(() => stub.restore());
-            }
-
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 
 
 
-        // ── The reject-slot half, on both sides of the arm ──────────────────
+        // ── Refused home rows ────────────────────────────────────────────────
         //
         // A REFUSED home row names a request that was never materialized: a malformed
-        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
-        // the arm the indexer stores no such row, so one in the view is residue and
-        // must not answer "already materialized" or the origin's request is stranded.
-        // Below the arm the stored refusal still occupies the id fleet-wide, so
-        // suppressing the broadcast is what keeps the hub from burning a fee per poll
-        // on a v3 every indexer drops.
-describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('materializes the request when the gate is ARMED, refused row and all', async function () {
+        // v3 claimed the id and was stamped 'rejected'. Once the home tip time is
+        // known, it must not answer "already materialized" and strand the request.
+describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows', function () { it('materializes the request when the home tip time is known', async function () {
                 const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [refusedHomeRow()]);
-                await withThreshold('regtest', 1786060800, () => relay.poll());
+                await relay.poll();
                 expect(proposedRows(relay, 'request')).to.have.length(1);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(false);
             }); }); }); });
@@ -222,46 +199,30 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 
 
-        // ── The reject-slot half, on both sides of the arm ──────────────────
+        // ── Refused home rows ────────────────────────────────────────────────
         //
         // A REFUSED home row names a request that was never materialized: a malformed
-        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
-        // the arm the indexer stores no such row, so one in the view is residue and
-        // must not answer "already materialized" or the origin's request is stranded.
-        // Below the arm the stored refusal still occupies the id fleet-wide, so
-        // suppressing the broadcast is what keeps the hub from burning a fee per poll
-        // on a v3 every indexer drops.
-describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('still suppresses the request one second BELOW the arm', async function () {
-                const relay = makeRelay(hubWithTipTime(1786060799), [originRow()], [refusedHomeRow()]);
-                await withThreshold('regtest', 1786060800, () => relay.poll());
-                expect(proposedRows(relay, 'request')).to.have.length(0);
-                expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
-            }); }); }); });
-
+        // v3 claimed the id and was stamped 'rejected'. Discovery filters such rows
+        // only after it has a usable home-chain tip time.
 // ── 3. Discovery gating ─────────────────────────────────────────────────
 
 
 
-        // ── The reject-slot half, on both sides of the arm ──────────────────
+        // ── Refused home rows ────────────────────────────────────────────────
         //
         // A REFUSED home row names a request that was never materialized: a malformed
-        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
-        // the arm the indexer stores no such row, so one in the view is residue and
-        // must not answer "already materialized" or the origin's request is stranded.
-        // Below the arm the stored refusal still occupies the id fleet-wide, so
-        // suppressing the broadcast is what keeps the hub from burning a fee per poll
-        // on a v3 every indexer drops.
-describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('suppresses the request when the home tip time is unknown, whatever the arming state', async function () {
-                // No tip pushed to this hub: the gate cannot be resolved, so the driver
-                // keeps the pre-arm behaviour rather than guessing armed and spending.
+        // v3 claimed the id and was stamped 'rejected'. Discovery filters such rows
+        // only after it has a usable home-chain tip time.
+describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows', function () { it('suppresses the request when the home tip time is unknown', async function () {
+                // No tip pushed to this hub, so the driver keeps the row rather than
+                // guessing that it is safe to relay and spending.
                 const relay = makeRelay({ db: { doQuery: sinon.stub().resolves([]) } },
                     [originRow()], [refusedHomeRow()]);
                 await relay.poll();
                 expect(proposedRows(relay, 'request')).to.have.length(0);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
 
-                // A tip row with no time reads 0 through getChainTip, which is "unknown"
-                // and must not satisfy a 0 threshold.
+                // A tip row with no time reads 0 through getChainTip, which is unknown.
                 const zero = makeRelay(hubWithTipTime(0), [originRow()], [refusedHomeRow()]);
                 await zero.poll();
                 expect(proposedRows(zero, 'request')).to.have.length(0);
@@ -272,21 +233,18 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 
 
-        // ── The reject-slot half, on both sides of the arm ──────────────────
+        // ── Refused home rows ────────────────────────────────────────────────
         //
         // A REFUSED home row names a request that was never materialized: a malformed
-        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
-        // the arm the indexer stores no such row, so one in the view is residue and
-        // must not answer "already materialized" or the origin's request is stranded.
-        // Below the arm the stored refusal still occupies the id fleet-wide, so
-        // suppressing the broadcast is what keeps the hub from burning a fee per poll
-        // on a v3 every indexer drops.
-describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('drops ONLY refused rows when armed: a fulfilled row still suppresses', async function () {
+        // v3 claimed the id and was stamped 'rejected'. Discovery filters such rows
+        // only after it has a usable home-chain tip time.
+describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows', function () { it('drops only refused rows: a fulfilled row still suppresses', async function () {
                 // The regression the relayed view exists for must survive the exclusion:
                 // a fulfilled BTC row is out of the pending queue but the request IS
                 // materialized, and re-broadcasting it burns a fee on a duplicate v3.
-                const relay = makeRelay(hubWithTipTime(1786060800), [originRow()], [homeRelayedRow()]);
-                await withThreshold('regtest', 1786060800, () => relay.poll());
+                const relay = makeRelay(hubWithTipTime(1786060800), [originRow()],
+                    [refusedHomeRow(), homeRelayedRow()]);
+                await relay.poll();
                 expect(proposedRows(relay, 'request')).to.have.length(0);
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
             }); }); }); });
@@ -295,21 +253,17 @@ describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hoo
 
 
 
-        // ── The reject-slot half, on both sides of the arm ──────────────────
+        // ── Refused home rows ────────────────────────────────────────────────
         //
         // A REFUSED home row names a request that was never materialized: a malformed
-        // v3 claimed the id, was stamped 'rejected' and (below the arm) stored. Above
-        // the arm the indexer stores no such row, so one in the view is residue and
-        // must not answer "already materialized" or the origin's request is stranded.
-        // Below the arm the stored refusal still occupies the id fleet-wide, so
-        // suppressing the broadcast is what keeps the hub from burning a fee per poll
-        // on a v3 every indexer drops.
-describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows and ATTEST_RELAY_REJECT_SLOT', function () { it('leaves an armed hub with no refused rows untouched, and asks the DB nothing', async function () {
+        // v3 claimed the id and was stamped 'rejected'. Discovery filters such rows
+        // only after it has a usable home-chain tip time.
+describe('AttestationRelay', function () { beforeEach(hookAt6668); afterEach(hookAt6849); describe('origin discovery', function () { describe('refused home rows', function () { it('leaves a view with no refused rows untouched, and asks the DB nothing', async function () {
                 const hub   = hubWithTipTime(1786060800);
                 const relay = makeRelay(hub, [originRow()], [homeRelayedRow()]);
-                await withThreshold('regtest', 1786060800, () => relay.poll());
+                await relay.poll();
                 expect(relay._homeRelayed.has(REQ_ID)).to.equal(true);
-                // The gate read is only taken when there is a refusal to weigh.
+                // The tip read is only taken when there is a refusal to weigh.
                 expect(hub.db.getChainTip.called).to.equal(false);
             }); }); }); });
 }
