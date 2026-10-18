@@ -6805,14 +6805,6 @@
       "be7c088d2f1a39d42682a3ad376b74f41b146daf4660cef6f22f60a557e646da",
       "1dc000d5508c5ce6e9d18d7c65fd75aa8ffa3550ce0d633d9ed3e82551a39778"
     ],
-    "8046f204328470b8": [
-      "fc8bd4f562c02cd9177ad1341f1a7c7b6d789de9f56859804fba7b8a59027c17",
-      "3c66750cc0045dc5281c9e43aba6598419f1dc0cda044a77cff91bb985d0ec05",
-      "fbedcd1e7777cfd32948e4e6f617c09c41334acacf6fade6f25c39c408e9d66f",
-      "af040d663c97b7bc483a770da13635588baa196399134219756f62f6835b37d3",
-      "9eb545d5094260612d0ae1630bc68ab16f5de1136f3547780c24642abce1642a",
-      "8102cc57f87bd2a99b94834bb9850d340629dacfcdebc305559773cc34125d33"
-    ],
     "80639adf8fd422eb": [
       "43f0d4efc2ab69dc08796ca21ff1f0fab873416286ab1e047111f3f3b211b044",
       "eb5db96704bf567af10ca7e4d0fddd1f31626ed0e2bf0d43fe2840c2d5921d17",
@@ -12097,6 +12089,15 @@
       "592b0d43c649e5b1686075fba207c085277c695028985fd9f5cef78ffdec2ae5",
       "6a59a84fbc193d0b7b53371de3cea8e127848177b45bab953a744b04549505bc"
     ],
+    "f98b5112aaad8f5e": [
+      "fc8bd4f562c02cd9177ad1341f1a7c7b6d789de9f56859804fba7b8a59027c17",
+      "3c66750cc0045dc5281c9e43aba6598419f1dc0cda044a77cff91bb985d0ec05",
+      "fbedcd1e7777cfd32948e4e6f617c09c41334acacf6fade6f25c39c408e9d66f",
+      "af040d663c97b7bc483a770da13635588baa196399134219756f62f6835b37d3",
+      "9eb545d5094260612d0ae1630bc68ab16f5de1136f3547780c24642abce1642a",
+      "fda55771ca77569ae902cc9ce9cea47470762e680c71788a329314d1e8bd64ff",
+      "8102cc57f87bd2a99b94834bb9850d340629dacfcdebc305559773cc34125d33"
+    ],
     "f9ad0ebfb28d11b4": [
       "34c7956be653b0c3d18ca6786c67c17dab352916ef679ab9e28b5cdf09b3def7",
       "9361d3994f7e5a5d5d36815cf6c6367b9e6d88ad5356f70085830586994f348c",
@@ -12310,7 +12311,7 @@
         "ci:regression"
       ],
       "fileCount": 973,
-      "titleCount": 8962,
+      "titleCount": 8963,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12705,7 +12706,7 @@
         "test/unit/capabilities/capability_snapshot_write_atomic.test.js": "81df4d986b922d69",
         "test/unit/capabilities/capability_snapshot_write_row_order.test.js": "657ec5f85144670c",
         "test/unit/capabilities/consensus_input_monitor.test.js": "588aed212bfae48b",
-        "test/unit/coins/chain_registry.test.js": "8046f204328470b8",
+        "test/unit/coins/chain_registry.test.js": "f98b5112aaad8f5e",
         "test/unit/coins/coins.test.js": "aafa8648cee3dace",
         "test/unit/coins/coins_confirmations.test.js": "86e05d7db846547d",
         "test/unit/coins/coins_consensus_pin.test.js": "6d77ce6dc95c94b3",
@@ -13342,7 +13343,7 @@
     },
     "test": {
       "fileCount": 973,
-      "titleCount": 8962,
+      "titleCount": 8963,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13737,7 +13738,7 @@
         "test/unit/capabilities/capability_snapshot_write_atomic.test.js": "81df4d986b922d69",
         "test/unit/capabilities/capability_snapshot_write_row_order.test.js": "657ec5f85144670c",
         "test/unit/capabilities/consensus_input_monitor.test.js": "588aed212bfae48b",
-        "test/unit/coins/chain_registry.test.js": "8046f204328470b8",
+        "test/unit/coins/chain_registry.test.js": "f98b5112aaad8f5e",
         "test/unit/coins/coins.test.js": "aafa8648cee3dace",
         "test/unit/coins/coins_confirmations.test.js": "86e05d7db846547d",
         "test/unit/coins/coins_consensus_pin.test.js": "6d77ce6dc95c94b3",
@@ -14321,7 +14322,7 @@
     },
     "test:all": {
       "fileCount": 1055,
-      "titleCount": 9825,
+      "titleCount": 9826,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14798,7 +14799,7 @@
         "test/unit/capabilities/capability_snapshot_write_atomic.test.js": "81df4d986b922d69",
         "test/unit/capabilities/capability_snapshot_write_row_order.test.js": "657ec5f85144670c",
         "test/unit/capabilities/consensus_input_monitor.test.js": "588aed212bfae48b",
-        "test/unit/coins/chain_registry.test.js": "8046f204328470b8",
+        "test/unit/coins/chain_registry.test.js": "f98b5112aaad8f5e",
         "test/unit/coins/coins.test.js": "aafa8648cee3dace",
         "test/unit/coins/coins_confirmations.test.js": "86e05d7db846547d",
         "test/unit/coins/coins_consensus_pin.test.js": "6d77ce6dc95c94b3",
