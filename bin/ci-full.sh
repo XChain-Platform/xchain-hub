@@ -135,6 +135,42 @@ need_sib() {
   done
 }
 
+chain_registry_check() {
+  local wallet="$SIB/xchain-wallet"
+  local upstream=""
+  local behind="0"
+  upstream="$(git -C "$wallet" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$upstream" ]; then
+    behind="$(git -C "$wallet" rev-list --count "HEAD..$upstream" -- \
+      packages/core/src/registry/descriptors bin/chain-registry.sync.json 2>/dev/null || echo 0)"
+  fi
+  if [ "$behind" -eq 0 ]; then
+    node "$wallet/bin/sync-chain-registry.mjs" --check
+    return
+  fi
+
+  local stage=""
+  echo "chain-registry: wallet checkout is $behind relevant commit(s) behind $upstream; checking upstream"
+  mkdir -p "$SELF/tmp"
+  stage="$(mktemp -d "$SELF/tmp/chain-registry-check.XXXXXX")" || return 1
+  mkdir -p "$stage/xchain-wallet" "$stage/xchain-hub/src"
+  if ! git -C "$wallet" archive "$upstream" \
+      package.json \
+      bin/sync-chain-registry.mjs \
+      bin/chain-registry.sync.json \
+      bin/lib/checkout-freshness.mjs \
+      packages/core/src \
+      | tar -x -C "$stage/xchain-wallet"; then
+    rm -rf -- "$stage"
+    return 1
+  fi
+  cp "$SELF/src/chain-registry.json" "$stage/xchain-hub/src/chain-registry.json"
+  node "$stage/xchain-wallet/bin/sync-chain-registry.mjs" --check
+  local status=$?
+  rm -rf -- "$stage"
+  return "$status"
+}
+
 export TEST_DB_HOST="${TEST_DB_HOST:-${CI_DB_HOST:-127.0.0.1}}"
 export TEST_DB_PORT="${TEST_DB_PORT:-${CI_DB_PORT:-3306}}"
 export TEST_DB_USER="${TEST_DB_USER:-${CI_DB_USER:-root}}"
@@ -190,7 +226,7 @@ run_tier "perf (test:perf)" env SOAK_DURATION_MS=15000 npm run test:perf
 # sync script against the pair. The script resolves the hub at ../../xchain-hub
 # from its own location, so the sibling layout is what makes it check anything.
 run_tier "drift: chain-registry snapshot vs canonical wallet descriptors" \
-  node "$SIB/xchain-wallet/bin/sync-chain-registry.mjs" --check
+  chain_registry_check
 consensus_pin_check() { (cd "$SELF" && node -e '
   const coins = require("./src/coins");
   for (const net of ["testnet", "regtest"]) {
