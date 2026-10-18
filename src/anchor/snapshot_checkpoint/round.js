@@ -23,24 +23,32 @@ const logger = getLogger();
 function initialize(engine) {
     engine.snapshotRounds = new Map();
     engine.snapshotMessageHandler = null;
+    engine.snapshotParentMessageHandler = null;
 }
 
 function start(engine) {
-    if (!engine.peerManager || typeof engine.peerManager.on !== 'function' ||
-        engine.snapshotMessageHandler) return;
+    if (engine.snapshotMessageHandler || !engine.source ||
+        typeof engine.source.handleMessage !== 'function') return;
     engine.snapshotMessageHandler = envelope => {
         handleMessage(engine, envelope).catch(error => logger.error(
             'SnapshotCheckpointEngine: peer message error: ' +
             String(error && error.message || error)));
     };
-    engine.peerManager.on('message', engine.snapshotMessageHandler);
+    const original = engine.source.handleMessage;
+    const wrapped = function (envelope) {
+        const result = original.call(this, envelope);
+        engine.snapshotMessageHandler(envelope);
+        return result;
+    };
+    engine.snapshotParentMessageHandler = { original, wrapped };
+    engine.source.handleMessage = wrapped;
 }
 
 function stop(engine) {
-    if (engine.snapshotMessageHandler && engine.peerManager &&
-        typeof engine.peerManager.removeListener === 'function') {
-        engine.peerManager.removeListener('message', engine.snapshotMessageHandler);
-    }
+    const parent = engine.snapshotParentMessageHandler;
+    if (parent && engine.source && engine.source.handleMessage === parent.wrapped)
+        engine.source.handleMessage = parent.original;
+    engine.snapshotParentMessageHandler = null;
     engine.snapshotMessageHandler = null;
     for (const pending of engine.snapshotRounds.values()) clearTimeout(pending.timer);
     engine.snapshotRounds.clear();

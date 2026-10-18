@@ -26,6 +26,9 @@ async function flush(count = 16) {
 async function startMesh(options = {}) {
     const mesh = buildSnapshotMesh(options);
     for (const node of mesh.nodes) {
+        node.stateCheckpoints.handleMessage = () => {};
+        node.stateCheckpoints.peerManager.on('message', envelope =>
+            node.stateCheckpoints.handleMessage(envelope));
         node.engine = new SnapshotCheckpointEngine(node.stateCheckpoints);
         node.db.seedSnapshots([SNAPSHOT_BLOCK]);
         await node.engine.start();
