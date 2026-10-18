@@ -6388,19 +6388,6 @@
       "d9af96feca218470523243e93678864cf1a2452ff72f1aa18d9f4454b91fd360",
       "2c64374e82e44efafda53f7526d1a19e2e0dbce90b8937525054f51a6ceb0c6d"
     ],
-    "77f7d4ba16c5649d": [
-      "317bd2e2a4712e3d88ef53013bb0f9728b397be1983400300ee8a6497f50c453",
-      "c13543309d0761e4b2d9a2a5927f92e4446370d883e1165e1b52b707abcd6e6d",
-      "76eee8f70e05117137eb4fd57f54889352fa8e5f3086944cbaec8164bbfdabe8",
-      "3639fcdcb94d1d0d269b49f835c4c79e4d88754ec1f5a799cc8fc4c165e979bb",
-      "68502cbf3d654376a60c5cecfd032e733f2f94b31a47916ae915c71b4648d35c",
-      "24f7f6775f1e78f894a88b22e5cf06ea6e7cc94366838e6c1b3585f0b6a6afa1",
-      "520e3a3cc14b04bd744a7126ca1cf346151070da88222ea5b6503757a5809376",
-      "8425be7a959d8c3d8939059c036c554bac50036693907139f0c52845916e8130",
-      "71ef080abc7ab1f5ed6f7188c1d12cc8c1c2d1652ecc5e62d37113e0aecb5a78",
-      "a2c96b93cf185e53b5ec8a1e3d0cd477453c04f7a9d8b64ba94648a4076d8d46",
-      "e08d9b0aa06abb96518114324a149949b7af63f81b003373ca0d9a90ad02a857"
-    ],
     "780904a051bf3e9e": [
       "bb4cfd8ca3b7616a346c519b133dffc63525c0d84d2a467716b09a47d84329dc",
       "4748c63e1cdbded8dcf7900984247f724021f9bc91acaad3418d7be1135b9d88",
@@ -9346,6 +9333,17 @@
       "2c65b8150a1a89aa9546ff45fb2b45df12b2ad12ca6182d6482dcbeedca454a4",
       "8a4908bfbe77aad40e6a71fedf3cbe74f7371cd05eab706df9a3732faf224f57"
     ],
+    "bb1f2099c4d69d0f": [
+      "09b07be2838c4d4481bf493fa9a0655d632dcf0b54f0abba2d1d3bb1a2612720",
+      "a804e787f55e5966718de51181c12c142e241be76158d37b2a588e61d9a4d7e5",
+      "6a1e7341e34c9df3428e328ab5cd7e0d32d4953583d36dc3bc9ef028299b8160",
+      "3ed9a7d4ead6f650359b4099cc811932253494ccc2c4ac3d33769baa76508140",
+      "f8acfcd751ae210540e1d4b19bc740084d84edf8f8f5988bf08caaa253508d08",
+      "31de5f28722c614b4e60bfe3a2602d46d49d6882d65aac0b3be3075f0412a1aa",
+      "2baa196939ba0ee686e1834be44a98c5299d400b198dff6b537f0811ffb41996",
+      "6bbb098b0b45a67bb7674410f481b8fe3b91c192aa1ef18b835548b8f0718cb7",
+      "708f8874daeb6d288e899e9c8fd393aa30a7aa4d19b78fcb880a9e688c6dca84"
+    ],
     "bb8d22d13c16ee01": [
       "459201ee90b4fa161a4411cd40ef7827f7cd9e62654a62946b0ddedc6e19f846",
       "dacd84b84e6642a61e69b3b51be55b2f67384950654cf85867e5d969bb4d411d"
@@ -12230,7 +12228,7 @@
         "ci:regression"
       ],
       "fileCount": 967,
-      "titleCount": 8894,
+      "titleCount": 8892,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12392,8 +12390,8 @@
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
-        "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
+        "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
@@ -13256,7 +13254,7 @@
     },
     "test": {
       "fileCount": 967,
-      "titleCount": 8894,
+      "titleCount": 8892,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13418,8 +13416,8 @@
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
-        "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
+        "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
@@ -14229,7 +14227,7 @@
     },
     "test:all": {
       "fileCount": 1049,
-      "titleCount": 9757,
+      "titleCount": 9755,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14473,8 +14471,8 @@
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
-        "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
+        "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
