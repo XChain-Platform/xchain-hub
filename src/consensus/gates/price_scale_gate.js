@@ -12,37 +12,37 @@
  *
  **********************************************************************
  *
- * PRICE v0 canonical price-value rule.
+ * PRICE v0 canonical price-value flag-day.
  *
  * A PRICE v0 round names each pair TICKER/FIAT and a price STRING. Every other
  * price entry point bounds that string's scale: the v1 push path caps the
  * decimal side at 8 places (PriceAggregator.receiveOraclePrice), the producer
  * normalizes with bcformat(price, 8) before its own bound
  * (XchainPriceSource._entry), and OracleConsensus._aggregate emits
- * bcformat(..., 8). The v0 wire alone accepted /^[0-9]+(\.[0-9]+)?$/, any
- * number of digits on either side of the point.
+ * bcformat(..., 8). The v0 wire alone accepts /^[0-9]+(\.[0-9]+)?$/, any number
+ * of digits on either side of the point.
  *
- * So a quorum-signed v0 round could carry values every other lane refused, and
- * two of them bit.
+ * So a quorum-signed v0 round carries values every other lane refuses, and two
+ * of them bite.
  *
  * SCALE. 0.000000001 is refused by the v1 regex and by every producer, whose
  * bcformat(..., 8) renders it '0.00000000' and fails the positive lower bound.
- * It passed v0 ingest and finalized into the unified store, which was the
+ * It passes v0 ingest and finalizes into the unified store, which is the
  * one-lane-accepts-what-another-refuses case this seam exists to prevent.
  *
- * LENGTH. The accepted string was stored and mirrored verbatim into
+ * LENGTH. The accepted string is stored and mirrored verbatim into
  * price_snapshots.price, a VARCHAR(40) on the hub and on the indexer mirror. A
- * 42-character price cleared every v0 gate, so under a permissive sql_mode the
- * stored row no longer equaled the value the validators signed, and under
- * STRICT_TRANS_TABLES the INSERT threw and the whole round was refused as a
+ * 42-character price clears every v0 gate, so under a permissive sql_mode the
+ * stored row no longer equals the value the validators signed, and under
+ * STRICT_TRANS_TABLES the INSERT throws and the whole round is refused as a
  * 'db error'. Which of the two happens is a database setting rather than a
  * protocol decision. OracleBatchSigner re-derives batch canonical bytes from
  * its own finalized price_snapshots rows and compares pair prices as strings,
  * so a truncated row also poisons later batch co-signing.
  *
- * THE RULE. A v0 price is CANONICAL: no leading zeros on the integer side, at
- * most PRICE_SCALE_MAX_DECIMALS digits on the decimal side, and a point only
- * when digits follow it.
+ * THE RULE. At and above the threshold a v0 price is CANONICAL: no leading
+ * zeros on the integer side, at most PRICE_SCALE_MAX_DECIMALS digits on the
+ * decimal side, and a point only when digits follow it.
  *
  * The scale half and the leading-zero half are ONE rule because either alone
  * leaves the other consequence reachable. A scale cap by itself still admits
@@ -55,16 +55,38 @@
  * no schema change carries this fix.
  *
  * It refuses nothing a producer emits. bcformat(..., 8) yields exactly this
- * form, so the honest wire is already canonical.
+ * form, so the honest wire is already canonical and arming changes no round the
+ * federation assembles.
  *
- * VENDORED byte-identically into xchain-hub/src, where PriceAggregator applies
- * it to both v0 ingest paths. A test in each repo pins the byte-equality.
+ * CONSENSUS-AFFECTING, so gated: below the threshold a node accepts the loose
+ * form and at/above it refuses, and a one-sided deploy forks the fleet on the
+ * first round carrying either shape. Below the gate the legacy pattern is
+ * preserved verbatim and a from-genesis replay stays byte-identical.
+ *
+ * TIME-keyed, not height-keyed, for the reason price_pair_activation records: a
+ * PRICE v0 action is parsed by the indexer of whichever chain carried it, and
+ * BTC/LTC/DOGE heights diverge, so no single height names one cutover.
+ *
+ * Resolved ONCE per action, alongside the pair-name bound, so every round in a
+ * batch is judged under one rule and no window can straddle this gate.
+ *
+ * MAINNET IS ARMED AT GENESIS by the 2026-09-09 ruling: no PRICE action has ever
+ * been indexed on any mainnet chain (measured 2026-09-09), so tightening the
+ * decimal bound rejects no round that was ever accepted, and the from-genesis
+ * OLD-vs-ON replay is the witness. testnet/regtest run from genesis too,
+ * matching the price-pair family.
+ *
+ * VENDORED byte-identically into xchain-hub/src, where PriceAggregator gates
+ * both v0 ingest paths on it. The hub resolves the same key the chain does, so
+ * it can never sit stricter than consensus; a one-sided edit of either copy is
+ * what would have it withhold a round the chain finalized. A test in each repo
+ * pins the byte-equality.
  *
  ********************************************************************/
 
 'use strict';
 
-const { copy } = require('../gate_registry');
+const { get, copy, activeAt } = require('../gate_registry');
 
 const PRICE_SCALE_MAX_DECIMALS = copy('price_scale_activation.PRICE_SCALE_MAX_DECIMALS');
 
@@ -101,17 +123,17 @@ function isCanonicalPriceV1Fee(fee){
         && PRICE_V1_FEE_RE_CANONICAL.test(fee);
 }
 
-// `blockTime` and `network` remain in the signature for caller compatibility.
+// The price-value matcher in force for an action at `blockTime` on `network`.
 function priceValuePattern(blockTime, network){
     return PRICE_VALUE_RE_CANONICAL;
 }
 
-// Whether `price` is a well-formed PRICE v0 value. The other arguments remain
-// for caller compatibility. Non-string input is never coerced: String(null)
+// Whether `price` is a well-formed PRICE v0 price value at `blockTime` on
+// `network`. Non-string input is not well-formed and is never coerced: String(null)
 // would become the parseable-looking 'null' and String(['1']) would silently pass.
 function isValidPriceValue(price, blockTime, network){
     if(typeof price !== 'string') return false;
-    return PRICE_VALUE_RE_CANONICAL.test(price);
+    return priceValuePattern(blockTime, network).test(price);
 }
 
 module.exports = {
