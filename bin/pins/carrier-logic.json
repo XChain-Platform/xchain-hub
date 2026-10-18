@@ -825,7 +825,7 @@
       "id": "price_scale_activation",
       "from": "49dd656650002b1570d1e1733f140f37f4ffd334ebeeae9daf6d9ff6f2cbf2ef",
       "to": "087da9c4db5c0c2f8a11e679a3cb0956d06269182f1b1ca169dd147de6608b64",
-      "reason": "XC-3351 gate retirement",
+      "reason": "XC\u002d3351 gate retirement",
       "date": "2026-10-18"
     }
   ]
