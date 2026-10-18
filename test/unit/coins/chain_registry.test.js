@@ -28,6 +28,13 @@ const { waitUntil } = require('../../helpers/waitUntil');
 const SNAPSHOT_PATH = path.join(__dirname, '../../../src/chain-registry.json');
 const SNAPSHOT = JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
 
+function expectNoDefaultHubForPublicTestnets() {
+    const testnetDescriptors = SNAPSHOT.descriptors.filter(d => d.networkKind === 'testnet');
+    expect(testnetDescriptors).to.have.length(3);
+    for (const d of testnetDescriptors)
+        expect(d, d.id).to.not.have.property('hub');
+}
+
 // Boot src/api.js with heavy deps stubbed; capture app.get routes and return
 // the /api/v1/chain-registry handler.
 async function bootRoute({ identity } = {}) {
@@ -180,6 +187,8 @@ describe('chain-registry snapshot consistency', function () {
             }
         }
     });
+
+    it('ships no default hub for the public testnet descriptors', expectNoDefaultHubForPublicTestnets);
 
     // Skips when xchain-wallet is not checked out (standalone hub deploy), but hard-fails
     // in the required-siblings lane (XCHAIN_REQUIRE_SIBLINGS=1, bin/ci-all.sh) so a
