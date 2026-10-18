@@ -124,7 +124,9 @@ describe('snapshot checkpoint co-sign refusals', function () {
             }
         });
     }
+});
 
+describe('snapshot checkpoint co-sign refusals', function () {
     it('refuses a checkpoint shallower than the local confirmation floor', async function () {
         const mesh = await startMesh({ n: 3 });
         try {
@@ -160,7 +162,9 @@ describe('snapshot checkpoint co-sign refusals', function () {
             await stopMesh(mesh);
         }
     });
+});
 
+describe('snapshot checkpoint co-sign refusals', function () {
     it('refuses a request while the local gate is inactive', async function () {
         const mesh = await startMesh({ n: 3 });
         try {
