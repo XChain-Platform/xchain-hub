@@ -13,16 +13,18 @@ function blockHeight(value) {
     return Number.isSafeInteger(height) && height >= 0 ? height : null;
 }
 
+function validContext(ctx) {
+    return ctx !== null && typeof ctx === 'object' &&
+        typeof ctx.network === 'string' && ctx.network.length > 0 &&
+        ctx.stateCheckpoints !== null && typeof ctx.stateCheckpoints === 'object' &&
+        typeof ctx.stateCheckpoints.indexerCall === 'function' &&
+        ctx.db !== null && typeof ctx.db === 'object' &&
+        typeof ctx.db.getSnapshotCheckpoint === 'function';
+}
+
 async function buildSnapshotCosignView(req, ctx) {
     try {
-        if(ctx === null || typeof ctx !== 'object' ||
-            typeof ctx.network !== 'string' || ctx.network.length === 0 ||
-            ctx.stateCheckpoints === null || typeof ctx.stateCheckpoints !== 'object' ||
-            typeof ctx.stateCheckpoints.indexerCall !== 'function' ||
-            ctx.db === null || typeof ctx.db !== 'object' ||
-            typeof ctx.db.getSnapshotCheckpoint !== 'function') {
-            return null;
-        }
+        if(!validContext(ctx)) return null;
 
         const view = {
             network: ctx.network,
