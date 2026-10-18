@@ -173,7 +173,9 @@ describe('snapshot checkpoint finalized message acceptance', function () {
         expect(result.refusal).to.equal(null);
         expect(result.row).to.deep.equal(stored);
     });
+});
 
+describe('snapshot checkpoint finalized message acceptance', function () {
     it('returns below_quorum for one trusted signature', function () {
         const msg = message([signature(keys[0])]);
         expect(snapshotFinalizedRefusal(msg, view())).to.equal('below_quorum');
