@@ -76,7 +76,9 @@ describe('snapshot signed record', function () {
         copy.state_root = hash('c');
         expect(record.held('testnet', 100).state_root).to.equal(hash('b'));
     });
+});
 
+describe('snapshot signed record', function () {
     it('refuses malformed checkpoints without throwing or recording', function () {
         const malformed = [
             null,
@@ -117,7 +119,9 @@ describe('snapshot signed record', function () {
         expect(() => createSnapshotSignedRecord('2')).to.throw(TypeError);
         expect(() => createSnapshotSignedRecord(Number.MAX_SAFE_INTEGER + 1)).to.throw(TypeError);
     });
+});
 
+describe('snapshot signed record', function () {
     it('provides the signed view used by snapshotCosignRefusal', function () {
         const record = createSnapshotSignedRecord();
         record.claim(checkpoint());
