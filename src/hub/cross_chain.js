@@ -22,6 +22,8 @@
 
 
 
+const SnapshotCheckpointEngine = require('../anchor/snapshot_checkpoint/engine.js');
+
 class CrossChain {
 
     async startCrossChain(){
@@ -67,6 +69,7 @@ class CrossChain {
         // and wallets can verify indexer state.
         this.stateCheckpoints = new StateCheckpointEngine(this);
         await this.stateCheckpoints.start();
+        await this.startSnapshotCheckpoints();
 
         // Signed retractions: collects 2f+1 co-signatures over quorum-class
         // reorg-retraction broadcasts before they reach the mirror stream. The engines
@@ -79,6 +82,16 @@ class CrossChain {
         // when DOGE publishing is not configured.
         this.stateAnchorPublisher = new StateAnchorPublisher(this);
         await this.stateAnchorPublisher.start();
+    }
+
+    async startSnapshotCheckpoints(){
+        this.snapshotCheckpoints = new SnapshotCheckpointEngine(this.stateCheckpoints);
+        await this.snapshotCheckpoints.start();
+        const stopStateCheckpoints = this.stateCheckpoints.stop.bind(this.stateCheckpoints);
+        this.stateCheckpoints.stop = async () => {
+            await this.snapshotCheckpoints.stop();
+            await stopStateCheckpoints();
+        };
     }
 
     getCrossChain(){
