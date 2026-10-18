@@ -29,12 +29,13 @@
 'use strict';
 
 const { expect } = require('chai');
+const { execFileSync } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
-const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
+const { skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
@@ -48,7 +49,28 @@ const HUB_PARTS    = ['hub_rows.js'];
 // authored here, so it is the one file with no indexer twin).
 const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
 const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
-const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
+const INDEXER_TWIN_COMMIT = '28bd731a50fc6453f06a840e9e4ca33dd1a645cf';
+
+function indexerGit(ctx, what, args, encoding = null) {
+    if (!fs.existsSync(path.join(INDEXER_DIR, '.git'))) {
+        if (!skipOrFail(ctx, {
+            usable: false,
+            reason: 'sibling path absent: ' + INDEXER_DIR,
+        }, what)) return null;
+    }
+    try {
+        return execFileSync('git', ['-C', INDEXER_DIR].concat(args), {
+            encoding,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    } catch (e) {
+        throw new Error(what + ' cannot read declared indexer commit ' + INDEXER_TWIN_COMMIT);
+    }
+}
+
+function indexerTwinAtCommit(ctx, file, what) {
+    return indexerGit(ctx, what, ['show', INDEXER_TWIN_COMMIT + ':src/protocol_changes/' + file]);
+}
 
 // Every converted carrier that still has a logic module, by registry stem and the
 // file it lives in since W5: the 7 gate twins under src/consensus/gates/, the
@@ -212,22 +234,26 @@ describe('src/consensus/gate_registry.js: the shared layout', function () {
     });
 
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
-        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;
-        const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
+        const what = 'the indexer registry part files twin guard';
+        const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f))
+            .equals(indexerTwinAtCommit(this, f, what)));
         expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });
 
     // TWINS is a hand list, so hold it to both directory listings: a part added on
     // either side fails here until it is vendored and listed, never skipped silently.
     it('lists every indexer twin part in TWINS and leaves no file under gate_registry/ unclassified', function () {
-        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part set guard')) return;
+        const what = 'the indexer registry part set guard';
         const listJs = (dir) => fs.readdirSync(dir, { withFileTypes: true })
             .filter((d) => d.isFile() && d.name.endsWith('.js')).map((d) => d.name).sort();
         const isTwinName = (f) => f === 'regtest_env.js' || /^shared_rows(_\d+)?\.js$/.test(f);
         const unclassified = listJs(PARTS_DIR).filter((f) => f !== 'core.js' && !HUB_PARTS.includes(f) && !TWINS.includes(f));
+        const indexerParts = indexerGit(this, what, [
+            'ls-tree', '--name-only', INDEXER_TWIN_COMMIT + ':src/protocol_changes',
+        ], 'utf8').trim().split('\n').filter(Boolean).sort();
         expect(unclassified, 'files under src/consensus/gate_registry/ that are neither core.js, a hub-owned part nor in TWINS').to.deep.equal([]);
         expect(TWINS.slice().sort(), 'TWINS against the twin parts under xchain-indexer/src/protocol_changes/')
-            .to.deep.equal(listJs(INDEXER_PARTS).filter(isTwinName));
+            .to.deep.equal(indexerParts.filter(isTwinName));
     });
 });
 
