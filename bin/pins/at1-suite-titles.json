@@ -3748,6 +3748,16 @@
       "b9d0634e4d4c29dd7f6f55b388d3257940a1672c5f26cd9299124403a92b2bad",
       "8bf334172f1b2f844554ddf511eeb1ca678b57ae4670845a05d2e07c643151ca"
     ],
+    "4b4d423fc2efb706": [
+      "ca0c8b5924f0d3999274ac09ff7b8e66206b6fd736d8cd1d63b184f2e59aaf2d",
+      "e8ee469529ab84c330e90c553d5e1737da33c84e52d344e4a6571370a4e9764d",
+      "7f3688b5edc482bae3bbb412df339aa5e0acfd50627919c614c9363879148037",
+      "06a1733e0934d5857ef2c78af925d8b4191299fbb79efe1f275df18947b7fd3a",
+      "09573cf65d2acc1e0a19162515321db9b6a9f252280f051375a31f5d071de344",
+      "0712672a1672ae5d511c14244dae35293e7b3e944afebe6e6dd039c75da637e5",
+      "4f99ada426609477038a98f1d3dcc37fd4ad7c0d5c6982f3709ce3d49bf9c221",
+      "0a053afa13d082638fe0cd394abb5f4f2c0ae95dde7ab7e2616d4df443dd585e"
+    ],
     "4b4e4c2859783ad0": [
       "4468b7a8a80f106e37d0d340700600ba0597d183963d16cc12461c8443d819e5",
       "6a0285be6c9e0382dabf5725f3ba1ba87eab6ca2b3510cbc5406bced3ce026a8",
@@ -4604,24 +4614,6 @@
       "d0721a9399dd19fafb6e143c23d2878223f5ecf77ee0584b1f5b6c73fe69a91f",
       "41e6c9a65bcd5b8dbb35b88148e20366773d57d9758ed0fa18e2639b16ed7c6a",
       "286261a9515bb9e4786e7c8385b638154cd8b8cd00155285a89f3595eca4af3f"
-    ],
-    "59e58a99d11a2e22": [
-      "92849e08aae196c8e63da1fdfbd19a54fbdb76ad7a080360a46e175702021b0f",
-      "bcc4960c91188c79196562e9cb68747e41b415eaad78aa67682587a1b0311593",
-      "6debcfea102c9ffe14dc0d55e4e334cf4bf2215c3407254e03c9a8604153b4bc",
-      "6a983a5812ba3b901ac09e59694a8b990ab3e9832ad8f5115bdf2633825d1238",
-      "a2224ee26c18a5a63832a8bc58b1f7b661c2106e2a4fa1276998b9a8067deac3",
-      "c0db283fb442f6f4602e9c3a667445d896d1829aba1c53d5775937e40e3adca9",
-      "ff465891b7e47663e6588c942b8bf7136775f8f8709188c7624c0baa2b1c9456",
-      "17b08ad2b7b5107438dbd1d74274a1b42000cc31edc2bb4a9017b8277db1a3ac",
-      "4ecb6b00fae07c8f2eb8fc9c988f6d4cc5550625e9edbb553ca44b389d594c3d",
-      "f6948be15596274ad46375941a5168934c024f22688362d6c6e8f3a7d6a168a1",
-      "b87877f073657d7b40db6e423e32c93264fd9616e72bc5e7f621e04aa8e54f6f",
-      "d07762ab473960503fc590acb73b57dfd8551dab74b29548221962088b178a01",
-      "eb5e5225406322bc79f034367d2fd03bde72cf6539bf01d1d93e1a587e07bdc9",
-      "85b3dca5abfcf38b2c3f06f56698c82007afdbba889aace6c19da3902685b2dd",
-      "73727f83ea44135b39ecffababf2925ab37d4342ff6b928573b22ff5bf7c990c",
-      "786d02afe23e4e082e023d26c11971af7779eaf4f5170b8fbedde0109a9e00e9"
     ],
     "59f1d7870676f35d": [
       "5aeedf682b91198c804c38931a29112a148ad979f5e89ec2a08204cede388c83",
@@ -12259,7 +12251,7 @@
         "ci:regression"
       ],
       "fileCount": 969,
-      "titleCount": 8919,
+      "titleCount": 8911,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12416,9 +12408,9 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
+        "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
@@ -13287,7 +13279,7 @@
     },
     "test": {
       "fileCount": 969,
-      "titleCount": 8919,
+      "titleCount": 8911,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13444,9 +13436,9 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
+        "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
@@ -14262,7 +14254,7 @@
     },
     "test:all": {
       "fileCount": 1051,
-      "titleCount": 9782,
+      "titleCount": 9774,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14501,9 +14493,9 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
+        "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
