@@ -87,7 +87,9 @@ describe('snapshot checkpoint finalized row', function () {
         const reverse = snapshotCheckpointRow(checkpoint(), [second, first]);
         expect(reverse.validator_signatures).to.equal(forward.validator_signatures);
     });
+});
 
+describe('snapshot checkpoint finalized row', function () {
     it('preserves canonical bytes and supplies signers to snapshotCheckpointQuorum', function () {
         const cp = checkpoint();
         const signatures = [
