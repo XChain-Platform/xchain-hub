@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
+const sinon = require('sinon');
 const SnapshotCheckpointEngine = require(
     '../../../../src/anchor/snapshot_checkpoint/engine.js');
 const {
@@ -87,6 +88,8 @@ describe('snapshot checkpoint co-sign round', function () {
 
     it('drops a timed-out round and re-leads it on the next tick', async function () {
         const mesh = await startMesh({ n: 3, timeoutMs: 12 });
+        // Only the round timer is faked, so flush() still drains setImmediate.
+        const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         try {
             mesh.drop = envelope => envelope.type === 'XSNP_SIGN';
             const blockIndex = snapshotCheckpointBlock(SNAPSHOT_BLOCK, mesh.network);
@@ -94,7 +97,7 @@ describe('snapshot checkpoint co-sign round', function () {
             await leader.engine.tick();
             await flush();
             expect(leader.engine.snapshotRounds.size).to.equal(1);
-            await new Promise(resolve => setTimeout(resolve, 18));
+            clock.tick(13);
             expect(leader.engine.snapshotRounds.size).to.equal(0);
 
             await leader.engine.tick();
@@ -102,6 +105,7 @@ describe('snapshot checkpoint co-sign round', function () {
             expect(mesh.sent.filter(row => row.type === 'XSNP_SIGN_REQ')).to.have.length(2);
             expectNoCadenceMessages(mesh);
         } finally {
+            clock.restore();
             await stopMesh(mesh);
         }
     });
