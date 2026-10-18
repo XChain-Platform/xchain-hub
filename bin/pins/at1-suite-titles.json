@@ -6315,6 +6315,21 @@
       "bb832b898e082fdf07e6e66ac730f1561170ec08f821ae4a9b1094f37b252fb9",
       "52df50f45fba8b389540df602e76064de0503205e9f9bd259e8471f195a376b8"
     ],
+    "76cbeb59c165afcb": [
+      "4191fd5eae542df3d509205771bfc9f050b51263bcee4588b787e8f3c7b4776b",
+      "2084cdd45f4f96d932bcc4fb0609e67b7df206348039c27a3db7777e8e648932",
+      "9636f995492079105ec4c0240896be46a42510c4a2a358bff691394649ca8b82",
+      "6f13267ab521a77aa954e2c993ef953d997c71c90d30c5130632908b82ecdfd6",
+      "dc6cdc98845277f1f4027192406968326ab48f42173de35e1e8fe0c621d22134",
+      "6ab3be1ad2f05054fa47707c9d34cc86b09ebf1a164e4daebabdc52de15209ad",
+      "247d1e4de5cd4f83004b8e851d3dec09b46c81ae0a9c8bd84d403b78d6a3b60a",
+      "6f91da65fed5927434085dd603da23e478f8723d2deffcd96990834f0f1c9e7b",
+      "b1d3ec534743c70cb19086f1c57b514c5111fed2e8fe4a69450eb1381d718ef2",
+      "53a1f4ef77fe5de4977d96f0a1471aa2687a5b3b1cb9f78bd4556937c7f73cc2",
+      "858c4f2256231f10e9b8884c71171d9b1aea689891f5c871dc5281fc4ea6b2f5",
+      "c7a95dc51d6c40b9b01f7e546cafbd757ff77e963dd215fb1df394c6c4255634",
+      "e1a2854c31115963c186da3e94d6e74207ec34536af44b8d4d4d9afb0d931b84"
+    ],
     "76d021eea1711bdb": [
       "094579de1c20fed48afd0b037a6d0b60428b4a7e26e8ac48cd1f8176db801c61",
       "2b282e4616f39b0378f34897b2abbbe1581253a4cddb0ea0fbd5e883a0d48eba",
@@ -12268,8 +12283,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 970,
-      "titleCount": 8927,
+      "fileCount": 971,
+      "titleCount": 8940,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12426,6 +12441,7 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
+        "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
@@ -13297,8 +13313,8 @@
       }
     },
     "test": {
-      "fileCount": 970,
-      "titleCount": 8927,
+      "fileCount": 971,
+      "titleCount": 8940,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13455,6 +13471,7 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
+        "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
@@ -14273,8 +14290,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1052,
-      "titleCount": 9790,
+      "fileCount": 1053,
+      "titleCount": 9803,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14513,6 +14530,7 @@
         "test/unit/anchor/reward_tracker_queries.test.js": "42223bb0c3eb5000",
         "test/unit/anchor/reward_tracker_recipient_set_determinism.test.js": "ac9f4e185da72c18",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
+        "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
         "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
