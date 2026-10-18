@@ -43,7 +43,9 @@ describe('snapshot checkpoint federation mesh', function () {
             expect(bus.leaderAt(block)).to.equal(leader);
         }
     });
+});
 
+describe('snapshot checkpoint federation mesh', function () {
     it('routes deep-copied broadcasts and supports drops and listener removal', function () {
         const bus = buildSnapshotMesh({ n: 3, timeoutMs: 30 });
         const received = bus.nodes.map(() => []);
@@ -73,7 +75,9 @@ describe('snapshot checkpoint federation mesh', function () {
         bus.nodes[0].hub.getPeerManager().broadcast('XSNP_FINALIZED', {});
         expect(received.map(rows => rows.length)).to.deep.equal([0, 2, 2]);
     });
+});
 
+describe('snapshot checkpoint federation mesh', function () {
     it('uses the real snapshot DB methods over isolated in-memory tables', async function () {
         const bus = buildSnapshotMesh({ n: 3, timeoutMs: 30 });
         const db = bus.nodes[0].db;
@@ -98,7 +102,9 @@ describe('snapshot checkpoint federation mesh', function () {
         expect(await due(bus.nodes[1].db, 0, 1)).to.deep.equal([106]);
         expect(await due(db, 0, 10)).to.deep.equal([112, 118]);
     });
+});
 
+describe('snapshot checkpoint federation mesh', function () {
     it('provides shared rooted indexer rows with hub-local fault controls', async function () {
         const bus = buildSnapshotMesh({ n: 3, timeoutMs: 30 });
         const call = (node, blockIndex) => node.stateCheckpoints
@@ -126,7 +132,9 @@ describe('snapshot checkpoint federation mesh', function () {
         }
         expect(rejected).to.equal(true);
     });
+});
 
+describe('snapshot checkpoint federation mesh', function () {
     it('exposes validator snapshots, independent tips, and signing identities', async function () {
         const bus = buildSnapshotMesh({ n: 3, timeoutMs: 30 });
         const validators = await bus.nodes[0].stateCheckpoints
