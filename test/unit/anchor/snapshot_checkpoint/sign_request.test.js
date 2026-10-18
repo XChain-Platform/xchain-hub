@@ -107,7 +107,9 @@ describe('snapshot sign request builders', function () {
             sig: request.sig,
         });
     });
+});
 
+describe('snapshot sign request builders', function () {
     it('builds replies retained by createSnapshotSignTally', function () {
         const tally = createSnapshotSignTally(
             106, checkpoint, validators, ValidatorIdentity.verify
@@ -169,7 +171,9 @@ describe('snapshotSignRequestRefusal', function () {
         );
         assert.strictEqual(refusal(changed), SIGN_REQUEST_REFUSAL.BAD_LEADER_SIGNATURE);
     });
+});
 
+describe('snapshotSignRequestRefusal', function () {
     it('turns a throwing verifier into bad_leader_signature', function () {
         const request = buildSnapshotSignRequest(leader, 106, checkpoint);
         assert.strictEqual(refusal(request, validators, () => {
