@@ -11,21 +11,17 @@
 //
 // test/unit/activations/price_scale_activation.test.js
 //
-// PRICE v0 canonical price-value flag day, hub side.
+// PRICE v0 canonical price-value validation, hub side.
 //
 // The hub and the chain must agree on which price VALUES are well-formed. The
 // hub decides twice per round, once at single-round ingest and once at batch
 // ingest, and the indexer decides again when the action lands on chain. If the
 // hub's rule is tighter than the chain's it withholds a round the federation
-// finalized; if looser, it stores one the chain refused. So both sides of the
-// gate are driven here, and the vendored copy is pinned against the indexer's
-// byte for byte.
+// finalized; if looser, it stores one the chain refused. The vendored copy is
+// pinned against the indexer's byte for byte.
 //
-// Every case drives the REAL aggregator with real Ed25519 quorum signatures over
-// the real canonical builders. The gate is moved by stubbing the module's own
-// pattern selector at a threshold, the same way the straddle cases drive the
-// sig-tally gate, so both branches are exercised without depending on which
-// network the shipped map happens to have armed.
+// Every ingest case drives the REAL aggregator with real Ed25519 quorum
+// signatures over the real canonical builders.
 const crypto            = require('crypto');
 const fs                = require('fs');
 const path              = require('path');
@@ -72,9 +68,8 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     let registerbyteIdentityWithTheXchainIndexer2;
     {
         function isByteIdenticalToTheIndexerTest4() {
-            // Byte-identity rather than value-identity: the activation map, the scale
-            // bound, both patterns AND the fail-closed edge cases all have to match, and
-            // a value-only check would miss a divergent guard clause.
+            // Byte-identity rather than value-identity: the scale bound, both patterns,
+            // and the retained caller interface all have to match.
             expect(fs.readFileSync(LOCAL_PATH, 'utf8'))
                 .to.equal(fs.readFileSync(TWIN_PATH, 'utf8'),
                     'the hub copy has drifted from the indexer twin; the hub would withhold a ' +
@@ -92,29 +87,15 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     }
     let registertheRuleThisHubShips5;
     {
-        function isArmedAtGenesisOnMainnetTest7() {
-            // 0 PRICE actions have ever been indexed on any mainnet chain (measured
-            // 2026-09-09), so tightening the decimal bound refuses no round ever accepted.
-            expect(priceScale.PRICE_SCALE_ACTIVATION.mainnet).to.equal(0);
-            let now = Math.floor(Date.now() / 1000);
-            expect(priceScale.isPriceScaleCanonicalActive(now, 'mainnet')).to.equal(true);
-            expect(priceScale.isValidPriceValue(WIDE, now, 'mainnet')).to.equal(false);
-            expect(priceScale.isValidPriceValue(NEAR_ZERO, now, 'mainnet')).to.equal(false);
-            expect(priceScale.isValidPriceValue(HONEST, now, 'mainnet')).to.equal(true);
-        }
-        function runsFromGenesisOnEveryNetworkTest8() {
-            for (const network of ['mainnet', 'testnet', 'regtest']) {
-                expect(priceScale.isPriceScaleCanonicalActive(0, network), network).to.equal(true);
-                expect(priceScale.isValidPriceValue(WIDE, 0, network), network).to.equal(false);
-                expect(priceScale.isValidPriceValue(HONEST, 0, network), network).to.equal(true);
-            }
-        }
-        function failsClosedToTheLegacyPatternTest9() {
-            for (const blockTime of [null, undefined, '', false, NaN, 'abc']) {
-                expect(priceScale.isPriceScaleCanonicalActive(blockTime, 'regtest'),
+        function appliesTheCanonicalRuleForAllRetainedArgumentsTest7() {
+            for (const blockTime of [null, undefined, '', false, NaN, 'abc', 0]) {
+                expect(priceScale.isValidPriceValue(WIDE, blockTime, 'nosuchnet'),
                     String(blockTime)).to.equal(false);
+                expect(priceScale.isValidPriceValue(NEAR_ZERO, blockTime, 'regtest'),
+                    String(blockTime)).to.equal(false);
+                expect(priceScale.isValidPriceValue(HONEST, blockTime, 'mainnet'),
+                    String(blockTime)).to.equal(true);
             }
-            expect(priceScale.isPriceScaleCanonicalActive(0, 'nosuchnet')).to.equal(false);
         }
         function refusesTheLeadingZeroFormATest10() {
             // The half the scale rule cannot carry on its own: 60 leading zeros is
@@ -131,9 +112,7 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
             expect(widest.length).to.be.below(40);
         }
         function theRuleThisHubShipsSuite6() {
-            it('is ARMED at genesis on mainnet by the 2026-09-09 ruling', isArmedAtGenesisOnMainnetTest7);
-            it('runs from genesis on every network', runsFromGenesisOnEveryNetworkTest8);
-            it('fails CLOSED to the legacy pattern on anything it cannot evaluate', failsClosedToTheLegacyPatternTest9);
+            it('applies the canonical rule for all retained caller arguments', appliesTheCanonicalRuleForAllRetainedArgumentsTest7);
             it('refuses the leading-zero form a scale cap alone would admit', refusesTheLeadingZeroFormATest10);
             it('bounds every accepted price to 19 characters, inside price_snapshots.price', boundsEveryAcceptedPriceTo19Test11);
         }
@@ -141,20 +120,13 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
             describe('the rule this hub ships', theRuleThisHubShipsSuite6);
         };
     }
-    // Both sides of the flag day are driven through the real ingest paths.
-    let registerreceivevalidatedroundBothSidesOfTheGate12;
+    // The canonical rule is driven through the real ingest paths.
+    let registerreceivevalidatedroundCanonicalRule12;
     {
         const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
         const BTC_HEIGHT = 799000;
-        const GATE       = 1700000000;   // stands in for an armed activation instant
+        const TIMESTAMP  = 1700000000;
         let hub, agg;
-        // Move the gate to GATE and resolve it on the same key the aggregator passes.
-        function armGateAt(threshold) {
-            sinon.stub(priceScale, 'priceValuePattern').callsFake(
-                (key) => parseInt(key) >= threshold
-                    ? priceScale.PRICE_VALUE_RE_CANONICAL
-                    : priceScale.PRICE_VALUE_RE_LEGACY);
-        }
         function makeRound(price, timestamp) {
             let pairs   = [{ pair: 'BTC/USD', price: price }];
             let payload = buildPriceV0Payload(5, timestamp, pairs, BTC_HEIGHT);
@@ -177,40 +149,21 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
             });
             return inserts;
         }
-        async function belowTheGateAcceptsTheOverTest14() {
-            // The pre-activation branch is the deployed behaviour and must not move: a
-            // replay of history below the threshold has to reach the same rows.
-            let inserts = stubDb();
-            let events  = [];
-            agg.on('row:inserted', e => events.push(e));
-            let result = await agg.receiveValidatedRound('BTC', makeRound(WIDE, GATE - 1));
-            expect(result.accepted).to.equal(true);
-            expect(inserts.length).to.equal(1);
-            expect(inserts[0]).to.include(WIDE);
-            expect(events.map(e => e.row.price)).to.deep.equal([WIDE]);
-        }
-        async function atTheGateRefusesTheOverTest15() {
+        async function refusesTheOverWidePriceTest15() {
             stubDb();
-            let result = await agg.receiveValidatedRound('BTC', makeRound(WIDE, GATE));
+            let result = await agg.receiveValidatedRound('BTC', makeRound(WIDE, TIMESTAMP));
             expect(result).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
             expect(hub.db.doQuery.called).to.equal(false);
         }
-        async function atTheGateRefusesTheNearTest16() {
-            stubDb();
-            let below = await agg.receiveValidatedRound('BTC', makeRound(NEAR_ZERO, GATE - 1));
-            expect(below.accepted, 'the loose rule admits it below the gate').to.equal(true);
-            let at = await agg.receiveValidatedRound('BTC', makeRound(NEAR_ZERO, GATE));
-            expect(at).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
-        }
-        async function atTheGateRefusesTheLeadingTest17() {
-            stubDb();
-            let below = await agg.receiveValidatedRound('BTC', makeRound(LEADING_ZEROS, GATE - 1));
-            expect(below.accepted).to.equal(true);
-            let at = await agg.receiveValidatedRound('BTC', makeRound(LEADING_ZEROS, GATE));
-            expect(at).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+        async function refusesTheOtherNoncanonicalFormsTest16() {
+            for (const price of [NEAR_ZERO, LEADING_ZEROS]) {
+                stubDb();
+                let result = await agg.receiveValidatedRound('BTC', makeRound(price, TIMESTAMP));
+                expect(result, price).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+            }
         }
         async function acceptsTheHonestProducerPriceOnTest18() {
-            for (const timestamp of [GATE - 1, GATE]) {
+            for (const timestamp of [TIMESTAMP, TIMESTAMP + 1]) {
                 hub = createMockHub();
                 agg = new PriceAggregator(hub);
                 hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
@@ -223,7 +176,7 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
                 expect(inserts[0]).to.include(HONEST);
             }
         }
-        function receivevalidatedroundBothSidesOfTheGateSuite13() {
+        function receivevalidatedroundCanonicalRuleSuite13() {
             beforeEach(function () {
                 hub = createMockHub();
                 agg = new PriceAggregator(hub);
@@ -233,36 +186,27 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
                     count:      V.length,
                     validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
                 }) };
-                armGateAt(GATE);
             });
             afterEach(function () {
                 sinon.restore();
             });
-            it('BELOW the gate accepts the over-wide price and stores it byte-exact', belowTheGateAcceptsTheOverTest14);
-            it('AT the gate refuses the over-wide price before any database work', atTheGateRefusesTheOverTest15);
-            it('AT the gate refuses the near-zero value the v1 lane and the producers refuse', atTheGateRefusesTheNearTest16);
-            it('AT the gate refuses the leading-zero form a scale cap alone would admit', atTheGateRefusesTheLeadingTest17);
-            it('accepts the honest producer price on BOTH sides, so arming refuses no real round', acceptsTheHonestProducerPriceOnTest18);
+            it('refuses the over-wide price before any database work', refusesTheOverWidePriceTest15);
+            it('refuses the near-zero and leading-zero forms too', refusesTheOtherNoncanonicalFormsTest16);
+            it('accepts the honest producer price across valid timestamps', acceptsTheHonestProducerPriceOnTest18);
         }
-        registerreceivevalidatedroundBothSidesOfTheGate12 = function registerSuite() {
-            describe('receiveValidatedRound(): both sides of the gate', receivevalidatedroundBothSidesOfTheGateSuite13);
+        registerreceivevalidatedroundCanonicalRule12 = function registerSuite() {
+            describe('receiveValidatedRound(): canonical rule', receivevalidatedroundCanonicalRuleSuite13);
         };
     }
-    let registerreceivevalidatedbatchBothSidesOfTheGate19;
+    let registerreceivevalidatedbatchCanonicalRule19;
     {
         const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
         const FIRST_ROUND  = 100;
         const LAST_ROUND   = 105;
         const BATCH_ANCHOR = 799005;
         const BLOCK_INDEX  = 800000;
-        const GATE         = 1700004000;   // stands in for an armed activation instant
+        const BLOCK_TIME   = 1700004000;
         let hub, agg;
-        function armGateAt(threshold) {
-            sinon.stub(priceScale, 'priceValuePattern').callsFake(
-                (key) => parseInt(key) >= threshold
-                    ? priceScale.PRICE_VALUE_RE_CANONICAL
-                    : priceScale.PRICE_VALUE_RE_LEGACY);
-        }
         // Six rounds carry the price under test at round index 3, so checking only
         // the first round cannot make a case pass.
         function makeBatch(price, blockTime) {
@@ -300,33 +244,26 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
             });
             return inserts;
         }
-        async function belowTheGateAcceptsTheOverTest21() {
-            let inserts = stubDb();
-            let result  = await agg.receiveValidatedBatch('BTC', makeBatch(WIDE, GATE - 1));
-            expect(result.accepted).to.equal(true);
-            let flat = [].concat(...inserts);
-            expect(flat).to.include(WIDE);
-        }
-        async function atTheGateRefusesTheWholeTest22() {
+        async function refusesTheWholeBatchTest22() {
             // A signed batch is atomic: one bad price invalidates every round in it, the
             // same shape the on-chain parser records.
             let inserts = stubDb();
-            let result  = await agg.receiveValidatedBatch('BTC', makeBatch(WIDE, GATE));
+            let result  = await agg.receiveValidatedBatch('BTC', makeBatch(WIDE, BLOCK_TIME));
             expect(result.accepted).to.equal(false);
             expect(result.reason).to.equal('invalid pairs');
             expect(result.stored).to.equal(0);
             expect(inserts.length).to.equal(0);
         }
-        async function atTheGateRefusesTheNearTest23() {
+        async function refusesTheOtherNoncanonicalFormsTest23() {
             for (const price of [NEAR_ZERO, LEADING_ZEROS]) {
                 stubDb();
-                let result = await agg.receiveValidatedBatch('BTC', makeBatch(price, GATE));
+                let result = await agg.receiveValidatedBatch('BTC', makeBatch(price, BLOCK_TIME));
                 expect(result.accepted, price).to.equal(false);
                 expect(result.reason, price).to.equal('invalid pairs');
             }
         }
         async function acceptsAnAllHonestBatchOnTest24() {
-            for (const blockTime of [GATE - 1, GATE]) {
+            for (const blockTime of [BLOCK_TIME, BLOCK_TIME + 1]) {
                 hub = createMockHub();
                 agg = new PriceAggregator(hub);
                 hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
@@ -338,7 +275,7 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
                 expect(result.accepted, 'block_time ' + blockTime).to.equal(true);
             }
         }
-        function receivevalidatedbatchBothSidesOfTheGateSuite20() {
+        function receivevalidatedbatchCanonicalRuleSuite20() {
             beforeEach(function () {
                 hub = createMockHub();
                 agg = new PriceAggregator(hub);
@@ -349,25 +286,23 @@ function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
                     validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
                 }) };
                 sinon.stub(console, 'log');
-                armGateAt(GATE);
             });
             afterEach(function () {
                 sinon.restore();
             });
-            it('BELOW the gate accepts the over-wide price and stores it byte-exact', belowTheGateAcceptsTheOverTest21);
-            it('AT the gate refuses the WHOLE batch, storing nothing partial', atTheGateRefusesTheWholeTest22);
-            it('AT the gate refuses the near-zero and leading-zero forms too', atTheGateRefusesTheNearTest23);
-            it('accepts an all-honest batch on BOTH sides of the gate', acceptsAnAllHonestBatchOnTest24);
+            it('refuses the WHOLE batch for an over-wide price, storing nothing partial', refusesTheWholeBatchTest22);
+            it('refuses the near-zero and leading-zero forms too', refusesTheOtherNoncanonicalFormsTest23);
+            it('accepts an all-honest batch across valid block times', acceptsAnAllHonestBatchOnTest24);
         }
-        registerreceivevalidatedbatchBothSidesOfTheGate19 = function registerSuite() {
-            describe('receiveValidatedBatch(): both sides of the gate', receivevalidatedbatchBothSidesOfTheGateSuite20);
+        registerreceivevalidatedbatchCanonicalRule19 = function registerSuite() {
+            describe('receiveValidatedBatch(): canonical rule', receivevalidatedbatchCanonicalRuleSuite20);
         };
     }
-    function priceV0CanonicalPriceValueFlagSuite1() {
+    function priceV0CanonicalPriceValueValidationSuite1() {
         registerbyteIdentityWithTheXchainIndexer2();
         registertheRuleThisHubShips5();
-        registerreceivevalidatedroundBothSidesOfTheGate12();
-        registerreceivevalidatedbatchBothSidesOfTheGate19();
+        registerreceivevalidatedroundCanonicalRule12();
+        registerreceivevalidatedbatchCanonicalRule19();
     }
-    describe('PRICE v0 canonical price-value flag day: hub copy @regression', priceV0CanonicalPriceValueFlagSuite1);
+    describe('PRICE v0 canonical price-value validation: hub copy @regression', priceV0CanonicalPriceValueValidationSuite1);
 }

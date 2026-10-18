@@ -832,12 +832,6 @@
       "b437a89ced4be51eb29e6659cba1b64a57aab0b2c407bbaf8b3d2354048c8651",
       "f8bd24e8b974d32c1e345a029f841b71a6e64bde6483b248e30636107d9487ce"
     ],
-    "1356bcf179dc4702": [
-      "10c248634e5a4031418892782dc58e765028963f8c08cfb718b97fb4d16ffdce",
-      "75b5038b3af82956fc08cc22a040ddedcbbec7a6bafb25eb070290f04a59dc98",
-      "75ec23bd21d9ca34fbac6c31c44f521c0d4b4b1287d740cca309e26964731df5",
-      "39cd7cf456fa0ba7cefe359b69bb4945c08b3b013549b23f819d02c6a5a90965"
-    ],
     "135a02bac5035eaf": [
       "e5e2fb096f04f456fff97736f5e509a1012ee1e610ec12d21e9a0558202eed9c",
       "dbb6b4fa1121b96bd481c27f6fde83f50587ef2bc83e633b518b4f3c92600b97",
@@ -7649,6 +7643,18 @@
       "84f64e795134ddcef04d1969c66bffa262b7670ec2bc9964c9f51f830389c252",
       "80421027c3377efeb0901a87aed64012b0b9987a8c345c7eb3e56b168fd05cdd"
     ],
+    "94dd6d2b81fd5f8c": [
+      "85a24c864d6fd106082d0b9990ca1810c0ebb82b98ddee99204f31adc603326d",
+      "83a19255c8bbf8894b873bdd4fa19aa49f12a9955cd965eb8606b5ff6d3007f7",
+      "95e1318ded0a3a6e9cab1e2b18987020d6fb750d29a7f21636e710f75437438f",
+      "9fe78f750cf565e4b1b28cc2e943434108b8d8335ef46f7311f23333db27a834",
+      "3f1d8f02380775c75ebc78b9246450237d9878ba08b50eadeb71dee89a9ffeb1",
+      "28979d4e2164f9a0973cd2ed94319f974b4411c7d11456c538ed9a267cf114c9",
+      "5f53347d865d489fb14ae3ecd9025e538763a3591825e5bd9eab06e70ccd426c",
+      "d6116fcf977f1e40e47af03c745ebef199dc9ac8ec2daff98d3f6f785c3c4527",
+      "006459fcaa8aed99f298af909a993826ee15baf1ff5fcf767653f9a25174b1a2",
+      "9382a352d6aa57258f20aff434ab4eb9b3cbec417a34fddb3927fbaac419d0e0"
+    ],
     "94f5f567f568ff9e": [
       "482d1e17dbdc25b3aafd2ee0c128a889d6cdd54ce59be942f85463f9f10aa5c8",
       "d050d0da9e06570627678008811ee3cfd987a679ad72d11f5fecf76de5d3e0ca",
@@ -7865,6 +7871,12 @@
       "85a12cf5bc368a3eb4d7c119de50592ed15e2e79b6d40fa989f1f247b0236712",
       "3aa0c30761eca4f994be9b49f2157ad1e42c93bd7bd49ede311795dab4d64067",
       "ed4f6456f39b658c1955258a9e6c999d7e8e31cb0af2db6ed2db4f802c4058e6"
+    ],
+    "9b528086ab74ca61": [
+      "7289a4883252f2acafac53d14579b85d620a23ff0497444226d96ff5af8bd73b",
+      "75b5038b3af82956fc08cc22a040ddedcbbec7a6bafb25eb070290f04a59dc98",
+      "a2b783541fd6cdc6bcfbc2abf2d3c613a0922b2489ad365072cff8168c59e600",
+      "f22885807e83338a677eee43dc8a228dc4bb9350435bbb3923209823b723cb97"
     ],
     "9b94adfd1325f788": [
       "8d8011990263df9886b0561da1e52ff82852b27b27d782caa42cd4d7857fe7fa",
@@ -8876,23 +8888,6 @@
       "73e4ab8533883a24d056fa0a6236ccacf37c4e5662e01b7305f5a63f79a2375e",
       "618a5c738899f2907476603fb6ea9403788cdb4b2ffaab37b00d6c680b9f8268",
       "7407e975b97d0dc730036193c16ae1a7be1d74aedc81594ed692216221f27c03"
-    ],
-    "b062b57a914fbb73": [
-      "6ac40053b79c6e8c0f7e75e121e8c732fca186f17dc603ec2ce5065aebd69528",
-      "b537c5947c47c18c28846ade39aedecf3d584d57dbc0c8647afa9472af2d2afc",
-      "4e6603fb89010e497fc16e4ab2793bc6f0a8c66f4d1357ee5b02ca02b0c53e21",
-      "15aabe68cf3910a1fc8afb69b38431cbceb75924250acfa6f02f8cf2fb3309ad",
-      "761991306cfa665ad1c989637f2286b01b1fbc043ba196c90fd96d9c3433f07b",
-      "6a2c2f6da9919624b33e33a2a880d6dc606ef814b1da99605b35d5b3fd87f5b6",
-      "66a742e0c46fbdbb691b2b6f692980884b35173d216bcd8a4736958dbb599856",
-      "b2188675475e81b4115fb520a2508f91282a75f7649037783dd335e237611ff1",
-      "8d97f6de0b2829bd3f645d42710591706823d4dba9447031a2fa296872440e7a",
-      "ac99c9b737730096d79f06242a32648733971156365c2a0c51ecb4835ec79d0b",
-      "8504964223c0fa7d53d519036e1ba9d5a2a752f4718aa1034525445970329756",
-      "fc5696ae08dd979448d0f6c9f981482d8721a64be0715f03739a7c37d9305385",
-      "bc455d0d9119cad3920e3adfa4b6321af792df385967efde9c9ce7ebc01e86da",
-      "bad770d187fff47c8b5b4c9e9810f5213dce3fe5c567f6b3110feabfdbc4fa9f",
-      "7b7ebd2ca1729759ae51e9471d21cda8a861dfd420a9d46949dd16b173893d79"
     ],
     "b0b2c7e4c7bee8e7": [
       "5f878fc55503ca7d1916832a4b668447a4e2c9c0c5c467a62607f1e56f39723c",
@@ -12311,7 +12306,7 @@
         "ci:regression"
       ],
       "fileCount": 973,
-      "titleCount": 8963,
+      "titleCount": 8958,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12322,7 +12317,7 @@
         "test/unit/activations/mirror_admission_chain_slots.test.js": "b1e2783b18982c71",
         "test/unit/activations/oracle_clamp_reference_activation.test.js": "d79854eeaa28729d",
         "test/unit/activations/price_pair_activation.test.js": "382c2f46c5285593",
-        "test/unit/activations/price_scale_activation.test.js": "b062b57a914fbb73",
+        "test/unit/activations/price_scale_activation.test.js": "94dd6d2b81fd5f8c",
         "test/unit/activations/rollcall_activation.test.js": "6c55ae1122bb2be8",
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
@@ -12740,7 +12735,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
-        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
+        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
@@ -13343,7 +13338,7 @@
     },
     "test": {
       "fileCount": 973,
-      "titleCount": 8963,
+      "titleCount": 8958,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13354,7 +13349,7 @@
         "test/unit/activations/mirror_admission_chain_slots.test.js": "b1e2783b18982c71",
         "test/unit/activations/oracle_clamp_reference_activation.test.js": "d79854eeaa28729d",
         "test/unit/activations/price_pair_activation.test.js": "382c2f46c5285593",
-        "test/unit/activations/price_scale_activation.test.js": "b062b57a914fbb73",
+        "test/unit/activations/price_scale_activation.test.js": "94dd6d2b81fd5f8c",
         "test/unit/activations/rollcall_activation.test.js": "6c55ae1122bb2be8",
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
@@ -13772,7 +13767,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
-        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
+        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
@@ -14322,7 +14317,7 @@
     },
     "test:all": {
       "fileCount": 1055,
-      "titleCount": 9826,
+      "titleCount": 9821,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14415,7 +14410,7 @@
         "test/unit/activations/mirror_admission_chain_slots.test.js": "b1e2783b18982c71",
         "test/unit/activations/oracle_clamp_reference_activation.test.js": "d79854eeaa28729d",
         "test/unit/activations/price_pair_activation.test.js": "382c2f46c5285593",
-        "test/unit/activations/price_scale_activation.test.js": "b062b57a914fbb73",
+        "test/unit/activations/price_scale_activation.test.js": "94dd6d2b81fd5f8c",
         "test/unit/activations/rollcall_activation.test.js": "6c55ae1122bb2be8",
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
@@ -14833,7 +14828,7 @@
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
         "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
-        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "1356bcf179dc4702",
+        "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",

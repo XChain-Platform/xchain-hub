@@ -262,9 +262,6 @@ describe('src/consensus/gate_registry.js: the readers', function () {
         expect(registry.activeAt(bridge, 'regtest', null, 'abc', 0), 'an unparseable height').to.equal(false);
         const rollcall = 'rollcall_activation.ROLLCALL_ACTIVATION';
         expect(registry.activeAt(rollcall, 'regtest', null, 0, 0), 'UNPINNED never arms, 0 >= null is a trap').to.equal(false);
-        const time = 'price_scale_activation.PRICE_SCALE_ACTIVATION';
-        expect(registry.activeAt(time, 'mainnet', null, 0, -1), 'a time row reads the time, not the height').to.equal(false);
-        expect(registry.activeAt(time, 'mainnet', null, -1, 0)).to.equal(true);
         expect(() => registry.activeAt('anchor_reward_activation.ANCHOR_REWARD_AMOUNT', 'mainnet', null, 0, 0))
             .to.throw('unsupported unit constant');
     });
