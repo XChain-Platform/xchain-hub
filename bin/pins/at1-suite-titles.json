@@ -10341,6 +10341,21 @@
       "b8b5f813a04aea021f5c147524d717219aef96684403e8c8b3d83311fbc6b22c",
       "7608eefb02aa3bd0c7b353a01114c4bf6f3c01b80b623faeabed7a670dc1e86d"
     ],
+    "d2b3a281b37a690c": [
+      "9b7a9ae4898197d1585bbac0125d092e49522ca80d12bd923a723ff24747ba07",
+      "4bc02fa3e08c4e59290d801564717da60720e59bc148dbc65a16da7577db30d8",
+      "5a052aa5ca973c1f7dde26b2491472163d128834ac285a4bf3bc0e74da41c888",
+      "7572c45359d8aced34768938cf830ffe682fd2c5500df9b8a3111110bab42fe8",
+      "5531c01d6dde4af6e0b15c3f06fc74180fde96cca4b1022fd0556c2e007df5d9",
+      "8ebd23a47a209d4bc0ef22f15a09e89574c6b66168865ffd079012c430244cbb",
+      "34b258b022dd53127afcb29b9b3ee160721b2ddbada621974fd80e771a3f4dfd",
+      "f629541b2c19d42b71088848c60d1572fbdaabc9356cc7e390ce3b4990751887",
+      "2647ef370a8a2f09b810831c8f6f673837d4b364fd0ef47408d77d992f48b5e0",
+      "a89d658d788df014bfb3a48ad45e0478d7a7fe38bd7a17563aa4858150b5888e",
+      "8d3f8b746bc8200275c2b48623a64ab265df091121496d348bae516cefea14f3",
+      "eab81031beca3be04b0e76fce39aae486850fc43b76e12385e989d3052494aa1",
+      "d03123f0d46501ddaff45fe5bad98c95a7cddaffd6c2d5c39b3553045c4be5d6"
+    ],
     "d30bd8a54d132bc6": [
       "529ce3e63502e7fe42e2442822b7d648856b8123d42efb1c00156d8731a19459",
       "a96b0cdeedc1b77b41eb07480daeb571f2984885b1c210b4485352da667ced55",
@@ -12201,8 +12216,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 965,
-      "titleCount": 8870,
+      "fileCount": 966,
+      "titleCount": 8883,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12363,6 +12378,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
+        "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
@@ -13225,8 +13241,8 @@
       }
     },
     "test": {
-      "fileCount": 965,
-      "titleCount": 8870,
+      "fileCount": 966,
+      "titleCount": 8883,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13387,6 +13403,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
+        "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
@@ -14196,8 +14213,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1047,
-      "titleCount": 9733,
+      "fileCount": 1048,
+      "titleCount": 9746,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14440,6 +14457,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
+        "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_tally.test.js": "6f7635c5ef52acdf",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
