@@ -121,6 +121,52 @@ function registerGateTests() {
     }
 }
 
+// The v0.25.0 testnet arming names the BTC-anchored height under 'BTC:testnet' and keeps
+// the bare testnet entry UNARMED. The scan floor must read the coin-scoped entry the way
+// activeAt does, or no testnet snapshot is ever checkpointed and every TLTC and TDOGE
+// mirror row waits on a proof that never comes.
+function registerCoinScopedGateTests() {
+    afterEach(function () { sinon.restore(); });
+
+    function stubCoinScopedGate(table) {
+        const realGet = gateRegistry.get;
+        const realActiveAt = gateRegistry.activeAt;
+        sinon.stub(gateRegistry, 'get').callsFake(gateKey =>
+            gateKey === GATE ? table : realGet(gateKey));
+        sinon.stub(gateRegistry, 'activeAt').callsFake((gateKey, network, coin, height, time) => {
+            if (gateKey !== GATE) return realActiveAt(gateKey, network, coin, height, time);
+            const scoped = coin + ':' + network;
+            const threshold = Object.prototype.hasOwnProperty.call(table, scoped) ? table[scoped] : table[network];
+            return Number.isSafeInteger(threshold) && height >= threshold;
+        });
+    }
+
+    it('scans from the BTC:<network> height when only the coin-scoped entry is armed', async function () {
+        stubCoinScopedGate({
+            mainnet: gateRegistry.UNARMED,
+            'BTC:testnet': 157053,
+            'LTC:testnet': 4928170,
+            'DOGE:testnet': 68008790,
+            testnet: gateRegistry.UNARMED,
+            regtest: 0,
+        });
+        const h = harness({ network: 'testnet', due: [157060], tip: 157100 });
+
+        expect(h.engine.gateHeight()).to.equal(157053);
+        await h.engine.tick();
+
+        expect(h.db.listUncheckpointedSnapshotBlocks.firstCall.args)
+            .to.deep.equal(['testnet', 157053, 6, 10]);
+        expect([...h.rows.values()].map(row => row.block_index)).to.deep.equal([157054]);
+    });
+
+    it('falls back to the bare network entry and stays unarmed when neither is armed', function () {
+        stubCoinScopedGate({ mainnet: gateRegistry.UNARMED, testnet: 42, regtest: 0 });
+        expect(harness({ network: 'testnet' }).engine.gateHeight()).to.equal(42);
+        expect(harness({ network: 'mainnet' }).engine.gateHeight()).to.equal(gateRegistry.UNARMED);
+    });
+}
+
 function registerSoleValidatorTests() {
     it('persists one sole-validator row per distinct snapshot block, oldest first', async function () {
         const h = harness({ due: [118, 106, 112, 106] });
@@ -233,6 +279,7 @@ function registerRefusalTests() {
 
 describe('SnapshotCheckpointEngine', function () {
     registerGateTests();
+    registerCoinScopedGateTests();
     registerSoleValidatorTests();
     registerLeaderTests();
     registerRefusalTests();
