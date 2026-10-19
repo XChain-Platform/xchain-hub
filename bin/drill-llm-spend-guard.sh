@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Run scripts/drill-llm-spend-guard.js inside a deployed hub container, so the
+# Run bin/drill-llm-spend-guard.js inside a deployed hub container, so the
 # guard is exercised on the IMAGE the hub actually runs (its src, its node, its
 # node_modules), not the checkout. The drill only touches a temp dir inside the
 # container: the hub's data dir and persisted spend window are left alone.
 #
-#   scripts/drill-llm-spend-guard.sh <ssh-host> <container> [window-ms]
-#   scripts/drill-llm-spend-guard.sh <ssh-host> <hub-container>
+#   bin/drill-llm-spend-guard.sh <ssh-host> <container> [window-ms]
+#   bin/drill-llm-spend-guard.sh <ssh-host> <hub-container>
 #
 # Regtest/testnet venues only; never point this at a mainnet hub.
 set -euo pipefail
