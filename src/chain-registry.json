@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-01T00:56:47.586Z",
+  "generated_at": "2026-10-17T19:56:00.338Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -167,10 +167,6 @@
       },
       "encoder": {
         "defaultUrl": "https://encoder.xchain.io/TBTC",
-        "defaultPort": 443
-      },
-      "hub": {
-        "defaultUrl": "https://hub.xchain.io/TBTC",
         "defaultPort": 443
       }
     },
@@ -412,10 +408,6 @@
       "encoder": {
         "defaultUrl": "https://encoder.xchain.io/TDOGE",
         "defaultPort": 443
-      },
-      "hub": {
-        "defaultUrl": "https://hub.xchain.io/TDOGE",
-        "defaultPort": 443
       }
     },
     {
@@ -656,10 +648,6 @@
       },
       "encoder": {
         "defaultUrl": "https://encoder.xchain.io/TLTC",
-        "defaultPort": 443
-      },
-      "hub": {
-        "defaultUrl": "https://hub.xchain.io/TLTC",
         "defaultPort": 443
       }
     },

@@ -52,6 +52,8 @@ module.exports = {
     persistTo(statePath){
         this._statePath = path.resolve(statePath || this.statePath);
         this.loadState();
+        // A pause raised before the store was armed is written down now, so the file agrees with memory.
+        if (this.paused) this.persist();
         return this;
     },
 
@@ -86,6 +88,7 @@ module.exports = {
         try { saved = JSON.parse(text); }
         catch(e){ this.seedConsumed('corrupt JSON'); return; }
         if (!saved || !Array.isArray(saved.spends)){ this.seedConsumed('unrecognized shape'); return; }
+        this.restorePause(saved);
 
         let now = Date.now();
         let cutoff = now - this.windowMs;
@@ -126,14 +129,25 @@ module.exports = {
         return false;
     },
 
-    // Assume the window is spent. Costs at most one window of liveness on a broken
-    // store, versus handing a restart a full fresh allowance.
+    // Re-apply an operator pause the saved state carries. A file with no `paused` key predates saved
+    // pauses and restores unpaused; a restore never clears a pause already raised in memory.
+    restorePause(saved){
+        if (saved.paused !== true || this.paused) return;
+        this.paused      = true;
+        this.pauseReason = typeof saved.pauseReason === 'string' && saved.pauseReason ? saved.pauseReason : 'operator pause';
+        logger.warn(this.label + ': restored operator PAUSE (' + this.pauseReason + ') from ' + this._statePath +
+                    '; spends stay blocked until resumeeffectorspend');
+    },
+
+    // Assume the window is spent (one window of liveness, versus a full fresh allowance) but restore UNPAUSED:
+    // a truncated write must not strand the effector paused until noticed, so the warning names the lost pause.
     seedConsumed(why){
         let now = Date.now();
         this._spends.push({ t: now, cost: this.maxSpendUsdCents });
         this.ceiling.seedConsumed(now);
         logger.warn(this.label + ': spend state at ' + this._statePath + ' is ' + why +
-                     '; assuming the window is already spent (fail-closed) until it rolls over');
+                     '; assuming the window is already spent (fail-closed) until it rolls over, and any ' +
+                     'operator pause it held is unknown: re-pause with pauseeffectorspend if one was in force');
     },
 
     // Write-through after every mutation. Never throws on the broadcast path, but it
@@ -148,7 +162,8 @@ module.exports = {
         try {
             fs.mkdirSync(path.dirname(this._statePath), { recursive: true });
             fs.writeFileSync(this._statePath, JSON.stringify({
-                label: this.label, windowMs: this.windowMs, savedAt: Date.now(), spends: this._spends
+                label: this.label, windowMs: this.windowMs, savedAt: Date.now(), spends: this._spends,
+                paused: this.paused, pauseReason: this.pauseReason
             }));
             if (this._persistBroken){
                 // The disk came back (remount, freed space, fixed permissions). Clear

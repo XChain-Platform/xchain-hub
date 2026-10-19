@@ -22,14 +22,26 @@ const crypto = require('crypto');
 const nodeUtil = require('node:util');
 const { REORG_ALERT } = require('./message_types.js');
 const snapshotLock = require('./snapshot_lock.js');
+const gateRegistry = require('../../consensus/gate_registry.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+const REORG_DIGEST_V2_KEY =
+    'anchor/reorg_handler/snapshot_round.REORG_DIGEST_V2_ACTIVATION';
 
 module.exports = {
 
     reorgRoundDigest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash, btcBlockHeight) {
         if (btcBlockHeight === null || btcBlockHeight === undefined)
             return this.digest(reorgId, chain, reorgHeight, timestamp, oldHash, newHash);
+        const network = String(this.network || (this.hub && this.hub.network) || '').toLowerCase();
+        if (Number.isSafeInteger(btcBlockHeight) &&
+                gateRegistry.activeAt(REORG_DIGEST_V2_KEY, network, null, btcBlockHeight, null)) {
+            const payload = JSON.stringify({
+                reorgId, chain, reorgHeight, timestamp, newHash, btcBlockHeight
+            });
+            return crypto.createHash('sha256').update(payload).digest('hex');
+        }
         let payload = JSON.stringify({
             reorgId, chain, reorgHeight, timestamp, oldHash, newHash, btcBlockHeight
         });

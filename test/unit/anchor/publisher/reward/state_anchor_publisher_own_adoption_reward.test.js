@@ -139,7 +139,7 @@ function registerPublishOrderCase() {
         pub.noteBundlePublished = () => {};
         pub.announceBundleDone = () => { announced++; };
         pub.adoptedBundleOwnership = async () => { throw new Error('ownership check blew up'); };
-        await pub.publishBundle({}, NET, GROUP, SNAP, false, [], { rows: 0 }, null);
+        await pub.publishBundle({}, 'testnet', GROUP, SNAP, false, [], { rows: 0 }, null);
         expect(announced, 'peers still hear the bundle is anchored').to.equal(1);
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });

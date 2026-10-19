@@ -101,17 +101,20 @@ function rollcallEffectorRpc(ctx) {
         // effector's on-chain spend immediately, INCLUDING its primary/leader path,
         // without a restart. `label` is the guard label (e.g. 'OraclePublisher',
         // 'AttestationPublisher', 'StateAnchorPublisher', 'FullNodeChallengeRound').
+        // `durable` says whether the new state is on disk and so survives a restart.
         async pauseeffectorspend({label, reason}){
             if(!label) return {error: "label is required"};
-            if(!SpendGuard.pauseCapability(label, reason || 'operator pause via RPC'))
-                return {error: "no effector registered with label '" + label + "'"};
-            return {status: "paused", label};
+            let g = SpendGuard.get(label);
+            if(!g) return {error: "no effector registered with label '" + label + "'"};
+            let written = g.pause(reason || 'operator pause via RPC');
+            return {status: "paused", label, durable: !!g._statePath && written};
         },
         async resumeeffectorspend({label}){
             if(!label) return {error: "label is required"};
-            if(!SpendGuard.resumeCapability(label))
-                return {error: "no effector registered with label '" + label + "'"};
-            return {status: "resumed", label};
+            let g = SpendGuard.get(label);
+            if(!g) return {error: "no effector registered with label '" + label + "'"};
+            let written = g.resume();
+            return {status: "resumed", label, durable: !!g._statePath && written};
         },
     };
 }

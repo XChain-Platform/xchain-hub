@@ -30,8 +30,10 @@
  *                             platform AML admission ceiling, operator-decided
  *                             2026-07-17): an operator can lower it but can never
  *                             configure a hub to spend more than $2000 per window.
- *   3. Per-capability        - an in-memory runtime pause, togglable per effector
- *      runtime pause          by capability label without a restart. Gating lives
+ *   3. Per-capability        - a runtime pause, togglable per effector by
+ *      runtime pause          capability label without a restart, and saved with
+ *                             the spend window once persistTo() is armed, so a
+ *                             restart cannot silently lift it. Gating lives
  *                             at the broadcast choke point (check()/allow()), so a
  *                             pause halts the PRIMARY (leader/live) spend path, not
  *                             only the queue-sweep path (the fe3aedbf kill-switch
@@ -171,8 +173,10 @@ class SpendGuard {
     }
 
     // ---- Gate 3: per-capability runtime pause ----
-    pause(reason){ this.paused = true; this.pauseReason = reason || 'operator pause'; }
-    resume(){ this.paused = false; this.pauseReason = null; }
+    // Takes effect in memory at once, then is written with the window so a restart keeps it; returns
+    // whether it is durable (true when persistence is not armed, false when the write failed).
+    pause(reason){ this.paused = true; this.pauseReason = reason || 'operator pause'; return this.persist(); }
+    resume(){ this.paused = false; this.pauseReason = null; return this.persist(); }
     isPaused(){ return this.paused; }
 
     // ---- Gate 2b: cost window helpers ----

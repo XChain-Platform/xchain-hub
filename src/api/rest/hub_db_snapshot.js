@@ -26,6 +26,7 @@ const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version');   // stamped
 const { buildOraclePricesSnapshotQuery } = require('../../oracle/prices_snapshot_query');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { validateLimit, validateSince } = require('../validate');
 const { mountSnapshotQueryValidation } = require('./hub_db_snapshot_query');
+const { mountCapabilitySnapshotProof } = require('./capability_snapshot_proof');
 
 function mountSnapshotRoutes(app, ctx) {
     const helpers = snapshotHelpers(ctx);
@@ -37,6 +38,7 @@ function mountSnapshotRoutes(app, ctx) {
     mountCallCheckpointSnapshots(app, ctx, helpers);
     mountBridgeSnapshots(app, ctx, helpers);
     mountAttestSnapshots(app, ctx, helpers);
+    mountCapabilitySnapshotProof(app, ctx);
 }
 
 // The admission watermark and the Bitcoin chain identity every page can carry.

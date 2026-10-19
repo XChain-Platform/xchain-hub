@@ -22,8 +22,10 @@
  *
  * Quorum requires 2f+1 INDEPENDENT observations of the same reorg: the
  * ALERT/PREPARE wire format carries the reporter's observed `oldHash` /
- * `newHash` at `reorgHeight`, both bound into the PBFT digest, and every
- * hub verifies against its OWN indexer that the node now serves `newHash`
+ * `newHash` at `reorgHeight`. The digest always binds `newHash`; `oldHash` is
+ * bound below the digest-v2 gate and remains a well-formedness and own-node
+ * verification field above it. Every hub verifies against its OWN indexer
+ * that the node now serves `newHash`
  * (getblockhashes) AND that `oldHash` was the canonical-then-orphaned hash
  * at that height (getreorghistory, backed by the decoder's REORG events)
  * before co-signing. A hub that cannot confirm (lagging
