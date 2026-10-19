@@ -23,3 +23,5 @@ No fix exists inside the writable surfaces. Making the file reachable needs one 
 2. a reachability.js or test exemption (bin/ is outside the surfaces).
 
 Recommendation: land this row together with, or after, the XC-5703 wiring, or have the orchestrator widen the surface for one require or exemption.
+
+RUN-COMPLETE f7524d814053a4d0638a3b98f2469f07
