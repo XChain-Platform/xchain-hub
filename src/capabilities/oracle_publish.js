@@ -109,7 +109,7 @@ exports.selfTest = async (config) => {
         return { ok: false, reason: 'HUB_SIGNER_MODULE (' + hooks.source + ') exports no broadcast(payload); ' +
                                     'every chunked publish this capability leads is a two-phase P2SH encoding ' +
                                     'the built-in pipeline cannot finish, so this hub would sign publishes it ' +
-                                    'can never land. See examples/doge-signer.example.js' };
+                                    'can never land. See docs/examples/doge-signer.example.js' };
     }
     return { ok: true };
 };

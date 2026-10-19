@@ -66,7 +66,7 @@ module.exports = {
             logger.warn('RollcallRound: this hub signs and gossips roll calls but cannot PUBLISH one: ' +
                          'HUB_SIGNER_MODULE exports no broadcast(payload), and every ROLLCALL is a two-phase ' +
                          'P2SH action the built-in encoder pipeline fails closed on. Its own presence still ' +
-                         'reaches the chain through the sweepers. See examples/doge-signer.example.js.');
+                         'reaches the chain through the sweepers. See docs/examples/doge-signer.example.js.');
         }
         return false;
     },

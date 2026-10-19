@@ -107,7 +107,7 @@ function isAmbiguousSendError(e){
     if (!e) return false;
     // Read BEFORE every message and status rule, because it outranks all of them. A
     // multi-phase signer hook (HUB_SIGNER_MODULE broadcast(), the P2SH fund-then-reveal
-    // pipeline in examples/doge-signer.example.js) puts its funding transaction on chain
+    // pipeline in docs/examples/doge-signer.example.js) puts its funding transaction on chain
     // and can then be rejected DEFINITIVELY on the reveal. The rules below would read
     // that rejection as a clean pre-send failure and hand the caller back to its
     // attempts-and-requeue path, which re-enters the hook, funds fresh UTXOs and pays for
