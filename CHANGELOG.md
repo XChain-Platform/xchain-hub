@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-18
+
+### Added
+- Added the snapshot checkpoint federation (producer, co-sign round, finalized messages), armed on testnet and unarmed on mainnet.
+- Added the capability snapshot proof route.
+- Added a safe seed tool for undelivered attestations and a spend guard drill for the LLM effectors.
+
+### Changed
+- Gated stamped reorg digests, adopted bundle completion announcements and bundle reward publisher binding by activations armed on testnet and unarmed on mainnet.
+- Counted verified oracle signers by a signed count quorum, armed on testnet and unarmed on mainnet.
+- Accepted the previous hub API key during rotation for bulk authorization only.
+- Dropped the default hub URL from public testnet descriptors and raised the CI MariaDB image to the 11 line.
+- Armed REORG_DIGEST_V2_ACTIVATION on BTC:testnet at 157073.
+- Armed REORG_DIGEST_V2_ACTIVATION on LTC:testnet at 4928460.
+- Armed REORG_DIGEST_V2_ACTIVATION on DOGE:testnet at 68009330.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on BTC:testnet at 157073.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on LTC:testnet at 4928460.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on DOGE:testnet at 68009330.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on BTC:testnet at 157073.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on LTC:testnet at 4928460.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on DOGE:testnet at 68009330.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on BTC:testnet at 157073.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on LTC:testnet at 4928460.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on DOGE:testnet at 68009330.
+
+### Fixed
+- Persisted effector spend pauses across restarts and scoped snapshot checkpoint discovery by network.
+
 ## [0.24.0] - 2026-10-17
 
 ### Added

@@ -57,11 +57,15 @@ describe('reorg digest v2 gate', function () {
         sinon.restore();
     });
 
-    it('registers a height gate armed only on regtest', function () {
+    it('registers a height gate armed on regtest and on testnet at its v0.25.0 heights', function () {
         const row = gateRegistry.get(KEY);
+        // The v0.25.0 cut arms the per-chain keys and the bare testnet key at the BTC height.
         expect(row).to.deep.equal({
             mainnet: gateRegistry.UNARMED,
-            testnet: gateRegistry.UNARMED,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
+            testnet: 157073,
             regtest: 0
         });
     });
