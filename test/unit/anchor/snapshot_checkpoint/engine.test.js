@@ -100,18 +100,18 @@ function harness(options = {}) {
 function registerGateTests() {
     it('reads a BTC-height hub gate armed on regtest and on testnet at its v0.25.0 heights', function () {
         const row = gateRegistry.get(GATE);
-        // The v0.25.0 cut arms BTC:testnet at 157053.
+        // The v0.25.0 cut arms BTC:testnet at 157073.
         expect(row).to.deep.equal({
             mainnet: gateRegistry.UNARMED,
-            'BTC:testnet': 157053,
-            'LTC:testnet': 4928170,
-            'DOGE:testnet': 68008790,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
             testnet: gateRegistry.UNARMED,
             regtest: 0,
         });
         expect(gateRegistry.activeAt(GATE, 'regtest', 'BTC', 0, 0)).to.equal(true);
-        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157052, 0)).to.equal(false);
-        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157053, 0)).to.equal(true);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157072, 0)).to.equal(false);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157073, 0)).to.equal(true);
         expect(gateRegistry.activeAt(GATE, 'mainnet', 'BTC', 1000000, 0)).to.equal(false);
     });
 
@@ -149,20 +149,20 @@ function registerCoinScopedGateTests() {
     it('scans from the BTC:<network> height when only the coin-scoped entry is armed', async function () {
         stubCoinScopedGate({
             mainnet: gateRegistry.UNARMED,
-            'BTC:testnet': 157053,
-            'LTC:testnet': 4928170,
-            'DOGE:testnet': 68008790,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
             testnet: gateRegistry.UNARMED,
             regtest: 0,
         });
-        const h = harness({ network: 'testnet', due: [157060], tip: 157100 });
+        const h = harness({ network: 'testnet', due: [157080], tip: 157120 });
 
-        expect(h.engine.gateHeight()).to.equal(157053);
+        expect(h.engine.gateHeight()).to.equal(157073);
         await h.engine.tick();
 
         expect(h.db.listUncheckpointedSnapshotBlocks.firstCall.args)
-            .to.deep.equal(['testnet', 157053, 6, 10]);
-        expect([...h.rows.values()].map(row => row.block_index)).to.deep.equal([157054]);
+            .to.deep.equal(['testnet', 157073, 6, 10]);
+        expect([...h.rows.values()].map(row => row.block_index)).to.deep.equal([157074]);
     });
 
     it('falls back to the bare network entry and stays unarmed when neither is armed', function () {

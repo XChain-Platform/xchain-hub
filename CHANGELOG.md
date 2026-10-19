@@ -19,18 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Counted verified oracle signers by a signed count quorum, armed on testnet and unarmed on mainnet.
 - Accepted the previous hub API key during rotation for bulk authorization only.
 - Dropped the default hub URL from public testnet descriptors and raised the CI MariaDB image to the 11 line.
-- Armed REORG_DIGEST_V2_ACTIVATION on BTC:testnet at 157053.
-- Armed REORG_DIGEST_V2_ACTIVATION on LTC:testnet at 4928170.
-- Armed REORG_DIGEST_V2_ACTIVATION on DOGE:testnet at 68008790.
-- Armed COUNT_QUORUM_SIGNED_ACTIVATION on BTC:testnet at 157053.
-- Armed COUNT_QUORUM_SIGNED_ACTIVATION on LTC:testnet at 4928170.
-- Armed COUNT_QUORUM_SIGNED_ACTIVATION on DOGE:testnet at 68008790.
-- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on BTC:testnet at 157053.
-- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on LTC:testnet at 4928170.
-- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on DOGE:testnet at 68008790.
-- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on BTC:testnet at 157053.
-- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on LTC:testnet at 4928170.
-- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on DOGE:testnet at 68008790.
+- Armed REORG_DIGEST_V2_ACTIVATION on BTC:testnet at 157073.
+- Armed REORG_DIGEST_V2_ACTIVATION on LTC:testnet at 4928460.
+- Armed REORG_DIGEST_V2_ACTIVATION on DOGE:testnet at 68009330.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on BTC:testnet at 157073.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on LTC:testnet at 4928460.
+- Armed COUNT_QUORUM_SIGNED_ACTIVATION on DOGE:testnet at 68009330.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on BTC:testnet at 157073.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on LTC:testnet at 4928460.
+- Armed BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION on DOGE:testnet at 68009330.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on BTC:testnet at 157073.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on LTC:testnet at 4928460.
+- Armed SNAPSHOT_CHECKPOINT_ACTIVATION on DOGE:testnet at 68009330.
 
 ### Fixed
 - Persisted effector spend pauses across restarts and scoped snapshot checkpoint discovery by network.

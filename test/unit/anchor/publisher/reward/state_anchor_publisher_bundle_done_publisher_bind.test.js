@@ -34,14 +34,14 @@ async function apply(pub, network){
 
 function registerGateRowCase(){
     it('is armed from regtest genesis, armed on testnet at its v0.25.0 heights, and unarmed on mainnet', function () {
-        // The v0.25.0 cut arms BTC:testnet 157053, LTC:testnet 4928170, DOGE:testnet 68008790,
+        // The v0.25.0 cut arms BTC:testnet 157073, LTC:testnet 4928460, DOGE:testnet 68009330,
         // and the bare testnet key at the BTC height for the null-coin read.
         expect(registry.get(GATE)).to.deep.equal({
             mainnet: registry.UNARMED,
-            'BTC:testnet': 157053,
-            'LTC:testnet': 4928170,
-            'DOGE:testnet': 68008790,
-            testnet: 157053,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
+            testnet: 157073,
             regtest: 0
         });
     });
