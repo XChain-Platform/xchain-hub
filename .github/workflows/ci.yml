@@ -277,7 +277,7 @@ jobs:
   # result; the rename map carries the moves a restructure declares.
   suite-title-pin:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -300,6 +300,12 @@ jobs:
         with:
           repository: XChain-Platform/xchain-indexer
           path: xchain-indexer
+
+      - name: Check out xchain-contracts
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-contracts
+          path: xchain-contracts
 
       - name: Check out xchain-sdk
         uses: actions/checkout@v4
@@ -344,6 +350,26 @@ jobs:
           repository: XChain-Platform/xchain-sync
           path: xchain-sync
 
+      - name: Check out the re-taken hub suite-title pin
+        uses: actions/checkout@v4
+        with:
+          ref: 29639df506a5f5065919e6a1af665c009c20813f
+          path: suite-title-pins/hub/xchain-hub
+
+      - name: Check out the re-taken SDK suite-title pin
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sdk
+          ref: ebe94f35ef76056cd9925e23fc794495bbc2eeb5
+          path: suite-title-pins/sdk/xchain-sdk
+
+      - name: Check out the re-taken sync suite-title pin
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sync
+          ref: 1a764b2c84c8c226e2e2d0c5d743b007fa2ba458
+          path: suite-title-pins/sync/xchain-sync
+
       - name: Verify complete sibling checkout roster
         working-directory: xchain-hub
         run: |
@@ -364,10 +390,131 @@ jobs:
           cache: npm
           cache-dependency-path: xchain-hub/package-lock.json
 
-      - name: Install dependencies
-        working-directory: xchain-hub
-        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Recreate the pinned sibling layouts
+        run: |
+          set -euo pipefail
+          for entry in hub:xchain-hub sdk:xchain-sdk sync:xchain-sync; do
+            pin=${entry%%:*}
+            repo=${entry#*:}
+            for sibling in xchain-*; do
+              if [ -d "$sibling" ] && [ "$sibling" != "$repo" ]; then
+                ln -s "$GITHUB_WORKSPACE/$sibling" "suite-title-pins/$pin/$sibling"
+              fi
+            done
+          done
 
-      - name: Collected suite titles vs the committed pin
-        working-directory: xchain-hub
-        run: node bin/suite-title-map.js --compare bin/pins/at1-suite-titles.json --rename-map bin/pins/suite-title-renames.json
+      - name: Install suite-title collector dependencies
+        run: |
+          set -euo pipefail
+          for repo in \
+            xchain-hub xchain-sdk xchain-sync \
+            suite-title-pins/hub/xchain-hub \
+            suite-title-pins/sdk/xchain-sdk \
+            suite-title-pins/sync/xchain-sync
+          do
+            (cd "$repo" && if [ -f package-lock.json ]; then npm ci; else npm install; fi)
+          done
+
+      - name: Pinned suite titles still collected; additions warn
+        env:
+          TEST_DB_PASS: dry-run-unused
+        run: |
+          set -euo pipefail
+          for entry in hub:xchain-hub sdk:xchain-sdk sync:xchain-sync; do
+            pin=${entry%%:*}
+            repo=${entry#*:}
+            (cd "suite-title-pins/$pin/$repo" && \
+              node bin/suite-title-map.js --out "$RUNNER_TEMP/$pin-suite-titles.json")
+          done
+
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const repositories = [
+              { name: 'hub', path: 'xchain-hub' },
+              { name: 'sdk', path: 'xchain-sdk' },
+              { name: 'sync', path: 'xchain-sync' },
+          ];
+          const workspace = process.env.GITHUB_WORKSPACE;
+          const blockingKinds = new Set(['file_dropped', 'title_dropped']);
+          const escapeCommand = (value) => String(value)
+              .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+          let blockingCount = 0;
+          let differenceCount = 0;
+
+          for (const repository of repositories) {
+              const root = path.join(workspace, repository.path);
+              const suiteTitles = require(path.join(root, 'bin/suite-title-map.js'));
+              const pinPath = path.join(process.env.RUNNER_TEMP, `${repository.name}-suite-titles.json`);
+              const renamePath = path.join(root, 'bin/pins/suite-title-renames.json');
+              const pin = JSON.parse(fs.readFileSync(pinPath, 'utf8'));
+              const renames = JSON.parse(fs.readFileSync(renamePath, 'utf8'));
+              process.chdir(root);
+              const fresh = suiteTitles.buildMap();
+              const differences = suiteTitles.compare(pin, fresh, renames);
+              const blocking = differences.filter((difference) => blockingKinds.has(difference.kind));
+              blockingCount += blocking.length;
+              differenceCount += differences.length;
+
+              if (!differences.length) {
+                  console.log(`${repository.name}: suite identity holds against the re-taken pin`);
+                  continue;
+              }
+
+              console.log(`${repository.name}: ${differences.length} difference(s); ${blocking.length} blocking`);
+              for (const difference of differences.slice(0, 200)) {
+                  const isBlocking = blockingKinds.has(difference.kind);
+                  const message = [
+                      `[${repository.name}/${difference.script}]`, difference.kind, difference.file || '',
+                      difference.title ? `:: ${difference.title}` : difference.detail || '',
+                  ].filter(Boolean).join(' ');
+                  console.log(`::${isBlocking ? 'error' : 'warning'}::${escapeCommand(message)}`);
+              }
+              if (differences.length > 200)
+                  console.log(`${repository.name}: ... and ${differences.length - 200} more`);
+          }
+
+          const classifier = require(path.join(workspace, 'xchain-hub/bin/suite-title-map.js'));
+          const fixturePin = {
+              titleSets: { pinned: ['kept title'] },
+              scripts: { test: { files: { 'test/pinned.test.js': 'pinned' } } },
+          };
+          const classifierCases = [
+              ['file_added', {
+                  titleSets: { pinned: ['kept title'] },
+                  scripts: { test: { files: {
+                      'test/pinned.test.js': 'pinned', 'test/new.test.js': 'pinned',
+                  } } },
+              }, false],
+              ['title_added', {
+                  titleSets: { grown: ['kept title', 'new title'] },
+                  scripts: { test: { files: { 'test/pinned.test.js': 'grown' } } },
+              }, false],
+              ['file_dropped', {
+                  titleSets: {}, scripts: { test: { files: {} } },
+              }, true],
+              ['title_dropped', {
+                  titleSets: { empty: [] },
+                  scripts: { test: { files: { 'test/pinned.test.js': 'empty' } } },
+              }, true],
+          ];
+          for (const [kind, fresh, expectedBlocking] of classifierCases) {
+              const differences = classifier.compare(fixturePin, fresh, {}, 'test');
+              const kinds = differences.map((difference) => difference.kind);
+              const isBlocking = differences.some((difference) => blockingKinds.has(difference.kind));
+              if (kinds.length !== 1 || kinds[0] !== kind || isBlocking !== expectedBlocking)
+                  throw new Error(`suite-title classifier rejected its ${kind} falsification case`);
+          }
+
+          const summary = [
+              '### suite-title-pin',
+              '',
+              `Commit: \`${process.env.GITHUB_SHA}\``,
+              `Differences: ${differenceCount}`,
+              `Blocking drops: ${blockingCount}`,
+              '',
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          if (blockingCount) process.exitCode = 1;
+          NODE
