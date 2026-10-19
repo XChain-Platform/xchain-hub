@@ -350,10 +350,12 @@ jobs:
           repository: XChain-Platform/xchain-sync
           path: xchain-sync
 
+      # The hub baseline is the revision whose generated pins the re-pin was
+      # taken against, so the title rewrites that pin already accepted are in it.
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
-          ref: 29639df506a5f5065919e6a1af665c009c20813f
+          ref: da159cba9baca5d661f4ff559807c48f6344da75
           path: suite-title-pins/hub/xchain-hub
 
       - name: Check out the re-taken SDK suite-title pin
