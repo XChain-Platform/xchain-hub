@@ -1,5 +1,5 @@
 -- Restate enum, voting-window and provider-payload columns on an already-deployed hub.
--- xchain:migration mode=manual
+-- xchain:migration mode=auto on-error=warn
 
 ALTER TABLE `validator_capabilities` MODIFY `capability` ENUM('price','cross_chain','oracle_publish','attestation','full_node') NOT NULL;
 ALTER TABLE `governance_proposals` MODIFY `voting_start` DATETIME NOT NULL;

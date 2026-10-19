@@ -80,18 +80,14 @@ describe('list_snapshots hub table', function () {
         ]);
     });
 
-    it('migrates the nullable metadata columns for an existing list_snapshots table', async function () {
-        const db = stubDb();
-        db.migrateAddNullableColumn = sinon.stub().resolves();
-
-        await db.migrateAdmissionColumns();
-
-        expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'name',
-            'VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true)).to.equal(true);
-        expect(db.migrateAddNullableColumn.calledWithExactly('list_snapshots', 'description',
-            'VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL', true)).to.equal(true);
-        expect(db.migrateAddNullableColumn.calledWithExactly(
-            'list_snapshots', 'meta_hash', 'CHAR(64) NULL', true)).to.equal(true);
+    it('migrates the nullable metadata columns for an existing list_snapshots table', function () {
+        const sql = require('fs').readFileSync(require('path').join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations',
+            '2026-10-19-nullable-mirror-columns.sql'), 'utf8');
+        for (const line of [
+            "ALTER TABLE `list_snapshots` ADD COLUMN IF NOT EXISTS `name` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL;",
+            "ALTER TABLE `list_snapshots` ADD COLUMN IF NOT EXISTS `description` VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL;",
+            "ALTER TABLE `list_snapshots` ADD COLUMN IF NOT EXISTS `meta_hash` CHAR(64) NULL;"
+        ]) expect(sql.split('\n')).to.include(line);
     });
 
     it('returns zero when no prior list version exists', async function () {

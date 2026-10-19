@@ -1,5 +1,5 @@
 -- Retype timestamp columns on an already-deployed hub.
--- xchain:migration mode=manual
+-- xchain:migration mode=auto on-error=warn
 
 ALTER TABLE `anchor_published_archives` MODIFY `intent_at` DATETIME DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE `anchor_published_archives` MODIFY `sent_at` DATETIME NULL DEFAULT NULL;

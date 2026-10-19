@@ -1,5 +1,5 @@
 -- Widen deployed unique keys after 2026-10-19-dedup-and-add-unique-keys.sql (this file sorts after it).
--- xchain:migration mode=manual
+-- xchain:migration mode=auto
 -- Each widen adds the wider key as <name>_widening before dropping the original, so the table is never without the key.
 -- A boot after a half-run file finishes it through widenUniqueKey's recovery branch, which uses the same suffix.
 -- The widened column must already exist; the boot-time column reconcile adds it.

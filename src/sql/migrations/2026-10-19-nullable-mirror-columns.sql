@@ -1,5 +1,6 @@
 -- Add nullable mirror columns on an already-deployed hub.
--- xchain:migration mode=manual
+-- Required: a hub missing one of these must not start, so a failure stops the boot.
+-- xchain:migration mode=auto
 
 ALTER TABLE `cross_chain_matches` ADD COLUMN IF NOT EXISTS `admit_block_btc` BIGINT UNSIGNED DEFAULT NULL;
 ALTER TABLE `cross_chain_matches` ADD COLUMN IF NOT EXISTS `admit_block_ltc` BIGINT UNSIGNED DEFAULT NULL;

@@ -1,5 +1,5 @@
 -- Deduplicate deployed tables before adding their runtime unique keys.
--- xchain:migration mode=manual
+-- xchain:migration mode=auto
 -- Each DELETE keeps the lowest id in its duplicate set.
 
 DELETE t1 FROM oracle_submissions t1 INNER JOIN oracle_submissions t2 WHERE t1.id > t2.id AND t1.round_number = t2.round_number AND t1.coin_pair = t2.coin_pair AND t1.validator_pubkey = t2.validator_pubkey;

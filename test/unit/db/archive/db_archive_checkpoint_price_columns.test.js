@@ -70,6 +70,13 @@ function lastCall(db) {
     return { sql: c.args[0], args: c.args[1] };
 }
 
+const NULLABLE_COLUMNS_MIGRATION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'migrations',
+    '2026-10-19-nullable-mirror-columns.sql'), 'utf8');
+
+function addsColumn(table, column) {
+    return NULLABLE_COLUMNS_MIGRATION.split('\n').some(l => l.startsWith('ALTER TABLE `' + table + '` ADD COLUMN IF NOT EXISTS `' + column + '` '));
+}
+
 describe('DDL: checkpoint and price archive bookkeeping', function () {
     it('state_checkpoints.sql carries batch_seq', function () {
         expect(ddlColumns('state_checkpoints')).to.include('batch_seq');
@@ -87,29 +94,12 @@ describe('DDL: checkpoint and price archive bookkeeping', function () {
     });
 });
 
-describe('migrateArchiveBookkeepingColumns() for checkpoints and prices', function () {
-    it('adds every missing column, and none once they exist', async function () {
-        const { db, mockConn } = makeDb();
-        let existing = { state_checkpoints: ['id'], price_snapshots: ['id', 'status'] };
-        mockConn.query.callsFake(async (sql, args) => {
-            if (/information_schema\.columns/.test(sql)) return (existing[args[1]] || []).map(c => ({ c }));
-            return [];
-        });
-        await db.migrateArchiveBookkeepingColumns();
-        let alters = mockConn.query.getCalls().map(c => c.args[0]).filter(s => /ALTER TABLE/.test(s));
+describe('dated nullable-column migration for checkpoints and prices', function () {
+    it('adds every bookkeeping column', function () {
         for (let [t, c] of [['state_checkpoints', 'batch_seq'], ['price_snapshots', 'batch_seq'],
             ['price_snapshots', 'archived_status'], ['price_snapshots', 'archived_batch_block_time'],
-            ['price_snapshots', 'archived_proof_sha']]) {
-            expect(alters.some(a => a.includes('ALTER TABLE `' + t + '` ADD COLUMN `' + c + '`')), t + '.' + c).to.equal(true);
-        }
-
-        existing = {
-            state_checkpoints: ['id', 'batch_seq'],
-            price_snapshots: ['id', 'batch_seq', 'archived_status', 'archived_batch_block_time', 'archived_proof_sha']
-        };
-        mockConn.query.resetHistory();
-        await db.migrateArchiveBookkeepingColumns();
-        expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
+            ['price_snapshots', 'archived_proof_sha']])
+            expect(addsColumn(t, c), t + '.' + c).to.equal(true);
     });
 });
 

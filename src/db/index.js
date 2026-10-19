@@ -23,9 +23,9 @@
  * keeps writing db.<method>() and no call site knows which file a query is in.
  *
  * The class's own plumbing is split the same way and installed by the same call:
- * schema/bootstrap.js brings the database and its tables up, schema/keys.js and
- * schema/columns.js hold the migration helpers, and schema/migrations.js holds the
- * step list runMigrations() below walks. What stays here is what the style guide
+ * schema/bootstrap.js brings the database and its tables up, and
+ * schema/sql_migrations.js runs the dated .sql files under src/sql/migrations/ that
+ * runMigrations() below calls. What stays here is what the style guide
  * says lives in this file: the constructor, the pool, the migration entry point and
  * the query plumbing every mixin method calls.
  *
@@ -69,17 +69,15 @@ const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
 // The class's own plumbing, split out of this file by behaviour and installed the
 // same way, non-enumerably, by the same installMixins() below. These are NOT table
-// families: they are bring-up, the two migration-helper families, the step list
-// runMigrations() walks and withTransaction, so they live under schema/, which has no index.js, rather
+// families: they are bring-up, the migration runner
+// and withTransaction, so they live under schema/, which has no index.js, rather
 // than beside the families: db_prototype_install.test.js and the mockHub scanner
 // read every `<family>.js` and `<family>/index.js` and would take a plumbing method
 // for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
 // rather than requiring them, because it is the only one that reaches outside the
 // process and a require there would escape the unit suite's proxyquire stubs.
 const bootstrapMixin        = require('./schema/bootstrap.js');
-const keyMigrationsMixin    = require('./schema/keys.js');
-const columnMigrationsMixin = require('./schema/columns.js');
-const migrationStepsMixin   = require('./schema/migrations.js');
+const sqlMigrationsMixin    = require('./schema/sql_migrations.js');
 const mirrorKeysMixin       = require('./schema/mirror_keys.js');
 const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
@@ -207,17 +205,11 @@ class Database {
 
     // Idempotent: safe to run every startup.
     //
-    // The steps themselves are the four lists in schema/migrations.js, awaited here
-    // in the order they ran when they were one method: reward and submission keys,
-    // then the capability ENUM and the checkpoint/snapshot keys, then the column
-    // conversions, the price fence re-key and the admission columns, then every
-    // remaining TIMESTAMP column. Splitting the list never reorders it, so a hub
-    // applies exactly the statements it applied before, in the same sequence.
+    // The steps are the dated files in src/sql/migrations/, applied in name order
+    // and recorded in schema_migrations, so each runs once per database. Then the
+    // boot refuses if a widened mirror key is still narrow.
     async runMigrations(){
-        await this.runRewardKeyMigrations();
-        await this.runCapabilityAndCheckpointMigrations();
-        await this.runColumnAndFenceMigrations();
-        await this.runDatetimeColumnMigrations();
+        await this.runSqlMigrations();
         await this.assertMirrorKeysWide();
     }
 
@@ -343,7 +335,7 @@ class Database {
 // the class reports, because before the split nothing was there to report. writable
 // and configurable stay true so a test can swap the driver and put it back.
 Object.defineProperty(Database, 'io', {
-    value: { mariadb, fs, sqlDir: SQL_DIR },
+    value: { mariadb, fs, sqlDir: SQL_DIR, migrationsDir: path.join(SQL_DIR, 'migrations') },
     enumerable: false, writable: true, configurable: true
 });
 
@@ -375,9 +367,7 @@ installMixins(Database.prototype, MIXINS);
 // name collision is reported from: either way installMixins throws at boot.
 installMixins(Database.prototype, [
     bootstrapMixin,
-    keyMigrationsMixin,
-    columnMigrationsMixin,
-    migrationStepsMixin,
+    sqlMigrationsMixin,
     mirrorKeysMixin,
     transactionMixin
 ]);

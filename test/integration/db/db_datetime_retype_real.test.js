@@ -13,7 +13,9 @@
 const mariadb = require('mariadb');
 const { expect } = require('chai');
 const Database = require('../../../src/db');
-const { DATETIME_COLUMNS } = require('../../../src/db/schema/datetime_columns.js');
+const fs = require('fs');
+const path = require('path');
+const { parseMigrationFile } = require('../../../src/db/schema/sql_migration_file.js');
 const testDb = require('../../helpers/testDb');
 
 const DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
@@ -22,6 +24,24 @@ const DB_NAME = process.env.TEST_DB_NAME || 'xchain_hub_test';
 const DB_USER = process.env.TEST_DB_USER || 'root';
 const DB_PASS = process.env.TEST_DB_PASS || '';
 const FRESH_DB_NAME = DB_NAME + '_datetime_retype_fresh';
+const DATETIME_MIGRATION = '2026-10-19-timestamp-columns-to-datetime.sql';
+
+// The columns the dated file retypes, read from the file so the list cannot drift from it.
+const DATETIME_COLUMNS = parseMigrationFile(DATETIME_MIGRATION, fs.readFileSync(
+    path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations', DATETIME_MIGRATION), 'utf8'))
+    .statements.map(statement => {
+        const match = statement.match(/^ALTER TABLE `([^`]+)` MODIFY `([^`]+)` (.+)$/);
+        return { table: match[1], column: match[2], columnDef: match[3] };
+    });
+
+async function runDatetimeMigration(database) {
+    // The ledger records the file once, so a second pass forgets it first.
+    await database.doQuery('CREATE TABLE IF NOT EXISTS schema_migrations (name VARCHAR(190) NOT NULL, ' +
+        'checksum CHAR(64) NOT NULL, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (name))');
+    await database.doQuery('DELETE FROM schema_migrations WHERE name = ?', [DATETIME_MIGRATION]);
+    await database.runSqlMigrations();
+}
+
 const STORED_TIME = '2026-01-15 12:34:56';
 const SHIFTED_TIME = '2026-01-15 06:34:56';
 
@@ -64,14 +84,14 @@ async function rehearseDatetimeRetype() {
     // Prove the aged columns still render stored instants through the session zone.
     expect(await readFixtureTimes()).to.deep.equal([SHIFTED_TIME, SHIFTED_TIME, SHIFTED_TIME]);
 
-    await db.runDatetimeColumnMigrations();
+    await runDatetimeMigration(db);
     const migrated = await columnMetadata(db);
     // Verify every listed column migrated and now ignores the session zone.
     expect(Object.values(migrated).map(v => v.dataType)).to.deep.equal(
         DATETIME_COLUMNS.map(() => 'datetime'));
     expect(await readFixtureTimes()).to.deep.equal([STORED_TIME, STORED_TIME, STORED_TIME]);
 
-    await db.runDatetimeColumnMigrations();
+    await runDatetimeMigration(db);
     // Verify the second pass changes neither definitions nor stored values.
     expect(await columnMetadata(db)).to.deep.equal(migrated);
     expect(await readFixtureTimes()).to.deep.equal([STORED_TIME, STORED_TIME, STORED_TIME]);

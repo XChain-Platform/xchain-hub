@@ -226,142 +226,27 @@ function registerVerifyTablesTests() {
     });
 }
 
-function registerUniqueKeyMigrationTests() {
-        it('skips the migration when the unique key already exists', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([{ c: 1 }]); // index already present
-            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']);
-            // only the existence SELECT runs; no DELETE / ALTER
-            expect(mockConn.query.callCount).to.equal(1);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('removes duplicates and adds the unique key when absent', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ c: 0 }])              // not present
-                .onCall(1).resolves({ affectedRows: 2 })     // DELETE dupes
-                .onCall(2).resolves([]);                     // ALTER ADD UNIQUE
-            await db.migrateUniqueKey('mytable', 'uq_x', '(a, b)', ['a', 'b']);
-            const del = mockConn.query.getCall(1).args[0];
-            const add = mockConn.query.getCall(2).args[0];
-            expect(del).to.include('DELETE t1 FROM mytable t1');
-            expect(del).to.include('t1.a = t2.a AND t1.b = t2.b');
-            expect(add).to.include('ADD UNIQUE KEY uq_x (a, b)');
-            expect(console.log.calledWithMatch(/removed 2 duplicate/)).to.be.true;
-        });
-
-        it('adds the key without a "removed duplicates" log when there are none', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query
-                .onCall(0).resolves([{ c: 0 }]) // not present
-                .onCall(1).resolves({})         // DELETE -> no affectedRows
-                .onCall(2).resolves([]);        // ALTER ADD UNIQUE
-            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']);
-            expect(mockConn.query.getCall(2).args[0]).to.include('ADD UNIQUE KEY uq');
-            expect(console.log.calledWithMatch(/duplicate/)).to.be.false;
-        });
-
-        it('catches and logs a migration error, still releasing the connection', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ c: 0 }]).onCall(1).rejects(new Error('alter failed'));
-            await db.migrateUniqueKey('t', 'uq', '(a)', ['a']); // must not throw
-            expect(console.error.calledWithMatch(/Migration error on t/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-}
-
-function registerRunMigrationSequenceTests() {
-        it('runMigrations migrates unique keys, the batch index, and the capability ENUM', async function () {
+function registerRunMigrationsTests() {
+    describe('runMigrations()', function () {
+        it('runs the dated .sql files, then asserts the widened mirror keys', async function () {
             const { db } = makeDb();
-            const mig = sinon.stub(db, 'migrateUniqueKey').resolves();
-            const idx = sinon.stub(db, 'migrateIndex').resolves();
-            const en  = sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, 'migrateColumnType').resolves();
+            const sqlRun = sinon.stub(db, 'runSqlMigrations').resolves(true);
+            const assertWide = sinon.stub(db, 'assertMirrorKeysWide').resolves();
             await db.runMigrations();
-            expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
-            expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
-            expect(idx.calledWith('validator_rewards', 'idx_batch_seq', '(batch_seq)')).to.be.true;
-            // The three price_snapshots frontier indexes: names and column lists byte-equal
-            // to the KEY lines in src/sql/price_snapshots.sql, the first two also to the
-            // indexer and explorer mirror twins, so a hub that predates them converges on the
-            // same index set a fresh install gets.
-            expect(idx.calledWith('price_snapshots', 'idx_status_block_round', '(status, reference_block, round_number)')).to.be.true;
-            expect(idx.calledWith('price_snapshots', 'idx_status_timestamp_round', '(status, block_timestamp, round_number)')).to.be.true;
-            expect(idx.calledWith('price_snapshots', 'idx_status_created', '(status, created_at)')).to.be.true;
-            const enCall = en.getCall(0);
-            expect(enCall.args[0]).to.equal('validator_capabilities');
-            expect(enCall.args[1]).to.equal('capability');
-            expect(enCall.args[2]).to.include('full_node');
+            expect(sqlRun.calledOnce).to.be.true;
+            expect(assertWide.calledOnce).to.be.true;
+            expect(sqlRun.calledBefore(assertWide)).to.be.true;
         });
 
-        // The archive-leg qualifier reaches an AGED hub only through runMigrations:
-        // alterTableForDrift adds the column (it carries a DEFAULT) but never touches an
-        // index, and migrateUniqueKey no-ops as soon as the index NAME exists. The
-        // backfill must run BEFORE the widen, or a pre-column archive row keeps qualifier
-        // 0 and falls out of every qualified predicate as though it were absent.
-        it('runMigrations backfills the archive round qualifier, then widens uq_reward', async function () {
+        it('does not assert mirror keys when a migration file fails', async function () {
             const { db } = makeDb();
-            sinon.stub(db, 'migrateUniqueKey').resolves();
-            sinon.stub(db, 'migrateIndex').resolves();
-            sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, 'migrateColumnType').resolves();
-            const back = sinon.stub(db, 'backfillArchiveRoundQualifier').resolves();
-            const wide = sinon.stub(db, 'widenUniqueKey').resolves();
-            await db.runMigrations();
-            expect(back.calledOnce).to.be.true;
-            const widen = wide.getCalls().find(c => c.args[0] === 'validator_rewards');
-            expect(widen, 'uq_reward must be widened on aged databases').to.not.be.undefined;
-            expect(widen.args[1]).to.equal('uq_reward');
-            expect(widen.args[2]).to.equal('round_qualifier');
-            expect(widen.args[3]).to.equal('(validator_pubkey, round_number, reward_type, round_qualifier)');
-            expect(back.calledBefore(wide), 'backfill must precede the widen').to.be.true;
+            sinon.stub(db, 'runSqlMigrations').rejects(new Error('boom'));
+            const assertWide = sinon.stub(db, 'assertMirrorKeysWide').resolves();
+            let failure = null;
+            try { await db.runMigrations(); } catch (e) { failure = e; }
+            expect(failure && failure.message).to.equal('boom');
+            expect(assertWide.called).to.be.false;
         });
-}
-
-function registerMigrationBackfillTests() {
-        it('the archive qualifier backfill touches only anchor_archive rows still at 0', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves({ affectedRows: 2 });
-            await db.backfillArchiveRoundQualifier();
-            const [sql, args] = mockConn.query.getCall(0).args;
-            expect(sql).to.include('UPDATE validator_rewards SET round_qualifier = block_index');
-            expect(sql).to.include('reward_type = ?');
-            expect(sql).to.include('round_qualifier = 0');
-            expect(sql).to.include('block_index IS NOT NULL');
-            expect(args).to.deep.equal(['anchor_archive']);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        // #4315: a DDL-only fix converts fresh installs and leaves every DEPLOYED hub
-        // TIMESTAMP-bound, because alterTableForDrift never MODIFYs a type. The migration
-        // being wired is therefore part of the fix, not a detail of it.
-        it('runMigrations converts both governance voting deadline columns to DATETIME', async function () {
-            const { db } = makeDb();
-            sinon.stub(db, 'migrateUniqueKey').resolves();
-            sinon.stub(db, 'migrateIndex').resolves();
-            sinon.stub(db, 'migrateEnumColumn').resolves();
-            const col = sinon.stub(db, 'migrateColumnType').resolves();
-            await db.runMigrations();
-            for (const column of ['voting_start', 'voting_end']) {
-                const call = col.getCalls().find(c => c.args[1] === column);
-                expect(call, column + ' is not migrated').to.exist;
-                expect(call.args[0]).to.equal('governance_proposals');
-                expect(call.args[2]).to.equal('datetime');
-                expect(call.args[3]).to.include('DATETIME');
-                expect(call.args[3]).to.include('NOT NULL');
-            }
-        });
-}
-
-function registerRunMigrationsMigrateUniqueKeyTests() {
-    // -----------------------------------------------------------------
-    // runMigrations() / migrateUniqueKey()
-    // -----------------------------------------------------------------
-    describe('runMigrations() / migrateUniqueKey()', function () {
-        registerUniqueKeyMigrationTests();
-        registerRunMigrationSequenceTests();
-        registerMigrationBackfillTests();
     });
 }
 
@@ -371,5 +256,5 @@ describe('Database: extended coverage', function () {
     registerVerifyDatabaseTests();
     registerCreateDatabaseTests();
     registerVerifyTablesTests();
-    registerRunMigrationsMigrateUniqueKeyTests();
+    registerRunMigrationsTests();
 });

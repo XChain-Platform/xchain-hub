@@ -1,5 +1,5 @@
 -- Add plain indexes and remove retired indexes on an already-deployed hub.
--- xchain:migration mode=manual
+-- xchain:migration mode=auto on-error=warn
 -- Run after the unique-key steps; retired checkpoint indexes are dropped only after `uq_chain_seq` exists.
 
 ALTER TABLE `validator_rewards` ADD INDEX IF NOT EXISTS `idx_batch_seq` (batch_seq);

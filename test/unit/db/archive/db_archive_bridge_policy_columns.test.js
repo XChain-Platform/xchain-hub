@@ -60,6 +60,13 @@ function makeDb() {
     return { db, mockConn, mockPool };
 }
 
+const NULLABLE_COLUMNS_MIGRATION = require('fs').readFileSync(require('path').join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'migrations',
+    '2026-10-19-nullable-mirror-columns.sql'), 'utf8');
+
+function addsColumn(table, column) {
+    return NULLABLE_COLUMNS_MIGRATION.split('\n').some(l => l.startsWith('ALTER TABLE `' + table + '` ADD COLUMN IF NOT EXISTS `' + column + '` '));
+}
+
 function registerDdlTests() {
     describe('DDL: archive bookkeeping columns', function () {
         it('bridge_transfers.sql carries batch_seq, archived_status and anchor_txid', function () {
@@ -75,65 +82,13 @@ function registerDdlTests() {
 }
 
 function registerMigrateArchiveColumnsTests() {
-    describe('migrateArchiveBookkeepingColumns()', function () {
-        it('adds every missing column on both tables', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.callsFake(async (sql, args) => {
-                if (/information_schema\.columns/.test(sql)) {
-                    let table = args[1];
-                    let existing = {
-                        bridge_transfers: ['id', 'transfer_id', 'status'],
-                        policy_snapshots: ['id', 'snapshot_id', 'status']
-                    };
-                    return (existing[table] || []).map(c => ({ c }));
-                }
-                return [];
-            });
-            await db.migrateArchiveBookkeepingColumns();
-            let alters = mockConn.query.getCalls().filter(c => /ALTER TABLE/.test(c.args[0])).map(c => c.args[0]);
-            expect(alters).to.have.lengthOf(5);
-            expect(alters.some(a => /ALTER TABLE `bridge_transfers` ADD COLUMN `batch_seq`/.test(a))).to.equal(true);
-            expect(alters.some(a => /ALTER TABLE `bridge_transfers` ADD COLUMN `archived_status`/.test(a))).to.equal(true);
-            expect(alters.some(a => /ALTER TABLE `bridge_transfers` ADD COLUMN `anchor_txid`/.test(a))).to.equal(true);
-            expect(alters.some(a => /ALTER TABLE `policy_snapshots` ADD COLUMN `batch_seq`/.test(a))).to.equal(true);
-            expect(alters.some(a => /ALTER TABLE `policy_snapshots` ADD COLUMN `anchor_txid`/.test(a))).to.equal(true);
-        });
-
-        it('is a no-op once every column already exists', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.callsFake(async (sql, args) => {
-                if (/information_schema\.columns/.test(sql)) {
-                    let table = args[1];
-                    let existing = {
-                        bridge_transfers: ['id', 'batch_seq', 'archived_status', 'anchor_txid'],
-                        policy_snapshots: ['id', 'batch_seq', 'anchor_txid']
-                    };
-                    return (existing[table] || []).map(c => ({ c }));
-                }
-                return [];
-            });
-            await db.migrateArchiveBookkeepingColumns();
-            expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
-        });
-
-        it('is a no-op when a table is not there yet (fresh install ships the DDL columns)', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.resolves([]);
-            await db.migrateArchiveBookkeepingColumns();
-            expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
-        });
-    });
-}
-
-function registerRunColumnAndFenceMigrationsTests() {
-    describe('runColumnAndFenceMigrations()', function () {
-        it('calls migrateArchiveBookkeepingColumns()', async function () {
-            const { db } = makeDb();
-            for (let m of ['migrateColumnType', 'migrateColumnCharset', 'migratePriceFencePrimaryKey',
-                           'migrateAdmissionColumns', 'migrateOracleTickWidth', 'migrateArchiveBookkeepingColumns'])
-                sinon.stub(db, m).resolves();
-            await db.runColumnAndFenceMigrations();
-            expect(db.migrateArchiveBookkeepingColumns.calledOnce).to.equal(true);
+    describe('dated nullable-column migration', function () {
+        it('adds every bookkeeping column on both tables', function () {
+            for (let c of ['batch_seq', 'archived_status', 'anchor_txid'])
+                expect(addsColumn('bridge_transfers', c), 'bridge_transfers.' + c).to.equal(true);
+            for (let c of ['batch_seq', 'anchor_txid'])
+                expect(addsColumn('policy_snapshots', c), 'policy_snapshots.' + c).to.equal(true);
+            expect(addsColumn('policy_snapshots', 'archived_status')).to.equal(false);
         });
     });
 }
@@ -230,8 +185,7 @@ describe('hub bridge/policy archive bookkeeping', function () {
 
     registerDdlTests();
     registerMigrateArchiveColumnsTests();
-    registerRunColumnAndFenceMigrationsTests();
-    registerFinderTests();
+        registerFinderTests();
     registerUpdateTests();
     registerBatchSeqAllocatorTests();
     registerSnapshotRouteCommentTest();
