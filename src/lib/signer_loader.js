@@ -44,7 +44,7 @@
  * an uncovered publisher stays idle with a stated reason rather than spending.
  *
  * A thin wrapper over xchain-sdk's wallet.signPsbt(psbtHex, wif) satisfies
- * the contract. See examples/doge-signer.example.js.
+ * the contract. See docs/examples/doge-signer.example.js.
  *
  * Failure policy: HUB_SIGNER_MODULE unset returns null and the publishers
  * stay idle (their own "no broadcast pipeline configured" warnings fire).
@@ -89,7 +89,7 @@ function readDeclaredChains(mod, modulePath){
 
 // Validate an already-required signer module and build the hooks object.
 // Split out of loadSignerHooks so a test can drive the real reference template
-// (examples/doge-signer.example.js, which cannot be require()d without operator
+// (docs/examples/doge-signer.example.js, which cannot be require()d without operator
 // credentials) through the same contract check the production path applies.
 function buildSignerHooks(mod, modulePath){
     if(!mod || typeof mod.walletSign !== 'function')
