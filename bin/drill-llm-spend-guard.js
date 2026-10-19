@@ -65,7 +65,6 @@ process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = String(CAP_CENTS);
 process.env.LLM_EST_SPEND_USD_CENTS            = String(EST_CENTS);
 process.env.LLM_SPEND_WINDOW_MS                = String(WINDOW_MS);
 process.env.LLM_SPEND_LOG_PATH                 = path.join(work, 'llm-spend.jsonl');
-delete process.env.LLM_ENABLED;                                 // the kill switch stays open
 delete process.env.LLM_SPEND_STATE_PATH;                        // and nothing persists
 
 const llm = require(path.join(HUB_ROOT, 'src/providers/llm.js'));
