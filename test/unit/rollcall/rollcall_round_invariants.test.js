@@ -145,7 +145,10 @@ const REQUIRED_SWEEPERS = 3;
     function theThreeTunablesHaveADocumentedTest7() {
         const fs   = require('fs');
         const path = require('path');
-        const doc  = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'CONFIGURATION.md'), 'utf8');
+        const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
+        const docPath = path.join(__dirname, '..', '..', '..', '..', 'xchain-documentation', 'components', 'hub', 'configuration.md');
+        if (!skipOrFail(this, siblingCheckout(__dirname, docPath), 'the hub configuration page guard')) return;
+        const doc  = fs.readFileSync(docPath, 'utf8');
         // Read the names out of the engine rather than restating them, so a rename
         // cannot pass by renaming the assertion with it.
         const src  = fs.readFileSync(path.join(__dirname, '../../../src/rollcall/round.js'), 'utf8');
@@ -167,7 +170,7 @@ const REQUIRED_SWEEPERS = 3;
             assert.ok(used.has(knob), 'env-name extraction missed ' + knob);
         const missing = [...used].filter(name => !doc.includes(name)).sort();
         assert.deepStrictEqual(missing, [],
-            'ROLLCALL_ env vars read in src/rollcall/round.js but undocumented in CONFIGURATION.md: ' +
+            'ROLLCALL_ env vars read in src/rollcall/round.js but undocumented in the hub configuration page: ' +
             missing.join(', '));
     }
 
@@ -177,7 +180,7 @@ const REQUIRED_SWEEPERS = 3;
         it('at least three ranks past the leader unlock inside the accept window on every network', atLeastThreeRanksPastTheTest4);
         it('the engine really does unlock rank 3 inside the window at the regtest defaults', theEngineReallyDoesUnlockRankTest5);
         it('keeps every self-publish deadline past the earliest signable tip', keepsEverySelfPublishDeadlinePastTest6);
-        it('the three tunables have a documented row in CONFIGURATION.md', theThreeTunablesHaveADocumentedTest7);
+        it('the three tunables have a documented row in the hub configuration page', theThreeTunablesHaveADocumentedTest7);
     }
 
     describe('RollcallRound publish-tunable invariants (D88)', rollcallroundPublishTunableInvariantsD88Suite1);

@@ -34,6 +34,13 @@
     },
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
+    },
+    "test/unit/repo_guards/configuration_doc.test.js": {
+      "CONFIGURATION.md env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/": "hub configuration page env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/",
+      "CONFIGURATION.md env-var coverage documents every dynamically-composed <COIN>_ env var read in src/": "hub configuration page env-var coverage documents every dynamically-composed <COIN>_ env var read in src/"
+    },
+    "test/unit/rollcall/rollcall_round_invariants.test.js": {
+      "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in CONFIGURATION.md": "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in the hub configuration page"
     }
   }
 }

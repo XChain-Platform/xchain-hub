@@ -994,6 +994,17 @@
       "2ebca0ea9b9877e6c9fa8b2fb6fab7ccc6531eb7361149d37ece11bb4e611c3b",
       "ada7d71d81d98882997d7e7338b785a057f8f2cc97c433eaa90ac6be78b06ba0"
     ],
+    "14e55c63f661998a": [
+      "ca7e81d679020bcfcf3b42b2ee3191d46898e49e77581fa32d72536ad81253a6",
+      "1a0f6576b1253957c1030b188b3604b22239bc6979287cddf4de5be8d96aca2a",
+      "4116f5d8f7668bd7fff1230509afd04fbc2159a3c87129a0b57094c3bd1cf087",
+      "8b8638e3d6f54fd3077a636f65d44c6b861f6e8b7ddce9a7218d11492765ed95",
+      "de9c14583515ac6b2a6e0d5adaf79112442bd369813c18a22e1ea66d7369f515",
+      "12045126bb05742d465f074e77b57ad0df8a5cced844368352a7b34a0de82225",
+      "147cac8fd3348434f1894ca73df16cd86b8e0d9fdc4014626f23883ab89a6737",
+      "4d06a45f75335421247900345db32cd9e2de528c41fa24c5c82b12456c12426f",
+      "d36f81712b6f38e9183e332a8b393c1cbdad6abedb9f947a8fddf8ff215ae4c8"
+    ],
     "1537a4891a018edb": [
       "05f91cc69da48fe0a201eee21812a025d1f546a6a81811d4996cf2b4e1561b65",
       "be9a69b2e955eed522c623f37147ccf80a86cccc32746dc4d3ac350c3ea2099b",
@@ -4279,10 +4290,6 @@
       "7bce80dd24b9ca2cd21a77dc516cb21e0289741943d274246a9cc64958c223d7",
       "1864a53c78b1413415e300729ea04c1b85e9b25b58f28d4122fadceb00721033",
       "f0b3a176ece80be74ede79be346b2e909e48a5c4285a32798b1395dbb52e2f9a"
-    ],
-    "535f8e4d43c961c7": [
-      "c86f3154908cd11380cb13080191104e8f63e3063581d329e8743c731fe1d089",
-      "6d04a4da768800d65939a1a951cdd90cb875947fb056cd7b045475026550ac00"
     ],
     "5375641dda3dbffe": [
       "38e72787f473e54b3a5e3d1d9777f9acbc31b5f6c398efe987d6412b14936a45",
@@ -8639,6 +8646,10 @@
       "2f1e0d9f7297a7e210edeb4be79873f838183558011a754e7622f0c6865ca85a",
       "ab2c401313d1a1c02ebfdecf5b980382ad19a6d032022e5e25e30b81fabc0030"
     ],
+    "a9e90eb88f52b53e": [
+      "3eedeac5f4daac16a349725e48d51a7bd2541d24bd67673c7662d4c4a880378b",
+      "341eba5ed89dcc665fcd1de956bbc9c56bd3fda78b97285d734ed8b03e2a5864"
+    ],
     "aa08c9c9713f08c6": [
       "6c6c4cd8450919fdf8062361031e7f12e28c47d849a65efd2614e73059ceb82f",
       "a0afdb2cb3d4388046e33374f4e681ffc8164fbe18f88041e396666564fb0cfc",
@@ -10993,17 +11004,6 @@
       "ac01bb4a02f30c7d4bc078b786bd7b0573e34db7a301efe0cf5dabc0021acaf4",
       "12fe325be47ec1bc0c477321b1050415e9c7e91fd92efd7218da9a51a8104621"
     ],
-    "e2672f35505188b4": [
-      "ca7e81d679020bcfcf3b42b2ee3191d46898e49e77581fa32d72536ad81253a6",
-      "1a0f6576b1253957c1030b188b3604b22239bc6979287cddf4de5be8d96aca2a",
-      "4116f5d8f7668bd7fff1230509afd04fbc2159a3c87129a0b57094c3bd1cf087",
-      "8b8638e3d6f54fd3077a636f65d44c6b861f6e8b7ddce9a7218d11492765ed95",
-      "de9c14583515ac6b2a6e0d5adaf79112442bd369813c18a22e1ea66d7369f515",
-      "6673b086bf11042b6c2e2fa4e688b6a6fa7e5ef3221f754ef25ef5333007b3a8",
-      "147cac8fd3348434f1894ca73df16cd86b8e0d9fdc4014626f23883ab89a6737",
-      "4d06a45f75335421247900345db32cd9e2de528c41fa24c5c82b12456c12426f",
-      "d36f81712b6f38e9183e332a8b393c1cbdad6abedb9f947a8fddf8ff215ae4c8"
-    ],
     "e2c71ad20691688a": [
       "17fdc53e7b9bfc15548be19554d9ea9deecb4e026e3fa9a9906d404d8a6a0983",
       "bf0dabf667a2e79f364749270bbcc4277c9f5fd056ec51aa86e7439613bef607",
@@ -13294,7 +13294,7 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
@@ -13312,7 +13312,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
@@ -14340,7 +14340,7 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
@@ -14358,7 +14358,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
@@ -15415,7 +15415,7 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
         "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
@@ -15433,7 +15433,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",

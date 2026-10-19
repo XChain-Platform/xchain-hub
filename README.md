@@ -186,7 +186,7 @@ stay inert unless switched on: with no env set, no route is registered, no timer
 starts and no socket opens. Turn the endpoint on with `METRICS_ENABLED=1` (add
 `METRICS_TOKEN` to gate the scrape on a reachable box), and ship logs with
 `LOG_SHIP_ENABLED=1` plus `LOG_SHIP_URL`. Variables are documented in
-[CONFIGURATION.md](CONFIGURATION.md); the exported metric names and the wiring
+[the hub configuration page](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md); the exported metric names and the wiring
 API are in [`src/observability/README.md`](src/observability/README.md).
 
 This directory is the CANONICAL copy of the shared module. After

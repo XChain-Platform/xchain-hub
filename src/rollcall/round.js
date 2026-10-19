@@ -108,7 +108,7 @@ const { MAX_PAIRS_PER_ACTION, ACTION_DATA_CEILING, BYTES_PER_PAIR, XROLLCALL_SIG
 
 // Per-network defaults for the three publish tunables. These are hub POLICY, not
 // consensus: no §3.3/§3.4 chain rule reads any of them, which is why they live
-// here and in CONFIGURATION.md rather than in rollcall_gate.js beside the
+// here and in the hub configuration page rather than in rollcall_gate.js beside the
 // values that decide what the ledger says.
 //
 // The ordering PUBLISH_DELAY < SELF_PUBLISH < ACCEPT_WINDOW - 24 is the part

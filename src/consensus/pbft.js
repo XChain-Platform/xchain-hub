@@ -150,7 +150,7 @@ class Consensus {
 
     // True when this hub is part of a real federation, which is what every
     // fail-closed guard below actually needs to know. MIN_VALIDATORS alone is
-    // the wrong question: CONFIGURATION.md marks it optional and
+    // the wrong question: the hub configuration page marks it optional and
     // .env.example ships it commented out, so it defaults to 1 and a normally
     // configured multi-hub deployment silently takes the single-node path, the
     // exact path those guards exist to keep it off. The live active set is
