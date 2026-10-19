@@ -26,7 +26,7 @@ const {
 const { getLogger } = require('../../observability');
 const { onCapabilitySnapshotWritten } = require('../../lib/capability_snapshot_write.js');
 const { XSNP_SIGN_REQ, XSNP_SIGN, XSNP_FINALIZED } = require('./constants.js');
-const { leadsSnapshotSlot } = require('./leader.js');
+const { mayLeadSnapshotSlot, snapshotLeaderRank } = require('./leader.js');
 const { pickDueSnapshot } = require('./due.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
@@ -205,18 +205,25 @@ class SnapshotCheckpointEngine {
     async checkpointNextDue() {
         const rows = await this.db.listUncheckpointedSnapshotBlocks(
             this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
+        const btcTip = await this.btcTip();
         const due = pickDueSnapshot(snapshotBlocks(rows), {
             inFlight: this.snapshotRounds.size > 0,
             gateActive: block => this.gateActive(block),
             blockOf: block => snapshotCheckpointBlock(block, this.network),
-            btcTip: await this.btcTip(),
+            btcTip,
             confirmations: this.confirmations,
         });
         if (!due) return false;
 
         const validators = await this.resolveValidators(due.snapshot_block);
         const myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
-        if (!leadsSnapshotSlot(due.block_index, validators, myPubkey)) return false;
+        const overdue = Number(btcTip) - due.block_index - this.confirmations;
+        if (!mayLeadSnapshotSlot(due.block_index, validators, myPubkey, overdue)) return false;
+        const rank = snapshotLeaderRank(due.block_index, validators, myPubkey);
+        if (rank > 0) {
+            logger.info('SnapshotCheckpointEngine: leading BTC/' + this.network + '/' +
+                due.block_index + ' as fallback ' + rank + ', ' + overdue + ' blocks past due');
+        }
 
         const block = await this.indexerCall('getblockhashes', {
             block_index: due.block_index,

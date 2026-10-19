@@ -45,7 +45,8 @@ function registerDrainTests() {
 
     it('stops draining at a snapshot another hub leads', async function () {
         const validators = [{ pubkey: key('1') }, { pubkey: key('2') }];
-        const h = harness({ validators, due: [107, 108], block: block(101) });
+        // The tip sits exactly at the due height, inside the turn hub's fallback wait.
+        const h = harness({ validators, due: [107, 108], block: block(101), tip: 107 });
         sinon.stub(h.engine, 'leadRound').resolves();
 
         await h.engine.tick();

@@ -141,7 +141,8 @@ function registerLeaderTests() {
         expect(leading.engine.leadRound.firstCall.args[1].map(row => row.pubkey))
             .to.deep.equal([key('1'), key('2')]);
 
-        const following = harness({ validators, due: [107], block: block(101) });
+        // The tip sits exactly at the due height, inside the turn hub's fallback wait.
+        const following = harness({ validators, due: [107], block: block(101), tip: 107 });
         sinon.stub(following.engine, 'leadRound').resolves();
         await following.engine.tick();
         expect(following.engine.leadRound.called).to.equal(false);
