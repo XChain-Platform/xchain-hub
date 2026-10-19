@@ -258,6 +258,9 @@
       "712b076eafb4e2e52b8eaf3a6dad4da06a2f228a1f1a12cd144a498f128ed009",
       "9fe4e16db3dffa50b7b7197dc25a8d0c760a47c6e01e844402db95bb2e06435d"
     ],
+    "05e0db81be01d130": [
+      "05e0db81be01d13059465eb030ab7b70d8c03e551698873bbd69aae631f719d6"
+    ],
     "060141e874954339": [
       "d8b29b72a391f3b37abd43438f8a10409e60ecdc244d00df05556d9d0aebe757",
       "9113d0dd4f402f90f6dda20a6a48a3918b7f14c9079b6134eab12f3c1663dab9",
@@ -3656,6 +3659,28 @@
     "48c8c42455f22bf5": [
       "afd020c55de627945d7537f3a9d20de559d5a4f45a1b87b703ec048aaf2368a4",
       "33aaf47153079fc3fa993ed7f49b1b85394803209ca8bbe4dc84ca6dfcff37eb"
+    ],
+    "49108b472488f065": [
+      "9e815c06a21eb6f28885dc52b506d08e9bab37975adc72956776f0416febd1ed",
+      "b814effb85b292d2ccfdde4f2476a847e775aa0a973b0a047d3b373d828831c5",
+      "d03d0269c16d308af32407dac7606616e0048f4a06256c5a49745145ac039483",
+      "355ed28821197533df3739abc41f3817acfb4f48e7b9f28b6207778fc51b4b35",
+      "8575659eef65237c89a34eb69b6046b686db27f287a62072d8275234eaaa7378",
+      "860d905a56466a2050aa1c38f24f3e64a26cc3c583f4af24fae6ff9964321991",
+      "1f5559dc0bc10bcba5a28f89dcb35c52173218c40f40dd13e9d5237d0c3f728c",
+      "fae5b683a92c809aefde32fdfbd09a7452fadc61144a5a0b9c18c45362f6fbf3",
+      "865dd27fa1e08177b478d79fb0d50a59d0b2cf5409739511ee21e9888e2d38c7",
+      "70ef865ea2f73fe0009e3abee73216f1f87f9a49dc6c74c39c1c6a7d7b09321b",
+      "5ea1d64b6a16c30dd85e620d9a48aa7171ceb04eedc1081febc3d45301bed203",
+      "a08999c803829fac6e35d08963dfbb94e464f402e86f7fbb75954c38e2d18262",
+      "6fbd22ae7ae714726d689ee74c62f21e6cda241d14d0343498ff44419ce329cc",
+      "a30dc2098ba20b2603ffe59557db16a4ef97d00e45adfb74ef29ad9d0b16dea6",
+      "565125b6ec41e33f08ec704b37477154587747d68b35b437f746c4681b1a43ff",
+      "9622789a7d3595b05a152b7b7505a53db6d08be1c83945ac8a8d81d6c603fb91",
+      "57d70d8ac2a4b531b33307fb68b623b19a8910d5d0f102dfafae5241b272e96f",
+      "1e0deca634b7e57286d80988c354236e8f9e58f3dd5d3b8d4c8088d2392e0d9d",
+      "65883f6d4386c7765e2fa13e2368536a70061c3c4021581b4334574f7d2cb7ba",
+      "dd4cd3b9d90443ba1e90eda7295497d75a2476428435c4536ada572e92142adc"
     ],
     "4914266dd27d9bea": [
       "98f97e6cd1837d0da51b0c12cd8401a2de9fd661492bb7850304ffb5339a5cff",
@@ -7263,12 +7288,6 @@
       "082e22af4af5bbd01137d0ad45ee49603b2373c0ec90aafa2c6fe9850ac90347",
       "424554373416e0dd738d31784584d399da22684cd4b97a1ca5d320ecb12c8c16"
     ],
-    "8cba4e1d3dd79e7f": [
-      "9e815c06a21eb6f28885dc52b506d08e9bab37975adc72956776f0416febd1ed",
-      "b814effb85b292d2ccfdde4f2476a847e775aa0a973b0a047d3b373d828831c5",
-      "d03d0269c16d308af32407dac7606616e0048f4a06256c5a49745145ac039483",
-      "355ed28821197533df3739abc41f3817acfb4f48e7b9f28b6207778fc51b4b35"
-    ],
     "8d3506263b0caeab": [
       "13af98c9c13d5b411b60984d60469fae932e4630a7a57fa0eb766007f9be5bc5",
       "c8fdb934b2bea311cf00a1a04539f04e3837c9159cd80a931d3809cd5f0fd635",
@@ -8056,24 +8075,6 @@
       "93045becdc44f17a6906de13ff484fb4ba8daccfa9d3df4e76cb14d8028cfe12",
       "8a1190be0d10dbab8df0ed4788a95638aad505536423e3f2296722063852d151",
       "6d822e59e0e202e0d3afa38cbbaf9a5602f8f80c4d0db3ba649419aeb37a8ef1"
-    ],
-    "9e72924575321297": [
-      "8575659eef65237c89a34eb69b6046b686db27f287a62072d8275234eaaa7378",
-      "860d905a56466a2050aa1c38f24f3e64a26cc3c583f4af24fae6ff9964321991",
-      "1f5559dc0bc10bcba5a28f89dcb35c52173218c40f40dd13e9d5237d0c3f728c",
-      "fae5b683a92c809aefde32fdfbd09a7452fadc61144a5a0b9c18c45362f6fbf3",
-      "865dd27fa1e08177b478d79fb0d50a59d0b2cf5409739511ee21e9888e2d38c7",
-      "70ef865ea2f73fe0009e3abee73216f1f87f9a49dc6c74c39c1c6a7d7b09321b",
-      "5ea1d64b6a16c30dd85e620d9a48aa7171ceb04eedc1081febc3d45301bed203",
-      "a08999c803829fac6e35d08963dfbb94e464f402e86f7fbb75954c38e2d18262",
-      "6fbd22ae7ae714726d689ee74c62f21e6cda241d14d0343498ff44419ce329cc",
-      "a30dc2098ba20b2603ffe59557db16a4ef97d00e45adfb74ef29ad9d0b16dea6",
-      "565125b6ec41e33f08ec704b37477154587747d68b35b437f746c4681b1a43ff",
-      "9622789a7d3595b05a152b7b7505a53db6d08be1c83945ac8a8d81d6c603fb91",
-      "57d70d8ac2a4b531b33307fb68b623b19a8910d5d0f102dfafae5241b272e96f",
-      "1e0deca634b7e57286d80988c354236e8f9e58f3dd5d3b8d4c8088d2392e0d9d",
-      "65883f6d4386c7765e2fa13e2368536a70061c3c4021581b4334574f7d2cb7ba",
-      "dd4cd3b9d90443ba1e90eda7295497d75a2476428435c4536ada572e92142adc"
     ],
     "9eddb3ae53f0f141": [
       "031559df789a73d381951a8bf4cf6cd43f0e2775580316f580907bc610c68610",
@@ -12353,7 +12354,7 @@
         "ci:regression"
       ],
       "fileCount": 982,
-      "titleCount": 8987,
+      "titleCount": 8988,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12777,7 +12778,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "9e72924575321297",
+        "test/unit/consensus/gate_registry.test.js": "49108b472488f065",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -12786,7 +12787,6 @@
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
-        "test/unit/consensus/gate_registry/regtest_arming_from_environment.test.js": "8cba4e1d3dd79e7f",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -12959,6 +12959,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_oracle_tick_widen_migration.test.js": "05e0db81be01d130",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
@@ -13394,7 +13395,7 @@
     },
     "test": {
       "fileCount": 982,
-      "titleCount": 8987,
+      "titleCount": 8988,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13818,7 +13819,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "9e72924575321297",
+        "test/unit/consensus/gate_registry.test.js": "49108b472488f065",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -13827,7 +13828,6 @@
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
-        "test/unit/consensus/gate_registry/regtest_arming_from_environment.test.js": "8cba4e1d3dd79e7f",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -14000,6 +14000,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_oracle_tick_widen_migration.test.js": "05e0db81be01d130",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
@@ -14382,7 +14383,7 @@
     },
     "test:all": {
       "fileCount": 1064,
-      "titleCount": 9850,
+      "titleCount": 9851,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14888,7 +14889,7 @@
         "test/unit/consensus/full_node_challenge_round_02_verdict_replay.test.js": "b0bf279f8cb45f67",
         "test/unit/consensus/full_node_challenge_round_03_answer_pass_lists.test.js": "344864211046a4fa",
         "test/unit/consensus/full_node_challenge_round_04_close_broadcast.test.js": "744ef820b07e6708",
-        "test/unit/consensus/gate_registry.test.js": "9e72924575321297",
+        "test/unit/consensus/gate_registry.test.js": "49108b472488f065",
         "test/unit/consensus/gate_registry/anchor_fold_registry_rows.test.js": "b4670aeb71c9d4c3",
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
@@ -14897,7 +14898,6 @@
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
-        "test/unit/consensus/gate_registry/regtest_arming_from_environment.test.js": "8cba4e1d3dd79e7f",
         "test/unit/consensus/message_types/pbft_message_types.test.js": "e8a6090b96310382",
         "test/unit/consensus/message_types/reorg_message_types.test.js": "587237eefc273122",
         "test/unit/consensus/message_types/xnode_message_types.test.js": "e7b3899924674281",
@@ -15070,6 +15070,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_oracle_tick_widen_migration.test.js": "05e0db81be01d130",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
