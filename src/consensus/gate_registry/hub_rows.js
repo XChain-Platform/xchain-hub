@@ -56,6 +56,16 @@ addGate('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION', 'height', {
 
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: UNARMED, regtest: 0 });
 
+// Height on a DOGE or LTC source leg's own block_index. From it a lock of a bare token native
+// to that chain is stamped one below the snapshot_block of the first finalized origin
+// checkpoint covering it, and held until one exists, so the destination indexer's escrow
+// cross-check (BRIDGE_ESCROW_ANCHOR_MATCH_ACTIVATION, first checkpoint strictly above the
+// stamp) finds it at once instead of stalling a block for the next round. Arm it at or before
+// that indexer row: a stamp ahead of the indexer's flag day is refused there exactly as a tip
+// stamp is, while an armed indexer facing tip stamps waits up to a cadence on every such lock.
+// Unarmed live; regtest from genesis, as the indexer row.
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+
 // peers/hub_db/landing_watermark
 // Landed-from-clear-frontier: at/above the activation, in the landing indexer's
 // block height, the hub publishes landed[chain] from the indexer's

@@ -10486,6 +10486,23 @@
       "eab81031beca3be04b0e76fce39aae486850fc43b76e12385e989d3052494aa1",
       "d03123f0d46501ddaff45fe5bad98c95a7cddaffd6c2d5c39b3553045c4be5d6"
     ],
+    "d2ba3ed9dd07110d": [
+      "8a5599d6816a9f09a24fbc4a94b9de4e70f6a4408cb10272f476be5d4021f092",
+      "a9ec81dc29dc68f02080af2b32d873ac005ecaaa620910663a84626d8d277992",
+      "604aee33ecedf3b391aeaef5af0cd7813176b6614cec2189efc61adda1614050",
+      "0843a67e7f407449f63120e1eac575c3d3cd94034f53bb0cdce433e5b68d7cbd",
+      "53f1d3cb11666ec6edcdd4471d61da15a340109a2f2796927a01b8908e43d33d",
+      "41732cebeaf5acc2c2d9bdb3826f92488b1ca395a1bae25a4230cc2f85f220c3",
+      "8c3e44854cecfd85648c3762d50991dadc9324a5f2e2cedd8f46f31b973f5093",
+      "e5c1585a55302bbb75952b967ea487f011893c31cefacb1157214e375af5ef3f",
+      "66c253da59224774f2ff1b6d12692ceb7342daf8eac87a0c7ec3b81241e52e28",
+      "89c68a407f73135108152f58019ad3cf1ed0e058639fe7657118c620f19795a2",
+      "d90c690b2e6af3826a6bfebe875c68c0196771bbacaefcd02f862850f234338d",
+      "abb8d6b094174fb797b9cefeb4c41c8d5c2fce24190394eca6e7ec476a28d55f",
+      "9252353de7617eb16431468654c37f26ab9fa6f8237842ad939c9121f175d001",
+      "d2b70cf3ff73b331bdac683e001d2194a5d6a444eb5177d4672ca6fe3b50fb95",
+      "415e1afadcb7267c29fab9a6b3ad27c0f94a7f907a7436e64ab8d89e7e3c7df1"
+    ],
     "d30bd8a54d132bc6": [
       "529ce3e63502e7fe42e2442822b7d648856b8123d42efb1c00156d8731a19459",
       "a96b0cdeedc1b77b41eb07480daeb571f2984885b1c210b4485352da667ced55",
@@ -12358,8 +12375,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 984,
-      "titleCount": 8989,
+      "fileCount": 985,
+      "titleCount": 9004,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12831,6 +12848,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",
@@ -13401,8 +13419,8 @@
       }
     },
     "test": {
-      "fileCount": 984,
-      "titleCount": 8989,
+      "fileCount": 985,
+      "titleCount": 9004,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13874,6 +13892,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",
@@ -14391,8 +14410,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1066,
-      "titleCount": 9852,
+      "fileCount": 1067,
+      "titleCount": 9867,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14946,6 +14965,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",
