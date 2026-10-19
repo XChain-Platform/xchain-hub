@@ -401,6 +401,21 @@
       "02cea6b74cdd5f694feb863512dd16462a0d377626428d8cba34591338605dac",
       "72aa60cdea4bc6bc604b0b3b4ece971b3b13a7b8e7178cb29580b0730bc8139c"
     ],
+    "090d43c2cd1b3c84": [
+      "dd6d225e011804e3fe962d9e52ab5f6d3f2522a6e863a30bb7a10ade3c4f52e5",
+      "69d6e2e7d7c53801aeca7a45da32fe89ad2aa701afa8b4ed1c8b237b4716237f",
+      "3bd848d0f9b916091092acdaa7ee2c35d9bc589ad206795be0b7e0712a46a3d2",
+      "ef19a46ccbdc84c22fafa20870486c8314bb8662afd8afdf4d04f1568ae9f6fb",
+      "79626dc9c6bd64e4363bdb2306cbd55755bdabc03f1b6d09d92713e3cb23e081",
+      "fcebfd9638a64acdf7b8fed0f671fef6bcee0a1394f4688ea5f8b9c2b0bb3e97",
+      "35e263ad1aa297d862f6e51eb3d7ed6fa331035b20caa61d00d236dff0f0c9d5",
+      "3e7707d88059f7977be62d764ae735eb889a572ced371d2b9c8b6905651ad6bc",
+      "2d49b2c20197fb87dd5980e3e1119f0ab3d4c8296254419a9b802c87d792ec4d",
+      "2aecefde2705e0cc3227dd12e173c7420743eb13a517aa677ff2d7a362eb16f5",
+      "e60da7f99804ffbf9642c40abffad2b1e46912d6b9b2d8cbf13f46d43f350aaa",
+      "0332185b5a2e80c6f907aa4d3602b8cd75ee6b0bea671e32532eee90990e7d6d",
+      "8d47f3515a4852cc52ff1408714a66bc4dedb4b838eba8c147254e4b403e93a3"
+    ],
     "09204e08cfcc9ce9": [
       "5d45c805c760ec0fc71aed4a019f7a7dcb56fbec0f418244806224b3c1485005",
       "f989290c00aecd30722330ae3f2217ebad568eb38516807ee65c95ecbac53b16",
@@ -4626,24 +4641,6 @@
       "41e6c9a65bcd5b8dbb35b88148e20366773d57d9758ed0fa18e2639b16ed7c6a",
       "286261a9515bb9e4786e7c8385b638154cd8b8cd00155285a89f3595eca4af3f"
     ],
-    "59e58a99d11a2e22": [
-      "92849e08aae196c8e63da1fdfbd19a54fbdb76ad7a080360a46e175702021b0f",
-      "bcc4960c91188c79196562e9cb68747e41b415eaad78aa67682587a1b0311593",
-      "6debcfea102c9ffe14dc0d55e4e334cf4bf2215c3407254e03c9a8604153b4bc",
-      "6a983a5812ba3b901ac09e59694a8b990ab3e9832ad8f5115bdf2633825d1238",
-      "a2224ee26c18a5a63832a8bc58b1f7b661c2106e2a4fa1276998b9a8067deac3",
-      "c0db283fb442f6f4602e9c3a667445d896d1829aba1c53d5775937e40e3adca9",
-      "ff465891b7e47663e6588c942b8bf7136775f8f8709188c7624c0baa2b1c9456",
-      "17b08ad2b7b5107438dbd1d74274a1b42000cc31edc2bb4a9017b8277db1a3ac",
-      "4ecb6b00fae07c8f2eb8fc9c988f6d4cc5550625e9edbb553ca44b389d594c3d",
-      "f6948be15596274ad46375941a5168934c024f22688362d6c6e8f3a7d6a168a1",
-      "b87877f073657d7b40db6e423e32c93264fd9616e72bc5e7f621e04aa8e54f6f",
-      "d07762ab473960503fc590acb73b57dfd8551dab74b29548221962088b178a01",
-      "eb5e5225406322bc79f034367d2fd03bde72cf6539bf01d1d93e1a587e07bdc9",
-      "85b3dca5abfcf38b2c3f06f56698c82007afdbba889aace6c19da3902685b2dd",
-      "73727f83ea44135b39ecffababf2925ab37d4342ff6b928573b22ff5bf7c990c",
-      "786d02afe23e4e082e023d26c11971af7779eaf4f5170b8fbedde0109a9e00e9"
-    ],
     "59f1d7870676f35d": [
       "5aeedf682b91198c804c38931a29112a148ad979f5e89ec2a08204cede388c83",
       "91cd26d09b554036ec6d8022fad87bb07361f3bbe45b0abb2c3cd5d9e8cde10e",
@@ -7733,6 +7730,12 @@
       "8872ef43992e2ddd359102f9c57837d3c7700281964fab7334844d98eff38216",
       "b712a3c67501b32bc06c7d07b7aa74375b04a31d354cfc7dd2d9312b83153823"
     ],
+    "970ae846863970fc": [
+      "2509fb098699a66b9198a6d9588e087d5383adeee2ebe56201aa0db606815ec5",
+      "b1c3940c3b7ef41006d7ff01271105f8876d3a161737c6abee60aa255f2ef3d0",
+      "fc6a6f3b5f8220f34b765228be04ea24261a425834e9b6552079f90a9d61c256",
+      "fa87edf6b78957f2ddb72f9b4846553ff3c137dc1730a331cb6eaaf38d16fcf9"
+    ],
     "971e0037c7be9d43": [
       "a76766be930296efcb27bdf6fb123431af359536f0492c419b0da864c9ac1288",
       "9933e9be9c08079505171dcf04d25ede7f257bfc0265783c7fe321dfb4bc9622",
@@ -10486,6 +10489,23 @@
       "eab81031beca3be04b0e76fce39aae486850fc43b76e12385e989d3052494aa1",
       "d03123f0d46501ddaff45fe5bad98c95a7cddaffd6c2d5c39b3553045c4be5d6"
     ],
+    "d2ba3ed9dd07110d": [
+      "8a5599d6816a9f09a24fbc4a94b9de4e70f6a4408cb10272f476be5d4021f092",
+      "a9ec81dc29dc68f02080af2b32d873ac005ecaaa620910663a84626d8d277992",
+      "604aee33ecedf3b391aeaef5af0cd7813176b6614cec2189efc61adda1614050",
+      "0843a67e7f407449f63120e1eac575c3d3cd94034f53bb0cdce433e5b68d7cbd",
+      "53f1d3cb11666ec6edcdd4471d61da15a340109a2f2796927a01b8908e43d33d",
+      "41732cebeaf5acc2c2d9bdb3826f92488b1ca395a1bae25a4230cc2f85f220c3",
+      "8c3e44854cecfd85648c3762d50991dadc9324a5f2e2cedd8f46f31b973f5093",
+      "e5c1585a55302bbb75952b967ea487f011893c31cefacb1157214e375af5ef3f",
+      "66c253da59224774f2ff1b6d12692ceb7342daf8eac87a0c7ec3b81241e52e28",
+      "89c68a407f73135108152f58019ad3cf1ed0e058639fe7657118c620f19795a2",
+      "d90c690b2e6af3826a6bfebe875c68c0196771bbacaefcd02f862850f234338d",
+      "abb8d6b094174fb797b9cefeb4c41c8d5c2fce24190394eca6e7ec476a28d55f",
+      "9252353de7617eb16431468654c37f26ab9fa6f8237842ad939c9121f175d001",
+      "d2b70cf3ff73b331bdac683e001d2194a5d6a444eb5177d4672ca6fe3b50fb95",
+      "415e1afadcb7267c29fab9a6b3ad27c0f94a7f907a7436e64ab8d89e7e3c7df1"
+    ],
     "d30bd8a54d132bc6": [
       "529ce3e63502e7fe42e2442822b7d648856b8123d42efb1c00156d8731a19459",
       "a96b0cdeedc1b77b41eb07480daeb571f2984885b1c210b4485352da667ced55",
@@ -11593,15 +11613,6 @@
       "f61d19a9dcb21489b09aea1da040213e57b72b825507099f5069174bb4aa19a4",
       "7bb442da6503528dd98e7e9cd6060bbcd1c9c7b82c8c7e63e529757f33c42fbe"
     ],
-    "efdc7a5f833b1dd2": [
-      "dd6d225e011804e3fe962d9e52ab5f6d3f2522a6e863a30bb7a10ade3c4f52e5",
-      "69d6e2e7d7c53801aeca7a45da32fe89ad2aa701afa8b4ed1c8b237b4716237f",
-      "3bd848d0f9b916091092acdaa7ee2c35d9bc589ad206795be0b7e0712a46a3d2",
-      "ef19a46ccbdc84c22fafa20870486c8314bb8662afd8afdf4d04f1568ae9f6fb",
-      "79626dc9c6bd64e4363bdb2306cbd55755bdabc03f1b6d09d92713e3cb23e081",
-      "fcebfd9638a64acdf7b8fed0f671fef6bcee0a1394f4688ea5f8b9c2b0bb3e97",
-      "e60da7f99804ffbf9642c40abffad2b1e46912d6b9b2d8cbf13f46d43f350aaa"
-    ],
     "eff09819ca94154a": [
       "3bf0407a310f6649ac153d2045d123aa1c0546430b6b6adc26780bdb073dbfd9",
       "b11e19affa3a50114aef68114bf297c1c5e3a4a71f8fc6584fba5005401e9d9e",
@@ -12302,10 +12313,37 @@
       "c8e49879c1a343460eea50da9c93d2350028b4be788a2c8105935cca4d29d62e",
       "4c2d02e4591afb2bc5f209ab9e3b3dd6c2174e6f1b8a1005ed3ea2d3fab5ff37"
     ],
+    "fe3efc1774fa0c69": [
+      "92849e08aae196c8e63da1fdfbd19a54fbdb76ad7a080360a46e175702021b0f",
+      "bcc4960c91188c79196562e9cb68747e41b415eaad78aa67682587a1b0311593",
+      "6debcfea102c9ffe14dc0d55e4e334cf4bf2215c3407254e03c9a8604153b4bc",
+      "6a983a5812ba3b901ac09e59694a8b990ab3e9832ad8f5115bdf2633825d1238",
+      "a2224ee26c18a5a63832a8bc58b1f7b661c2106e2a4fa1276998b9a8067deac3",
+      "c0db283fb442f6f4602e9c3a667445d896d1829aba1c53d5775937e40e3adca9",
+      "ff465891b7e47663e6588c942b8bf7136775f8f8709188c7624c0baa2b1c9456",
+      "17b08ad2b7b5107438dbd1d74274a1b42000cc31edc2bb4a9017b8277db1a3ac",
+      "4ecb6b00fae07c8f2eb8fc9c988f6d4cc5550625e9edbb553ca44b389d594c3d",
+      "f6948be15596274ad46375941a5168934c024f22688362d6c6e8f3a7d6a168a1",
+      "b87877f073657d7b40db6e423e32c93264fd9616e72bc5e7f621e04aa8e54f6f",
+      "d07762ab473960503fc590acb73b57dfd8551dab74b29548221962088b178a01",
+      "eb5e5225406322bc79f034367d2fd03bde72cf6539bf01d1d93e1a587e07bdc9",
+      "85b3dca5abfcf38b2c3f06f56698c82007afdbba889aace6c19da3902685b2dd",
+      "73727f83ea44135b39ecffababf2925ab37d4342ff6b928573b22ff5bf7c990c",
+      "786d02afe23e4e082e023d26c11971af7779eaf4f5170b8fbedde0109a9e00e9",
+      "b6695df3599f07e35d2a6290ef8195edc89ade5f0856de6f136ea7f07ae5fc52"
+    ],
     "fea0e5ae5ae71253": [
       "ca83ca412f692c45ea102b8428f7b48f3155c0dae8f647b2c511e1ed6ad78799",
       "17c2844d89048b4f4f2b1a044e75573172d0a19b6a2cb4ebc448d86388ab83da",
       "b3c0420d88d2261e9275d1f4eb48e6496acc6f9df6557e9a0b547b16ab62ce13"
+    ],
+    "fed653e6b52f5853": [
+      "549c359ac5bfe02ecac0f97c57d28cfba729b9679a87356f671ca133fc9abaa0",
+      "21ab14441e454768f1c41f1427233e5368df38163ac8cdcf266f5a38e992f4c2",
+      "6847ebc279c1a98e35d900571e1e8191c487353f95367fa6c3548d13cb6c041f",
+      "f76f9ecb9fdafc1088a9fac7725f30d0330aab94080d11fa938254584b8b8722",
+      "6fc84772600437da275de16d8a1201e1860a857604eee21f2c26e1c74b59b496",
+      "dddb124869333bc27179b71b24989ce727d175d94a67c3521ae07ccf9a5437d4"
     ],
     "fef32d50ed498044": [
       "654aa02a4304b062043c2ee1dcc83770e3f1edcc39d6bec3b6fa61e0929247d3",
@@ -12358,8 +12396,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 984,
-      "titleCount": 8989,
+      "fileCount": 987,
+      "titleCount": 9021,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12518,13 +12556,15 @@
         "test/unit/anchor/snapshot_checkpoint/cosign.test.js": "95e902ade2f6d38a",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
+        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "fe3efc1774fa0c69",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/engine.test.js": "74fb1b6fb58ac47b",
+        "test/unit/anchor/snapshot_checkpoint/engine_promptness.test.js": "fed653e6b52f5853",
+        "test/unit/anchor/snapshot_checkpoint/fallback_leader.test.js": "970ae846863970fc",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
+        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
@@ -12831,6 +12871,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",
@@ -13401,8 +13442,8 @@
       }
     },
     "test": {
-      "fileCount": 984,
-      "titleCount": 8989,
+      "fileCount": 987,
+      "titleCount": 9021,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13561,13 +13602,15 @@
         "test/unit/anchor/snapshot_checkpoint/cosign.test.js": "95e902ade2f6d38a",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
+        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "fe3efc1774fa0c69",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/engine.test.js": "74fb1b6fb58ac47b",
+        "test/unit/anchor/snapshot_checkpoint/engine_promptness.test.js": "fed653e6b52f5853",
+        "test/unit/anchor/snapshot_checkpoint/fallback_leader.test.js": "970ae846863970fc",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
+        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
@@ -13874,6 +13917,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",
@@ -14391,8 +14435,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1066,
-      "titleCount": 9852,
+      "fileCount": 1069,
+      "titleCount": 9884,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14633,13 +14677,15 @@
         "test/unit/anchor/snapshot_checkpoint/cosign.test.js": "95e902ade2f6d38a",
         "test/unit/anchor/snapshot_checkpoint/cosign_policy.test.js": "6f0a1255faf2832c",
         "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": "76cbeb59c165afcb",
-        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "59e58a99d11a2e22",
+        "test/unit/anchor/snapshot_checkpoint/cosigner.test.js": "fe3efc1774fa0c69",
         "test/unit/anchor/snapshot_checkpoint/due.test.js": "af0f76551a2426e8",
         "test/unit/anchor/snapshot_checkpoint/engine.test.js": "74fb1b6fb58ac47b",
+        "test/unit/anchor/snapshot_checkpoint/engine_promptness.test.js": "fed653e6b52f5853",
+        "test/unit/anchor/snapshot_checkpoint/fallback_leader.test.js": "970ae846863970fc",
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "efdc7a5f833b1dd2",
+        "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
         "test/unit/anchor/snapshot_checkpoint/sign_request.test.js": "77f7d4ba16c5649d",
@@ -14946,6 +14992,7 @@
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_08_get_bridge_invariant.test.js": "d1f00af2dbd98f9f",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_09_snapshot_block_covers_the_source_leg.test.js": "a14e19e8b0a69493",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_10_snapshot_block_on_a_covering_checkpoint.test.js": "8d3506263b0caeab",
+        "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_11_snapshot_block_below_a_covering_origin_checkpoint.test.js": "d2ba3ed9dd07110d",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_api.test.js": "b91447fe319d87bf",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_chain_state.test.js": "427d901e1d92b788",
         "test/unit/cross_chain/bridge/engine/cross_chain_bridge_engine_policy_margin.test.js": "b57f54b715e5532d",

@@ -24,8 +24,9 @@ const {
     snapshotCheckpointCanonical,
 } = require('../../consensus/snapshot_checkpoint/canonical.js');
 const { getLogger } = require('../../observability');
+const { onCapabilitySnapshotWritten } = require('../../lib/capability_snapshot_write.js');
 const { XSNP_SIGN_REQ, XSNP_SIGN, XSNP_FINALIZED } = require('./constants.js');
-const { leadsSnapshotSlot } = require('./leader.js');
+const { mayLeadSnapshotSlot, snapshotLeaderRank } = require('./leader.js');
 const { pickDueSnapshot } = require('./due.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
@@ -92,7 +93,9 @@ class SnapshotCheckpointEngine {
             config.CHECKPOINT_ROUND_TIMEOUT_MS, 60000, false);
         this.signedRecord = createSnapshotSignedRecord();
         this.ticking = false;
+        this.tickRequested = false;
         this.pollTimer = null;
+        this.stopWrittenListener = null;
         snapshotRound.initialize(this);
     }
 
@@ -104,9 +107,21 @@ class SnapshotCheckpointEngine {
                 'SnapshotCheckpointEngine: tick error:', error && error.message)));
         }, this.pollMs);
         if (this.pollTimer.unref) this.pollTimer.unref();
+        // A capability set written to this hub's db is checkpointed as soon as it commits.
+        // On the poll alone it would wait a full CHECKPOINT_POLL_MS, and the state
+        // checkpoint engine that writes the oracle_publish set polls on the same interval
+        // and was started just before this one, so this scan ran before each new set
+        // existed and every set was checkpointed one poll late.
+        if (!this.stopWrittenListener) {
+            this.stopWrittenListener = onCapabilitySnapshotWritten(db => {
+                if (db === this.db && this.gateHeight() !== gateRegistry.UNARMED) this.requestTick();
+            });
+        }
     }
 
     async stop() {
+        if (this.stopWrittenListener) this.stopWrittenListener();
+        this.stopWrittenListener = null;
         if (this.pollTimer) clearInterval(this.pollTimer);
         this.pollTimer = null;
         snapshotRound.stop(this);
@@ -155,49 +170,80 @@ class SnapshotCheckpointEngine {
             'oracle_publish', snapshotBlock));
     }
 
+    // A tick asked for outside the poll. One that arrives while a tick runs is kept and run
+    // after it, since the running tick may have scanned before the new set was written.
+    requestTick() {
+        if (this.ticking) {
+            this.tickRequested = true;
+            return;
+        }
+        this.tick().catch(error => logger.error(nodeUtil.format(
+            'SnapshotCheckpointEngine: tick error:', error && error.message)));
+    }
+
+    // Checkpoints every due snapshot this hub can finish alone, oldest first, up to
+    // DUE_LIMIT, and stops at the first that needs a round, belongs to another leader or
+    // is refused. One per tick could never clear a backlog: the hub writes a new set each
+    // cadence interval, so a single missed poll left every later set one poll late.
     async tick() {
         if (this.ticking || !this.identity || !this.db) return;
         this.ticking = true;
         try {
-            const rows = await this.db.listUncheckpointedSnapshotBlocks(
-                this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
-            const due = pickDueSnapshot(snapshotBlocks(rows), {
-                inFlight: this.snapshotRounds.size > 0,
-                gateActive: block => this.gateActive(block),
-                blockOf: block => snapshotCheckpointBlock(block, this.network),
-                btcTip: await this.btcTip(),
-                confirmations: this.confirmations,
-            });
-            if (!due) return;
-
-            const validators = await this.resolveValidators(due.snapshot_block);
-            const myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
-            if (!leadsSnapshotSlot(due.block_index, validators, myPubkey)) return;
-
-            const block = await this.indexerCall('getblockhashes', {
-                block_index: due.block_index,
-            });
-            const cp = snapshotCheckpointFromBlockHashes(
-                this.network, block, due.block_index);
-            if (!cp) {
-                logger.warn('SnapshotCheckpointEngine: refusing rootless or malformed BTC block ' +
-                    due.block_index);
-                return;
+            for (let i = 0; i < DUE_LIMIT; i++) {
+                if (!await this.checkpointNextDue()) break;
             }
-            if (!await this.claimPayload(cp)) return;
-
-            const signature = {
-                pubkey: myPubkey,
-                sig: this.identity.sign(snapshotCheckpointCanonical(cp)),
-            };
-            if (validators.length === 1) {
-                await this.persistSoleCheckpoint(cp, signature);
-                return;
-            }
-            await this.leadRound(cp, validators, due.snapshot_block, signature);
         } finally {
             this.ticking = false;
+            if (this.tickRequested) {
+                this.tickRequested = false;
+                this.requestTick();
+            }
         }
+    }
+
+    // One due snapshot: true only when this hub alone stored a new checkpoint for it.
+    async checkpointNextDue() {
+        const rows = await this.db.listUncheckpointedSnapshotBlocks(
+            this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
+        const btcTip = await this.btcTip();
+        const due = pickDueSnapshot(snapshotBlocks(rows), {
+            inFlight: this.snapshotRounds.size > 0,
+            gateActive: block => this.gateActive(block),
+            blockOf: block => snapshotCheckpointBlock(block, this.network),
+            btcTip,
+            confirmations: this.confirmations,
+        });
+        if (!due) return false;
+
+        const validators = await this.resolveValidators(due.snapshot_block);
+        const myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
+        const overdue = Number(btcTip) - due.block_index - this.confirmations;
+        if (!mayLeadSnapshotSlot(due.block_index, validators, myPubkey, overdue)) return false;
+        const rank = snapshotLeaderRank(due.block_index, validators, myPubkey);
+        if (rank > 0) {
+            logger.info('SnapshotCheckpointEngine: leading BTC/' + this.network + '/' +
+                due.block_index + ' as fallback ' + rank + ', ' + overdue + ' blocks past due');
+        }
+
+        const block = await this.indexerCall('getblockhashes', {
+            block_index: due.block_index,
+        });
+        const cp = snapshotCheckpointFromBlockHashes(
+            this.network, block, due.block_index);
+        if (!cp) {
+            logger.warn('SnapshotCheckpointEngine: refusing rootless or malformed BTC block ' +
+                due.block_index);
+            return false;
+        }
+        if (!await this.claimPayload(cp)) return false;
+
+        const signature = {
+            pubkey: myPubkey,
+            sig: this.identity.sign(snapshotCheckpointCanonical(cp)),
+        };
+        if (validators.length === 1) return this.persistSoleCheckpoint(cp, signature);
+        await this.leadRound(cp, validators, due.snapshot_block, signature);
+        return false;
     }
 
     async claimPayload(cp) {
@@ -219,13 +265,14 @@ class SnapshotCheckpointEngine {
         const inserted = await this.db.insertSnapshotCheckpoint(Object.assign({}, cp, {
             validator_signatures: JSON.stringify([signature]),
         }));
-        if (inserted) return;
+        if (inserted) return true;
         const stored = await this.db.getSnapshotCheckpoint(
             cp.chain, cp.network, cp.block_index);
         if (!payloadMatches(stored, cp)) {
             logger.error('SnapshotCheckpointEngine: concurrent checkpoint conflict at BTC/' +
                 cp.network + '/' + cp.block_index);
         }
+        return false;
     }
 
     async leadRound(cp, validators, snapshotBlock, signature) {

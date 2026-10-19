@@ -13,7 +13,12 @@
 const { expect } = require('chai');
 const snapshotTypes = require('../../../../src/anchor/snapshot_checkpoint/constants.js');
 const cadenceTypes = require('../../../../src/anchor/checkpoint_engine/constants.js');
-const { leadsSnapshotSlot } = require('../../../../src/anchor/snapshot_checkpoint/leader.js');
+const {
+    SNAPSHOT_FALLBACK_STEP_BLOCKS: STEP,
+    leadsSnapshotSlot,
+    mayLeadSnapshotSlot,
+    snapshotLeaderRank,
+} = require('../../../../src/anchor/snapshot_checkpoint/leader.js');
 
 const key = digit => String(digit).repeat(64);
 const validators = (...digits) => digits.map(digit => ({ pubkey: key(digit) }));
@@ -74,6 +79,59 @@ describe('leadsSnapshotSlot()', function () {
         for (let blockIndex of [-1, 1.5, '3', null, Number.MAX_SAFE_INTEGER + 1]) {
             expect(leadsSnapshotSlot(blockIndex, validators(1), key(1)),
                 String(blockIndex)).to.equal(false);
+        }
+    });
+});
+
+describe('snapshotLeaderRank()', function () {
+    it('counts places after the turn hub in the sorted rotation', function () {
+        let set = validators(3, 1, 2);
+        for (let blockIndex = 0; blockIndex < 6; blockIndex++) {
+            for (let digit of [1, 2, 3]) {
+                expect(snapshotLeaderRank(blockIndex, set, key(digit)),
+                    'block ' + blockIndex + ', key ' + digit)
+                    .to.equal((digit - 1 - blockIndex % 3 + 3) % 3);
+            }
+        }
+    });
+
+    it('returns null for unusable inputs and a non-member', function () {
+        expect(snapshotLeaderRank(-1, validators(1), key(1))).to.equal(null);
+        expect(snapshotLeaderRank(0, [], key(1))).to.equal(null);
+        expect(snapshotLeaderRank(0, validators(1), '')).to.equal(null);
+        expect(snapshotLeaderRank(0, validators(1), key(2))).to.equal(null);
+    });
+});
+
+describe('mayLeadSnapshotSlot()', function () {
+    let set = validators(1, 2, 3, 4, 5);
+
+    it('always lets the turn hub lead, whatever the depth', function () {
+        for (let overdue of [undefined, null, 0, 1000])
+            expect(mayLeadSnapshotSlot(7, set, key(3), overdue), String(overdue)).to.equal(true);
+    });
+
+    it('lets rank k lead only once the tip is k steps past the due height', function () {
+        for (let rank = 1; rank < 5; rank++) {
+            let pubkey = key((7 + rank) % 5 + 1);
+            expect(snapshotLeaderRank(7, set, pubkey)).to.equal(rank);
+            expect(mayLeadSnapshotSlot(7, set, pubkey, rank * STEP - 1)).to.equal(false);
+            expect(mayLeadSnapshotSlot(7, set, pubkey, rank * STEP)).to.equal(true);
+        }
+    });
+
+    it('keeps only the turn hub when the depth is missing or not an integer', function () {
+        for (let overdue of [undefined, null, NaN, 2.5, '9'])
+            expect(mayLeadSnapshotSlot(7, set, key(4), overdue), String(overdue)).to.equal(false);
+        expect(mayLeadSnapshotSlot(7, set, key(6), 1000)).to.equal(false);
+    });
+
+    it('agrees with leadsSnapshotSlot when no depth is given', function () {
+        for (let blockIndex = 0; blockIndex < 10; blockIndex++) {
+            for (let digit of [1, 2, 3, 4, 5]) {
+                expect(mayLeadSnapshotSlot(blockIndex, set, key(digit)))
+                    .to.equal(leadsSnapshotSlot(blockIndex, set, key(digit)));
+            }
         }
     });
 });

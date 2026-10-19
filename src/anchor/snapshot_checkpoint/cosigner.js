@@ -19,6 +19,14 @@ function canSign(identity) {
         typeof identity.getPubkeyHex === 'function';
 }
 
+// How many BTC blocks this co-signer's own tip sits past the request's due height, which
+// decides whether a fallback leader has waited long enough. Null when the view lacks it.
+function overdueBlocks(req, view) {
+    if(view === null || typeof view !== 'object' || view.btcTip === null) return null;
+    const overdue = Number(view.btcTip) - req.cp.block_index - Number(view.confirmations);
+    return Number.isSafeInteger(overdue) ? overdue : null;
+}
+
 function answerSnapshotSignRequest(req, ctx) {
     try {
         if(ctx === null || typeof ctx !== 'object' ||
@@ -29,7 +37,7 @@ function answerSnapshotSignRequest(req, ctx) {
         }
 
         const requestRefusal = snapshotSignRequestRefusal(
-            req, ctx.validators, ctx.verify
+            req, ctx.validators, ctx.verify, overdueBlocks(req, ctx.view)
         );
         if(requestRefusal !== null) return refused(requestRefusal);
 

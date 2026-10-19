@@ -25,7 +25,7 @@ const { RELAY_MIN_FUTURE_S } = require('../../lib/relay_margin.js');
 const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { ALLOWED_CHAINS, PENDING_PAGE, TRANSFER_CANONICAL_INT_FIELDS, POLICY_CANONICAL_INT_FIELDS, SNAPSHOT_BLOCK_TOLERANCE } = require('./constants.js');
 const { parsePolicyColumn } = require('./policy_column.js');
-const { proofReadyActive, proofReadySnapshot } = require('./proof_ready_snapshot.js');
+const { proofReadyActive, proofReadySnapshot, anchorProofReadyActive, anchorProofReadySnapshot } = require('./proof_ready_snapshot.js');
 
 module.exports = {
     // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
@@ -135,6 +135,12 @@ module.exports = {
         // Past the proof-ready flag day the stamp is this hub's first covering checkpoint.
         if(proofReadyActive(row.network, row.src_chain, leg.block_index)){
             let expected = await proofReadySnapshot(this.db, row.network, leg.block_index);
+            if(expected == null || Number(row.snapshot_block) !== expected) return false;
+        }
+        // Past the anchor flag day a DOGE or LTC lock's stamp is one below this hub's own
+        // first covering origin checkpoint, or the destination would wait on a later round.
+        if(anchorProofReadyActive(row.network, row.src_chain, row.tick, leg.block_index)){
+            let expected = await anchorProofReadySnapshot(this.db, row.network, row.src_chain, leg.block_index);
             if(expected == null || Number(row.snapshot_block) !== expected) return false;
         }
 

@@ -14,6 +14,9 @@ const {
 const {
     createSnapshotSignedRecord,
 } = require('../../../../src/anchor/snapshot_checkpoint/signed_record.js');
+const {
+    SNAPSHOT_FALLBACK_STEP_BLOCKS: STEP,
+} = require('../../../../src/anchor/snapshot_checkpoint/leader.js');
 
 const hash = character => character.repeat(64);
 const LEADER = hash('1');
@@ -114,6 +117,25 @@ describe('answerSnapshotSignRequest request refusal', function () {
         expect(answerSnapshotSignRequest(request(checkpoint(), COSIGNER), context(record)))
             .to.deep.equal(refusal('not_leader'));
         expect(record.size()).to.equal(0);
+    });
+
+    it('signs for the next key in rotation once its own tip is a fallback step past due', function () {
+        const record = createSnapshotSignedRecord();
+        const third = hash('3');
+        // Block 100 over three keys is the second key's turn, so the third key is next.
+        const ctx = context(record, {
+            identity: identity(LEADER),
+            validators: validators.concat({ pubkey: third }),
+        });
+        const fallback = request(checkpoint({ block_index: 100 }), third);
+        expect(answerSnapshotSignRequest(fallback, Object.assign({}, ctx, {
+            view: view({ btcTip: 106 + STEP - 1 }),
+        }))).to.deep.equal(refusal('not_leader'));
+        const result = answerSnapshotSignRequest(fallback, Object.assign({}, ctx, {
+            view: view({ btcTip: 106 + STEP }),
+        }));
+        expect(result.refusal).to.equal(null);
+        expect(result.reply).to.include({ block_index: 100, pubkey: LEADER });
     });
 
     it('refuses a forged leader signature with bad_leader_signature', function () {
