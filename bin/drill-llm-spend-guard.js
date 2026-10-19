@@ -20,9 +20,9 @@
 //      settled as `blocked`.
 //
 // Run inside the regtest hub container (the drill copies itself in):
-//   xchain-hub/scripts/drill-llm-spend-guard.sh <ssh-host> <hub-container>
+//   xchain-hub/bin/drill-llm-spend-guard.sh <ssh-host> <hub-container>
 // or directly against a checkout:
-//   node scripts/drill-llm-spend-guard.js
+//   node bin/drill-llm-spend-guard.js
 //
 // Every knob is an env var the guard already reads (LLM_* keys), so the drill
 // configures the guard the same way an operator would; it never touches the
