@@ -94,11 +94,12 @@ function btcLock(over){
     }, over);
 }
 
-// A burn on DOGE releasing BTC escrow: its block_index is a DOGE height, a different
-// axis from the BTC-anchored snapshot_block, so no floor can be read across the two.
+// A burn on DOGE releasing BTC escrow, its tick rooted at BTC: its block_index is a DOGE
+// height, a different axis from the BTC-anchored snapshot_block, so no floor can be read
+// across the two.
 function dogeBurn(over){
     return btcLock(Object.assign({
-        transfer_kind: 'burn', src_chain: 'DOGE', src_action_index: 7,
+        transfer_kind: 'burn', src_chain: 'DOGE', src_action_index: 7, tick: 'BTC.FUFU',
         dest_chain: 'BTC', dest_address: 'mDestAddress', block_index: 90000
     }, over));
 }
@@ -176,7 +177,7 @@ function registerFollower(){
             const engine = makeEngine({ block: 4912 });
             pages(engine, { DOGE: { latest_block_index: 90000, network: 'regtest', transfers: [dogeBurn()] } });
             expect(await engine.validateProposedMatch(proposedRow(engine, {
-                src_chain: 'DOGE', src_action_index: 7, dest_chain: 'BTC', dest_address: 'mDestAddress'
+                src_chain: 'DOGE', src_action_index: 7, tick: 'BTC.FUFU', dest_chain: 'BTC', dest_address: 'mDestAddress'
             }))).to.equal(true);
         });
     });

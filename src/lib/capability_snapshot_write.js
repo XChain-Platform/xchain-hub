@@ -96,6 +96,30 @@ async function resolveBtcChainId(db){
     }
 }
 
+// Callers told after a set commits, so the snapshot checkpoint engine can checkpoint the
+// new snapshot block at once instead of on its next poll. Each mirror holds a fresh row
+// until that checkpoint exists, and the hub writes a new set every cadence interval, so a
+// checkpoint that only lands on the next poll leaves a held row behind every interval and
+// an off-BTC chain's proof barrier never sees an empty hold set. A listener is told the
+// db it wrote to and must not throw into the write; any error it raises is dropped here.
+const writtenListeners = new Set();
+
+function onCapabilitySnapshotWritten(listener){
+    if(typeof listener !== 'function') return () => {};
+    writtenListeners.add(listener);
+    return () => { writtenListeners.delete(listener); };
+}
+
+function notifyWritten(db, capability, block){
+    for(const listener of [...writtenListeners]){
+        try {
+            listener(db, capability, block);
+        } catch(e){
+            logger.warn('capability_snapshot_write: a written-set listener failed: ' + (e && e.message));
+        }
+    }
+}
+
 /**
  * Write the whole validator set in one INSERT IGNORE, all-or-nothing.
  *
@@ -136,8 +160,11 @@ async function writeCapabilitySnapshotRows(db, capability, block, validators, bt
     // what makes the mirror all-or-nothing, and the reason it must not be chunked
     // is recorded beside the statement itself.
     await db.createCapabilitySnapshots(rows, chainId);
+    notifyWritten(db, capability, block);
 
     return rows;
 }
 
-module.exports = { normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };
+module.exports = {
+    normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows, onCapabilitySnapshotWritten,
+};

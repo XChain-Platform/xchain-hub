@@ -23,7 +23,7 @@
 const bc = require('../../bcmath.js');
 const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const { ALLOWED_CHAINS, PENDING_PAGE } = require('./constants.js');
-const { proofReadyActive, proofReadySnapshot } = require('./proof_ready_snapshot.js');
+const { proofReadyActive, proofReadySnapshot, anchorProofReadyActive, anchorProofReadySnapshot } = require('./proof_ready_snapshot.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -287,12 +287,23 @@ module.exports = {
     // The block a leg's row is stamped with: the tip, or for a BTC leg past its flag day the
     // block of the first finalized BTC checkpoint at or above the leg, or null while the leg
     // is held. A stamp at or below the tip leaves every snapshot-keyed gate at the same answer.
+    // A DOGE or LTC lock past its own flag day is stamped one below the snapshot_block of the
+    // first finalized origin checkpoint covering it (proof_ready_snapshot.js says why).
     async stampSnapshotBlock(coin, network, tipBlock, t){
-        if(!proofReadyActive(network, coin, t.block_index)) return tipBlock;
-        let stamped = await proofReadySnapshot(this.db, network, t.block_index);
-        if(stamped == null){
-            this.logHeld(coin, t, 'no finalized BTC checkpoint at or above the source block ' + t.block_index);
-            return null;
+        let stamped;
+        if(anchorProofReadyActive(network, coin, t.tick, t.block_index)){
+            stamped = await anchorProofReadySnapshot(this.db, network, coin, t.block_index);
+            if(stamped == null){
+                this.logHeld(coin, t, 'no finalized ' + coin + ' checkpoint at or above the source block ' + t.block_index);
+                return null;
+            }
+        } else {
+            if(!proofReadyActive(network, coin, t.block_index)) return tipBlock;
+            stamped = await proofReadySnapshot(this.db, network, t.block_index);
+            if(stamped == null){
+                this.logHeld(coin, t, 'no finalized BTC checkpoint at or above the source block ' + t.block_index);
+                return null;
+            }
         }
         if(String(t.tick || '') !== 'XCHAIN' && !this.gateActive('token', stamped, 'BTC')){
             this.logHeld(coin, t, 'token bridge not active at snapshot_block ' + stamped);
