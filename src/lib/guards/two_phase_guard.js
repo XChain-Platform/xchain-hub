@@ -33,7 +33,7 @@
  * not. So it fails CLOSED here instead of pretending, BEFORE the wallet hook
  * runs - nothing is signed, no fee is spent and no value moves. The working
  * production path is an operator signer module that exports `broadcast(payload)`
- * and runs both phases; examples/doge-signer.example.js is that reference
+ * and runs both phases; docs/examples/doge-signer.example.js is that reference
  * implementation, and its own header already documents the built-in pipeline as
  * phase-1-only.
  *
@@ -70,7 +70,7 @@ function assertSingleTxEncoding(psbtResult, who){
         (encoding || 'chunked') + ' encoding; the built-in pipeline can only broadcast the funding ' +
         'transaction, whose payload no indexer can decode, and cannot sign the reveal. Refusing to ' +
         'broadcast. Configure HUB_SIGNER_MODULE with a module exporting broadcast(payload) that runs ' +
-        'both phases (see examples/doge-signer.example.js).');
+        'both phases (see docs/examples/doge-signer.example.js).');
 }
 
 module.exports = { assertSingleTxEncoding, TWO_PHASE_ENCODINGS };

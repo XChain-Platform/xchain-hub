@@ -18,7 +18,7 @@
 // and zero responses.
 //
 // These tests drive a verdict through the REFERENCE DOGE signer template
-// (examples/doge-signer.example.js, the module operators copy) and assert the
+// (docs/examples/doge-signer.example.js, the module operators copy) and assert the
 // refusal lands before any fee is spent: no walletSign call, no encoder call.
 const assert = require('assert');
 const crypto = require('crypto');
@@ -36,7 +36,7 @@ const {
   turnsUntil,
   settleFlag
 } = require('../../../helpers/microtask_turns');
-const TEMPLATE = path.join(__dirname, '..', '..', '..', '..', 'examples', 'doge-signer.example.js');
+const TEMPLATE = path.join(__dirname, '..', '..', '..', '..', 'docs', 'examples', 'doge-signer.example.js');
 const source = fs.readFileSync(TEMPLATE, 'utf8').replace(/^#!.*\n/, '');
 const ME = 'a'.repeat(64);
 

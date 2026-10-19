@@ -994,6 +994,17 @@
       "2ebca0ea9b9877e6c9fa8b2fb6fab7ccc6531eb7361149d37ece11bb4e611c3b",
       "ada7d71d81d98882997d7e7338b785a057f8f2cc97c433eaa90ac6be78b06ba0"
     ],
+    "14e55c63f661998a": [
+      "ca7e81d679020bcfcf3b42b2ee3191d46898e49e77581fa32d72536ad81253a6",
+      "1a0f6576b1253957c1030b188b3604b22239bc6979287cddf4de5be8d96aca2a",
+      "4116f5d8f7668bd7fff1230509afd04fbc2159a3c87129a0b57094c3bd1cf087",
+      "8b8638e3d6f54fd3077a636f65d44c6b861f6e8b7ddce9a7218d11492765ed95",
+      "de9c14583515ac6b2a6e0d5adaf79112442bd369813c18a22e1ea66d7369f515",
+      "12045126bb05742d465f074e77b57ad0df8a5cced844368352a7b34a0de82225",
+      "147cac8fd3348434f1894ca73df16cd86b8e0d9fdc4014626f23883ab89a6737",
+      "4d06a45f75335421247900345db32cd9e2de528c41fa24c5c82b12456c12426f",
+      "d36f81712b6f38e9183e332a8b393c1cbdad6abedb9f947a8fddf8ff215ae4c8"
+    ],
     "1537a4891a018edb": [
       "05f91cc69da48fe0a201eee21812a025d1f546a6a81811d4996cf2b4e1561b65",
       "be9a69b2e955eed522c623f37147ccf80a86cccc32746dc4d3ac350c3ea2099b",
@@ -3826,6 +3837,21 @@
       "cce97c7e11a21c742832d2e41927913f543f580775c2a50aa607e533fda93780",
       "6efaa2c7c45ba2f1bca1a3d2554be0a9f3e18baaa96e43fde5d5eb9035e417ba"
     ],
+    "4bfb74f5aabf8ac9": [
+      "bba87197363195a9ea5f9c15dd2bf2498277986e69913e053a1a211281e4bfdb",
+      "640f7ed52a98a0c66663a969c72bbfe1d2a2b52a396524461fc89edec7aaa5bc",
+      "bf17719487c7c146293f53cd7afc398d240ad6b08ff1c1a809cdb6ed1068bc6f",
+      "9be0aa2f8e18610a1e47ad861f904263b681e0e05b81901299050b4196ca767c",
+      "bd5bff2ca3777515b0fadfce62327e10accbfe678cc8c3e15336d1cedf559236",
+      "c0c7911130081e2fad561793e3935dcc6926d77373691e9dc61e7fa929fcbe39",
+      "e68f904c7ed2cf21c1cf004ffa9ac1e06e635b543844574f9c4cd1ec9c1b921c",
+      "17f170c30a1b9919431a5ae63ade4c4de934cb9a9891a686e5cd0558e71960b5",
+      "065fd70e2376362a285fe45d0f5e5cfe1bd676d7ddbd0c214a7c171319abb655",
+      "1710fd5dcf5cbb43e36cd167b1aa14487a07a950110951a9ada216ba7e59e414",
+      "2374a19de678cd10df8f55a893d2cb616a1c046ba8c2b2adad5f7215cda81501",
+      "06c9bb46b4e6ba5ce6a6a13663cf310511f3a10aac73e920b8aa227e349a4c0e",
+      "443e35f46648a6d368db5fa9f6a87e526fd9c14637e26899cd43ec31cba238df"
+    ],
     "4bfec0a3f9eaf395": [
       "c6bf6ebd36a771e5d65a132a5a91e598c6eb56cfb91d24c26e54a86835976236",
       "b356a92adc526cbc2fa5841a1a4ed71792bbf6f9b6f8332575f7f47223334ef1",
@@ -4279,10 +4305,6 @@
       "7bce80dd24b9ca2cd21a77dc516cb21e0289741943d274246a9cc64958c223d7",
       "1864a53c78b1413415e300729ea04c1b85e9b25b58f28d4122fadceb00721033",
       "f0b3a176ece80be74ede79be346b2e909e48a5c4285a32798b1395dbb52e2f9a"
-    ],
-    "535f8e4d43c961c7": [
-      "c86f3154908cd11380cb13080191104e8f63e3063581d329e8743c731fe1d089",
-      "6d04a4da768800d65939a1a951cdd90cb875947fb056cd7b045475026550ac00"
     ],
     "5375641dda3dbffe": [
       "38e72787f473e54b3a5e3d1d9777f9acbc31b5f6c398efe987d6412b14936a45",
@@ -8639,6 +8661,10 @@
       "2f1e0d9f7297a7e210edeb4be79873f838183558011a754e7622f0c6865ca85a",
       "ab2c401313d1a1c02ebfdecf5b980382ad19a6d032022e5e25e30b81fabc0030"
     ],
+    "a9e90eb88f52b53e": [
+      "3eedeac5f4daac16a349725e48d51a7bd2541d24bd67673c7662d4c4a880378b",
+      "341eba5ed89dcc665fcd1de956bbc9c56bd3fda78b97285d734ed8b03e2a5864"
+    ],
     "aa08c9c9713f08c6": [
       "6c6c4cd8450919fdf8062361031e7f12e28c47d849a65efd2614e73059ceb82f",
       "a0afdb2cb3d4388046e33374f4e681ffc8164fbe18f88041e396666564fb0cfc",
@@ -10993,17 +11019,6 @@
       "ac01bb4a02f30c7d4bc078b786bd7b0573e34db7a301efe0cf5dabc0021acaf4",
       "12fe325be47ec1bc0c477321b1050415e9c7e91fd92efd7218da9a51a8104621"
     ],
-    "e2672f35505188b4": [
-      "ca7e81d679020bcfcf3b42b2ee3191d46898e49e77581fa32d72536ad81253a6",
-      "1a0f6576b1253957c1030b188b3604b22239bc6979287cddf4de5be8d96aca2a",
-      "4116f5d8f7668bd7fff1230509afd04fbc2159a3c87129a0b57094c3bd1cf087",
-      "8b8638e3d6f54fd3077a636f65d44c6b861f6e8b7ddce9a7218d11492765ed95",
-      "de9c14583515ac6b2a6e0d5adaf79112442bd369813c18a22e1ea66d7369f515",
-      "6673b086bf11042b6c2e2fa4e688b6a6fa7e5ef3221f754ef25ef5333007b3a8",
-      "147cac8fd3348434f1894ca73df16cd86b8e0d9fdc4014626f23883ab89a6737",
-      "4d06a45f75335421247900345db32cd9e2de528c41fa24c5c82b12456c12426f",
-      "d36f81712b6f38e9183e332a8b393c1cbdad6abedb9f947a8fddf8ff215ae4c8"
-    ],
     "e2c71ad20691688a": [
       "17fdc53e7b9bfc15548be19554d9ea9deecb4e026e3fa9a9906d404d8a6a0983",
       "bf0dabf667a2e79f364749270bbcc4277c9f5fd056ec51aa86e7439613bef607",
@@ -12037,21 +12052,6 @@
       "db0cb190ad845ec7dd5c0ea978556e5565ec1fac41b9a41462ffcd4d8b1d7a6b",
       "b27116b8950f57f309b5c2464637a49df62b7f7782601ea6c4e208851df93b01",
       "04c65d232ca647ff1b61442d7770dc7b400de2003cf2807261bc107d024cb030"
-    ],
-    "f8260b1db01c0900": [
-      "d4bb4cdda2d61458c0791dfa92bc72529bf10f46d4580792e20e7e28164a743d",
-      "db0a5ad3cfa90acf1ca3ae81cd9266265584f53de05a1c88552af0c2440fe685",
-      "e1f27cdb2516ea2ffa410a7f53bba3054cfe7d8b8ad00e82c3df9f39c5da52a9",
-      "d00256d97f436521ac7884536232ef2da14694f2200a992a975fbaf58bf218c2",
-      "b4409ff7b03f2f888b4d96145af26827b36d83cc9fa4f626a808ed7378f4b73d",
-      "aad4dfdf69f852b00f9d4dfa31569b8a46830e10dbe6629a32824bf17cedb8c0",
-      "59f62e5ba3dfafbae6db4123287b53c9dd6de5849a638f5c0f50610db7ac01d0",
-      "97b2dd7b44a8709d4fb5247475ce617407f0bacc5f9d0482134beab3e31ccbf4",
-      "ac4f10ef0e0f78bca758611d7e63431b72bbcfb7dd62f708e34f9ef4926bc392",
-      "3eabda7d504463258066ed1bf3e6c425de7548ca0224408acea2a015654ee89c",
-      "134ff72f431f0cce82b73add3006ada328e79946ed5af29f8289ad1b9515a1db",
-      "6acddfc16c6683cf182ed62557d2be3235f81d3a5264620c4925b9087e1d206e",
-      "c62ada85c2ec4a2d6b3ab926bf49c3d9dfb20d461e7297e904c892c2db3d3eec"
     ],
     "f848101de0f26a45": [
       "aa72839c5ce957458accfdd1ed69a78aae4bdc722a874c6da9640fa6c01699f2",
@@ -13294,10 +13294,10 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "4bfb74f5aabf8ac9",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -13312,7 +13312,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
@@ -14340,10 +14340,10 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "4bfb74f5aabf8ac9",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -14358,7 +14358,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
@@ -15415,10 +15415,10 @@
         "test/unit/repo_guards/blind_sleep_ratchet.test.js": "5f22db553461cfc6",
         "test/unit/repo_guards/carrier_logic_pin.test.js": "0c13b5d1d073adc0",
         "test/unit/repo_guards/ci_siblings_ref_expression.test.js": "5f18fb6b379a7b02",
-        "test/unit/repo_guards/configuration_doc.test.js": "535f8e4d43c961c7",
+        "test/unit/repo_guards/configuration_doc.test.js": "a9e90eb88f52b53e",
         "test/unit/repo_guards/consensus_identity_cli.test.js": "b5786d53b9b3772e",
         "test/unit/repo_guards/coverage_thresholds_sync.test.js": "1098c63ebf272884",
-        "test/unit/repo_guards/examples_doge_signer.test.js": "f8260b1db01c0900",
+        "test/unit/repo_guards/examples_doge_signer.test.js": "4bfb74f5aabf8ac9",
         "test/unit/repo_guards/observability_sync_gate.test.js": "7040c0d93b487fac",
         "test/unit/repo_guards/sibling_coverage.test.js": "d8d1e52267ea606f",
         "test/unit/rollcall/rollcall_round.test.js": "863349b9628aac69",
@@ -15433,7 +15433,7 @@
         "test/unit/rollcall/rollcall_round_07_regossip_on_connect.test.js": "f2f97b917c1c77af",
         "test/unit/rollcall/rollcall_round_canonical.test.js": "739fc1db736a06a2",
         "test/unit/rollcall/rollcall_round_canonical_size_statics.test.js": "abb73cf505edd7e7",
-        "test/unit/rollcall/rollcall_round_invariants.test.js": "e2672f35505188b4",
+        "test/unit/rollcall/rollcall_round_invariants.test.js": "14e55c63f661998a",
         "test/unit/rollcall/rollcall_status_rpc.test.js": "f032272b5fcd55d0",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",

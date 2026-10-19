@@ -12,7 +12,7 @@
 //
 // getoraclesubmissions distinguishes an absent oracle ROLE from a failure.
 //
-// A standalone config-oracle hub (P2P_VALIDATOR_ADDR empty, CONFIGURATION.md)
+// A standalone config-oracle hub (P2P_VALIDATOR_ADDR empty, the hub configuration page)
 // never mints an OracleRound, so getOracle() is null forever. Answering that with
 // an {error} envelope made it indistinguishable from a transport failure to a
 // health consumer, which pinned such a hub at 'degraded' on every poll for its

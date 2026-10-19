@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 // pins the DERIVATION behind the ANCHOR sizing/timing constants, so the
-// prose in StateAnchorPublisher's constructor, xchain-hub/CONFIGURATION.md and
+// prose in StateAnchorPublisher's constructor, the hub configuration page and
 // protocol/actions/ANCHOR.md ("Where the publisher constants come from") cannot
 // drift away from the values. None of these knobs is consensus data, but two of
 // them sit under a hard on-chain ceiling and one encodes a timing ORDER; a
