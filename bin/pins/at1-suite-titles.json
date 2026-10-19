@@ -3962,6 +3962,9 @@
       "a3abd602c7d85e3ba63ed1c51027291d04f45d39cbeedde1a825d185190eba43",
       "5eede6edd02461ba9304519f449e2f895cd3a1e6af1d5f2363194bf4df5347bf"
     ],
+    "4f2bc7341a95fcf5": [
+      "4f2bc7341a95fcf5ea0b52f9ea72994d46e0dbe00679fa55ed1ca6ea3dd1f975"
+    ],
     "4f81893f75a63a9b": [
       "b04e50da818c1eb7d01e3f26858c805c36f1e58c24e15c6f96a9832966c7a66b",
       "148489b22f76edfdb5078bba9049a2b740c86836927d844cb84280a9ecd86dfe",
@@ -12950,6 +12953,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
@@ -13988,6 +13992,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
@@ -15055,6 +15060,7 @@
         "test/unit/db/schema/mirror_keys_assert.test.js": "468707442f80793b",
         "test/unit/db/schema/sql_enum_charset_voting_widens_migration.test.js": "10e18a521b117007",
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
+        "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
