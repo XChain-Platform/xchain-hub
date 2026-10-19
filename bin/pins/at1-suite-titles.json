@@ -11395,6 +11395,9 @@
       "5615f3a571b1b145dcb2f1c4997831208df55bc2f92f15c9d144741780ae810d",
       "4b6c24d1d0af83ada2244b57f57c6e585ca878ccbdcb92b6e563ad2af5da8e80"
     ],
+    "ec1ff6c7fdbc01e1": [
+      "ec1ff6c7fdbc01e1fc6bf637e9c6ae995c9f20a7e1d93aca24f10780d77318d7"
+    ],
     "ec6bd15fb2be5dbe": [
       "d50f9431a0603385f5325394397aa5495473eab8783009f5a51e41c607eaed5d",
       "5ea91c0ec0d358aa790e6a009d7e2e1569c0c6f07e089bfb3e6b4a78c7451f71"
@@ -12350,8 +12353,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 981,
-      "titleCount": 8987,
+      "fileCount": 982,
+      "titleCount": 8988,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12958,6 +12961,7 @@
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
+        "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "ec1ff6c7fdbc01e1",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
@@ -13390,8 +13394,8 @@
       }
     },
     "test": {
-      "fileCount": 981,
-      "titleCount": 8987,
+      "fileCount": 982,
+      "titleCount": 8988,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13998,6 +14002,7 @@
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
+        "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "ec1ff6c7fdbc01e1",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
@@ -14377,8 +14382,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1063,
-      "titleCount": 9850,
+      "fileCount": 1064,
+      "titleCount": 9851,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15067,6 +15072,7 @@
         "test/unit/db/schema/sql_nullable_mirror_columns_migration.test.js": "7ef4c6a8789cc850",
         "test/unit/db/schema/sql_plain_and_retired_indexes_migration.test.js": "4f2bc7341a95fcf5",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "7667eb17bafc4f75",
+        "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "ec1ff6c7fdbc01e1",
         "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/hub/chain_tips_null_reasons.test.js": "285138870fa87f9d",
