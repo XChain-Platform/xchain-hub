@@ -10,92 +10,9 @@ const sinon = require('sinon');
 const gateRegistry = require('../../../../src/consensus/gate_registry.js');
 const SnapshotCheckpointEngine = require(
     '../../../../src/anchor/snapshot_checkpoint/engine.js');
+const { key, hash, block, checkpoint, harness } = require('./support/engine_harness.js');
 
 const GATE = SnapshotCheckpointEngine.SNAPSHOT_CHECKPOINT_ACTIVATION;
-const key = character => character.repeat(64);
-const hash = character => character.repeat(64);
-
-function block(blockIndex, overrides = {}) {
-    return Object.assign({
-        block_index: blockIndex,
-        block_hash: hash('a'),
-        state_root: hash('b'),
-        state_root_version: 1,
-    }, overrides);
-}
-
-function checkpoint(network, blockIndex, overrides = {}) {
-    return Object.assign({
-        chain: 'BTC',
-        network,
-        block_index: blockIndex,
-        block_hash: hash('a'),
-        state_root: hash('b'),
-        state_root_version: 1,
-        validator_signatures: '[]',
-    }, overrides);
-}
-
-function harness(options = {}) {
-    const network = options.network || 'regtest';
-    const pubkey = options.pubkey || key('1');
-    const due = (options.due || [106]).slice();
-    const rows = new Map();
-    const validators = options.validators || [{ pubkey }];
-    let tip = options.tip === undefined ? 1000 : options.tip;
-    let indexerBlock = options.block || null;
-
-    for (const cp of options.stored || []) {
-        rows.set([cp.chain, cp.network, cp.block_index].join('|'), cp);
-    }
-    const db = {
-        listUncheckpointedSnapshotBlocks: sinon.spy(async () => due
-            .filter(snapshotBlock => !rows.has(['BTC', network, snapshotBlock - 6].join('|')))
-            .map(snapshotBlock => ({ snapshot_block: snapshotBlock }))),
-        getSnapshotCheckpoint: sinon.spy(async (chain, cpNetwork, blockIndex) =>
-            rows.get([chain, cpNetwork, blockIndex].join('|')) || null),
-        insertSnapshotCheckpoint: sinon.spy(async cp => {
-            const rowKey = [cp.chain, cp.network, cp.block_index].join('|');
-            if (rows.has(rowKey)) return false;
-            rows.set(rowKey, Object.assign({}, cp));
-            return true;
-        }),
-        insertStateCheckpoint: sinon.spy(async () => true),
-    };
-    const peerManager = { broadcast: sinon.spy() };
-    const identity = {
-        getPubkeyHex: sinon.stub().returns(pubkey),
-        sign: sinon.stub().returns('f'.repeat(128)),
-    };
-    const source = {
-        db,
-        peerManager,
-        identity,
-        network,
-        confirmations: options.confirmations === undefined ? 6 : options.confirmations,
-        pollMs: 60000,
-        resolveSnapshotBlock: sinon.spy(async () => tip),
-        resolveCapabilityValidators: sinon.spy(async () => validators),
-        indexerCall: sinon.spy(async (chain, method, params) => {
-            const answer = indexerBlock || block(params.block_index);
-            expect(chain).to.equal('BTC');
-            expect(method).to.equal('getblockhashes');
-            expect(params).to.deep.equal({ block_index: answer.block_index });
-            return Object.assign({}, answer);
-        }),
-    };
-    const engine = new SnapshotCheckpointEngine(source);
-    return {
-        engine,
-        source,
-        db,
-        rows,
-        identity,
-        peerManager,
-        setTip(value) { tip = value; },
-        setBlock(value) { indexerBlock = value; },
-    };
-}
 
 function registerGateTests() {
     it('reads a BTC-height hub gate armed on regtest and on testnet at its v0.25.0 heights', function () {
