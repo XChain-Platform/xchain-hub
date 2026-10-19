@@ -20,9 +20,9 @@
 //      settled as `blocked`.
 //
 // Run inside the regtest hub container (the drill copies itself in):
-//   xchain-hub/scripts/drill-llm-spend-guard.sh <ssh-host> <hub-container>
+//   xchain-hub/bin/drill-llm-spend-guard.sh <ssh-host> <hub-container>
 // or directly against a checkout:
-//   node scripts/drill-llm-spend-guard.js
+//   node bin/drill-llm-spend-guard.js
 //
 // Every knob is an env var the guard already reads (LLM_* keys), so the drill
 // configures the guard the same way an operator would; it never touches the
@@ -65,7 +65,6 @@ process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = String(CAP_CENTS);
 process.env.LLM_EST_SPEND_USD_CENTS            = String(EST_CENTS);
 process.env.LLM_SPEND_WINDOW_MS                = String(WINDOW_MS);
 process.env.LLM_SPEND_LOG_PATH                 = path.join(work, 'llm-spend.jsonl');
-delete process.env.LLM_ENABLED;                                 // the kill switch stays open
 delete process.env.LLM_SPEND_STATE_PATH;                        // and nothing persists
 
 const llm = require(path.join(HUB_ROOT, 'src/providers/llm.js'));

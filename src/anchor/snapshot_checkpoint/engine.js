@@ -112,9 +112,18 @@ class SnapshotCheckpointEngine {
         snapshotRound.stop(this);
     }
 
+    // The floor of the uncheckpointed-snapshot scan, resolved exactly as gateActive's
+    // activeAt resolves it: the 'BTC:<network>' entry first, then the bare network.
+    // A table armed only by its coin-scoped entry (the v0.25.0 testnet re-slide keeps
+    // `testnet: UNARMED` beside 'BTC:testnet') would otherwise scan from UNARMED and
+    // never checkpoint a snapshot, leaving every proof-gated mirror row held.
     gateHeight() {
         const table = gateRegistry.get(SNAPSHOT_CHECKPOINT_ACTIVATION);
-        const height = table && table[this.network];
+        const coinKey = 'BTC:' + this.network;
+        const height = !table ? undefined
+            : Object.prototype.hasOwnProperty.call(table, coinKey) ? table[coinKey]
+                : Object.prototype.hasOwnProperty.call(table, this.network) ? table[this.network]
+                    : undefined;
         return Number.isSafeInteger(height) && height >= 0
             ? height
             : gateRegistry.UNARMED;

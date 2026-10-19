@@ -24,6 +24,23 @@ function buildFeedRpc(ctx) {
     return Object.assign({}, chainTipFeedRpc(ctx), priceRoundFeedRpc(ctx), priceBatchFeedRpc(ctx), attestBatchFeedRpc(ctx), oraclePriceFeedRpc(ctx));
 }
 
+// Store the pushed tip. Then, regtest only, so every later write already reads the id, stamp the
+// capability rows written before this hub knew its chain. Those rows are this chain's
+// (a changed id purged the table first), and a NULL row's snapshot block is never
+// checkpointed, so its proof would stay unavailable and every proof-gated mirror would
+// hold it forever. Testnet and mainnet never enter this branch, so nothing they write
+// changes. Best effort: the tip is already stored and the next push retries the stamp.
+async function storeChainTip(hub, coin, network, height, time, chainId) {
+    await hub.db.setChainTip(coin, network, height, time, chainId);
+    if (coin !== 'BTC' || network !== 'regtest' || hub.network !== 'regtest' || chainId === undefined) return;
+    if (typeof hub.db.stampNullCapabilitySnapshotChainId !== 'function') return;
+    try {
+        await hub.db.stampNullCapabilitySnapshotChainId(chainId);
+    } catch (stampError) {
+        // Left NULL until the next push; the tip write above already succeeded.
+    }
+}
+
 function chainTipFeedRpc(ctx) {
     const { hub } = ctx;
     return {
@@ -76,7 +93,7 @@ function chainTipFeedRpc(ctx) {
                         await hub.db.deleteAllCapabilitySnapshots();
                     }
                 }
-                await hub.db.setChainTip(coin, network, height, time, chainId);
+                await storeChainTip(hub, coin, network, height, time, chainId);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};

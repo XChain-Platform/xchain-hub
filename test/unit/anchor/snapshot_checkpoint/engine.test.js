@@ -98,15 +98,20 @@ function harness(options = {}) {
 }
 
 function registerGateTests() {
-    it('reads a BTC-height hub gate armed only on regtest', function () {
+    it('reads a BTC-height hub gate armed on regtest and on testnet at its v0.25.0 heights', function () {
         const row = gateRegistry.get(GATE);
+        // The v0.25.0 cut arms BTC:testnet at 157073.
         expect(row).to.deep.equal({
             mainnet: gateRegistry.UNARMED,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
             testnet: gateRegistry.UNARMED,
             regtest: 0,
         });
         expect(gateRegistry.activeAt(GATE, 'regtest', 'BTC', 0, 0)).to.equal(true);
-        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 1000000, 0)).to.equal(false);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157072, 0)).to.equal(false);
+        expect(gateRegistry.activeAt(GATE, 'testnet', 'BTC', 157073, 0)).to.equal(true);
         expect(gateRegistry.activeAt(GATE, 'mainnet', 'BTC', 1000000, 0)).to.equal(false);
     });
 
@@ -119,6 +124,52 @@ function registerGateTests() {
             expect(h.identity.sign.called).to.equal(false);
         });
     }
+}
+
+// The v0.25.0 testnet arming names the BTC-anchored height under 'BTC:testnet' and keeps
+// the bare testnet entry UNARMED. The scan floor must read the coin-scoped entry the way
+// activeAt does, or no testnet snapshot is ever checkpointed and every TLTC and TDOGE
+// mirror row waits on a proof that never comes.
+function registerCoinScopedGateTests() {
+    afterEach(function () { sinon.restore(); });
+
+    function stubCoinScopedGate(table) {
+        const realGet = gateRegistry.get;
+        const realActiveAt = gateRegistry.activeAt;
+        sinon.stub(gateRegistry, 'get').callsFake(gateKey =>
+            gateKey === GATE ? table : realGet(gateKey));
+        sinon.stub(gateRegistry, 'activeAt').callsFake((gateKey, network, coin, height, time) => {
+            if (gateKey !== GATE) return realActiveAt(gateKey, network, coin, height, time);
+            const scoped = coin + ':' + network;
+            const threshold = Object.prototype.hasOwnProperty.call(table, scoped) ? table[scoped] : table[network];
+            return Number.isSafeInteger(threshold) && height >= threshold;
+        });
+    }
+
+    it('scans from the BTC:<network> height when only the coin-scoped entry is armed', async function () {
+        stubCoinScopedGate({
+            mainnet: gateRegistry.UNARMED,
+            'BTC:testnet': 157073,
+            'LTC:testnet': 4928460,
+            'DOGE:testnet': 68009330,
+            testnet: gateRegistry.UNARMED,
+            regtest: 0,
+        });
+        const h = harness({ network: 'testnet', due: [157080], tip: 157120 });
+
+        expect(h.engine.gateHeight()).to.equal(157073);
+        await h.engine.tick();
+
+        expect(h.db.listUncheckpointedSnapshotBlocks.firstCall.args)
+            .to.deep.equal(['testnet', 157073, 6, 10]);
+        expect([...h.rows.values()].map(row => row.block_index)).to.deep.equal([157074]);
+    });
+
+    it('falls back to the bare network entry and stays unarmed when neither is armed', function () {
+        stubCoinScopedGate({ mainnet: gateRegistry.UNARMED, testnet: 42, regtest: 0 });
+        expect(harness({ network: 'testnet' }).engine.gateHeight()).to.equal(42);
+        expect(harness({ network: 'mainnet' }).engine.gateHeight()).to.equal(gateRegistry.UNARMED);
+    });
 }
 
 function registerSoleValidatorTests() {
@@ -233,6 +284,7 @@ function registerRefusalTests() {
 
 describe('SnapshotCheckpointEngine', function () {
     registerGateTests();
+    registerCoinScopedGateTests();
     registerSoleValidatorTests();
     registerLeaderTests();
     registerRefusalTests();

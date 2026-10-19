@@ -20,6 +20,12 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const fs          = require('fs');
+const path        = require('path');
+
+function readSchema(file) {
+    return fs.readFileSync(path.join(__dirname, '../../../../src/sql', file), 'utf8');
+}
 
 // Build a Database class with fully-stubbed mariadb + fs. `fsOverrides` lets a
 // test inject specific readdirSync/readFileSync behaviour for the schema paths.
@@ -75,12 +81,13 @@ function registerCreateTableFromFileTests() {
 
     describe('createTableFromFile()', function () {
         it('splits the SQL file on ; and runs each non-empty statement', async function () {
-            const sql = 'CREATE TABLE configs (id INT);\n\n  ;\nINSERT INTO configs VALUES (1);';
+            const schema = readSchema('configs.sql').trim();
+            const sql = `${schema}\n\n  ;\nSELECT 1;`;
             const { db, mockConn } = makeDb({ readFileSync: sinon.stub().returns(sql) });
             await db.createTableFromFile('configs.sql');
             const ran = mockConn.query.getCalls().map(c => c.args[0]);
-            expect(ran).to.include('CREATE TABLE configs (id INT)');
-            expect(ran).to.include('INSERT INTO configs VALUES (1)');
+            expect(ran).to.include(schema.replace(/;$/, ''));
+            expect(ran).to.include('SELECT 1');
             // the blank `;` segment is skipped
             expect(ran.every(q => q.trim() !== '')).to.be.true;
         });
@@ -159,8 +166,7 @@ function registerParseExpectedColumnsTests() {
         });
 
         it('parses sent_doge_height as a nullable checkpoint column with a default', function () {
-            const sql = require('fs').readFileSync(
-                require('path').join(__dirname, '../../../../src/sql/anchor_published_checkpoints.sql'), 'utf8');
+            const sql = readSchema('anchor_published_checkpoints.sql');
             const cols = db.parseExpectedColumns(sql);
             const column = cols.find(c => c.name === 'sent_doge_height');
             expect(column).to.include({ nullable: true, hasDefault: true });
