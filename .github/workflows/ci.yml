@@ -300,6 +300,8 @@ jobs:
         with:
           repository: XChain-Platform/xchain-indexer
           path: xchain-indexer
+          # Full history: the gate registry twin test reads its sibling blobs from one declared indexer commit, which a depth-1 checkout does not hold.
+          fetch-depth: 0
 
       - name: Check out xchain-sdk
         uses: actions/checkout@v4
