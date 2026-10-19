@@ -705,10 +705,6 @@
       "2d7c89e167da45e2add51e6e724d30ec41af26f0b567663c7ddd337d0f9e5e59",
       "8964dbaa4ad0c9533a4d770d12fa9d855cdb9764d6640b21d964a7bd2df1ac1d"
     ],
-    "0f0906f4fcb2462a": [
-      "0b177daedfb883d377f5dbd988f16ead69f6519ab3ff962f1db7d636ae723721",
-      "511649d034ff9d772e2bc7052ec5f2b0174db6668c39ce952b661b3fd310882e"
-    ],
     "0f9c099b7207a204": [
       "0f9c099b7207a2045138923a489971dad5305e18c00591c861fb3c0684af20cd"
     ],
@@ -2847,16 +2843,6 @@
       "f8a273f299fe55b120d35a7138dd29868525b792ec7d5a64c7873b8792effbea",
       "425b1f39bde4a28a0606ded675e272b7241cbb45963e7c3045db3b1d05860859",
       "17c473944e884f2a5a3a12bd2f686f81fdd8d81c83b7b746f7bcc6644415c4e9"
-    ],
-    "3912d0c760dbd4eb": [
-      "acf7f0072829afccc399819c18e643f2cc68bc454a34ff1387caadc95caa8d30",
-      "895ae6ae66d5649279a3d6bc5a9c62855ffb56e7986c2a276f1dc44be152260d",
-      "db5651ffcb7de6778374df302f71b188032dc6a2687d35eb934711640c4e1d06",
-      "79c14b60124f22a06da5c7179c06d5f1c55824dd22fe593bd9a712612df89e9c",
-      "84c8cee3bd990b07ee42d0ee9e23133f3b6782e26a0b028bb7c71d70ac677deb",
-      "3a12f763cf353159975269cd69742bf77e5e068950154c054458dc88c38577f2",
-      "059f5286badeb2b04d46fe3cc6fbaceb1e17c7c12c6978a33fecad9836a1df38",
-      "31d6dd2a8bc91cf5266abdd0320f8f49d240c8abb40684286406712dfe637bb6"
     ],
     "3915d5ae211d6c7d": [
       "80856ed58c8e4674a9be818c813bb40a91a23f3187ffdfd461cfa9e5de7a6cca",
@@ -12334,8 +12320,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 976,
-      "titleCount": 8981,
+      "fileCount": 974,
+      "titleCount": 8971,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12510,7 +12496,6 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
-        "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
@@ -12838,7 +12823,6 @@
         "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
-        "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
         "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",
@@ -13369,8 +13353,8 @@
       }
     },
     "test": {
-      "fileCount": 976,
-      "titleCount": 8981,
+      "fileCount": 974,
+      "titleCount": 8971,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13545,7 +13529,6 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
-        "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
@@ -13873,7 +13856,6 @@
         "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
-        "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
         "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",
@@ -14351,8 +14333,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1058,
-      "titleCount": 9844,
+      "fileCount": 1056,
+      "titleCount": 9834,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14609,7 +14591,6 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
-        "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
@@ -14937,7 +14918,6 @@
         "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
-        "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
         "test/unit/cross_chain/cross_chain_engine.test.js": "6bd9fecee0aa7862",
         "test/unit/cross_chain/cross_chain_engine_01_p_bft_attestation_flow.test.js": "2439e914fdec84c3",
         "test/unit/cross_chain/cross_chain_engine_02_empty_snapshot_guard_xceemptysnap1.test.js": "9b4addeb552d849f",

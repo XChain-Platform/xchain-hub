@@ -89,23 +89,6 @@ module.exports = {
             args);
     },
 
-    // Stamps the chain identity on rows written before this hub learned it. Regtest only
-    // (the caller gates it): a row written while the BTC indexer was still catching up,
-    // before its first chain-tip push, carries NULL, and listUncheckpointedSnapshotBlocks
-    // joins on btc_chain_id, so that snapshot would never be checkpointed.
-    async stampNullCapabilitySnapshotChainId(btcChainId) {
-        return this.doQuery(
-            'UPDATE ' + TABLE + ' SET btc_chain_id = ? WHERE btc_chain_id IS NULL', [btcChainId]);
-    },
-
-    // Counts the rows at one snapshot block and how many of them carry a NULL
-    // btc_chain_id, for the proof endpoint's not-checkpointed diagnostic.
-    async countCapabilitySnapshotChainIdStamps(snapshot_block) {
-        return this.doQuery(
-            'SELECT COUNT(*) AS rows_total, SUM(btc_chain_id IS NULL) AS rows_null FROM ' + TABLE +
-            ' WHERE snapshot_block = ?', [snapshot_block]);
-    },
-
     // The four stale-range prune statements, moved here from src/validators/capability_snapshot_prune.js.
     // `where` is that tool's buildWhere ({ clause, args }): the clause holds only ?
     // placeholders, so every operator-supplied value stays bound.

@@ -20,7 +20,6 @@
 
 const { snapshotCheckpointBlock } = require('../../consensus/snapshot_checkpoint/canonical.js');
 const { parseCapabilityProofQuery } = require('./capability_snapshot_proof/params.js');
-const { createMissLog } = require('./capability_snapshot_proof/miss_log.js');
 
 const PUBKEY = /^[0-9a-fA-F]{64}$/;
 
@@ -71,7 +70,6 @@ function checkpointBody(snapshotBlock, capability, checkpoint, proof) {
 
 function mountCapabilitySnapshotProof(app, ctx) {
     const { hub, HUB_NETWORK, p2pConfig } = ctx;
-    const missLog = createMissLog();
     app.get('/hub-db/snapshot/capability_snapshot_proof', async (req, res) => {
         const parsed = parseCapabilityProofQuery(req.query, configuredCapabilities(hub, p2pConfig));
         if (parsed.error) return res.status(400).json(parsed);
@@ -88,10 +86,7 @@ function mountCapabilitySnapshotProof(app, ctx) {
             const network = (hub && hub.network) || HUB_NETWORK;
             const blockIndex = snapshotCheckpointBlock(parsed.snapshotBlock, network);
             const checkpoint = await hub.db.getSnapshotCheckpoint('BTC', network, blockIndex);
-            if (!checkpoint) {
-                missLog.report(hub.db, parsed.snapshotBlock, blockIndex);
-                return res.status(404).json({ error: 'SNAPSHOT_NOT_YET_CHECKPOINTED' });
-            }
+            if (!checkpoint) return res.status(404).json({ error: 'SNAPSHOT_NOT_YET_CHECKPOINTED' });
 
             const proof = await fetchProof(ctx, {
                 capability: parsed.capability,
