@@ -1,7 +1,8 @@
-// CONFIGURATION.md drift guard.
+// Hub configuration page drift guard.
 //
 // Every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST_/ATTESTATION_ env var read
-// anywhere in src/ must be documented in CONFIGURATION.md. The first four
+// anywhere in src/ must be documented in the hub configuration page
+// (xchain-documentation/components/hub/configuration.md). The first four
 // families were the ~42-var undocumented blind spot from the 2026-06-24
 // maintainability review; the attestation families joined them because the
 // response-mirror batch rail shipped a publish kill switch, a buffer path and
@@ -12,10 +13,11 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const SRC = path.join(ROOT, 'src');
-const DOC = path.join(ROOT, 'CONFIGURATION.md');
+const DOC = path.join(ROOT, '..', 'xchain-documentation', 'components', 'hub', 'configuration.md');
 
 const ENV_RE = /process\.env\.((?:ANCHOR|XDEX|CHECKPOINT|FULLNODE|ATTESTATION|ATTEST)_[A-Z_0-9]+)/g;
 const COIN_SUFFIX_RE = /_(BTC|LTC|DOGE)$/;
@@ -33,11 +35,12 @@ function walkJs(dir, out) {
     return out;
 }
 
-describe('CONFIGURATION.md env-var coverage', function () {
+describe('hub configuration page env-var coverage', function () {
     // Reads every src/ file synchronously; late in a full run on a loaded host that outlasts the 5 s default.
     this.timeout(30000);
 
     it('documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/', function () {
+        if (!skipOrFail(this, siblingCheckout(__dirname, DOC), 'the hub configuration page guard')) return;
         const doc = fs.readFileSync(DOC, 'utf8');
 
         const used = new Set();
@@ -59,7 +62,7 @@ describe('CONFIGURATION.md env-var coverage', function () {
         }).sort();
 
         assert.deepStrictEqual(missing, [],
-            'env vars read in src/ but undocumented in CONFIGURATION.md: ' + missing.join(', '));
+            'env vars read in src/ but undocumented in the hub configuration page: ' + missing.join(', '));
     });
 
     // the guard above scans for literal process.env.NAME, so it is blind to
@@ -68,6 +71,7 @@ describe('CONFIGURATION.md env-var coverage', function () {
     // shipped with four undocumented origin-chain variables whose absence silently
     // holds a finalized v4 forever. Scan the computed form too.
     it('documents every dynamically-composed <COIN>_ env var read in src/', function () {
+        if (!skipOrFail(this, siblingCheckout(__dirname, DOC), 'the hub configuration page guard')) return;
         const doc = fs.readFileSync(DOC, 'utf8');
 
         // process.env[coin + '_SUFFIX'] / cfg[coin + '_SUFFIX'], either quote style.
@@ -88,6 +92,6 @@ describe('CONFIGURATION.md env-var coverage', function () {
 
         assert.deepStrictEqual(missing, [],
             'per-coin env vars composed at runtime but undocumented as `<COIN>_...` in ' +
-            'CONFIGURATION.md: ' + missing.map(s => '<COIN>' + s).join(', '));
+            'the hub configuration page: ' + missing.map(s => '<COIN>' + s).join(', '));
     });
 });
