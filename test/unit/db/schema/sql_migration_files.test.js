@@ -51,6 +51,9 @@ describe('src/sql/migrations files', function () {
         }
     });
 
+});
+
+describe('src/sql/migrations files, key and retype statements', function () {
     it('re-key the price fence in a single ALTER', function () {
         const stmts = parsed['2026-10-19-price-fence-primary-key.sql'].statements;
         expect(stmts).to.deep.equal([

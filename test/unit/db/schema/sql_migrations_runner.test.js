@@ -8,29 +8,29 @@ const FILE_A = '-- xchain:migration mode=auto\nALTER TABLE a ADD x INT;\nALTER T
 const FILE_B = '-- xchain:migration mode=auto on-error=warn\nALTER TABLE b ADD x INT;\nALTER TABLE b ADD y INT;\n';
 const FILE_G = '-- xchain:migration mode=auto gate=GATE_FLAG\nALTER TABLE g ADD x INT;\n';
 
-describe('runSqlMigrations()', function () {
-    let Database, conn, files, applied, config, db;
+let Database, conn, files, applied, config, db;
 
-    function build(){
-        conn = {
-            query: sinon.stub().callsFake(async (sql) => /FROM schema_migrations/.test(sql) ? applied : []),
-            release: sinon.stub().resolves()
-        };
-        config = { MIGRATE_QUERY_TIMEOUT: undefined, GATE_FLAG: undefined };
-        const fs = {
-            readdirSync: sinon.stub().callsFake(() => Object.keys(files)),
-            readFileSync: sinon.stub().callsFake((p) => files[p.split('/').pop()])
-        };
-        const runner = proxyquire('../../../../src/db/schema/sql_migrations.js', { '../../config': config });
-        db = Object.create({ ...runner });
-        Object.defineProperty(db, 'constructor', { value: { io: { fs, migrationsDir: '/m' } } });
-        db.getConnection = sinon.stub().resolves(conn);
-        db.connectionPoolParams = { queryTimeout: 30000 };
-        Database = db;
-    }
+function build(){
+    conn = {
+        query: sinon.stub().callsFake(async (sql) => /FROM schema_migrations/.test(sql) ? applied : []),
+        release: sinon.stub().resolves()
+    };
+    config = { MIGRATE_QUERY_TIMEOUT: undefined, GATE_FLAG: undefined };
+    const fs = {
+        readdirSync: sinon.stub().callsFake(() => Object.keys(files)),
+        readFileSync: sinon.stub().callsFake((p) => files[p.split('/').pop()])
+    };
+    const runner = proxyquire('../../../../src/db/schema/sql_migrations.js', { '../../config': config });
+    db = Object.create({ ...runner });
+    Object.defineProperty(db, 'constructor', { value: { io: { fs, migrationsDir: '/m' } } });
+    db.getConnection = sinon.stub().resolves(conn);
+    db.connectionPoolParams = { queryTimeout: 30000 };
+    Database = db;
+}
 
-    const sqlCalls = () => conn.query.getCalls().map(c => c.args[0]);
+const sqlCalls = () => conn.query.getCalls().map(c => c.args[0]);
 
+function freshFiles(){
     beforeEach(function () {
         files = {
             '2026-10-19-b.sql': FILE_B,
@@ -40,6 +40,10 @@ describe('runSqlMigrations()', function () {
         applied = [];
         build();
     });
+}
+
+describe('runSqlMigrations()', function () {
+    freshFiles();
 
     it('applies files in name order and records each one', async function () {
         await Database.runSqlMigrations();
@@ -67,6 +71,10 @@ describe('runSqlMigrations()', function () {
         const first = conn.query.getCalls().find(c => /max_statement_time/.test(c.args[0]));
         expect(first.args[1]).to.deep.equal([900]);
     });
+});
+
+describe('runSqlMigrations() skips, failures and gates', function () {
+    freshFiles();
 
     it('skips a file already recorded, whatever its checksum', async function () {
         applied = [{ name: '2026-10-19-a.sql', checksum: 'stale' }];

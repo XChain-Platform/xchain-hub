@@ -67,15 +67,9 @@ const stateCheckpointsMixin    = require('./state_checkpoints.js');
 const swapRecordsMixin         = require('./swap_records.js');
 const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
-// The class's own plumbing, split out of this file by behaviour and installed the
-// same way, non-enumerably, by the same installMixins() below. These are NOT table
-// families: they are bring-up, the migration runner
-// and withTransaction, so they live under schema/, which has no index.js, rather
-// than beside the families: db_prototype_install.test.js and the mockHub scanner
-// read every `<family>.js` and `<family>/index.js` and would take a plumbing method
-// for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
-// rather than requiring them, because it is the only one that reaches outside the
-// process and a require there would escape the unit suite's proxyquire stubs.
+// The class's own plumbing (bring-up, the migration runner, withTransaction),
+// installed non-enumerably by installMixins() below. Not table families, so they
+// live under schema/ where the family scanners do not read them.
 const bootstrapMixin        = require('./schema/bootstrap.js');
 const sqlMigrationsMixin    = require('./schema/sql_migrations.js');
 const mirrorKeysMixin       = require('./schema/mirror_keys.js');
@@ -203,11 +197,8 @@ class Database {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    // Idempotent: safe to run every startup.
-    //
-    // The steps are the dated files in src/sql/migrations/, applied in name order
-    // and recorded in schema_migrations, so each runs once per database. Then the
-    // boot refuses if a widened mirror key is still narrow.
+    // Idempotent: runs the dated files in src/sql/migrations/ once each, then
+    // refuses the boot if a widened mirror key is still narrow.
     async runMigrations(){
         await this.runSqlMigrations();
         await this.assertMirrorKeysWide();
