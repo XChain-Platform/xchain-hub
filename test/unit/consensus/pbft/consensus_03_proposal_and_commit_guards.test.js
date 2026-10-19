@@ -91,7 +91,7 @@ it('refuses to PROPOSE without a deterministic snapshot when MIN_VALIDATORS > 1'
             expect(hub.applyConfig.called).to.be.false;
         });
 // #4168: relying only on the guard above required the operator to set MIN_VALIDATORS. That env var is
-// optional (CONFIGURATION.md "No", commented out in .env.example), so a normally configured multi-hub
+// optional (the hub configuration page says "No", commented out in .env.example), so a normally configured multi-hub
 // federation can leave minValidators at 1 and size quorum from its own mutable local set during an
 // indexer outage. The live active validator set now decides.
 it('refuses to PROPOSE on a multi-member set even with MIN_VALIDATORS unset', async function () {

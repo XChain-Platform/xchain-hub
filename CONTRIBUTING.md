@@ -9,7 +9,7 @@ If you're reporting a security issue, **stop here** and read [`SECURITY.md`](./S
 ## Quick links
 
 - Project overview: [`README.md`](./README.md)
-- Environment variables and database schema: [`CONFIGURATION.md`](./CONFIGURATION.md)
+- Environment variables and database schema: the [hub configuration page](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md)
 - Full component docs: the [`xchain-documentation`](https://github.com/XChain-Platform/xchain-documentation/tree/master/components/hub) repository (architecture, configuration, API reference, operations)
 - Disclosure policy: [`SECURITY.md`](./SECURITY.md)
 - License: [`LICENSE.md`](./LICENSE.md) + [`NOTICE.md`](./NOTICE.md) (GNU Affero General Public License v3.0, dual-licensed)
@@ -23,7 +23,6 @@ xchain-hub/
 ├── src/                  hub core: API, consensus, oracle, cross-chain engine, P2P, governance
 ├── test/                 layered suites (unit, integration, e2e, fuzz, chaos, smoke, regression, performance)
 ├── CHANGELOG.md          authoritative version history
-├── CONFIGURATION.md      all environment variables and schema details
 ├── SECURITY.md           private vulnerability disclosure
 └── package.json          scripts + dependencies
 ```
@@ -46,7 +45,7 @@ cd xchain-hub
 npm install
 ```
 
-Create a `.env` (see [`CONFIGURATION.md`](./CONFIGURATION.md) for the full key list). **Never commit a `.env` or any real credential.** Secrets live only in the local `.env`, loaded at runtime; never hard-code them into source, tests, or scripts.
+Create a `.env` (see the [hub configuration page](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md) for the full key list). **Never commit a `.env` or any real credential.** Secrets live only in the local `.env`, loaded at runtime; never hard-code them into source, tests, or scripts.
 
 ---
 
@@ -56,7 +55,7 @@ Create a `.env` (see [`CONFIGURATION.md`](./CONFIGURATION.md) for the full key l
 npm run api        # start the hub API server
 ```
 
-The hub auto-creates the database and all tables on first startup. Without `P2P_VALIDATOR_ADDR` it runs in standalone config-oracle mode. Set the `P2P_*` and `SIGNING_PRIVKEY_HEX` variables (see `CONFIGURATION.md`) to activate the full validator stack.
+The hub auto-creates the database and all tables on first startup. Without `P2P_VALIDATOR_ADDR` it runs in standalone config-oracle mode. Set the `P2P_*` and `SIGNING_PRIVKEY_HEX` variables (see the hub configuration page) to activate the full validator stack.
 
 ---
 

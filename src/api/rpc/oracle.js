@@ -28,7 +28,7 @@ function oracleStatusRpc(ctx) {
     const { hub } = ctx;
     return {
         // Always 200. {active:false} means this hub runs NO oracle round at all -
-        // the documented standalone config-oracle topology (CONFIGURATION.md:
+        // the documented standalone config-oracle topology (the hub configuration page:
         // P2P_VALIDATOR_ADDR left empty), where startOracle() never mints an
         // OracleRound because there is no peerManager. That is an absent ROLE, not a
         // fault, so it is reported the same structured way getanchorstatus and
