@@ -58,13 +58,20 @@ function indexerGit(ctx, what, args, encoding = null) {
             reason: 'sibling path absent: ' + INDEXER_DIR,
         }, what)) return null;
     }
+    const read = () => execFileSync('git', ['-C', INDEXER_DIR].concat(args), {
+        encoding,
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
     try {
-        return execFileSync('git', ['-C', INDEXER_DIR].concat(args), {
-            encoding,
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        return read();
     } catch (e) {
-        throw new Error(what + ' cannot read declared indexer commit ' + INDEXER_TWIN_COMMIT);
+        // A CI sibling clone is depth 1, so the declared commit may be absent: fetch exactly that commit once.
+        try {
+            execFileSync('git', ['-C', INDEXER_DIR, 'fetch', '--quiet', '--depth=1', 'origin', INDEXER_TWIN_COMMIT], { stdio: 'ignore' });
+            return read();
+        } catch (e2) {
+            throw new Error(what + ' cannot read declared indexer commit ' + INDEXER_TWIN_COMMIT);
+        }
     }
 }
 
