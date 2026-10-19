@@ -440,6 +440,27 @@ jobs:
           const blockingKinds = new Set(['file_dropped', 'title_dropped']);
           const escapeCommand = (value) => String(value)
               .replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+          const exitCodeFor = (blockingCount) => blockingCount ? 1 : 0;
+          const reportDifferences = (repositoryName, differences, write = console.log) => {
+              const blocking = differences.filter((difference) => blockingKinds.has(difference.kind));
+              if (!differences.length) {
+                  write(`${repositoryName}: suite identity holds against the re-taken pin`);
+                  return { blockingCount: 0, differenceCount: 0 };
+              }
+
+              write(`${repositoryName}: ${differences.length} difference(s); ${blocking.length} blocking`);
+              for (const difference of differences.slice(0, 200)) {
+                  const isBlocking = blockingKinds.has(difference.kind);
+                  const message = [
+                      `[${repositoryName}/${difference.script}]`, difference.kind, difference.file || '',
+                      difference.title ? `:: ${difference.title}` : difference.detail || '',
+                  ].filter(Boolean).join(' ');
+                  write(`::${isBlocking ? 'error' : 'warning'}::${escapeCommand(message)}`);
+              }
+              if (differences.length > 200)
+                  write(`${repositoryName}: ... and ${differences.length - 200} more`);
+              return { blockingCount: blocking.length, differenceCount: differences.length };
+          };
           let blockingCount = 0;
           let differenceCount = 0;
 
@@ -453,26 +474,9 @@ jobs:
               process.chdir(root);
               const fresh = suiteTitles.buildMap();
               const differences = suiteTitles.compare(pin, fresh, renames);
-              const blocking = differences.filter((difference) => blockingKinds.has(difference.kind));
-              blockingCount += blocking.length;
-              differenceCount += differences.length;
-
-              if (!differences.length) {
-                  console.log(`${repository.name}: suite identity holds against the re-taken pin`);
-                  continue;
-              }
-
-              console.log(`${repository.name}: ${differences.length} difference(s); ${blocking.length} blocking`);
-              for (const difference of differences.slice(0, 200)) {
-                  const isBlocking = blockingKinds.has(difference.kind);
-                  const message = [
-                      `[${repository.name}/${difference.script}]`, difference.kind, difference.file || '',
-                      difference.title ? `:: ${difference.title}` : difference.detail || '',
-                  ].filter(Boolean).join(' ');
-                  console.log(`::${isBlocking ? 'error' : 'warning'}::${escapeCommand(message)}`);
-              }
-              if (differences.length > 200)
-                  console.log(`${repository.name}: ... and ${differences.length - 200} more`);
+              const result = reportDifferences(repository.name, differences);
+              blockingCount += result.blockingCount;
+              differenceCount += result.differenceCount;
           }
 
           const classifier = require(path.join(workspace, 'xchain-hub/bin/suite-title-map.js'));
@@ -480,32 +484,38 @@ jobs:
               titleSets: { pinned: ['kept title'] },
               scripts: { test: { files: { 'test/pinned.test.js': 'pinned' } } },
           };
-          const classifierCases = [
+          const policyCases = [
               ['file_added', {
                   titleSets: { pinned: ['kept title'] },
                   scripts: { test: { files: {
                       'test/pinned.test.js': 'pinned', 'test/new.test.js': 'pinned',
                   } } },
-              }, false],
+              }, 'warning', 0],
               ['title_added', {
                   titleSets: { grown: ['kept title', 'new title'] },
                   scripts: { test: { files: { 'test/pinned.test.js': 'grown' } } },
-              }, false],
+              }, 'warning', 0],
               ['file_dropped', {
                   titleSets: {}, scripts: { test: { files: {} } },
-              }, true],
+              }, 'error', 1],
               ['title_dropped', {
                   titleSets: { empty: [] },
                   scripts: { test: { files: { 'test/pinned.test.js': 'empty' } } },
-              }, true],
+              }, 'error', 1],
           ];
-          for (const [kind, fresh, expectedBlocking] of classifierCases) {
+          for (const [kind, fresh, annotation, expectedExitCode] of policyCases) {
               const differences = classifier.compare(fixturePin, fresh, {}, 'test');
               const kinds = differences.map((difference) => difference.kind);
-              const isBlocking = differences.some((difference) => blockingKinds.has(difference.kind));
-              if (kinds.length !== 1 || kinds[0] !== kind || isBlocking !== expectedBlocking)
-                  throw new Error(`suite-title classifier rejected its ${kind} falsification case`);
+              const output = [];
+              const result = reportDifferences('falsification', differences, (line) => output.push(line));
+              const annotationPrefix = `::${annotation}::`;
+              if (kinds.length !== 1 || kinds[0] !== kind
+                  || !output.some((line) => line.startsWith(annotationPrefix) && line.includes(kind))
+                  || exitCodeFor(result.blockingCount) !== expectedExitCode) {
+                  throw new Error(`suite-title policy rejected its ${kind} falsification case`);
+              }
           }
+          console.log(`suite-title policy falsification passed (${policyCases.length} cases)`);
 
           const summary = [
               '### suite-title-pin',
@@ -516,5 +526,5 @@ jobs:
               '',
           ].join('\n');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
-          if (blockingCount) process.exitCode = 1;
+          process.exitCode = exitCodeFor(blockingCount);
           NODE
