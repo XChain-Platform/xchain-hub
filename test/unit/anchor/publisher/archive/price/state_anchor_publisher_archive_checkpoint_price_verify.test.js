@@ -86,6 +86,28 @@ function signaturePrices(){
     return copy(vectors.P.inputs.prices.filter(row => row.round_number === 11));
 }
 
+describe('archive checkpoint signature set against our held row', () => {
+    it('accepts an archived checkpoint equal to our held row', async () => {
+        const held = signCheckpoint(buildPub(), checkpoint());
+        const pub = buildPub({ checkpoint: copy(held) });
+        expect(await pub.verifyArchiveAgainstLocal(archive({
+            state_checkpoints: [pub.serializeStateCheckpoint(held)]
+        }))).to.equal(true);
+    });
+
+    it('refuses a checkpoint whose signature set differs from our held row, as the anchor body requires', async () => {
+        const held = signCheckpoint(buildPub(), checkpoint());
+        const pub = buildPub({ checkpoint: copy(held) });
+        const archived = pub.serializeStateCheckpoint(held);
+        archived.validator_signatures = JSON.stringify(JSON.parse(held.validator_signatures).reverse());
+        expect(pub.quorumVerified(pub.stateCheckpointCanonical(archived),
+            pub.parseSigs(archived.validator_signatures), SET, false)).to.equal(true);
+        expect(await pub.verifyArchiveAgainstLocal(archive({
+            state_checkpoints: [archived]
+        }))).to.equal(false);
+    });
+});
+
 describe('archive checkpoint and price follower verification', () => {
     it('accepts checkpoint and signature-proofed price quorums', async () => {
         const pub = buildPub();

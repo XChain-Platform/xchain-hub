@@ -23,6 +23,9 @@ const COLUMNS = [
 // not carry the columns, has no admission keys at all; it is stored with explicit NULLs.
 const ADMIT_COLUMNS = new Set(['admit_block_btc', 'admit_block_ltc', 'admit_block_doge']);
 
+// Nothing writes the table's batch_seq and anchor_txid columns: remote-token rows are not
+// carried in the ANCHOR archive and return through the hub mirror and peer catchup.
+
 module.exports = {
     async insertRemoteTokenSnapshot(row, btcChainId){
         const values = Object.assign({ status: 'finalized' }, row, { btc_chain_id: btcChainId });
@@ -53,19 +56,5 @@ module.exports = {
 
     async getRemoteTokenSnapshotsMaxId(){
         return this.doQuery('SELECT MAX(id) AS max_id FROM remote_token_snapshots');
-    },
-
-    async findRemoteTokenSnapshotsByBatchSeq(limit){
-        return this.doQuery(
-            'SELECT * FROM remote_token_snapshots WHERE batch_seq IS NULL ' +
-            'ORDER BY snapshot_block ASC, coin ASC, tick ASC, snapshot_id ASC LIMIT ?',
-            [Number(limit)]);
-    },
-
-    async updateRemoteTokenSnapshotArchiveBatchSeq(batchSeq, txid, snapshotId){
-        return this.doQuery(
-            'UPDATE remote_token_snapshots SET batch_seq = ?, anchor_txid = COALESCE(?, anchor_txid) ' +
-            'WHERE snapshot_id = ? AND batch_seq IS NULL',
-            [Number(batchSeq), txid, String(snapshotId)]);
     }
 };

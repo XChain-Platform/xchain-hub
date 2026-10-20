@@ -38,8 +38,10 @@ function wireBlockTime(round, btcBlockHeight, captured, network, epochStart, rou
     return Number.isSafeInteger(captured) && captured > 0 ? captured : nominal;
 }
 
-// True when the consensus engine reports a peer quorum, the same federation test
-// the follower uses before refusing a PROPOSE with no real BTC height.
+// True when the consensus engine reports a peer quorum or, once FEDERATED_HUB_ACTIVATION
+// is active at the anchor, any federation signal: the test the snapshot gates share
+// (consensus/federation.js roundIsFederated). The follower's absent-height drop applies
+// it at its own BTC tip instead, since the proposer chooses the wire height.
 function isFederated(consensus, network, btcBlockHeight) {
     if (typeof consensus.getQuorum === 'function' && consensus.getQuorum() > 0) return true;
     return isFederatedHubActive(network, btcBlockHeight) &&

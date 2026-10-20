@@ -23,6 +23,7 @@ const eq                    = require('../../../../../src/consensus/equivocation
 const { waitUntil }         = require('../../../../helpers/waitUntil');
 const arMod                 = require('../../../../../src/consensus/gates/anchor_reward_gate.js');
 const { DB_METHODS }        = require('../../../../helpers/mockHub.js');
+const { consensusStateDoQuery } = require('../../../../helpers/anchor_mesh_db.js');
 const { CP_ROW, buildMesh, startAll, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
 
 // Independent reimplementation of the indexer's Anchor._rewardCanonical (FORMAT 1):
@@ -41,7 +42,7 @@ function archiveRewardCanonical(cp, batchSeq, publisher) {
 const CANON = 'XANC|test|canonical';
 function weightedPub() {
     return new StateAnchorPublisher({
-        db: { ...DB_METHODS, async doQuery() { return []; } },
+        db: { ...DB_METHODS, doQuery: consensusStateDoQuery() },   // [] for all but consensus_state
         network: 'regtest',                                   // activation = 0 → weighted on
         getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
         getIdentity: () => null,

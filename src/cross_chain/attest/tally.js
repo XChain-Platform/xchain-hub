@@ -123,6 +123,8 @@ module.exports = {
                     this.emit('attestation:finalized', attestation);
 
                     if (pending.resolve) pending.resolve(attestation);
+                    // Callers that joined this round settle with the same stored attestation.
+                    this.settleWaiters(pending, null, attestation);
                 })
                 .catch(err => {
                     // Retain the round and re-drive the store on our own timer: peers send

@@ -89,3 +89,49 @@ describe('archive price local skipped rows', () => {
             .to.equal(false);
     });
 });
+
+describe('archive price proofed rows this hub does not hold', () => {
+    function relabelled(pub, change){
+        const archived = signPrices(pub, signaturePrices());
+        Object.assign(archived[0], change);
+        return archived;
+    }
+
+    it('accepts an unheld signed round whose rows are plain finalized rows', async () => {
+        const pub = buildPub([]);
+        expect(await pub.verifyArchivedPriceGroup(relabelled(pub, {}), { network: 'regtest' }))
+            .to.equal(true);
+    });
+
+    for(const status of ['disputed', 'skipped']){
+        it('refuses an unheld signed row relabelled ' + status, async () => {
+            const pub = buildPub([]);
+            expect(await pub.verifyArchivedPriceGroup(relabelled(pub, { status }), { network: 'regtest' }))
+                .to.equal(false);
+        });
+    }
+
+    it('refuses a signed row relabelled disputed over a held skipped marker', async () => {
+        const held = copy(signaturePrices()[0]);
+        held.price = null;
+        held.consensus_proof = '[]';
+        held.status = 'skipped';
+        const pub = buildPub([held]);
+        expect(await pub.verifyArchivedPriceGroup(relabelled(pub, { status: 'disputed' }), { network: 'regtest' }))
+            .to.equal(false);
+    });
+
+    it('refuses an unheld signed row with a consensus_round other than 1', async () => {
+        const pub = buildPub([]);
+        expect(await pub.verifyArchivedPriceGroup(relabelled(pub, { consensus_round: 2 }), { network: 'regtest' }))
+            .to.equal(false);
+    });
+
+    it('accepts a signed disputed row against a byte-identical held disputed row', async () => {
+        const pub = buildPub([]);
+        const archived = relabelled(pub, { status: 'disputed' });
+        pub.db.findPriceSnapshotsForRound = async () => copy(archived);
+        expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' }))
+            .to.equal(true);
+    });
+});

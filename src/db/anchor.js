@@ -65,7 +65,7 @@ module.exports = {
     // never offered to the sweep.
     async findOwnAnchorCheckpointStamps(maxSentDogeHeight) {
         return this.doQuery(
-            'SELECT sc.chain, sc.network, sc.block_index, sc.checkpoint_seq, apc.txid, apc.sent_doge_height ' +
+            'SELECT sc.chain, sc.network, sc.block_index, sc.checkpoint_seq, sc.snapshot_block, apc.txid, apc.sent_doge_height ' +
             'FROM anchor_published_checkpoints apc JOIN state_checkpoints sc ' +
             'ON sc.chain = apc.chain AND sc.network = apc.network AND sc.checkpoint_seq = apc.checkpoint_seq ' +
             'WHERE apc.txid IS NOT NULL AND apc.sent_doge_height IS NOT NULL ' +

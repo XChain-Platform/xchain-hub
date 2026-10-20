@@ -140,7 +140,6 @@ module.exports = {
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
         let canonical = this.archiveAttestationCanonical(cp, batchSeq, publisher);
-        let mySig     = this.identity.sign(canonical);
 
         // Unresolved (empty) set: abstain, exactly as the v0 bundle round does. Self-attesting
         // here would emit a v1 whose lone signature every indexer rejects while this hub
@@ -156,6 +155,11 @@ module.exports = {
         // tail rather than emit an attestation whose reward can never be credited.
         if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
 
+        // One XANCPUB signature per slot (attest_round.js claimAttestSlot): a rank-1
+        // failover reuses rank 0's wrapper checkpoint, so a hub that co-signed rank 0
+        // abstains here and the archive lands as a count-0 tail with no reward.
+        if(!(await this.claimAttestSlot(canonical))) return { met: false, sigs: [] };
+        let mySig = this.identity.sign(canonical);
         let signatures = new Map();
         signatures.set(me, mySig);
 
@@ -212,6 +216,9 @@ module.exports = {
         let canonical = this.archiveAttestationCanonical(cp, batchSeq, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
+        // Several ranks can be observed leaders for one batch_seq, so refuse a second
+        // publisher in a slot this hub already signed (attest_round.js claimAttestSlot).
+        if(!(await this.claimAttestSlot(canonical))) return;
         this.peerManager.broadcast(XANCARCHPUB_SIGN, {
             batch_seq: batchSeq,
             sig_pubkey: myPubkey, sig: this.identity.sign(canonical)

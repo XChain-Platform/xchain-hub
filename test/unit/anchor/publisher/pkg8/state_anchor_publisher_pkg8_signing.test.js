@@ -28,6 +28,9 @@ const swq = require('../../../../../src/consensus/stake_weighted_quorum');
 const {
   DB_METHODS
 } = require('../../../../helpers/mockHub.js');
+const {
+  consensusStateDoQuery
+} = require('../../../../helpers/anchor_mesh_db.js');
 const CP = {
   chain: 'BTC',
   network: 'regtest',
@@ -42,6 +45,9 @@ const CP = {
 function buildPub(opts) {
   opts = opts || {};
   let identity = opts.identity !== undefined ? opts.identity : new ValidatorIdentity('11'.repeat(32));
+  // consensus_state answers like the table (the XANCPUB slot latch reads it back);
+  // every other statement goes to opts.doQuery, or answers [].
+  let consensusState = consensusStateDoQuery(async (sql, params) => opts.doQuery ? await opts.doQuery(sql, params) : []);
   let hub = {
     db: {
       ...DB_METHODS,
@@ -51,7 +57,7 @@ function buildPub(opts) {
           sql,
           params
         });
-        return opts.doQuery ? await opts.doQuery(sql, params) : [];
+        return consensusState(sql, params);
       }
     },
     network: opts.network !== undefined ? opts.network : 'regtest',

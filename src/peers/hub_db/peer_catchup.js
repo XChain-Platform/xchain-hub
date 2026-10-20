@@ -215,7 +215,11 @@ class HubDbPeerCatchup {
             this.rerunRequested = true;
             return this.runningPromise;
         }
-        this.runningPromise = this.run(options).finally(() => {
+        // Log a failed run here so runningPromise always resolves: the retry tick, the
+        // peer:connect listener and the rerun below all drop or only .then() it.
+        this.runningPromise = this.run(options).catch((e) => {
+            this.logger.warn(nodeUtil.format('Hub DB peer catch-up run failed:', e && e.message ? e.message : e));
+        }).finally(() => {
             this.runningPromise = null;
             if (this.rerunRequested) {
                 this.rerunRequested = false;

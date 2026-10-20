@@ -119,8 +119,8 @@ module.exports = {
         // cost the federation a whole day of anchoring. Anything in ~6..144 blocks
         // (1h..24h) preserves both bounds; below the DOGE burial window it burns
         // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
-        // Never a divergence risk in either direction: concurrent unlocked
-        // publishers build identical archive bodies, per-publisher tail aside (see rankUnlocked).
+        // Never a divergence risk: concurrent unlocked publishers build identical archive
+        // bodies, and the per-publisher XANCPUB tail is signed once per slot (claimAttestSlot).
         //
         // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
         // anchors to a STALLED batch, so its `since` grows without bound. On the v0
@@ -267,10 +267,11 @@ module.exports = {
         // that lands late (slot holder offline, a tick spanning blocks) can move the
         // ordinal by 2 and step over the eligible residue; for N>1 a run of late rounds
         // can stretch the delay past N-1 rounds, and no fixed bound holds.
-        // Both knobs are already required to be fleet-uniform, and checkpoint_seq is
-        // consensus data, so the predicate stays deterministic fleet-wide. At the
+        // Both knobs are fleet-uniform by enforcement: the shared resolver pins them to
+        // 6 / 1 on every network except regtest. checkpoint_seq is consensus data, so the
+        // predicate stays deterministic fleet-wide. At the
         // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
-        const checkpointCadence = resolveCheckpointCadence(cfg);
+        const checkpointCadence = resolveCheckpointCadence(cfg, this.network);
         this.anchorEveryNCheckpoints = checkpointCadence.anchorEveryNCheckpoints;
         // The engine's own cadence step (StateCheckpointEngine.js), resolved through the
         // one shared function it also calls so the two cannot drift. Always positive: a

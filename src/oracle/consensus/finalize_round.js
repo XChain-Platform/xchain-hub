@@ -28,7 +28,7 @@ const { takeSeat }      = require('./seats.js');
 const { nominalRoundSeconds } = require('./round_time/round_time.js');
 const { roundTimeGateActive } = require('./round_time_gate.js');
 const { singleSourcePairs } = require('./source_diversity.js');
-const { isFederatedHub, isFederatedHubActive, liveFederationSignals } = require('../../consensus/federation.js');
+const federation        = require('../../consensus/federation.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -100,7 +100,7 @@ function noteSourceDiversity(round, submissions) {
 // and silently stalls for the full finalization timeout without storing a
 // skipped-round record. Falling back to count mode degrades gracefully and
 // keeps the round from stalling.
-function weightedSnapshotVerdict(round, weighted, snapshot) {
+function weightedSnapshotVerdict(round, weighted, snapshot, btcBlockHeight) {
     if (weighted && (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)) {
         // Federation-split guard (fail closed), mirroring Consensus.js's posture
         // before its identical weighted->count flip. swq.isStakeWeightedQuorumActive
@@ -109,9 +109,10 @@ function weightedSnapshotVerdict(round, weighted, snapshot) {
         // reachability forks the finalization THRESHOLD semantics: peers finalize on
         // summed stake while this hub finalizes/stalls on a count quorum over the same
         // N validators. In a real federation, skip the round rather than diverge.
-        // A single-node / regtest hub (no peers, getQuorum()===0) has no peer to
-        // split from, so it keeps the graceful count fallback below.
-        if (this.getQuorum() > 0) {
+        // A hub that is not federated at the round's anchor (roundIsFederated, the
+        // same test the follower applies) has no peer to split from, so it keeps the
+        // graceful count fallback below.
+        if (roundIsFederated.call(this, btcBlockHeight)) {
             logger.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
                 'unavailable while federated; skipping rather than downgrading to a count quorum ' +
                 'this hub\'s peers are not using.');
@@ -126,10 +127,9 @@ function weightedSnapshotVerdict(round, weighted, snapshot) {
 // True when this hub must treat the round as federated: a live peer quorum, or,
 // once FEDERATED_HUB_ACTIVATION is reached at the round's anchor, any open peer,
 // configured seed or multi-validator set.
+// Shared with the follower's PROPOSE gates through consensus/federation.js.
 function roundIsFederated(btcBlockHeight) {
-    if (this.getQuorum() > 0) return true;
-    return isFederatedHubActive(this.hub && this.hub.network, btcBlockHeight) &&
-        isFederatedHub(liveFederationSignals(this));
+    return federation.roundIsFederated(this, btcBlockHeight);
 }
 
 // The two federation guards a round clears before anything aggregates: the skip reason,
@@ -147,8 +147,8 @@ function snapshotSkip(round, btcBlockHeight, snapshot) {
     // getValidatorsByCapability at the same height), so the degradation buys no
     // liveness and spends a fee to say so. Consensus.js takes exactly this posture
     // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
-    // not a new one. Genuine single-node / regtest bootstrap (getQuorum() === 0)
-    // keeps the self-finalize path, same federation test as the empty-set guard below.
+    // not a new one. Genuine single-node / regtest bootstrap (not federated at the
+    // anchor) keeps the self-finalize path, same federation test as the empty-set guard below.
     if (!this.hasDeterministicSnapshot(snapshot) && roundIsFederated.call(this, btcBlockHeight)) {
         logger.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
             btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
@@ -162,7 +162,7 @@ function snapshotSkip(round, btcBlockHeight, snapshot) {
     // indexer's stake gate rejects (see _isEmptyFederationSnapshot). Genuine
     // single-node / regtest bootstrap (no federation) is unaffected and still
     // self-finalizes via the quorum===0 path.
-    if (this.isEmptyFederationSnapshot(snapshot)) {
+    if (this.isEmptyFederationSnapshot(snapshot, btcBlockHeight)) {
         logger.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
             btcBlockHeight + ' while this hub is federated; skipping rather than self-finalizing a ' +
             'single-signature round the indexer stake gate would reject.');
@@ -239,7 +239,7 @@ async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submission
 // Everything after the round's snapshot is locked: the snapshot guards, the member filter,
 // the clamp-reference refresh, then the solo bypass or the seat split.
 async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissions, weighted, snapshot) {
-    let verdict = weightedSnapshotVerdict.call(this, round, weighted, snapshot);
+    let verdict = weightedSnapshotVerdict.call(this, round, weighted, snapshot, btcBlockHeight);
     if (verdict === DOWNGRADE_TO_COUNT) {
         weighted = false;
         snapshot = this.hub.capabilitySnapshot

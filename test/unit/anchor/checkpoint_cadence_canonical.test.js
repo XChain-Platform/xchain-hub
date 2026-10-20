@@ -10,8 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The two cadence knobs are fleet-uniform; a hub resolving non-canonical values
-// must say so unless the skip variable is set.
+// The two cadence knobs are fleet-uniform: an override is honoured on regtest only,
+// where a hub resolving non-canonical values must say so unless the skip variable is
+// set, and is set-but-IGNORED with a warning on every other network.
 
 const { expect } = require('chai');
 const sinon = require('sinon');
@@ -20,7 +21,14 @@ const { assertCanonicalCadence, resolveAnchorCheckpointEveryN, resolveCheckpoint
     require('../../../src/anchor/checkpoint_cadence.js');
 const StateAnchorPublisher = require('../../../src/anchor/publisher.js');
 
-const ENV = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT'];
+const StateCheckpointEngine = require('../../../src/anchor/checkpoint_engine.js');
+
+const ENV = ['CHECKPOINT_INTERVAL_BLOCKS', 'ANCHOR_CHECKPOINT_EVERY_N', 'XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT', 'HUB_NETWORK'];
+
+// A hub on the given network with nothing else configured.
+function makeHub(network) {
+    return { network, db: { doQuery: async () => [] }, p2pConfig: {} };
+}
 
 describe('checkpoint cadence canonical assertion', function () {
     let saved = {};
@@ -59,7 +67,8 @@ describe('checkpoint cadence canonical assertion', function () {
         expect(warn.callCount).to.equal(0);
     });
 
-    it('the shared resolver still returns the operator value and never throws on drift', function () {
+    it('the shared resolver still returns the operator value on regtest and never throws on drift', function () {
+        process.env.HUB_NETWORK = 'regtest';
         process.env.CHECKPOINT_INTERVAL_BLOCKS = '12';
         process.env.ANCHOR_CHECKPOINT_EVERY_N = '2';
         expect(resolveCheckpointIntervalBlocks({})).to.equal(12);
@@ -80,4 +89,80 @@ describe('checkpoint cadence canonical assertion', function () {
         expect(publisher.anchorEveryNCheckpoints).to.equal(1);
         expect(warn.args.map(args => String(args[0])).join('\n')).to.not.include('fleet-canonical cadence');
     });
+});
+
+// Save, clear and restore the cadence variables around each case, with the logger stubbed.
+function cadenceSandbox() {
+    let state = { warn: null, saved: {} };
+    beforeEach(function () {
+        for (let k of ENV) { state.saved[k] = process.env[k]; delete process.env[k]; }
+        state.warn = sinon.stub(logger, 'warn');
+    });
+    afterEach(function () {
+        sinon.restore();
+        for (let k of ENV) { if (state.saved[k] !== undefined) process.env[k] = state.saved[k]; else delete process.env[k]; }
+    });
+    return state;
+}
+
+// Every network except regtest uses 6 / 1 whatever was set, from env or p2pConfig.
+function registerPinCases(state) {
+    for (let network of ['mainnet', 'testnet', '']) {
+        it('pins both knobs to 6 / 1 and warns IGNORED on ' + (network || 'a standalone hub'), function () {
+            process.env.HUB_NETWORK = network;
+            process.env.CHECKPOINT_INTERVAL_BLOCKS = '12';
+            process.env.ANCHOR_CHECKPOINT_EVERY_N = '4';
+            expect(resolveCheckpointIntervalBlocks({})).to.equal(6);
+            expect(resolveAnchorCheckpointEveryN({})).to.equal(1);
+            let lines = state.warn.args.map(args => String(args[0])).join('\n');
+            expect(lines).to.include('CHECKPOINT_INTERVAL_BLOCKS=12 is set but IGNORED');
+            expect(lines).to.include('ANCHOR_CHECKPOINT_EVERY_N=4 is set but IGNORED');
+            expect(lines).to.not.include('fleet-canonical cadence');
+        });
+    }
+
+    it('pins a p2pConfig override off regtest the same way as an env one', function () {
+        expect(resolveCheckpointIntervalBlocks({ CHECKPOINT_INTERVAL_BLOCKS: '12' }, 'mainnet')).to.equal(6);
+        expect(resolveAnchorCheckpointEveryN({ ANCHOR_CHECKPOINT_EVERY_N: '4' }, 'testnet')).to.equal(1);
+        expect(resolveCheckpointIntervalBlocks({ CHECKPOINT_INTERVAL_BLOCKS: '12' }, 'regtest')).to.equal(12);
+    });
+
+    it('stays silent off regtest when the set value is the canonical one', function () {
+        process.env.HUB_NETWORK = 'mainnet';
+        process.env.CHECKPOINT_INTERVAL_BLOCKS = '6';
+        process.env.ANCHOR_CHECKPOINT_EVERY_N = '1';
+        expect(resolveCheckpointIntervalBlocks({})).to.equal(6);
+        expect(state.warn.callCount).to.equal(0);
+    });
+
+    it('does not let the skip variable lift the pin off regtest', function () {
+        process.env.XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT = '1';
+        process.env.CHECKPOINT_INTERVAL_BLOCKS = '12';
+        expect(resolveCheckpointIntervalBlocks({}, 'testnet')).to.equal(6);
+    });
+}
+
+// Both readers pass their own network, so they resolve the same step on every network.
+function registerReaderCases() {
+    it('lets the caller network win over HUB_NETWORK, for the engine and the publisher alike', function () {
+        process.env.HUB_NETWORK = 'regtest';
+        process.env.CHECKPOINT_INTERVAL_BLOCKS = '12';
+        process.env.ANCHOR_CHECKPOINT_EVERY_N = '4';
+        let engine = new StateCheckpointEngine(makeHub('mainnet'));
+        let publisher = new StateAnchorPublisher(makeHub('mainnet'));
+        expect(engine.intervalBlocks).to.equal(6);
+        expect(publisher.checkpointIntervalBlocks).to.equal(6);
+        expect(publisher.anchorEveryNCheckpoints).to.equal(1);
+        engine = new StateCheckpointEngine(makeHub('regtest'));
+        publisher = new StateAnchorPublisher(makeHub('regtest'));
+        expect(engine.intervalBlocks).to.equal(12);
+        expect(publisher.checkpointIntervalBlocks).to.equal(12);
+        expect(publisher.anchorEveryNCheckpoints).to.equal(4);
+    });
+}
+
+describe('checkpoint cadence knobs off regtest', function () {
+    let state = cadenceSandbox();
+    registerPinCases(state);
+    registerReaderCases();
 });

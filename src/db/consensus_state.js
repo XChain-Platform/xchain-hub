@@ -63,5 +63,11 @@ module.exports = {
     // Moved here from src/consensus/pbft.js:1379.
     async setConsensusState(key_name, value, value2) {
         return this.doQuery('INSERT INTO consensus_state (key_name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?, updated_at = NOW()', [key_name, value, value2]);
+    },
+
+    // Inserts a row only when key_name is unused, so the first writer's value
+    // stands; read it back with findConsensusState to learn which value won.
+    async createConsensusStateIfAbsent(key_name, value) {
+        return this.doQuery('INSERT IGNORE INTO consensus_state (key_name, value) VALUES (?, ?)', [key_name, value]);
     }
 };

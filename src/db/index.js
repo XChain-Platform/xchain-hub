@@ -75,6 +75,7 @@ const sqlMigrationsMixin    = require('./schema/sql_migrations.js');
 const mirrorKeysMixin       = require('./schema/mirror_keys.js');
 const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
+const sqlMigrationFiles     = require('./schema/sql_migration_files.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const hubConfig = require('../config');
@@ -317,7 +318,9 @@ class Database {
     }
 }
 
-// What schema/bootstrap.js reaches the outside world through. Set on the class, not
+// What schema/bootstrap.js reaches the outside world through, plus the dated
+// migration file readers (schema/sql_migration_files.js) that a migration runner
+// reads off the class. Set on the class, not
 // required in that file, so a proxyquire load of THIS module hands the bring-up
 // methods the same stubbed driver and filesystem it hands the constructor.
 //
@@ -326,7 +329,7 @@ class Database {
 // the class reports, because before the split nothing was there to report. writable
 // and configurable stay true so a test can swap the driver and put it back.
 Object.defineProperty(Database, 'io', {
-    value: { mariadb, fs, sqlDir: SQL_DIR, migrationsDir: path.join(SQL_DIR, 'migrations') },
+    value: { mariadb, fs, sqlDir: SQL_DIR, migrationsDir: path.join(SQL_DIR, 'migrations'), migrationFiles: sqlMigrationFiles },
     enumerable: false, writable: true, configurable: true
 });
 

@@ -57,6 +57,12 @@ function isFederatedHubActive(network, height) {
         String(network || '').toLowerCase(), null, height, null);
 }
 
+// Whether the gate is armed at any height on `network`: its threshold sits below the
+// UNARMED sentinel (mainnet today), so a height just under the sentinel reaches it.
+function isFederatedHubArmed(network) {
+    return isFederatedHubActive(network, gateRegistry.UNARMED - 1);
+}
+
 // The four signals read off a live engine: its configured floor, its validator
 // set, its open peers and the configured seeds.
 function liveFederationSignals(engine) {
@@ -70,4 +76,34 @@ function liveFederationSignals(engine) {
     };
 }
 
-module.exports = { isFederatedHub, isFederatedHubActive, liveFederationSignals };
+// Whether an engine must treat a round anchored at `height` as federated: a live peer
+// quorum, or, once the gate is active at that anchor, any of the four signals. A
+// validatorSet of exactly one entry has getQuorum() 0 even with verified open peers.
+function roundIsFederated(engine, height) {
+    if (typeof engine.getQuorum === 'function' && engine.getQuorum() > 0) return true;
+    return isFederatedHubActive(engine.hub && engine.hub.network, height) &&
+        isFederatedHub(liveFederationSignals(engine));
+}
+
+// The same test for a PROPOSE whose height the proposer chose: the activation half reads
+// this hub's OWN tip, so a stale pre-activation or absent wire height cannot switch off the
+// bound that refuses it, and an unknown tip on an armed network fails closed. The raw tip
+// rides along so the caller's freshness bound reuses it rather than asking twice.
+async function tipAnchoredFederation(engine) {
+    if (typeof engine.getQuorum === 'function' && engine.getQuorum() > 0) {
+        return { federated: true, tipResolved: false, tipKnown: false, myTip: null };
+    }
+    const hub = engine.hub;
+    const network = hub && hub.network;
+    if (!isFederatedHubArmed(network) || !isFederatedHub(liveFederationSignals(engine))) {
+        return { federated: false, tipResolved: false, tipKnown: false, myTip: null };
+    }
+    let myTip = null;
+    try { myTip = hub && hub.resolveBtcLatestBlock ? await hub.resolveBtcLatestBlock() : null; } catch (e) { myTip = null; }
+    const tipKnown = myTip !== null && myTip !== undefined && myTip !== '' && Number.isFinite(Number(myTip));
+    return { federated: tipKnown ? isFederatedHubActive(network, Number(myTip)) : true, tipResolved: true, tipKnown, myTip };
+}
+
+module.exports = {
+    isFederatedHub, isFederatedHubActive, isFederatedHubArmed, liveFederationSignals, roundIsFederated, tipAnchoredFederation
+};

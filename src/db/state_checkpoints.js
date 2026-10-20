@@ -140,6 +140,13 @@ module.exports = {
         return this.doQuery('UPDATE state_checkpoints SET anchor_txid = NULL WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid = ?', [chain, network, block_index, checkpoint_seq, txid]);
     },
 
+    // Counts sections at this snapshot block, on any network, stamped by a transaction other
+    // than `txid`. validator_rewards carries no network, so any such stamp may back the reward.
+    async countOtherAnchorStampsAtSnapshotBlock(snapshot_block, txid) {
+        const rows = await this.doQuery('SELECT COUNT(*) AS n FROM state_checkpoints WHERE snapshot_block = ? AND anchor_txid IS NOT NULL AND anchor_txid <> ?', [snapshot_block, txid]);
+        return Number(rows && rows[0] ? rows[0].n : 0);
+    },
+
     // Reads the pending anchor checkpoints across every network, for a hub with no
     // configured network (the legacy unscoped behavior).
     // Moved here from src/anchor/publisher.js:1065, the unscoped branch.

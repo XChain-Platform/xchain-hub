@@ -54,6 +54,11 @@ module.exports = {
                             '... TERMS differ from our row; NOT signing');
                 return false;
             }
+        } else {
+            // A version we never wrote rests on the signature quorum below alone (a late joiner)
+            logger.info('StateAnchorPublisher: archive list snapshot ' +
+                        String(row.snapshot_id).substring(0, 16) +
+                        '... predates our local history; accepting on signature quorum alone');
         }
 
         return this.verifyArchivedBridgePolicyQuorum(

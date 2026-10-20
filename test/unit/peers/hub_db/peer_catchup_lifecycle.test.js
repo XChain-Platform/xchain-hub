@@ -76,3 +76,41 @@ describe('hub DB peer catch-up retry lifecycle', function () {
         expect(clock.countTimers()).to.equal(0);
     });
 });
+describe('hub DB peer catch-up run failure', function () {
+    const throwingVerifier = () => { throw new Error('verifier lookup boom'); };
+    let unhandled;
+    beforeEach(function () {
+        unhandled = sinon.spy();
+        process.on('unhandledRejection', unhandled);
+    });
+    afterEach(function () { process.removeListener('unhandledRejection', unhandled); });
+    it('resolves a failed run and logs its error', async function () {
+        const logger = { warn: sinon.stub(), error: sinon.stub() };
+        const catchup = makeCatchup({ getVerifier: throwingVerifier, logger });
+        const outcome = await catchup.schedule();
+        catchup.stop();
+        expect(outcome).to.equal(undefined);
+        expect(logger.warn.args.some(args => /verifier lookup boom/.test(String(args[0])))).to.equal(true);
+    });
+    it('still advances the retry backoff after a failed retry run', async function () {
+        const catchup = makeCatchup({ getVerifier: throwingVerifier, retryIntervalMs: 1000 });
+        catchup.onRetryTick();
+        await catchup.runningPromise;
+        await new Promise(resolve => setImmediate(resolve));
+        catchup.stop();
+        expect(catchup.nextRetryAt).to.be.greaterThan(0);
+        expect(catchup.currentRetryIntervalMs).to.equal(2000);
+    });
+    it('leaves no unhandled rejection from a peer connect or a requested rerun', async function () {
+        const pm = peerManager(true);
+        const catchup = makeCatchup({ peerManager: pm, getVerifier: throwingVerifier });
+        const first = catchup.start();
+        pm.emit('peer:connect', PEER);
+        catchup.schedule();
+        await first;
+        for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+        if (catchup.runningPromise) await catchup.runningPromise;
+        catchup.stop();
+        expect(unhandled.called).to.equal(false);
+    });
+});
