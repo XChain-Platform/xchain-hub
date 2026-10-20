@@ -66,7 +66,7 @@ addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACT
 // that indexer row: a stamp ahead of the indexer's flag day is refused there exactly as a tip
 // stamp is, while an armed indexer facing tip stamps waits up to a cadence on every such lock.
 // Unarmed live; regtest from genesis, as the indexer row.
-addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION', 'height', { mainnet: UNARMED, testnet: UNARMED, regtest: 0 });
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157235, 'LTC:testnet': 4930600, 'DOGE:testnet': 68012800, testnet: UNARMED, regtest: 0 });
 
 // peers/hub_db/landing_watermark
 // Landed-from-clear-frontier: at/above the activation, in the landing indexer's

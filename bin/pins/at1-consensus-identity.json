@@ -51,7 +51,7 @@
   },
   "gate_key_count": 47,
   "absent_gates": [],
-  "hub_only_rules_digest": "2caec1edbddd41271e1efbc144d214e75fd93919c21da5fe9a6a925063d05c33",
+  "hub_only_rules_digest": "0461c3aad9d4ec18fa62e20607614f5868a9f4b2a27bcb252ca93cfbff7e2aa0",
   "hub_only_rules_gates": {
     "anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":157073}",
     "anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN": "{\"mainnet\":9999999999,\"regtest\":9999999999,\"testnet\":1792454400}",
@@ -60,7 +60,7 @@
     "anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "anchor_archive_fold_term_activation.ANCHOR_ARCHIVE_FOLD_TERM_ACTIVATION": "{\"BTC:testnet\":156230,\"DOGE:testnet\":67989993,\"LTC:testnet\":4912984,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "consensus/federation.FEDERATED_HUB_ACTIVATION": "{\"BTC:testnet\":156230,\"DOGE:testnet\":67989993,\"LTC:testnet\":4912984,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":156230}",
-    "cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
+    "cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION": "{\"BTC:testnet\":157235,\"DOGE:testnet\":68012800,\"LTC:testnet\":4930600,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION": "{\"BTC:testnet\":156230,\"DOGE:testnet\":67989993,\"LTC:testnet\":4912984,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
     "cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT": "{\"BTC:testnet\":156230,\"DOGE:testnet\":67989993,\"LTC:testnet\":4912984,\"mainnet\":9999999999,\"regtest\":9999999999,\"testnet\":156230}",
     "oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
