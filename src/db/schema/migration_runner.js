@@ -19,7 +19,11 @@
  * files under src/sql/migrations in lexical (authored) order, the immutability
  * checksum, the mode gate, and the apply-then-record of each pending file.
  *
- * Every hub file is tagged mode=manual, so a boot never runs one. Before the mode
+ * A file tagged `-- xchain:runbook` is a one-off operator script and is only ever applied
+ * by a run that names it (`npm run migrate -- --file <name>`); a blanket run lists it under
+ * runbooks and touches nothing.
+ *
+ * Every other hub file is tagged mode=manual, so a boot never runs one. Before the mode
  * gate a pending file whose end state the live schema already holds is BASELINED:
  * recorded as applied with no statement run (see schema/migration_end_state.js).
  * That is how a fresh hub, whose src/sql tables already carry every shape, and a
@@ -107,7 +111,7 @@ module.exports = {
         const only = opts.only == null ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
         const ctx = { dir, only, includeManual: !!opts.includeManual, files,
-            result: { applied: [], pending: [], baselined: [], pendingTables: {}, lockSkipped: false } };
+            result: { applied: [], pending: [], baselined: [], runbooks: [], pendingTables: {}, lockSkipped: false } };
 
         const names = files.listDatedMigrations(dir);
         assertTargetsKnown(only, names, dir);
@@ -150,6 +154,10 @@ module.exports = {
         const raw = files.readMigration(ctx.dir, name);
         const checksum = files.migrationChecksum(raw);
         if(ctx.applied.has(name)) return checkAppliedChecksum(name, ctx.applied.get(name), checksum, includeManual);
+        if(files.isRunbook(raw) && !(only && only.has(name))){
+            result.runbooks.push(name);
+            return;
+        }
 
         const mode = files.migrationMode(raw);
         const statements = files.splitMigrationStatements(raw);

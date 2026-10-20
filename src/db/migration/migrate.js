@@ -24,6 +24,8 @@
  *   npm run migrate
  *   node src/db/migration/migrate.js --file 2026-10-19-oracle-prices-widen-tick.sql
  *
+ * A file tagged `-- xchain:runbook` is a one-off script: this command skips it unless --file names it.
+ *
  ********************************************************************/
 
 'use strict';

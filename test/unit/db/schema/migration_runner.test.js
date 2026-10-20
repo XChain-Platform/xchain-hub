@@ -280,6 +280,54 @@ function registerEntryPointTests() {
     });
 }
 
+function registerRunbookTests() {
+    const RUNBOOK = '-- xchain:runbook\n' + MANUAL;
+    const COMMITTED = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'migrations');
+    const COMMITTED_RUNBOOKS = [
+        '2026-06-02-backfill-price-snapshot-reference-chain.sql',
+        '2026-09-11-price-ingest-watermarks-network-column.sql'
+    ];
+
+    describe('runbook files', function () {
+        it('are skipped by a blanket operator run over the committed directory', async function () {
+            const result = await db.runDatedMigrations({ includeManual: true, dir: COMMITTED });
+            expect(result.runbooks).to.include.members(COMMITTED_RUNBOOKS);
+            for (const name of COMMITTED_RUNBOOKS) {
+                expect(result.applied).to.not.include(name);
+                expect(result.baselined).to.not.include(name);
+                expect(result.pending).to.not.include(name);
+                expect(ledger.map(r => r.name)).to.not.include(name);
+            }
+            expect(executed.filter(s => /^(START TRANSACTION|COMMIT|SET @hub_network|UPDATE (price_snapshots|price_ingest_watermarks))/.test(s))).to.deep.equal([]);
+        });
+
+        it('are skipped by a boot', async function () {
+            makeDir({ '2026-10-19-runbook.sql': RUNBOOK + WIDEN_TICK });
+            const result = await db.runDatedMigrations({ dir });
+            expect(result.runbooks).to.deep.equal(['2026-10-19-runbook.sql']);
+            expect(result.pending).to.deep.equal([]);
+            expect(executed).to.deep.equal([]);
+            expect(ledger).to.deep.equal([]);
+        });
+
+        it('are applied and recorded by a run that names them', async function () {
+            makeDir({ '2026-10-19-runbook.sql': RUNBOOK + WIDEN_TICK });
+            const result = await db.runDatedMigrations({ dir, includeManual: true, only: '2026-10-19-runbook.sql' });
+            expect(result.applied).to.deep.equal(['2026-10-19-runbook.sql']);
+            expect(result.runbooks).to.deep.equal([]);
+            expect(executed.filter(s => /^ALTER/.test(s))).to.have.lengthOf(1);
+            expect(ledger.map(r => r.name)).to.deep.equal(['2026-10-19-runbook.sql']);
+        });
+
+        it('do not hide a later manual file from the same blanket run', async function () {
+            makeDir({ '2026-10-19-a-runbook.sql': RUNBOOK + WIDEN_TICK, '2026-10-19-b-widen.sql': MANUAL + WIDEN_TICK });
+            const result = await db.runDatedMigrations({ dir, includeManual: true });
+            expect(result.runbooks).to.deep.equal(['2026-10-19-a-runbook.sql']);
+            expect(result.applied).to.deep.equal(['2026-10-19-b-widen.sql']);
+        });
+    });
+}
+
 describe('dated .sql migration runner', function () {
     registerHooks();
     registerBootTests();
@@ -288,4 +336,5 @@ describe('dated .sql migration runner', function () {
     registerOperatorGuardTests();
     registerTimeoutFallbackTests();
     registerEntryPointTests();
+    registerRunbookTests();
 });

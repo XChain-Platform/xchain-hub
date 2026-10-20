@@ -1,3 +1,5 @@
+-- xchain:runbook
+-- xchain:migration mode=manual
 -- ---------------------------------------------------------------------------
 -- Fleet schema migration: price_ingest_watermarks gains a `network` column
 -- ---------------------------------------------------------------------------

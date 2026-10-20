@@ -49,6 +49,21 @@ function migrationMode(raw){
     return m ? m[1].toLowerCase() : 'manual';
 }
 
+// A file tagged `-- xchain:runbook` is a one-off operator script: it may fail on a
+// hub that already holds its change, so a blanket run (boot or `npm run migrate`)
+// never examines it and only a run that names the file applies it. The tag is read
+// from the leading blank-and-comment prologue only, like the mode tag, so a token in
+// body prose or a data literal cannot mark a file.
+function isRunbook(raw){
+    const prologue = [];
+    for(const line of String(raw).split('\n')){
+        const trimmed = line.trim();
+        if(trimmed === '' || trimmed.startsWith('--')){ prologue.push(line); continue; }
+        break;
+    }
+    return /^\s*--\s*xchain:runbook\b/im.test(prologue.join('\n'));
+}
+
 // The *.sql basenames in dir, sorted lexically (apply order). A missing
 // directory is an empty list; an undated name is an error, because the dated
 // prefix is what makes lexical order the authorship order.
@@ -117,4 +132,4 @@ function splitMigrationStatements(raw){
     return out;
 }
 
-module.exports = { migrationMode, listDatedMigrations, readMigration, migrationChecksum, splitMigrationStatements };
+module.exports = { migrationMode, isRunbook, listDatedMigrations, readMigration, migrationChecksum, splitMigrationStatements };

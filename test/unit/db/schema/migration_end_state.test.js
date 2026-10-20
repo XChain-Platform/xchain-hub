@@ -135,6 +135,12 @@ function registerFreshInstallTests() {
         });
 
         for (const name of names) {
+            if (files.isRunbook(files.readMigration(MIGRATIONS, name))) {
+                it('is a runbook, so a blanket run never baselines or applies ' + name, function () {
+                    expect(files.isRunbook(files.readMigration(MIGRATIONS, name))).to.equal(true);
+                });
+                continue;
+            }
             it('already holds the end state of ' + name + ', so it is baselined with no statement run', function () {
                 const plan = planEndState(files.splitMigrationStatements(files.readMigration(MIGRATIONS, name)));
                 expect(unmetEndState(plan, model)).to.deep.equal([]);

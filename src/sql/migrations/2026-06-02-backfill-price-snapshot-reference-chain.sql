@@ -1,3 +1,5 @@
+-- xchain:runbook
+-- xchain:migration mode=manual
 -- ---------------------------------------------------------------------------
 -- One-off data correction: price_snapshots.reference_chain backfill
 -- ---------------------------------------------------------------------------
