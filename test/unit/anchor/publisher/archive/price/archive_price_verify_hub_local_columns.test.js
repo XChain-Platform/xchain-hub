@@ -96,4 +96,59 @@ describe('archive price follower hub-local columns', () => {
         expect(await pub.verifyArchivedPriceGroup([archived], { network: 'regtest' }))
             .to.equal(false);
     });
+
+    registerLandingClockTests();
+    registerUnheldChainShapeTests();
 });
+
+// No signature covers batch_block_time, so a held row's landing clock must match exactly
+function registerLandingClockTests(){
+    it('refuses a batch-proofed row while the held landing clock lags the archived one', async () => {
+        const archived = copy(vectors.P.inputs.prices.find(row => row.round_number === 12));
+        archived.batch_block_time = 1700000000;
+        for(const heldClock of [0, 1700000600]){
+            const held = Object.assign(copy(archived), { batch_block_time: heldClock });
+            expect(await buildPub([held]).verifyArchivedPriceGroup([archived], { network: 'regtest' }))
+                .to.equal(false);
+        }
+        const same = Object.assign(copy(archived), { batch_block_time: 1700000000 });
+        expect(await buildPub([same]).verifyArchivedPriceGroup([archived], { network: 'regtest' }))
+            .to.equal(true);
+    });
+
+    it('refuses a signature-proofed round whose held rows differ only in landing clock', async () => {
+        const held = signaturePrices();
+        const pub = buildPub(held);
+        signPrices(pub, held, IDENTITIES);
+        const archived = signaturePrices();
+        signPrices(pub, archived, IDENTITIES);
+        for(const row of archived) row.batch_block_time = 1700000000;
+        for(const row of held) row.batch_block_time = 0;
+
+        expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' })).to.equal(false);
+        for(const row of held) row.batch_block_time = 1700000000;
+        expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' })).to.equal(true);
+    });
+}
+
+// Honest hubs store several chain shapes for one round, so an unheld row cannot be pinned to one
+function registerUnheldChainShapeTests(){
+    it('co-signs an unheld proofed round in every chain shape honest hubs store', async () => {
+        const shapes = [
+            ['BTC', 'DOGE', null, 0],
+            ['LTC', 'LTC', 8, 1700000000],
+            ['BTC', 'LTC', 8, 0],
+            ['DOGE', 'DOGE', null, 1700000000]
+        ];
+        for(const [referenceChain, sourceChain, actionIndex, landed] of shapes){
+            const pub = buildPub([]);
+            const archived = signaturePrices().map(row => Object.assign(row, {
+                reference_chain: referenceChain, source_chain: sourceChain,
+                source_action_index: actionIndex, batch_block_time: landed
+            }));
+            signPrices(pub, archived, IDENTITIES);
+            expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' }),
+                [referenceChain, sourceChain, actionIndex, landed].join('/')).to.equal(true);
+        }
+    });
+}

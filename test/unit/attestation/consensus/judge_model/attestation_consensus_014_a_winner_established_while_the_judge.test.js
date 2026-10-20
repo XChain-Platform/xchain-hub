@@ -154,12 +154,32 @@ async function raceRound() {
             expect(pending._agreeing).to.equal(true);   // judge call in flight
             expect(pending.winner).to.equal(null);
 
-            // The race: a responsible peer's signed provider_error PREPARE is adopted
-            // (any sender may record an outage; a judge_model no_quorum is leader-only).
+            // The race: a responsible peer's signed provider_error PREPARE lands mid-judge.
+            // This hub holds two ok proposals, so it cannot derive an outage and refuses it.
             c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
             await flush();
-            expect(pending.status).to.equal('provider_error');
+            expect(pending.winner).to.equal(null);
 
+            release();
+            await flush();
+            return pending;
+        }
+
+// A writer that does land during the judge call (here the engine's own non-ok path) keeps its winner.
+async function racedWinnerRound() {
+            let release;
+            let reg = makeRealProviderRegistry(
+                () => new Promise((resolve) => { release = () => resolve({ body: BODY, meta: '' }); }),
+                'judge_model');
+            c = new AttestationConsensus(hub, reg);
+            await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 3));
+            await flush();
+            c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+            c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+            await flush();
+            let pending = c.pending.get(RID);
+            expect(pending._agreeing).to.equal(true);
+            expect(c.adoptNonOkWinner(RID, 'provider_error')).to.equal(pending);
             release();
             await flush();
             return pending;
@@ -173,10 +193,17 @@ async function raceRound() {
     // response whose signature count over its own canonical is below redundancy.
     // Every signature in the map must verify over the round's FINAL canonical.
 describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('lets the raced outcome stand rather than overwriting it', async function () {
-            let pending = await raceRound();
+            let pending = await racedWinnerRound();
             expect(pending.status).to.equal('provider_error');
             expect(pending.winner.body.length).to.equal(0);
             expect(pending.winner.meta).to.equal('');
+        }); }); });
+
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); describe('a winner established while the judge ran', function () { it('refuses a mid-judge provider_error PREPARE it cannot derive and lands the judge winner', async function () {
+            let pending = await raceRound();
+            expect(pending.status).to.equal('ok');
+            expect(pending.winner.body.equals(BODY)).to.equal(true);
+            expect(pending.signatures.has(pub(p2))).to.equal(false);
         }); }); });
 
 // A judge_model round is the only one with a real await window: agree() is an

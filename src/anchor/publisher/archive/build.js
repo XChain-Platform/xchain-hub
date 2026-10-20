@@ -22,7 +22,8 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
-const { sortedListRows, listCapabilityWants } = require('./list/list_rows_select.js');
+const { sortedListRows } = require('./list/list_rows_select.js');
+const { archiveCapabilityWants } = require('./capability_wants.js');
 const { foldArchiveSuffix } = require('../fold/wrapper_canonical.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -40,8 +41,8 @@ module.exports = {
     // cannot disagree about the key no matter what else diverges.
     //
     // The batch_seq is deliberately NOT in the key. It came from
-    // getNextBatchSeq, which is MAX(batch_seq)+1 over THIS hub's own
-    // cross_chain_matches / cross_chain_calls / validator_rewards, with no consensus
+    // getNextBatchSeq, which is MAX(batch_seq)+1 over every batch_seq table THIS hub
+    // holds (the list lives in db.getNextAnchorBatchSeq), with no consensus
     // step: it is only fleet-uniform while backfillBatch plus the XANC_FINALIZED gossip
     // have landed everywhere. Once two hubs' tables differ by one missed back-fill they
     // keyed the SAME wrapper differently, so each ranked itself 0 under its own key and
@@ -75,7 +76,8 @@ module.exports = {
         // would otherwise pin the floor at batch 0.
         if(seq === null || seq === undefined || seq === '') return;
         let s = Number(seq);
-        if(!Number.isFinite(s) || s <= this._observedConsumedBatchSeq) return;
+        // A batch seq is a whole number >= 0; anything else would make the next draw fractional or negative
+        if(!Number.isSafeInteger(s) || s < 0 || s <= this._observedConsumedBatchSeq) return;
         this._observedConsumedBatchSeq = s;
         logger.warn('StateAnchorPublisher: batch seq ' + s + ' is already consumed by the federation (' +
                      why + '); the next archive round will draw above it rather than rebuilding under a ' +
@@ -181,35 +183,6 @@ module.exports = {
         const checkpoints = this.sortedStateCheckpoints((quorumRows || {}).checkpoints);
         const prices = this.sortedPriceSnapshots((quorumRows || {}).prices);
         const tombstones = this.sortedPriceTombstones((quorumRows || {}).tombstones);
-        let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
-            .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
-            .concat(bridges.concat(policies).map(r => ({ block: Number(r.snapshot_block), capability: 'cross_chain' })))
-            .concat(listCapabilityWants(lists))
-            .concat(checkpoints.map(r => ({ block: Number(r.snapshot_block), capability: 'oracle_publish' })))
-            .concat(prices.filter(r => this.isSignatureProofedPrice(r))
-                .map(r => ({ block: Number(r.reference_block), capability: 'price' })))
-            // oracle_publish set at each reward's earn block; verifiers (and
-            // recovery) check the rewarded pubkey was an eligible publisher.
-            .concat(rewards.map(({row}) => ({ block: Number(row.block_index), capability: 'oracle_publish' })));
-        if(wrapperSnapshotBlock != null)
-            wants.push({ block: Number(wrapperSnapshotBlock), capability: 'oracle_publish' });
-        let seen = new Set(), snaps = [];
-        for(let w of wants.sort((a, b) => a.block - b.block || (a.capability < b.capability ? -1 : a.capability > b.capability ? 1 : 0))){
-            let key = w.block + '|' + w.capability;
-            if(seen.has(key)) continue;
-            seen.add(key);
-            let set = await this.resolveCapabilitySet(w.capability, w.block, network);
-            // Total order: pubkey then source. Equal pubkeys are legitimately
-            // possible in weighted snapshots (one row per (source, pubkey), a key
-            // may be delegated by multiple sources); a two-branch comparator that
-            // returns 1 for both orderings of an equal pair is inconsistent and
-            // leaves relative order engine-defined, which can diverge the crc32
-            // archive bytes that follower co-signers verify byte-for-byte.
-            for(let v of set.slice().sort((a, b) => a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)))
-                snaps.push({ snapshot_block: w.block, capability: w.capability,
-                             signing_pubkey: v.pubkey, amount: v.amount,
-                             source: String(v.source != null ? v.source : '') });
-        }
         // `calls` and `rewards` are additive to the v1 archive shape: recovery
         // treats a missing key as an empty list, so older on-chain archives stay
         // parseable.
@@ -229,6 +202,26 @@ module.exports = {
         if(prices.length) obj.price_snapshots = prices.map(r => this.serializePriceSnapshot(r));
         if(tombstones.length) obj.price_tombstones = tombstones.map(r => this.serializePriceTombstone(r));
         if(lists.length) obj.list_snapshots = lists.map(r => this.serializeListSnapshot(r));
+        // Derive the groups from the serialized rows through the follower's own list, so the two never disagree
+        let wants = archiveCapabilityWants(obj, wrapperSnapshotBlock, r => this.isSignatureProofedPrice(r))
+            .map(w => ({ block: Number(w.block), capability: w.capability }));
+        let seen = new Set(), snaps = [];
+        for(let w of wants.sort((a, b) => a.block - b.block || (a.capability < b.capability ? -1 : a.capability > b.capability ? 1 : 0))){
+            let key = w.block + '|' + w.capability;
+            if(seen.has(key)) continue;
+            seen.add(key);
+            let set = await this.resolveCapabilitySet(w.capability, w.block, network);
+            // Total order: pubkey then source. Equal pubkeys are legitimately
+            // possible in weighted snapshots (one row per (source, pubkey), a key
+            // may be delegated by multiple sources); a two-branch comparator that
+            // returns 1 for both orderings of an equal pair is inconsistent and
+            // leaves relative order engine-defined, which can diverge the crc32
+            // archive bytes that follower co-signers verify byte-for-byte.
+            for(let v of set.slice().sort((a, b) => a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)))
+                snaps.push({ snapshot_block: w.block, capability: w.capability,
+                             signing_pubkey: v.pubkey, amount: v.amount,
+                             source: String(v.source != null ? v.source : '') });
+        }
         obj.capability_snapshots = snaps;
         return { json: JSON.stringify(obj), count: matches.length };
     },

@@ -147,15 +147,6 @@ module.exports = {
         return true;
     },
 
-    // Release a round that finalized in PBFT but whose fail-closed precondition refused
-    // the write, so the next poll can re-propose it. Both releases are needed: _inflight
-    // gates the poll (`if(this._inflight.has(roundId)) return;`) and the consensus
-    // finalized-ring refuses to re-run a round id it has already retired. No 'call:'
-    // event is emitted, because nothing was finalized in this hub's DB.
-    // Record a retraction this hub applies, before it looks for rows to flip, so a write
-    // that is mid-await is fenced whether or not the retraction finds anything to update.
-    // Bounds arrive already normalized by normalizeRetractionBounds, so the predicate here
-    // and the SQL predicate in retractCallsForReorg read the same fields the same way.
     // Bring the fence fields up on an instance that reaches these paths without the
     // constructor, which several suites build with Object.create(Engine.prototype).
     ensureRetractionFence(){
@@ -164,6 +155,10 @@ module.exports = {
         if(typeof this._retractionSeq !== 'number') this._retractionSeq = 0;
     },
 
+    // Record a retraction this hub applies, before it looks for rows to flip, so a write
+    // that is mid-await is fenced whether or not the retraction finds anything to update.
+    // Bounds arrive already normalized by normalizeRetractionBounds, so the predicate here
+    // and the SQL predicate in retractCallsForReorg read the same fields the same way.
     recordRetraction(chain, bounds){
         this.ensureRetractionFence();
         this._retractionFence.push({
@@ -201,6 +196,11 @@ module.exports = {
             (!e.fenced  || gen <= e.gen));
     },
 
+    // Release a round that finalized in PBFT but whose fail-closed precondition refused
+    // the write, so the next poll can re-propose it. Both releases are needed: _inflight
+    // gates the poll (`if(this._inflight.has(roundId)) return;`) and the consensus
+    // finalized-ring refuses to re-run a round id it has already retired. No 'call:'
+    // event is emitted, because nothing was finalized in this hub's DB.
     deferFinalize(row){
         this._inflight.delete(row.round_id);
         if(this.consensus && typeof this.consensus.forgetFinalized === 'function')

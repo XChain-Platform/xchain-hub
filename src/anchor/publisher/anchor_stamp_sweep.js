@@ -62,6 +62,16 @@ module.exports = {
             return 0;
         }
 
+        // A bundle's reward round is the highest snapshot block among the sections its txid stamps.
+        const bundleBlocks = new Map();
+        for(const row of rows || []){
+            const block = Number(row.snapshot_block);
+            if(row.snapshot_block === null || row.snapshot_block === undefined || !Number.isSafeInteger(block)) continue;
+            const txid = String(row.txid);
+            if(!bundleBlocks.has(txid) || block > bundleBlocks.get(txid)) bundleBlocks.set(txid, block);
+        }
+        const clearedTxids = new Set();
+
         let cleared = 0;
         for(const row of rows || []){
             let location;
@@ -78,13 +88,52 @@ module.exports = {
                 const result = await this.db.updateStateCheckpointClearStamp(
                     String(row.txid), String(row.chain), String(row.network),
                     Number(row.block_index), Number(row.checkpoint_seq));
-                if(result && Number(result.affectedRows) > 0) cleared++;
+                if(result && Number(result.affectedRows) > 0){
+                    cleared++;
+                    clearedTxids.add(String(row.txid));
+                }
             } catch(err){
                 logger.warn('StateAnchorPublisher: anchor stamp sweep could not clear transaction ' +
                             row.txid + ': ' + (err && err.message));
             }
         }
+
+        // Retract the hub-local reward each swept bundle wrote at broadcast, since it never mined.
+        for(const txid of clearedTxids){
+            if(bundleBlocks.has(txid)) await this.retractSweptBundleReward(txid, bundleBlocks.get(txid));
+        }
         return cleared;
+    },
+
+    // Delete this hub's unarchived anchor_bundle row for a bundle whose transaction vanished.
+    // publish_bundle.js recordOwnBundleReward writes that row when DOGE accepts the broadcast,
+    // and the superseded slot is never republished, so the row would outlive its anchor and an
+    // unscoped hub would archive it. Never throws: the stamp is already cleared either way.
+    async retractSweptBundleReward(txid, snapshotBlock){
+        const tracker = this.hub && this.hub.rewardTracker;
+        const me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
+        if(!tracker || typeof tracker.withAnchorLock !== 'function' || !me) return false;
+        try {
+            // Keep the row while another stamp at this block may still back it (a split bundle)
+            const others = await this.db.countOtherAnchorStampsAtSnapshotBlock(snapshotBlock, txid);
+            if(others > 0){
+                logger.info('StateAnchorPublisher: anchor stamp sweep kept the anchor_bundle reward at ' +
+                            snapshotBlock + '; ' + others + ' other stamp(s) remain at that block');
+                return false;
+            }
+            // Serialize with recordAnchorReward under the per-anchor key it locks its writes on
+            const result = await tracker.withAnchorLock('anchor_bundle|' + Number(snapshotBlock),
+                () => this.db.deleteUnarchivedValidatorReward(me, Number(snapshotBlock), 'anchor_bundle', 0));
+            const removed = !!(result && Number(result.affectedRows) > 0);
+            if(removed)
+                logger.warn('StateAnchorPublisher: anchor stamp sweep retracted the anchor_bundle reward at ' +
+                            snapshotBlock + ' for vanished transaction ' + txid);
+            return removed;
+        } catch(err){
+            logger.warn('StateAnchorPublisher: anchor stamp sweep could not retract the anchor_bundle reward at ' +
+                        snapshotBlock + ' for ' + txid + ': ' + (err && err.message));
+            return false;
+        }
     }
 
 };

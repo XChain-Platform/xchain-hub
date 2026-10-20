@@ -144,27 +144,32 @@ function registerFeature3resolveQuorumFailClosed1223() {
     registerFeature3resolveQuorumFailClosed1223Part1();
   });
 }
+// Any hub opens a round from a request: the live set and a per-hub counter elect nobody.
 function registerFeature4getLeaderPart1() {
-  it('rotates through validators by seq % N', function () {
+  it('opens a round for every request in a row, whatever the old seq rotation would pick', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
-    expect(rootSuiteEngine.getLeader(0, null, null)).to.equal(VALIDATORS_3[0]);
-    expect(rootSuiteEngine.getLeader(1, null, null)).to.equal(VALIDATORS_3[1]);
-    expect(rootSuiteEngine.getLeader(3, null, null)).to.equal(VALIDATORS_3[0]);
+    wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
+    rootSuitePm.validatorAddr = VALIDATORS_3[0].addr;
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    rootSuiteEngine.requestAttestation('BTC', 2, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuiteEngine.pendingAttestations.size === 2, { label: 'both rounds to open' });
   });
-  it('uses chain-pair set for leader selection', function () {
+  it('opens a round when the live chain-pair set leaves this hub out', async function () {
     let pairSet = [makeValidator(5), makeValidator(6)];
     rootSuiteEngine.chainPairValidators = new Map([['BTC-LTC', pairSet]]);
     rootSuiteEngine.setValidatorSet(VALIDATORS_7);
-    expect(rootSuiteEngine.getLeader(0, 'BTC', 'LTC')).to.equal(pairSet[0]);
-    expect(rootSuiteEngine.getLeader(1, 'BTC', 'LTC')).to.equal(pairSet[1]);
+    wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
+    rootSuitePm.validatorAddr = VALIDATORS_7[0].addr;
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuiteEngine.pendingAttestations.has('BTC:1:LTC'), { label: 'the round to open' });
   });
-  it('returns null for empty set', function () {
-    rootSuiteEngine.setValidatorSet([]);
-    expect(rootSuiteEngine.getLeader(0, null, null)).to.be.null;
+  it('keeps no proposer election or counter on the engine', function () {
+    expect(rootSuiteEngine.getLeader).to.equal(undefined);
+    expect(rootSuiteEngine.seq).to.equal(undefined);
   });
 }
 function registerFeature4getLeader() {
-  describe('getLeader()', function () {
+  describe('proposer (no live-set election)', function () {
     registerFeature4getLeaderPart1();
   });
 }
@@ -233,6 +238,42 @@ function registerFeature6requestAttestationPart1() {
     expect(threw, 'should refuse over an empty snapshot').to.be.true;
   });
 }
+// A one-member snapshot also yields quorum 0, and only its sole member may attest alone.
+function registerFeature6requestAttestationOneMember() {
+  it('REFUSES to finalize unilaterally over a one-member cross_chain snapshot that does not hold this hub', async function () {
+    rootSuiteEngine.setValidatorSet(VALIDATORS_3);
+    rootSuiteHub.resolveBtcLatestBlock = async () => 800000;
+    rootSuiteHub.capabilitySnapshot = {
+      getSnapshot: async () => ({ validators: [{ pubkey: VALIDATORS_3[1].pubkey }], count: 1 }),
+      getQuorum: () => 0
+    };
+    let heard = [];
+    rootSuiteEngine.on('attestation:finalized', a => heard.push(a));
+    let caught = null;
+    try {
+      await rootSuiteEngine.requestAttestation('BTC', 7, 'LTC');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'should refuse over a non-self one-member snapshot').to.be.an('error');
+    expect(caught.message).to.match(/does not hold this hub/);
+    expect(heard).to.deep.equal([]);
+    expect(rootSuiteEngine.finalized.has('BTC:7:LTC')).to.be.false;
+  });
+  it('lets the sole member of a one-member cross_chain snapshot finalize alone', async function () {
+    rootSuiteEngine.setValidatorSet(VALIDATORS_3);
+    rootSuiteHub.resolveBtcLatestBlock = async () => 800000;
+    let self = rootSuiteEngine.selfPubkey();
+    expect(self, 'the engine resolves its own signing key').to.be.a('string');
+    rootSuiteHub.capabilitySnapshot = {
+      getSnapshot: async () => ({ validators: [{ pubkey: self.toUpperCase() }], count: 1 }),
+      getQuorum: () => 0
+    };
+    let result = await rootSuiteEngine.requestAttestation('BTC', 7, 'LTC');
+    expect(result.status).to.equal('attested');
+    expect(rootSuiteEngine.finalized.has('BTC:7:LTC')).to.be.true;
+  });
+}
 function registerFeature6requestAttestationPart2() {
   it('returns stored attestation if already finalized', async function () {
     rootSuiteEngine.finalized.add('BTC:42:LTC');
@@ -294,21 +335,19 @@ function registerFeature6requestAttestationPart3() {
     let doge = await rootSuiteEngine.requestAttestation('DOGE', 1, 'BTC');
     expect(doge.confirmations).to.equal(60);
   });
-  it('throws when not the leader in multi-node mode', async function () {
+  it('proposes from a hub outside the live set in multi-node mode', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
     wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
     rootSuitePm.validatorAddr = 'ws://not-in-set:10001';
-    try {
-      await rootSuiteEngine.requestAttestation('BTC', 1, 'LTC');
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect(e.message).to.include('Not the leader');
-    }
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuitePm.broadcast.calledWith('XCHAIN_ATTEST_PROPOSE'), { label: 'the PROPOSE broadcast' });
+    expect(rootSuiteEngine.pendingAttestations.has('BTC:1:LTC')).to.equal(true);
   });
 }
 function registerFeature6requestAttestation() {
   describe('requestAttestation()', function () {
     registerFeature6requestAttestationPart1();
+    registerFeature6requestAttestationOneMember();
     registerFeature6requestAttestationPart2();
     registerFeature6requestAttestationNested5();
     registerFeature6requestAttestationPart3();

@@ -13,7 +13,8 @@
 const mariadb = require('mariadb');
 const { expect } = require('chai');
 const Database = require('../../../src/db');
-const { DATETIME_COLUMNS } = require('../../../src/db/schema/datetime_columns.js');
+const path = require('path');
+const files = require('../../../src/db/schema/sql_migration_files.js');
 const testDb = require('../../helpers/testDb');
 
 const DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
@@ -24,6 +25,15 @@ const DB_PASS = process.env.TEST_DB_PASS || '';
 const FRESH_DB_NAME = DB_NAME + '_datetime_retype_fresh';
 const STORED_TIME = '2026-01-15 12:34:56';
 const SHIFTED_TIME = '2026-01-15 06:34:56';
+const MIGRATIONS = path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations');
+const RETYPE_FILE = '2026-10-19-timestamp-columns-to-datetime.sql';
+
+// The retype's statements, and the columns they name with their DATETIME definitions.
+const RETYPE_STATEMENTS = files.splitMigrationStatements(files.readMigration(MIGRATIONS, RETYPE_FILE));
+const DATETIME_COLUMNS = RETYPE_STATEMENTS.map(stmt => {
+    const m = stmt.match(/^ALTER TABLE `(\w+)` MODIFY `(\w+)` (.+)$/);
+    return { table: m[1], column: m[2], columnDef: m[3] };
+});
 
 let db;
 let freshDb;
@@ -64,14 +74,18 @@ async function rehearseDatetimeRetype() {
     // Prove the aged columns still render stored instants through the session zone.
     expect(await readFixtureTimes()).to.deep.equal([SHIFTED_TIME, SHIFTED_TIME, SHIFTED_TIME]);
 
-    await db.runDatetimeColumnMigrations();
+    // The operator path: the runner applies the manual file and records it.
+    const result = await db.runDatedMigrations({ includeManual: true, only: [RETYPE_FILE] });
+    expect(result.applied).to.deep.equal([RETYPE_FILE]);
     const migrated = await columnMetadata(db);
     // Verify every listed column migrated and now ignores the session zone.
     expect(Object.values(migrated).map(v => v.dataType)).to.deep.equal(
         DATETIME_COLUMNS.map(() => 'datetime'));
     expect(await readFixtureTimes()).to.deep.equal([STORED_TIME, STORED_TIME, STORED_TIME]);
 
-    await db.runDatetimeColumnMigrations();
+    // A second run is a ledger no-op, and re-issuing the statements by hand is safe.
+    expect((await db.runDatedMigrations({ includeManual: true, only: [RETYPE_FILE] })).applied).to.deep.equal([]);
+    for (const stmt of RETYPE_STATEMENTS) await db.doQuery(stmt);
     // Verify the second pass changes neither definitions nor stored values.
     expect(await columnMetadata(db)).to.deep.equal(migrated);
     expect(await readFixtureTimes()).to.deep.equal([STORED_TIME, STORED_TIME, STORED_TIME]);

@@ -46,8 +46,9 @@ module.exports = {
         // pollMs makes setInterval clamp to ~1ms and storm, and a NaN or zero
         // intervalBlocks makes the cadence latch never hold, anchoring 3 chains every poll.
         // intervalBlocks goes through the shared resolver the anchor publisher also calls,
-        // so the two readers of CHECKPOINT_INTERVAL_BLOCKS cannot drift.
-        this.intervalBlocks = resolveCheckpointIntervalBlocks(cfg);
+        // so the two readers of CHECKPOINT_INTERVAL_BLOCKS cannot drift; both pass their
+        // own network, which decides whether an override is honoured (regtest only).
+        this.intervalBlocks = resolveCheckpointIntervalBlocks(cfg, this.network);
         this.pollMs         = positiveIntConfig(hubConfig.CHECKPOINT_POLL_MS || cfg.CHECKPOINT_POLL_MS,
                                                 60000, 'CHECKPOINT_POLL_MS');
         this.roundTimeoutMs = positiveIntConfig(hubConfig.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS,

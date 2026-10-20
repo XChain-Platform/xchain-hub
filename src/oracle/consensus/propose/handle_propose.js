@@ -30,6 +30,7 @@ const { coSignGateRejects } = require('../cosign_gate.js');
 const { bindAndCoSign } = require('../follower_round.js');
 const { nominalRoundSeconds, roundTimeMatches } = require('../round_time/round_time.js');
 const { roundTimeGateActive } = require('../round_time_gate.js');
+const { roundIsFederated, tipAnchoredFederation } = require('../../../consensus/federation.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -65,7 +66,7 @@ function proposalAdmissible(envelope, proposal) {
 
 // Mirror the finalizeRound() fallback: if weighted but no validators in the
 // snapshot, degrade to count mode so the round can finalize normally.
-function weightedProposeVerdict(round, wt, snap) {
+function weightedProposeVerdict(round, wt, snap, anchor) {
     if (wt && (!snap || !Array.isArray(snap.validators) || snap.validators.length === 0)) {
         // Federation-split guard (fail closed), mirroring the leader-side guard
         // in finalizeRound (#1222). swq.isStakeWeightedQuorumActive is a pure
@@ -74,9 +75,10 @@ function weightedProposeVerdict(round, wt, snap) {
         // reachability (e.g. a per-RPC getstakeweightsbycapability failure) forks
         // the finalization THRESHOLD: peers tally summed stake while this hub
         // tallies a count over the same N. Skip the round rather than diverge.
-        // A single-node / regtest hub (getQuorum()===0) has no peer to split
-        // from, so it keeps the graceful count fallback below.
-        if (this.getQuorum() > 0) {
+        // Federated is the leader's own test at the round's anchor (roundIsFederated); a
+        // hub that is not federated there has no peer to split from, so it keeps the
+        // graceful count fallback below.
+        if (roundIsFederated(this, anchor)) {
             logger.warn('Oracle: dropping PROPOSE for round ' + round + ': weighted mode ' +
                 'active but weight snapshot unavailable while federated; refusing to open a ' +
                 'count-mode pending round this hub\'s peers are not using.');
@@ -94,9 +96,11 @@ function weightedProposeVerdict(round, wt, snap) {
 // its own live set (quorumForRound falls through to getQuorum below) with
 // memberPubkeys null, so its vote tally is unfiltered and its leader
 // election is live-set rotation: three ways to disagree with every peer at
-// the same height on nothing but its own indexer reachability.
-function proposeSnapshotQuorum(round, blockHeight, snap) {
-    if (!this.hasDeterministicSnapshot(snap) && this.getQuorum() > 0) {
+// the same height on nothing but its own indexer reachability. Federated means
+// the leader's roundIsFederated at the round's anchor, never bare getQuorum() > 0,
+// which reads 0 on a one-entry validatorSet with open peers.
+function proposeSnapshotQuorum(round, blockHeight, snap, anchor) {
+    if (!this.hasDeterministicSnapshot(snap) && roundIsFederated(this, anchor)) {
         logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
             'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
             'pending round sized from this hub\'s live validator set.');
@@ -111,7 +115,7 @@ function proposeSnapshotQuorum(round, blockHeight, snap) {
     // round (finalizeRound), so a PROPOSE for one is spurious/Byzantine; drop
     // it. Genuine single-node hubs receive no PROPOSEs, and a healthy
     // federation snapshot is non-empty, so this only bites the bad case.
-    if (this.isEmptyFederationSnapshot(snap)) {
+    if (this.isEmptyFederationSnapshot(snap, anchor)) {
         logger.warn('Oracle: dropping PROPOSE for round ' + round + ': empty price-qualifying ' +
             'snapshot at block ' + blockHeight + ' on a federated hub (a legitimate leader skips ' +
             'such a round; not accepting a single-signature finalization).');
@@ -180,6 +184,9 @@ async function lockProposeSnapshot(envelope, proposal, blockHeight, roundTimeAct
     // resolved and bounded above, before the clamp-reference read.
     let wt = false, snap = null, quorumForRound = null;
     let memberPubkeys = null;
+    // The federation gates read the round's real BTC anchor; a round-id stand-in (only
+    // returned to a hub boundedProposeHeight found unfederated) is no height at all.
+    let anchor = Number.isInteger(proposal.btcBlockHeight) && proposal.btcBlockHeight > 0 ? blockHeight : null;
     {
         let existing = this.pendingRounds.get(round);
         if (existing) {
@@ -194,7 +201,7 @@ async function lockProposeSnapshot(envelope, proposal, blockHeight, roundTimeAct
                     ? await this.hub.capabilitySnapshot.getWeightSnapshot('price', blockHeight)
                     : await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight))
                 : null;
-            let verdict = weightedProposeVerdict.call(this, round, wt, snap);
+            let verdict = weightedProposeVerdict.call(this, round, wt, snap, anchor);
             if (verdict === DROP) return;
             if (verdict === DOWNGRADE_TO_COUNT) {
                 wt   = false;
@@ -202,7 +209,7 @@ async function lockProposeSnapshot(envelope, proposal, blockHeight, roundTimeAct
                     ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
                     : null;
             }
-            let quorum = proposeSnapshotQuorum.call(this, round, blockHeight, snap);
+            let quorum = proposeSnapshotQuorum.call(this, round, blockHeight, snap, anchor);
             if (quorum === DROP) return;
             quorumForRound = quorum;
             memberPubkeys = this.memberPubkeySet(snap);
@@ -268,11 +275,12 @@ module.exports = {
         // path. Only reachable from a peer that omits the height (old peer mid
         // rolling deploy, or a malformed envelope) -- current honest senders always
         // populate it. Fail closed: drop the PROPOSE rather than pin to a fake block.
-        // A single-node / regtest hub (getQuorum()===0) has no peer to split from,
-        // so it keeps the legacy round-as-anchor fallback for bootstrap.
+        // A hub not federated at its OWN tip (tipAnchoredFederation: the proposer picks the
+        // wire height) has no peer to split from, so it keeps the round-as-anchor bootstrap.
+        let fed = await tipAnchoredFederation(this);
         let blockHeight = btcBlockHeight;
         if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
-            if (this.getQuorum() > 0) {
+            if (fed.federated) {
                 logger.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
                     'height in envelope on a federated hub; refusing to pin the price snapshot ' +
                     'at the round id (not a BTC block boundary), which would diverge from the ' +
@@ -297,11 +305,10 @@ module.exports = {
         // decline when we cannot resolve a tip of our own. Same shape and
         // tolerance as StateCheckpointEngine's co-sign guard. Federated hubs
         // only, like every other fail-closed guard on this path.
-        if (this.getQuorum() > 0) {
-            let myTip = this.hub && this.hub.resolveBtcLatestBlock
-                ? await this.hub.resolveBtcLatestBlock()
-                : null;
-            if (!Number.isFinite(Number(myTip))) {
+        if (fed.federated) {
+            let myTip = fed.tipResolved ? fed.myTip
+                : (this.hub && this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null);
+            if ((fed.tipResolved && !fed.tipKnown) || !Number.isFinite(Number(myTip))) {
                 logger.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
                     'our own BTC tip to bound the leader-supplied snapshot height ' +
                     '(federated hub).');

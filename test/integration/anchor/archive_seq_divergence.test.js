@@ -17,7 +17,7 @@
 // (a dropped announcement, a hub restarting through the round, a partitioned peer).
 //
 // THE HAZARD. An election key that binds getNextBatchSeq(), i.e. MAX(batch_seq)+1
-// over THIS hub's own cross_chain_matches / cross_chain_calls / validator_rewards, with
+// over every batch_seq table THIS hub holds (listed in db.getNextAnchorBatchSeq), with
 // no consensus step, is uniform only while every back-fill has landed; once one hub misses
 // one, the two compute DIFFERENT keys for
 // the SAME wrapper checkpoint, and the failover ladder stops being a shared ordering:

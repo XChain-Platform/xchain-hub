@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration: widenUniqueKey against a real MariaDB.
+// Integration: the dated unique-key widen against a real MariaDB.
 //
 // The unit tier models the DDL; this tier runs it. That distinction is the whole
 // point of the defect being fixed: the failing statement was a real
@@ -19,15 +19,32 @@
 // that had already run in front of it. Only a server can produce that pair.
 //
 // The table is a throwaway shaped like an aged capability_snapshots (narrow key,
-// widen column not yet added). It is created and dropped by the test, so nothing
-// the hub reads is touched.
+// widen column not yet added). The statements run are the capability_snapshots
+// widen from the committed migration file, pointed at that table, so the SQL under
+// test is the SQL an operator applies. It is created and dropped by the test, so
+// nothing the hub reads is touched.
 
 const { expect } = require('chai');
+const path       = require('path');
 const testDb     = require('../../helpers/testDb');
+const files      = require('../../../src/db/schema/sql_migration_files.js');
 
 const TABLE = 'widen_key_probe';
 const KEY   = 'uq_probe';
 const WIDE  = '(snapshot_block, capability, signing_pubkey, source)';
+const MIGRATIONS = path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations');
+
+// The capability_snapshots widen statements from the dated file, retargeted.
+function widenStatements() {
+    return files.splitMigrationStatements(files.readMigration(MIGRATIONS, '2026-10-19-widen-unique-keys.sql'))
+        .filter(stmt => stmt.includes('`capability_snapshots`'))
+        .map(stmt => stmt.split('`capability_snapshots`').join('`' + TABLE + '`').split('uq_cap_snap').join(KEY));
+}
+
+// Run the widen as the runner would: in order, stopping at the first failure.
+async function applyWiden(database) {
+    for (const stmt of widenStatements()) await database.doQuery(stmt);
+}
 
 // Columns of a live index, in key order.
 async function indexColumns(db, table, indexName) {
@@ -59,7 +76,7 @@ async function insertRow(db, source) {
 
 let db;
 
-describe('Integration: widenUniqueKey on a real MariaDB', function () {
+describe('Integration: the dated unique-key widen on a real MariaDB', function () {
     registerWidenHooks();
     registerWidenTests();
 });
@@ -103,10 +120,14 @@ function registerWidenTests() {
 }
 
 // The production incident, reproduced: the widen column is genuinely absent, so
-// the server really does answer errno 1072. The old sequence left this table with
-// zero indexes and accepted the duplicate below.
+// the server really does answer errno 1072 on the temporary ADD, before any DROP has
+// run. A drop-first sequence left this table with zero indexes and accepted the
+// duplicate below.
 async function testMissingColumn() {
-    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    let refused = null;
+    try { await applyWiden(db); } catch (e) { refused = e; }
+    expect(refused, 'the widen ran without the column').to.be.an('error');
+    expect(refused.errno).to.equal(1072);
 
     expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
         ['snapshot_block', 'capability', 'signing_pubkey']);
@@ -121,7 +142,7 @@ async function testMissingColumn() {
 
 async function testWidenedKey() {
     await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await applyWiden(db);
 
     expect(await indexColumns(db, TABLE, KEY)).to.deep.equal(
         ['snapshot_block', 'capability', 'signing_pubkey', 'source']);
@@ -137,22 +158,22 @@ async function testWidenedKey() {
 
 async function testSecondRun() {
     await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
-    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
-    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await applyWiden(db);
+    await applyWiden(db);
 
     expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
     expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);
 }
 
 // A run interrupted between the temporary ADD and the rename leaves the wider
-// key under the temporary name. The next run must finish it, never restart it
-// from a state with no key.
+// key under the temporary name. Applying the file again must finish it, and every
+// statement before the re-add leaves the temporary key enforcing.
 async function testInterruptedWiden() {
     await db.doQuery('ALTER TABLE `' + TABLE + "` ADD COLUMN source VARCHAR(255) NOT NULL DEFAULT ''");
     await db.doQuery('ALTER TABLE `' + TABLE + '` ADD UNIQUE KEY `' + KEY + '_widening` ' + WIDE);
     await db.doQuery('ALTER TABLE `' + TABLE + '` DROP INDEX `' + KEY + '`');
 
-    await db.widenUniqueKey(TABLE, KEY, 'source', WIDE);
+    await applyWiden(db);
 
     expect(await indexColumns(db, TABLE, KEY)).to.have.lengthOf(4);
     expect(await uniqueIndexNames(db, TABLE)).to.deep.equal([KEY]);

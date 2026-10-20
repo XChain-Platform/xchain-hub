@@ -91,6 +91,7 @@ describe('StateCheckpointEngine: same-seq conflict fence', function () {
     afterEach(function () { sinon.restore(); });
 
     registerSequenceConflictTests();
+    registerSequenceRaceTests();
     registerSequenceConflictControlTests();
 });
 
@@ -123,6 +124,47 @@ function registerSequenceConflictTests() {
         expect((await engine.getStats()).seq_conflicts).to.equal(0);
         await engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'bb' }], 1, false);
         expect((await engine.getStats()).seq_conflicts).to.equal(1);
+    });
+}
+
+// A db double that seats on uq_chain_seq as the real INSERT IGNORE does and reports
+// whether a row went in, starting empty.
+function mkUniqueSeqDb() {
+    const db = mkDb(null);
+    db.doQuery = async function (sql, params) {
+        if (!/^INSERT IGNORE INTO state_checkpoints/.test(sql)) return mkDb(null).doQuery.call(this, sql, params);
+        this.inserts.push(params);
+        if (this.rows.some(r => r.chain === params[0] && r.network === params[1] &&
+                                Number(r.checkpoint_seq) === Number(params[7]))) return { affectedRows: 0 };
+        this.rows.push({ chain: params[0], network: params[1], block_index: params[2], block_hash: params[3],
+            ledger_hash: params[4], actions_hash: params[5], contract_hash: params[6], checkpoint_seq: params[7],
+            snapshot_block: params[8] });
+        return { affectedRows: 1 };
+    };
+    return db;
+}
+
+function registerSequenceRaceTests() {
+
+    it('reports the loser when two payloads at one sequence race past the read before either commits', async function () {
+        const db     = mkUniqueSeqDb();
+        const engine = mkEngine(db, broadcaster);
+        let emitted = [];
+        engine.on('checkpoint:finalized', (e) => { emitted.push(e.checkpoint.block_index); });
+        const first = Object.assign({}, SEATED);
+        delete first.id;
+        delete first.validator_signatures;
+
+        await Promise.all([
+            engine.acceptFinalized(first, [{ pubkey: 'aa', sig: 'bb' }], 1, false),
+            engine.acceptFinalized(RIVAL, [{ pubkey: 'aa', sig: 'cc' }], 1, false)
+        ]);
+
+        expect(db.inserts.length, 'both reads passed, so both INSERTs ran').to.equal(2);
+        expect(db.rows.length, 'the unique key seated one row').to.equal(1);
+        expect(emitted, 'only the seated payload is emitted').to.deep.equal([494]);
+        expect(broadcaster.dropAllForResync.called, 'no spurious subscriber resync').to.equal(false);
+        expect(engine._seqConflicts, 'the loser is counted').to.equal(1);
     });
 }
 

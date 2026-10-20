@@ -25,6 +25,7 @@
 const coins = require('../../coins');
 const hubConfig = require('../../config');
 const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
+const { classifyArchiveSeqFloorReply } = require('./archive/seq_floor_seed.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -61,6 +62,10 @@ module.exports = {
         this._archivePublishing = null;
         this._attestRound        = null;  // leader-side publisher-attestation round (one at a time)
         this._archiveAttestRound = null;  // leader-side ARCHIVE publisher-attestation round (one at a time)
+        // XANCPUB slot -> the payload this hub signed there (attest_round.js
+        // claimAttestSlot), and how many second payloads it has refused.
+        this._attestSlots        = new Map();
+        this._attestSlotRefusals = 0;
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
         this._callHandler      = null;
         this._flushing         = false;
@@ -175,6 +180,9 @@ module.exports = {
         // wider than this is logged and ignored, and the honest floor arrives with the
         // next announcement.
         this._archiveSeqFloorMaxJump = 1024;
+        // Highest batch seq THIS hub's own DOGE address spent (its own heads, never peer
+        // input), so the v1 leader draw honours it without the jump cap. -1 means none known.
+        this._ownArchiveBatchSeq = -1;
 
     },
 
@@ -220,11 +228,24 @@ module.exports = {
         }
         try {
             const res = await this.indexerCall('DOGE', 'getarchiveanchor', { author: this.dogeAddress });
-            if(!res || !res.exists){
+            const reply = classifyArchiveSeqFloorReply(res);
+            // Report an indexer error as a failed lookup, never as "no archive"
+            if(reply.kind === 'error'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: the DOGE indexer answered ' + reply.detail);
+                return;
+            }
+            if(reply.kind === 'none'){
                 logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer found no archive');
                 return;
             }
-            this.noteConsumedBatchSeq(res.match_batch_seq, 'boot-time floor seed from the DOGE indexer');
+            // Refuse a seq that is not a whole number >= 0 (it would make the next batch seq fractional)
+            if(reply.kind === 'invalid'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer returned an invalid seq ' + String(reply.raw));
+                return;
+            }
+            this.noteConsumedBatchSeq(reply.seq, 'boot-time floor seed from the DOGE indexer');
+            // Also hold it as our own floor, which the jump cap never discards and a later failed read keeps
+            this.noteOwnArchiveSeq(reply.seq);
         } catch(err){
             logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + (err && err.message ? err.message : String(err)));
         }

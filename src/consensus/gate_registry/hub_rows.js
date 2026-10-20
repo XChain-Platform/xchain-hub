@@ -22,7 +22,9 @@
  * in ONE place in this repo and the module keeps its predicate and reads the
  * row back through get(). A key is the module's path under src/ joined to
  * the export name, the spelling the indexer's own non-twin rows use, so a
- * moved module can still find its row by name.
+ * moved module can still find its row by name. A row that mirrors an
+ * indexer-only gate keeps the indexer's key instead, so set-activation-heights
+ * arms both rows in one plan, and a test holds the two values equal.
  *
  * No SHARED-GATES markers on purpose: nothing here is twinned, so
  * reconcile-twins.sh never copies this file and the layout suite grades it
@@ -55,6 +57,16 @@ addGate('validators/governance/rules.GOV_SNAPSHOT_ACTIVATION', 'height', { mainn
 addGate('validators/governance/rules.GOV_TALLY_FAILOVER_ACTIVATION', 'height', { mainnet: UNPINNED, testnet: 156230, regtest: 0 });
 
 addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_PROOF_READY_SNAPSHOT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: UNARMED, regtest: 0 });
+
+// Height on a DOGE or LTC source leg's own block_index. From it a lock of a bare token native
+// to that chain is stamped one below the snapshot_block of the first finalized origin
+// checkpoint covering it, and held until one exists, so the destination indexer's escrow
+// cross-check (BRIDGE_ESCROW_ANCHOR_MATCH_ACTIVATION, first checkpoint strictly above the
+// stamp) finds it at once instead of stalling a block for the next round. Arm it at or before
+// that indexer row: a stamp ahead of the indexer's flag day is refused there exactly as a tip
+// stamp is, while an armed indexer facing tip stamps waits up to a cadence on every such lock.
+// Unarmed live; regtest from genesis, as the indexer row.
+addGate('cross_chain/bridge/proof_ready_snapshot.BRIDGE_ANCHOR_PROOF_READY_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157235, 'LTC:testnet': 4930600, 'DOGE:testnet': 68012800, testnet: UNARMED, regtest: 0 });
 
 // peers/hub_db/landing_watermark
 // Landed-from-clear-frontier: at/above the activation, in the landing indexer's
@@ -102,3 +114,14 @@ addGate('oracle/consensus/commit.COUNT_QUORUM_SIGNED_ACTIVATION', 'height', { ma
 addGate('anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157073, 'LTC:testnet': 4928460, 'DOGE:testnet': 68009330, testnet: 157073, regtest: 0 });
 
 addGate('anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 157073, 'LTC:testnet': 4928460, 'DOGE:testnet': 68009330, testnet: UNARMED, regtest: 0 });
+
+// Read by anchor/publisher/reward_defer.js under the indexer's key.
+// The indexer's archive fold-term gate, copied so the reward drain screens the same anchor_archive
+// rows the indexer screens. It keeps the indexer's key so set-activation-heights arms both rows at once;
+// reward_drain_archive_term.test.js holds the two values equal.
+addGate('anchor_archive_fold_term_activation.ANCHOR_ARCHIVE_FOLD_TERM_ACTIVATION', 'height', { mainnet: UNARMED, 'BTC:testnet': 156230, 'LTC:testnet': 4912984, 'DOGE:testnet': 67989993, testnet: UNARMED, regtest: 0 });
+
+// anchor/publisher/legacy_reward_pin: the time columns of the indexer's LEGACY_ANCHOR_REWARD_PIN protocol change.
+// It keeps the hub's own key, since the activation census refuses a hub time row under a change key and
+// set-activation-heights arms only the indexer row; reward_drain_legacy_pin.test.js holds the two equal.
+addGate('anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN', 'time', { mainnet: UNARMED, testnet: 1792454400, regtest: UNARMED });

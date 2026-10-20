@@ -117,7 +117,12 @@ module.exports = {
         if(this.reportSeqConflict(seated, cp, sigs)) return;
 
         await this.persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
-        await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
+        let inserted = await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
+        // Re-check the fence when the INSERT seated nothing: two different payloads at one
+        // sequence can both pass the read above before either row commits, and the loser
+        // must be reported here rather than streamed and emitted as if it were held.
+        if(!(inserted && Number(inserted.affectedRows) > 0) &&
+           this.reportSeqConflict(await this.seatedCheckpointAtSeq(cp), cp, sigs)) return;
 
         await this.broadcastRowOrResync(
             'state_checkpoints',

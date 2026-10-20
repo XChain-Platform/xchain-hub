@@ -106,6 +106,25 @@ module.exports = {
         );
     },
 
+    // Refuse a provider_error PREPARE this hub could not derive itself (okProposalsForRound:
+    // `need` proposals, none ok; buffered until `need`), in every strategy, or one sender's
+    // outage claim latches a hub holding an ok proposal and stalls the round to timeout.
+    // Called from nonOkDerivationRefuses (prepare.js) before anything is adopted.
+    providerErrorUnderivable(envelope, pending, rid, senderPubkey){
+        let needPe = Math.min(pending.redundancy, pending.responsible.length);
+        if(pending.proposals.size < needPe){
+            this.bufferEarlyMessage(rid, envelope);
+            return true;
+        }
+        let holdsOk = [...pending.proposals.values()].some(p => (p.status || 'ok') === 'ok');
+        if(holdsOk){
+            logger.warn('AttestationConsensus: refusing provider_error PREPARE from ' + senderPubkey.substring(0,16) +
+                '... for ' + rid.substring(0,16) + '... (this hub holds an ok proposal; it cannot derive provider_error)');
+            return true;
+        }
+        return false;
+    },
+
     // Liveness guard (item 5314): a follower re-signs the leader's
     // chosen body only after verifying the leader's Ed25519 sig, so it
     // never re-judges (LLM non-determinism makes that infeasible; the

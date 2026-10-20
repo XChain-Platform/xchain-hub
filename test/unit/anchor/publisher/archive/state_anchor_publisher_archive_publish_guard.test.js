@@ -33,6 +33,8 @@ const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../../../../src/validators/identity');
 const { waitUntil }        = require('../../../../helpers/waitUntil');
+const { DB_METHODS }       = require('../../../../helpers/mockHub.js');
+const { consensusStateDoQuery } = require('../../../../helpers/anchor_mesh_db.js');
 
 const BLOCK = 100;
 const CP_ROW = {
@@ -44,7 +46,8 @@ const CP_ROW = {
 function mkPub(){
     const identity = new ValidatorIdentity('11'.repeat(32));
     const pub = new StateAnchorPublisher({
-        db: { async doQuery(){ return []; } },
+        // [] for every statement but consensus_state, which the XANCPUB slot latch reads back.
+        db: { ...DB_METHODS, doQuery: consensusStateDoQuery() },
         network: 'regtest', p2pConfig: {},
         getIdentity: () => identity,
         getPeerManager: () => ({ on(){}, removeListener(){}, broadcast(){} }),

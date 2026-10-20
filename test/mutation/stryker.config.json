@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.json",
+  "mutate": [
+    "src/**/*.js",
+    "!src/sql/**"
+  ],
+  "testRunner": "mocha",
+  "mochaOptions": {
+    "spec": [
+      "test/unit/**/*.test.js"
+    ],
+    "ignore": [
+      "test/unit/coins/fullnode_comment.test.js",
+      "test/unit/db/retry/db_retry_const_vars.test.js",
+      "test/unit/api/jsonrpc_body_guard.test.js",
+      "test/unit/api/openrpc_coverage.test.js",
+      "test/unit/attestation/consensus/attest_response_canonical_era.test.js",
+      "test/unit/coins/fee_payment_mode_comment.test.js",
+      "test/unit/consensus/consensus_rules_digest.test.js",
+      "test/unit/consensus/gate_registry.test.js",
+      "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js",
+      "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js",
+      "test/unit/cross_chain/chain_tip_chain_id.test.js",
+      "test/unit/oracle/price/price_v0_canonical_admission.test.js",
+      "test/unit/oracle/round/oracle_round_extra_retention.test.js",
+      "test/unit/oracle/round/oracle_round_extra_submission_cap.test.js",
+      "test/unit/peers/manager/peer_manager_listener_ceiling.test.js",
+      "test/unit/peers/rpc_batch_guard.test.js",
+      "test/unit/repo_guards/carrier_logic_pin.test.js",
+      "test/unit/repo_guards/consensus_identity_cli.test.js",
+      "test/unit/rollcall/rollcall_status_rpc.test.js"
+    ]
+  },
+  "reporters": [
+    "html",
+    "json",
+    "progress"
+  ],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/report.json"
+  },
+  "concurrency": 4,
+  "timeoutMS": 10000,
+  "thresholds": {
+    "high": 95,
+    "low": 85,
+    "break": 80
+  },
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": true
+}

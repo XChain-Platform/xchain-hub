@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-20
+
+### Added
+- Stamped a DOGE- or LTC-origin bridge lock one BTC block below a covering origin checkpoint.
+- Applied the hub's dated SQL migrations through a ledgered runner.
+- Added eight manual migrations that dedup and widen unique keys, widen enums and the oracle tick, and retype timestamps.
+
+### Changed
+- Checkpointed a capability snapshot as soon as it is written and let the next hub in rotation take a missed turn.
+- Kept archive batch sequence numbers above the ones the hub already spent.
+- Moved the legacy anchor reward pin's testnet time to the indexer's activation instant.
+- Named the migrate command and the pending file when boot refuses a narrow mirror key.
+- Armed BRIDGE_ANCHOR_PROOF_READY_ACTIVATION on BTC:testnet at 157235.
+- Armed BRIDGE_ANCHOR_PROOF_READY_ACTIVATION on LTC:testnet at 4930600.
+- Armed BRIDGE_ANCHOR_PROOF_READY_ACTIVATION on DOGE:testnet at 68012800.
+
+### Fixed
+- Read the snapshot checkpoint scan floor from the coin-scoped gate entry.
+- Stamped regtest capability snapshots written before the chain id is known.
+- Hardened the archive, oracle and catch-up paths.
+
 ## [0.25.0] - 2026-10-18
 
 ### Added

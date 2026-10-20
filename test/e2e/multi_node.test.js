@@ -150,9 +150,9 @@ function attestationPbftSuite() {
             // cluster.start() already polls the peer sockets until the mesh is up, so
             // there is nothing left to wait for here.
 
-            // Request attestation from the leader node
-            // The CrossChainEngine uses seq-based leader rotation
-            // Try from each node; only the leader will succeed
+            // Request the attestation through each node in turn
+            // Any node may open the round; a request for an id already in flight joins it
+            // Stop at the first node whose round reports the attestation
             let attestation = null;
             for (let i = 0; i < 3; i++) {
                 let res = await callRpc(cluster.getPort(i), 'requestattestation', {

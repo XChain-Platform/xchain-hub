@@ -160,8 +160,10 @@ describe('getrollcallstatus', function () {
 
 describe('capabilities/oracle_publish broadcast presence check', function () {
 
+    // A checksum-valid mainnet P2PKH address (the DOGE registry GAS literal): the
+    // self-test decodes the address, so a hand-typed one with a bad checksum fails.
     const VALID = { HUB_NETWORK: 'mainnet',
-                    oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg',
+                    oracle_publish: { doge_address: 'DGasfpttCnTijuuoAdiJ9sXJjG7vQ5pMkW',
                                       doge_wallet: '/path/to/wallet' } };
 
     function load(loadSignerHooks) {
@@ -206,6 +208,6 @@ describe('capabilities/oracle_publish broadcast presence check', function () {
         const mod = load(() => ({ source: '/opt/signer.js', walletSignFn: () => {}, broadcastFn: () => {} }));
         assert.strictEqual((await mod.selfTest({})).ok, false);
         assert.strictEqual((await mod.selfTest({ HUB_NETWORK: 'testnet',
-            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/p' } })).ok, false);
+            oracle_publish: { doge_address: VALID.oracle_publish.doge_address, doge_wallet: '/p' } })).ok, false);
     });
 });

@@ -39,9 +39,40 @@ function policyList(raw, refsAllowed){
     return parsePolicyColumn(raw, refsAllowed);
 }
 
+// Either case: validate.js co-signs an id case-insensitively, so a held row may carry upper case.
+const HEX64 = /^[0-9a-f]{64}$/i;
+
+// The reason a row does not belong in its archive array, or null. The shared canonical
+// picks XBRIDGE or XPOLICY by which id the row carries and throws on both, so a row
+// filed under the wrong array would otherwise verify as the other kind or throw.
+function rowShapeRefusal(row, idKey, otherKey){
+    if(!row || typeof row !== 'object' || Array.isArray(row)) return 'is not a row object';
+    // Require this array's own id as a derived sha256 hex id
+    // (a held row refused here is re-selected every wake, so this must admit every id quorum signs)
+    if(typeof row[idKey] !== 'string' || !HEX64.test(row[idKey])) return 'has a malformed ' + idKey;
+    // Refuse a row that also carries the other kind's id
+    const other = row[otherKey];
+    if(other !== undefined && other !== null && other !== '') return 'also carries ' + otherKey;
+    return null;
+}
+
+// Record that a row this hub never held was accepted on its signature quorum alone.
+function logUnheld(label, id){
+    logger.info('StateAnchorPublisher: archive ' + label + ' ' + String(id).substring(0, 16) +
+                '... predates our local history; accepting on signature quorum alone');
+}
+
 module.exports = {
 
     async verifyArchivedBridgeTransfer(row){
+        // Refuse a row that is not a transfer before any lookup or canonical
+        const shape = rowShapeRefusal(row, 'transfer_id', 'snapshot_id');
+        if(shape){
+            logger.warn('StateAnchorPublisher: archive bridge transfer ' +
+                        String(row && row.transfer_id).substring(0, 16) +
+                        '... ' + shape + '; NOT signing');
+            return false;
+        }
         const held = await this.db.getBridgeTransferByTransferId(row.transfer_id);
         if(held && held.length){
             const local = comparable(this.serializeBridgeTransfer(held[0]));
@@ -52,12 +83,22 @@ module.exports = {
                             '... TERMS differ from our row; NOT signing');
                 return false;
             }
+        } else {
+            logUnheld('bridge transfer', row.transfer_id);
         }
         return this.verifyArchivedBridgePolicyQuorum(row, 'bridge transfer',
                                                       this.bridgeTransferCanonical(row));
     },
 
     async verifyArchivedPolicySnapshot(row){
+        // Refuse a row that is not a policy snapshot before any lookup or canonical
+        const shape = rowShapeRefusal(row, 'snapshot_id', 'transfer_id');
+        if(shape){
+            logger.warn('StateAnchorPublisher: archive policy snapshot ' +
+                        String(row && row.snapshot_id).substring(0, 16) +
+                        '... ' + shape + '; NOT signing');
+            return false;
+        }
         const refsAllowed = gateRegistry.activeAt(LIST_SHARE_PRODUCER_GATE,
             row.network, 'BTC', Number(row.snapshot_block), null);
         const allow = policyList(row.allow_list, refsAllowed);
@@ -85,6 +126,8 @@ module.exports = {
                             '... TERMS differ from our row; NOT signing');
                 return false;
             }
+        } else {
+            logUnheld('policy snapshot', row.snapshot_id);
         }
         return this.verifyArchivedBridgePolicyQuorum(row, 'policy snapshot',
                                                       this.policySnapshotCanonical(row));

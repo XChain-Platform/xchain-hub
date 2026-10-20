@@ -62,7 +62,25 @@ async function refusesNarrowCapabilitySnapshotKey() {
     expect(thrown.message).to.match(/Refusing to start/);
     expect(thrown.message).to.match(/capability_snapshots/);
     expect(thrown.message).to.match(/source/);
+    expect(thrown.message).to.include('Run `npm run migrate` to apply the dated unique-key widen under src/sql/migrations');
     expect(connection.release.calledOnce).to.equal(true);
+}
+
+async function namesThePendingWidenFile() {
+    const { db } = makeDb({ capability_snapshots: ['snapshot_block', 'capability', 'signing_pubkey'] });
+    const pendingTables = {
+        '2026-10-19-oracle-prices-widen-tick.sql': ['oracle_prices'],
+        '2026-10-19-widen-unique-keys.sql': ['validator_rewards', 'capability_snapshots', 'attestation_responses']
+    };
+
+    let thrown = null;
+    try {
+        await mirrorKeys.assertMirrorKeysWide.call(db, pendingTables);
+    } catch(error) { thrown = error; }
+
+    expect(thrown).to.be.an('error');
+    expect(thrown.message).to.include('Run `npm run migrate` to apply the pending 2026-10-19-widen-unique-keys.sql');
+    expect(thrown.message).not.to.include('oracle-prices-widen-tick');
 }
 
 async function refusesAbsentAttestationResponseKey() {
@@ -124,6 +142,7 @@ async function releasesConnectionAfterCatalogueFailure() {
 describe('assertMirrorKeysWide()', function () {
     it('accepts both unique mirror keys only when all widened columns are present in order', acceptsWideUniqueKeys);
     it('refuses startup when the capability snapshot key is still narrow', refusesNarrowCapabilitySnapshotKey);
+    it('names the pending widen file and the migrate command in the refusal', namesThePendingWidenFile);
     it('refuses startup when the attestation response key is absent', refusesAbsentAttestationResponseKey);
     it('refuses startup when a named mirror key is not unique', refusesNonUniqueMirrorKey);
     it('allows runMigrations before the mirror tables exist', acceptsMissingTablesBeforeBootstrap);

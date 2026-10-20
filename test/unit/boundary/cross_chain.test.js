@@ -34,8 +34,8 @@ function registerBoundaryCrossChainEngine() {
     });
     // Chain pair validator set fallback
     describe('chain pair validator set fallback', registerChainPairValidatorSetFallback);
-    // Leader rotation with chain pairs
-    describe('leader rotation with chain pairs', registerLeaderRotationWithChainPairs);
+    // Live quorum with chain pairs
+    describe('live quorum with chain pairs', registerLiveQuorumWithChainPairs);
     // Attestation ID boundaries
     describe('attestation ID handling', registerAttestationIDHandling);
     // Confirmation thresholds per chain
@@ -98,33 +98,31 @@ function testGetChainPairSetWithNoChainPairMapReturnsFullSet() {
     expect(result).to.equal(VALIDATORS_4);
 }
 
-function registerLeaderRotationWithChainPairs() {
-    it('uses chain-pair set for leader selection', testUsesChainPairSetForLeaderSelection);
-    it('uses full set when no chain pair specified', testUsesFullSetWhenNoChainPairSpecified);
-    it('returns null when both sets are empty', testReturnsNullWhenBothSetsAreEmpty);
+// The live quorum fallback sizes N from the chain-pair set; no hub is elected from it any more.
+function registerLiveQuorumWithChainPairs() {
+    it('sizes the live quorum from the chain-pair set', testSizesLiveQuorumFromChainPairSet);
+    it('sizes the live quorum from the full set when no chain pair is specified', testSizesLiveQuorumFromFullSet);
+    it('reads a single node when both sets are empty and no peer is open', testReadsSingleNodeWhenBothSetsAreEmpty);
 }
-function testUsesChainPairSetForLeaderSelection() {
-    let pairSet = [makeValidator(10), makeValidator(20)];
+function testSizesLiveQuorumFromChainPairSet() {
+    let pairSet = [makeValidator(10), makeValidator(20), makeValidator(30), makeValidator(40)];
     let pairMap = new Map();
     pairMap.set('BTC-LTC', pairSet);
     cc.setChainPairValidators(pairMap);
-    cc.setValidatorSet(VALIDATORS_4);
+    cc.setValidatorSet(VALIDATORS_4.slice(0, 2));
 
-    let leader = cc.getLeader(0, 'BTC', 'LTC');
-    expect(leader).to.equal(pairSet[0]);
-
-    let leader2 = cc.getLeader(1, 'BTC', 'LTC');
-    expect(leader2).to.equal(pairSet[1]);
+    // N=4 from the pair set gives quorum 3; the two-member full set would give 2.
+    expect(cc.getQuorum('BTC', 'LTC')).to.equal(3);
 }
-function testUsesFullSetWhenNoChainPairSpecified() {
+function testSizesLiveQuorumFromFullSet() {
     cc.setValidatorSet(VALIDATORS_4);
-    let leader = cc.getLeader(0);
-    expect(leader).to.equal(VALIDATORS_4[0]);
+    expect(cc.getQuorum()).to.equal(3);
 }
-function testReturnsNullWhenBothSetsAreEmpty() {
+function testReadsSingleNodeWhenBothSetsAreEmpty() {
     cc.setValidatorSet([]);
     cc.setChainPairValidators(new Map());
-    expect(cc.getLeader(0, 'BTC', 'LTC')).to.be.null;
+    pm.getPeerStatus = sinon.stub().returns([]);
+    expect(cc.getQuorum('BTC', 'LTC')).to.equal(0);
 }
 
 function registerAttestationIDHandling() {

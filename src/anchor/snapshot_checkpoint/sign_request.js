@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const { leadsSnapshotSlot } = require('./leader.js');
+const { mayLeadSnapshotSlot } = require('./leader.js');
 const {
     snapshotCheckpointCanonical,
 } = require('../../consensus/snapshot_checkpoint/canonical.js');
@@ -65,7 +65,9 @@ function buildSnapshotSignRequest(identity, snapshotBlock, cp) {
     };
 }
 
-function snapshotSignRequestRefusal(req, validators, verify) {
+// overdueBlocks is how far this co-signer's BTC tip sits past the request's due height;
+// left out, only the turn hub may lead, as before the fallback existed.
+function snapshotSignRequestRefusal(req, validators, verify, overdueBlocks) {
     let canonical;
     let blockIndex;
     let pubkey;
@@ -89,7 +91,7 @@ function snapshotSignRequestRefusal(req, validators, verify) {
     }
 
     try {
-        if (leadsSnapshotSlot(blockIndex, validators, pubkey) !== true)
+        if (mayLeadSnapshotSlot(blockIndex, validators, pubkey, overdueBlocks) !== true)
             return SIGN_REQUEST_REFUSAL.NOT_LEADER;
     } catch (e) {
         return SIGN_REQUEST_REFUSAL.NOT_LEADER;

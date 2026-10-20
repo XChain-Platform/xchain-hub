@@ -49,7 +49,7 @@ CREATE TABLE price_snapshots (
     -- byte-equal to the indexer and explorer mirror twins (their hub_db_sync price
     -- barrier runs both MAX() reads against THIS table over HUB_DB_*); the third serves
     -- the hub's own finalized-age read (getPriceSnapshotsFinalizedAgeSeconds). Existing
-    -- tables get them from runMigrations (alterTableForDrift never touches indexes).
+    -- tables get them from a dated migration (alterTableForDrift never touches indexes).
     KEY idx_status_block_round (status, reference_block, round_number),
     KEY idx_status_timestamp_round (status, block_timestamp, round_number),
     KEY idx_status_created (status, created_at),

@@ -23,9 +23,9 @@
  * keeps writing db.<method>() and no call site knows which file a query is in.
  *
  * The class's own plumbing is split the same way and installed by the same call:
- * schema/bootstrap.js brings the database and its tables up, schema/keys.js and
- * schema/columns.js hold the migration helpers, and schema/migrations.js holds the
- * step list runMigrations() below walks. What stays here is what the style guide
+ * schema/bootstrap.js brings the database and its tables up, and
+ * schema/migration_runner.js applies the dated .sql files under src/sql/migrations
+ * that runMigrations() below starts. What stays here is what the style guide
  * says lives in this file: the constructor, the pool, the migration entry point and
  * the query plumbing every mixin method calls.
  *
@@ -69,20 +69,19 @@ const telemetryPingsMixin      = require('./telemetry_pings.js');
 const validatorsMixin          = require('./validators.js');
 // The class's own plumbing, split out of this file by behaviour and installed the
 // same way, non-enumerably, by the same installMixins() below. These are NOT table
-// families: they are bring-up, the two migration-helper families, the step list
-// runMigrations() walks and withTransaction, so they live under schema/, which has no index.js, rather
+// families: they are bring-up, the dated migration runner, the mirror key check and
+// withTransaction, so they live under schema/, which has no index.js, rather
 // than beside the families: db_prototype_install.test.js and the mockHub scanner
 // read every `<family>.js` and `<family>/index.js` and would take a plumbing method
 // for a query. Bootstrap reads the driver, fs and the SQL directory off Database.io
 // rather than requiring them, because it is the only one that reaches outside the
 // process and a require there would escape the unit suite's proxyquire stubs.
 const bootstrapMixin        = require('./schema/bootstrap.js');
-const keyMigrationsMixin    = require('./schema/keys.js');
-const columnMigrationsMixin = require('./schema/columns.js');
-const migrationStepsMixin   = require('./schema/migrations.js');
+const migrationRunnerMixin  = require('./schema/migration_runner.js');
 const mirrorKeysMixin       = require('./schema/mirror_keys.js');
 const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
+const sqlMigrationFiles     = require('./schema/sql_migration_files.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const hubConfig = require('../config');
@@ -207,18 +206,16 @@ class Database {
 
     // Idempotent: safe to run every startup.
     //
-    // The steps themselves are the four lists in schema/migrations.js, awaited here
-    // in the order they ran when they were one method: reward and submission keys,
-    // then the capability ENUM and the checkpoint/snapshot keys, then the column
-    // conversions, the price fence re-key and the admission columns, then every
-    // remaining TIMESTAMP column. Splitting the list never reorders it, so a hub
-    // applies exactly the statements it applied before, in the same sequence.
-    async runMigrations(){
-        await this.runRewardKeyMigrations();
-        await this.runCapabilityAndCheckpointMigrations();
-        await this.runColumnAndFenceMigrations();
-        await this.runDatetimeColumnMigrations();
-        await this.assertMirrorKeysWide();
+    // Settles the dated .sql files under src/sql/migrations through the ledgered
+    // runner (schema/migration_runner.js): a file whose end state already holds is
+    // recorded, an auto file is applied, and a manual one waits for the operator
+    // path, which passes { includeManual: true }. The mirror key check runs last
+    // either way, so a hub whose widen is still pending refuses to serve, and it is
+    // handed the pending files by table so the refusal names the one to apply.
+    async runMigrations(opts){
+        const result = await this.runDatedMigrations(opts);
+        await this.assertMirrorKeysWide(result.pendingTables);
+        return result;
     }
 
     async getConnection(){
@@ -334,7 +331,9 @@ class Database {
     }
 }
 
-// What schema/bootstrap.js reaches the outside world through. Set on the class, not
+// What schema/bootstrap.js reaches the outside world through, plus the dated
+// migration file readers (schema/sql_migration_files.js) that a migration runner
+// reads off the class. Set on the class, not
 // required in that file, so a proxyquire load of THIS module hands the bring-up
 // methods the same stubbed driver and filesystem it hands the constructor.
 //
@@ -343,7 +342,7 @@ class Database {
 // the class reports, because before the split nothing was there to report. writable
 // and configurable stay true so a test can swap the driver and put it back.
 Object.defineProperty(Database, 'io', {
-    value: { mariadb, fs, sqlDir: SQL_DIR },
+    value: { mariadb, fs, sqlDir: SQL_DIR, migrationFiles: sqlMigrationFiles },
     enumerable: false, writable: true, configurable: true
 });
 
@@ -375,9 +374,7 @@ installMixins(Database.prototype, MIXINS);
 // name collision is reported from: either way installMixins throws at boot.
 installMixins(Database.prototype, [
     bootstrapMixin,
-    keyMigrationsMixin,
-    columnMigrationsMixin,
-    migrationStepsMixin,
+    migrationRunnerMixin,
     mirrorKeysMixin,
     transactionMixin
 ]);

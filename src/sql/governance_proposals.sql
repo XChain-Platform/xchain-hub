@@ -13,7 +13,7 @@ CREATE TABLE governance_proposals (
     -- propose() writes an out-of-range value and governance stops (#4315). The session
     -- is pinned to UTC on every connection (db.js connectionPoolParams.timezone 'Z'),
     -- so the literal DATETIME stores the same instant TIMESTAMP did. Deployed tables are
-    -- converted by _migrateColumnType in runMigrations; the drift reconciler adds columns
+    -- converted by a dated migration under src/sql/migrations; the drift reconciler adds columns
     -- but never changes a type.
     voting_start    DATETIME NOT NULL,
     voting_end      DATETIME NOT NULL,

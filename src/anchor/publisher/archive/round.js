@@ -75,6 +75,8 @@ module.exports = {
 
         let batchSeq = await this.getNextBatchSeq();
         if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly)) return 'none';
+        // Lead only above the seqs our own DOGE address already spent
+        batchSeq = await this.leaderBatchSeqAboveOwn(batchSeq);
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return 'none';
 

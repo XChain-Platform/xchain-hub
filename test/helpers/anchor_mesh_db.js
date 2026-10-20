@@ -272,13 +272,39 @@ function snapshotQuery(sql, params, s) {
     return undefined;
 }
 
-const QUERY_FAMILIES = [checkpointQuery, matchQuery, rewardQuery, callQuery, snapshotQuery];
+// consensus_state as the hub's key/value table: INSERT IGNORE keeps the first
+// writer's value (the XANCPUB slot latch relies on that), SELECT reads it back.
+function consensusStateQuery(sql, params, s) {
+    const consensus = s.consensus;
+    if (sql.startsWith('INSERT IGNORE INTO consensus_state')) {
+        if (!consensus.has(params[0])) consensus.set(params[0], String(params[1]));
+        return [];
+    }
+    if (sql.startsWith('SELECT value FROM consensus_state WHERE key_name = ?')) {
+        return consensus.has(params[0]) ? [{ value: consensus.get(params[0]) }] : [];
+    }
+    return undefined;
+}
+
+const QUERY_FAMILIES = [checkpointQuery, matchQuery, rewardQuery, callQuery, snapshotQuery, consensusStateQuery];
+
+// A doQuery that answers only consensus_state, over its own Map, for a hand-built
+// db double whose every other statement answers [] (or whatever `fallback` returns).
+function consensusStateDoQuery(fallback) {
+    const state = { consensus: new Map() };
+    return async function (sql, params) {
+        const rows = consensusStateQuery(sql, params || [], state);
+        if (rows !== undefined) return rows;
+        return fallback ? fallback.call(this, sql, params) : [];
+    };
+}
 
 function memDb() {
     let matches = [], checkpoints = [], snapshots = [], calls = [], rewardRows = [];
-    const state = { matches, checkpoints, snapshots, calls, rewardRows };
+    const consensus = new Map();
+    const state = { matches, checkpoints, snapshots, calls, rewardRows, consensus };
     return { ...DB_METHODS,
-        matches, checkpoints, snapshots, calls, rewardRows,
+        matches, checkpoints, snapshots, calls, rewardRows, consensus,
         async doQuery(sql, params) {
             params = params || [];
             for (const family of QUERY_FAMILIES) {
@@ -291,5 +317,6 @@ function memDb() {
 }
 
 module.exports = {
-    CP_ROW, matchRow, matchCanonical, callRow, callCanonical, parseV7Sections, parseV7Tail, memDb
+    CP_ROW, matchRow, matchCanonical, callRow, callCanonical, parseV7Sections, parseV7Tail, memDb,
+    consensusStateDoQuery
 };

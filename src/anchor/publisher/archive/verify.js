@@ -23,6 +23,7 @@
 'use strict';
 
 const canonicalForms = require('../canonical_forms.js');
+const { archiveCapabilityWants } = require('./capability_wants.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
@@ -61,7 +62,7 @@ module.exports = {
             if(!(await this.verifyArchivedPolicySnapshot(policy))) return false;
         }
         for(const list of (archive.list_snapshots || [])){
-            if(!(await this.verifyArchivedListSnapshot(list))) return false;
+            if(!(await this.verifyArchivedListSnapshot(list, archive))) return false;
         }
         for(const checkpoint of (archive.state_checkpoints || [])){
             if(!(await this.verifyArchivedStateCheckpoint(checkpoint))) return false;
@@ -322,17 +323,8 @@ module.exports = {
         // rejecting it would stall co-signing on honest rounds.
     // False when a required group sits at a non-numeric block (a malformed archive).
     seedRequiredSnapshotGroups(groups, archive, wrapperSnapshotBlock){
-    let wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
-        .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
-        .concat((archive.bridge_transfers || []).map(b => ({ block: b.snapshot_block, capability: 'cross_chain' })))
-        .concat((archive.policy_snapshots || []).map(p => ({ block: p.snapshot_block, capability: 'cross_chain' })))
-        .concat((archive.list_snapshots || []).map(l => ({ block: l.snapshot_block, capability: 'cross_chain' })))
-        .concat((archive.state_checkpoints || []).map(c => ({ block: c.snapshot_block, capability: 'oracle_publish' })))
-        .concat((archive.price_snapshots || []).filter(p => this.isSignatureProofedPrice(p))
-            .map(p => ({ block: p.reference_block, capability: 'price' })))
-        .concat((archive.rewards || []).map(r => ({ block: r.block_index,    capability: 'oracle_publish' })));
-    if(wrapperSnapshotBlock != null)
-        wants.push({ block: wrapperSnapshotBlock, capability: 'oracle_publish' });
+    // The builder derives its groups from this same list, so a kind is demanded exactly where it is emitted
+    let wants = archiveCapabilityWants(archive, wrapperSnapshotBlock, p => this.isSignatureProofedPrice(p));
     for(let w of wants){
         // An honest builder always emits a finite height; a non-numeric one is a
         // malformed archive, and letting it through would resolve a NaN-keyed set.

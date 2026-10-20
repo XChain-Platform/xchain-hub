@@ -28,7 +28,7 @@ function mountRegistryRoutes(app, ctx) {
 // Public chain registry for wallet/SDK bootstrap (wallet spec G007 / §9.7).
 // Serves the wallet-authored descriptor snapshot vendored at
 // src/chain-registry.json (synced from the wallet's bundled descriptors by
-// xchain-wallet/bin/sync-chain-registry.mjs; drift-guarded in CI). Public
+// xchain-wallet/tools/sync-chain-registry.mjs; drift-guarded in CI). Public
 // read tier by design: endpoint URLs + UX metadata only, no secrets. When
 // this hub has a signing identity (validator mode) the response also
 // carries an Ed25519 signature so clients can verify before merging:

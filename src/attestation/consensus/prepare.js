@@ -105,9 +105,10 @@ module.exports = {
     // sender, not just the leader: a dead leader must not block an
     // outage from being recorded. Safety comes from the co-sign rules
     // (mayCoSignNonOk: a hub only vouches for what it observed), never from
-    // trusting the sender. The one exception is a judge_model no_quorum,
-    // which only the leader can derive, so it is leader-only (see
-    // nonOkDerivationRefuses).
+    // trusting the sender. Every status is still self-derivation gated:
+    // a judge_model no_quorum, which only the leader can derive, is
+    // leader-only, and a provider_error waits until this hub could reach it
+    // itself (see nonOkDerivationRefuses).
     adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks){
         if(body.length !== 0 || meta !== ''){
             logger.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
@@ -206,14 +207,16 @@ module.exports = {
                     '(config error: strategy/module shape mismatch)');
                 return true;
             }
-            if(derivedWinner){
+            // Refuse our own ok winner, and a round with no ok proposal (this hub derives provider_error
+            // there). Past this, this hub derives no_quorum itself, so co-signing below is self-evidenced.
+            if(derivedWinner || okForVerdict.length === 0){
                 logger.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
-                    '... for ' + rid.substring(0,16) + '... (own agree() derives an ok winner; not co-signing)');
+                    '... for ' + rid.substring(0,16) + '... (' + (derivedWinner ? 'own agree() derives an ok winner'
+                    : 'no ok proposal; own derivation is provider_error') + '; not co-signing)');
                 return true;
             }
-            // derivedWinner === null: this hub independently derives no_quorum,
-            // so adopting and co-signing below is self-evidenced.
         }
+        if(status === 'provider_error') return this.providerErrorUnderivable(envelope, pending, rid, senderPubkey);
         return false;
     },
 

@@ -12,7 +12,8 @@
 
 // A judge_model no_quorum is reachable only behind the leader gate, so only the
 // leader's PREPARE may establish it. A non-leader's is buffered like a non-leader
-// ok PREPARE, and an outage (provider_error) stays recordable by any sender.
+// ok PREPARE, and an outage (provider_error) stays recordable by any sender once this
+// hub holds enough proposals to derive it.
 
 const sinon                = require('sinon');
 const crypto               = require('crypto');
@@ -113,6 +114,11 @@ describe('AttestationConsensus: judge_model no_quorum is leader-gated', function
     await flush();
     c.handleMessage(signEnv('ATTEST_PREPARE', p2, EMPTY, 'provider_error'));
     await flush();
+    // Held until this hub holds `need` proposals, then adopted once none of them is ok.
+    expect(c.pending.get(RID).winner).to.equal(null);
+    c.handleMessage(signEnv('ATTEST_PROPOSE', p2, EMPTY, 'provider_error'));
+    await flush();
     expect(c.pending.get(RID).status).to.equal('provider_error');
+    expect(c.pending.get(RID).signatures.has(pub(p2))).to.equal(true);
 }); });
 }

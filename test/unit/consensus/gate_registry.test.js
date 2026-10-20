@@ -29,12 +29,13 @@
 'use strict';
 
 const { expect } = require('chai');
+const { execFileSync } = require('child_process');
 const fs   = require('fs');
 const path = require('path');
 
 const registry = require('../../../src/consensus/gate_registry.js');
 const crd      = require('../../../src/consensus_rules_digest.js');
-const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
+const { skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const SRC          = path.resolve(__dirname, '../../../src');
 const ENTRY_PATH   = path.join(SRC, 'consensus', 'gate_registry.js');
@@ -48,7 +49,35 @@ const HUB_PARTS    = ['hub_rows.js'];
 // authored here, so it is the one file with no indexer twin).
 const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
 const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
-const INDEXER_PARTS = path.join(INDEXER_DIR, 'src', 'protocol_changes');
+const INDEXER_TWIN_COMMIT = 'e49fc3e32675457d84d8856f9a35283ae308cd13';
+
+function indexerGit(ctx, what, args, encoding = null) {
+    if (!fs.existsSync(path.join(INDEXER_DIR, '.git'))) {
+        if (!skipOrFail(ctx, {
+            usable: false,
+            reason: 'sibling path absent: ' + INDEXER_DIR,
+        }, what)) return null;
+    }
+    const read = () => execFileSync('git', ['-C', INDEXER_DIR].concat(args), {
+        encoding,
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+        return read();
+    } catch (e) {
+        // A CI sibling clone is depth 1, so the declared commit may be absent: fetch exactly that commit once.
+        try {
+            execFileSync('git', ['-C', INDEXER_DIR, 'fetch', '--quiet', '--depth=1', 'origin', INDEXER_TWIN_COMMIT], { stdio: 'ignore' });
+            return read();
+        } catch (e2) {
+            throw new Error(what + ' cannot read declared indexer commit ' + INDEXER_TWIN_COMMIT);
+        }
+    }
+}
+
+function indexerTwinAtCommit(ctx, file, what) {
+    return indexerGit(ctx, what, ['show', INDEXER_TWIN_COMMIT + ':src/protocol_changes/' + file]);
+}
 
 // Every converted carrier that still has a logic module, by registry stem and the
 // file it lives in since W5: the 7 gate twins under src/consensus/gates/, the
@@ -75,18 +104,6 @@ function same(a, b) {
         return a instanceof RegExp && b instanceof RegExp && a.source === b.source && a.flags === b.flags;
     }
     return crd.canonical(a) === crd.canonical(b);
-}
-
-// The one loaded registry read through `fn` under `env` (one variable set, or
-// cleared when the value is undefined), with the environment put back exactly
-// as it was. No purge: the arming is applied at each read (D78), so the
-// registry every suite holds answers for the venue as it stands now.
-function bootedWith(name, value, fn) {
-    const saved = process.env[name];
-    if (value === undefined) delete process.env[name]; else process.env[name] = value;
-    try { return fn(registry); } finally {
-        if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-    }
 }
 
 describe('src/consensus/gate_registry.js: the rows', function () {
@@ -212,22 +229,26 @@ describe('src/consensus/gate_registry.js: the shared layout', function () {
     });
 
     it('is byte-identical to the indexer twin, file for file under gate_registry/', function () {
-        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part files twin guard')) return;
-        const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f)).equals(fs.readFileSync(path.join(INDEXER_PARTS, f))));
+        const what = 'the indexer registry part files twin guard';
+        const drifted = TWINS.filter((f) => !fs.readFileSync(path.join(PARTS_DIR, f))
+            .equals(indexerTwinAtCommit(this, f, what)));
         expect(drifted, 'files under src/consensus/gate_registry/ that differ from xchain-indexer/src/protocol_changes/').to.deep.equal([]);
     });
 
     // TWINS is a hand list, so hold it to both directory listings: a part added on
     // either side fails here until it is vendored and listed, never skipped silently.
     it('lists every indexer twin part in TWINS and leaves no file under gate_registry/ unclassified', function () {
-        if (!skipOrFail(this, siblingCheckout(__dirname, path.join(INDEXER_PARTS, 'shared_rows_1.js')), 'the indexer registry part set guard')) return;
+        const what = 'the indexer registry part set guard';
         const listJs = (dir) => fs.readdirSync(dir, { withFileTypes: true })
             .filter((d) => d.isFile() && d.name.endsWith('.js')).map((d) => d.name).sort();
         const isTwinName = (f) => f === 'regtest_env.js' || /^shared_rows(_\d+)?\.js$/.test(f);
         const unclassified = listJs(PARTS_DIR).filter((f) => f !== 'core.js' && !HUB_PARTS.includes(f) && !TWINS.includes(f));
+        const indexerParts = indexerGit(this, what, [
+            'ls-tree', '--name-only', INDEXER_TWIN_COMMIT + ':src/protocol_changes',
+        ], 'utf8').trim().split('\n').filter(Boolean).sort();
         expect(unclassified, 'files under src/consensus/gate_registry/ that are neither core.js, a hub-owned part nor in TWINS').to.deep.equal([]);
         expect(TWINS.slice().sort(), 'TWINS against the twin parts under xchain-indexer/src/protocol_changes/')
-            .to.deep.equal(listJs(INDEXER_PARTS).filter(isTwinName));
+            .to.deep.equal(indexerParts.filter(isTwinName));
     });
 });
 
@@ -298,83 +319,5 @@ describe('src/consensus/gate_registry.js: the readers on an armed testnet slot',
         expect(registry.activeAt(bridge, 'testnet', 'BTC', btcTestnet - 1, 0), 'BTC:testnet one below its height').to.equal(false);
         expect(registry.activeAt(bridge, 'testnet', 'BTC', btcTestnet, 0), 'BTC:testnet at its height').to.equal(true);
         expect(registry.activeAt(bridge, 'testnet', 'BCH', btcTestnet, 0), 'an unlisted testnet coin reads the dark fallback').to.equal(false);
-    });
-});
-
-describe('src/consensus/gate_registry.js: regtest arming from the environment', function () {
-
-    const ROLLCALL  = 'rollcall_activation.ROLLCALL_ACTIVATION';
-    const ADMISSION = 'mirror_admission_activation.MIRROR_ADMISSION_ACTIVATION';
-    const BARRIER   = 'anchor_reward_activation.ANCHOR_ATTEST_BARRIER_ACTIVATION';
-
-    it('keeps regtest UNPINNED when the variable is unset, off or malformed', function () {
-        const heard = [];
-        const listen = (w) => { if (w.name === 'RegtestArmingWarning') heard.push(w.message); };
-        process.on('warning', listen);
-        for (const v of [undefined, '', 'off', 'inert', 'no', 'later']) {
-            bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', v, (fresh) => {
-                expect(fresh.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v)).to.equal(null);
-            });
-        }
-        // The refused value said so as a process warning, the one channel a
-        // registry that depends on no logger has; the accepted ones were silent.
-        // The event fires on a later tick, so the check waits for it before the
-        // listener goes.
-        return new Promise((resolve) => setImmediate(resolve)).then(() => {
-            process.removeListener('warning', listen);
-            expect(heard, 'exactly one warning, for the malformed value').to.have.lengthOf(1);
-            expect(heard[0]).to.match(/XC_ROLLCALL_REGTEST_ACTIVATION="later"/);
-        });
-    });
-
-    it('arms regtest at the documented height on the armed words and at a given height on an integer', function () {
-        for (const v of ['armed', 'GENESIS', ' on ', 'true', 'yes']) {
-            bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', v, (fresh) => {
-                expect(fresh.get(ROLLCALL).regtest, 'value ' + JSON.stringify(v))
-                    .to.equal(fresh.get('rollcall_activation.ROLLCALL_REGTEST_ARMED_HEIGHT'));
-            });
-        }
-        bootedWith('XC_ROLLCALL_REGTEST_ACTIVATION', '150', (fresh) => {
-            expect(fresh.get(ROLLCALL).regtest).to.equal(150);
-            expect(fresh.get(ROLLCALL).mainnet, 'the lever must not reach the held networks').to.equal(0);
-            expect(fresh.get(ROLLCALL).testnet).to.equal(151200);
-            expect(fresh.activeAt(ROLLCALL, 'regtest', null, 150, 0), 'activeAt judges the armed row').to.equal(true);
-            expect(fresh.activeAt(ROLLCALL, 'regtest', null, 149, 0)).to.equal(false);
-        });
-    });
-
-    it('arms every regtest key of the admission family, the barrier included, from the one admission variable', function () {
-        bootedWith('XC_MIRROR_ADMISSION_ACTIVATION', '150', (fresh) => {
-            const producer = fresh.get(ADMISSION);
-            for (const k of ['BTC:regtest', 'LTC:regtest', 'DOGE:regtest']) expect(producer[k], k).to.equal(150);
-            expect(producer['BTC:testnet']).to.equal(154234);
-            expect(fresh.copy(BARRIER).regtest).to.equal(150);
-            expect(fresh.get(ROLLCALL).regtest, 'the roll-call lever is a different variable').to.equal(null);
-        });
-    });
-});
-
-describe('src/consensus/gate_registry.js: the arming follows the environment at each read', function () {
-
-    const GATES = 'rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION';
-
-    it('a carrier re-required alone, with no registry purge, reads the venue as it stands now', function () {
-        const before = registry.get(GATES).regtest;
-        expect(before, 'the suite runs bare').to.equal(null);
-        const saved = process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION;
-        process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = 'armed';
-        const id = require.resolve('../../../src/consensus/gates/rollcall_gates_gate.js');
-        const cached = require.cache[id];
-        try {
-            expect(registry.get(GATES).regtest, 'the loaded registry answers for the environment at the read').to.equal(0);
-            delete require.cache[id];
-            expect(require('../../../src/consensus/gates/rollcall_gates_gate.js').ROLLCALL_GATES_ACTIVATION.regtest,
-                'a carrier re-required alone sees the armed table, as its own literal did').to.equal(0);
-        } finally {
-            if (cached) require.cache[id] = cached; else delete require.cache[id];
-            if (saved === undefined) delete process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION;
-            else process.env.XC_ROLLCALL_GATES_REGTEST_ACTIVATION = saved;
-        }
-        expect(registry.get(GATES).regtest, 'restored, the bare reading is back').to.equal(before);
     });
 });

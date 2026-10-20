@@ -223,30 +223,77 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { before
         rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
-        // Leader's provider_error PREPARE arrives before enough PROPOSEs.
+        // Leader's provider_error PREPARE arrives before enough PROPOSEs: buffered until
+        // this hub holds `need` proposals and can derive the outage itself.
         c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
+        expect(pending.winner).to.equal(null);
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, EMPTY, '', 'provider_error'));
+        await flush();
         expect(pending.winner).to.exist;
         expect(pending.status).to.equal('provider_error');
         expect(pending.signatures.has(pub(me))).to.equal(true);
+        expect(pending.signatures.has(pub(p1))).to.equal(true);
     }); });
 
-describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { beforeEach(hookAt89269); afterEach(hookAt89431); it('a follower whose own fetch SUCCEEDED abstains from a provider_error PREPARE', async function () {
+describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { beforeEach(hookAt89269); afterEach(hookAt89431); it('a follower whose own fetch SUCCEEDED refuses a provider_error PREPARE and still adopts the leader ok winner', async function () {
         c = new AttestationConsensus(hub, makeRealProviderRegistry(null, 'judge_model'));
         let rs = roundState(me, [p1, me, p2], BODY, 'llm', 3);
         rs.leaderPubkey = pub(p1);
         rs.role = 'follower';
         await c.propose(RID, rs);
         await flush();
+        // A lone responsible peer claims an outage this hub has direct evidence against.
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, EMPTY, '', 'provider_error'));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner).to.equal(null);
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, EMPTY, '', 'provider_error'));
+        await flush();
+        // Replayed at `need` and refused: no outage winner, no signature for it.
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+        expect(pending.signatures.has(pub(p2))).to.equal(false);
+        // The ok path stays open: the leader's ok PREPARE still establishes the winner.
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(pending.status).to.equal('ok');
+        expect(pending.winner.body.equals(BODY)).to.equal(true);
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+    }); });
+
+describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { beforeEach(hookAt89269); afterEach(hookAt89431); it('a lone provider_error PREPARE cannot stall a byte_equality round whose bodies agree', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry());
+        let finalized = [];
+        c.on('request:finalized', ev => finalized.push(ev));
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 2));
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'provider_error'));
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, BODY));
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        c.handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p2, BODY));
+        await flush();
+        expect(finalized.length).to.equal(1);
+        expect(finalized[0].status).to.equal('ok');
+    }); });
+
+describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { beforeEach(hookAt89269); afterEach(hookAt89431); it('a judge_model leader whose own fetch FAILED still judges a peer ok proposal over a lone provider_error PREPARE', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry((proposals) => proposals[0], 'judge_model'));
+        await c.propose(RID, errorRoundState(me, [me, p1, p2], 2));
+        await flush();
         c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, EMPTY, '', 'provider_error'));
         await flush();
         let pending = c.pending.get(RID);
-        // Adopts the deterministic outcome (sender's sig verified) but does
-        // NOT vouch for an outage it has direct evidence against.
-        expect(pending.status).to.equal('provider_error');
-        expect(pending.signatures.has(pub(me))).to.equal(false);
-        expect(pending.signatures.has(pub(p1))).to.equal(true);
+        expect(pending.winner).to.equal(null);
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, BODY));
+        await flush();
+        expect(pending.status).to.equal('ok');
+        expect(pending.winner.body.equals(BODY)).to.equal(true);
     }); });
 
 describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () { beforeEach(hookAt89269); afterEach(hookAt89431); it('rejects a non-ok PREPARE carrying a non-canonical (non-empty) body', async function () {

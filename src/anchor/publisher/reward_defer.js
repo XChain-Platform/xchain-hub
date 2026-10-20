@@ -23,9 +23,63 @@
 
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { serialPass } = require('./drain_serial.js');
-const { judgeAnchors } = require('../anchor_proof_binding.js');
+const {
+    ATTESTED_VERSIONS, REWARD_FAMILY_VERSIONS, isRewardCandidateRow, judgeAnchors
+} = require('../anchor_proof_binding.js');
+const { activeAt } = require('../../consensus/gate_registry.js');
+const { hasLegacyByteRow, isPinnedEntry, legacyPinGateProven } = require('./legacy_reward_pin.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+// The archive fold term ends legacy anchor_archive rewards where both gates are active.
+const ANCHOR_ARCHIVE_FOLD_TERM_GATE = 'anchor_archive_fold_term_activation.ANCHOR_ARCHIVE_FOLD_TERM_ACTIVATION';
+const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
+
+// Is the archive fold term in force for this network, chain domain and height?
+function archiveTermActive(network, coin, height){
+    let termActive = activeAt(ANCHOR_ARCHIVE_FOLD_TERM_GATE, network, coin, height, null);
+    let foldActive = activeAt(ANCHOR_FOLD_GATE, network, coin, height, null);
+    return termActive && foldActive;
+}
+
+// The indexer proof client's archiveRowTerminated: a candidate archive row landed on DOGE past the term.
+function archiveRowTerminated(a, e){
+    if(String(e.rewardType) !== 'anchor_archive') return false;
+    if(!REWARD_FAMILY_VERSIONS.archive.includes(Number(a.version))) return false;
+    let network = String(e.network || '');
+    let publisher = String(e.publisher || '').toLowerCase();
+    if(!isRewardCandidateRow(a, network, publisher)) return false;
+    return archiveTermActive(network, 'DOGE', a.block_index_doge);
+}
+
+// Judge anchors as the indexer does before it mints: the BTC derive refuses an anchor_archive
+// reward whose snapshot block is past the term, and the DOGE proof client screens terminated
+// archive rows, so a screened-only set that would stay unknown is rejected instead.
+function judgeDrainAnchors(anchors, e){
+    if(String(e.rewardType) === 'anchor_archive' &&
+       archiveTermActive(String(e.network || ''), 'BTC', e.snapshotBlock)) return 'rejected';
+    let screened = false;
+    let proofRows = anchors.filter((a) => {
+        if(!archiveRowTerminated(a, e)) return true;
+        screened = true;
+        return false;
+    });
+    let verdict = judgeAnchors(proofRows, e);
+    // Screened archive rows still count as attested evidence
+    if(screened && verdict === 'unknown' &&
+       !proofRows.some(a => ATTESTED_VERSIONS.includes(Number(a.version)))) return 'rejected';
+    return verdict;
+}
+
+// Hard stop on the getanchorconfirmations page walk. It must equal MAX_ANCHOR_PAGES in the
+// indexer's anchor_proof_client/page_walk.js, and reward_drain_paging.test.js pins the two.
+const MAX_ANCHOR_PAGES = 25;
+
+// Read a page cursor the way the indexer's walk does: only a number or a digit string.
+// Number() alone would turn null, '' or false into 0 and restart a cursor-less walk.
+function parseAnchorCursor(raw){
+    return (typeof raw === 'number' || (typeof raw === 'string' && /^[0-9]+$/.test(raw))) ? Number(raw) : NaN;
+}
 
 module.exports = {
 
@@ -145,53 +199,81 @@ module.exports = {
     // of anchor_proof_client/binding.js and never re-derived here. An anchor_bundle entry
     // whose round_reference differs from its snapshot_block is counted, since the bundle
     // round IS its snapshot block and judgeAnchors can never bind such a tuple.
+    // judgeDrainAnchors adds the indexer's archive fold-term screen around that rule.
+    // An anchor_archive entry past the BTC-side term is rejected before any DOGE call, as the indexer never mints it.
     // With no DOGE indexer wired, or with a response that omits the anchor rows, there is
     // no binding evidence. Feed that empty set through judgeAnchors so it remains unknown
     // rather than inheriting verifyAnchorOnChain's checkpoint-only verdict.
     // Returns 'verified' | 'rejected' | 'unknown'. `minConfirmations` defaults to the
     // drain's burial depth; the adoption ownership check passes 0.
-    async drainBindingVerdict(e, minConfirmations){
-        let minConf = (minConfirmations != null) ? Number(minConfirmations) : this.dogeConfirmations;
+    // `screenLegacy` true applies the indexer's LEGACY_ANCHOR_REWARD_PIN drop; only the write drain asks.
+    async drainBindingVerdict(e, minConfirmations, screenLegacy){
         if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
             this._rewardBundleRoundMismatch = (this._rewardBundleRoundMismatch || 0) + 1;
             logger.warn('StateAnchorPublisher: anchor_bundle reward entry with round_reference ' + e.roundReference +
                          ' <> snapshot_block ' + e.snapshotBlock + ' (' + this._rewardBundleRoundMismatch + ' seen)');
         }
+        let expect = {
+            rewardType: e.rewardType, network: e.network, publisher: e.publisher,
+            roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
+            minConfirmations: (minConfirmations != null) ? Number(minConfirmations) : this.dogeConfirmations
+        };
+        if(String(expect.rewardType) === 'anchor_archive' && archiveTermActive(String(expect.network || ''), 'BTC', expect.snapshotBlock)) return 'rejected';
+        let txid = String(e.txid).toLowerCase();
         let anchors = [];
         let after = null;
-        for(let page = 0; page < 25; page++){
-            let params = { txid: String(e.txid).toLowerCase() };
+        for(let page = 0; page < MAX_ANCHOR_PAGES; page++){
+            let params = { txid: txid };
             if(after !== null) params.after_action_index = after;
             let r;
             try {
                 r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
             } catch(err){
-                if(err && /^no indexer url for /.test(err.message)) return judgeAnchors([], {
-                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
-                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                    minConfirmations: minConf
-                });
+                if(err && /^no indexer url for /.test(err.message)) return await this.judgeDrainEntry([], expect, screenLegacy);
                 throw err;
             }
-            if(r && r.exists && r.anchors === undefined) return judgeAnchors([], {
-                rewardType: e.rewardType, network: e.network, publisher: e.publisher,
-                roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                minConfirmations: minConf
-            });
-            if(!r || !r.exists || !Array.isArray(r.anchors) || r.anchors.length === 0) return 'unknown';
+            if(r && r.exists && r.anchors === undefined) return await this.judgeDrainEntry([], expect, screenLegacy);
+            if(!r || !Array.isArray(r.anchors)) return 'unknown';
+            // Defer when the FIRST page shows no anchor: the DOGE indexer may simply be behind.
+            // A later page may be empty, and the rows already walked are judged, as the indexer does.
+            if(page === 0 && (!r.exists || r.anchors.length === 0)) return 'unknown';
             anchors = anchors.concat(r.anchors);
-            if(r.truncated !== true){
-                return judgeAnchors(anchors, {
-                    rewardType: e.rewardType, network: e.network, publisher: e.publisher,
-                    roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-                    minConfirmations: minConf
-                });
+            if(r.truncated !== true) return await this.judgeDrainEntry(anchors, expect, screenLegacy);
+            // Defer when a truncated page gives no usable cursor, or one that does not advance.
+            let next = parseAnchorCursor(r.next_after_action_index);
+            if(!Number.isInteger(next) || next < 0 || (after !== null && next <= after)){
+                logger.warn('StateAnchorPublisher: ' + txid + ' reported truncated with an unusable page cursor (' +
+                            r.next_after_action_index + '); binding left undecided');
+                return 'unknown';
             }
-            let next = Number(r.next_after_action_index);
-            if(!Number.isInteger(next) || (after !== null && next <= after)) return 'unknown';
             after = next;
         }
+        // Refuse to judge a set still truncated after the page bound (a faulty or hostile peer).
+        logger.error('StateAnchorPublisher: ' + txid + ' still truncated after ' + MAX_ANCHOR_PAGES +
+                     ' pages; binding left undecided');
         return 'unknown';
+    },
+
+    // judgeDrainAnchors, dropping the pre-restart bytes 6 and 7 as the indexer does once the
+    // LEGACY_ANCHOR_REWARD_PIN gate is proven on. Unproven, the bytes still bind and nothing is forfeit.
+    async judgeDrainEntry(anchors, expect, screenLegacy){
+        if(screenLegacy === true && hasLegacyByteRow(anchors) && await this.legacyPinGateOn(expect.network))
+            return judgeDrainAnchors(anchors, Object.assign({}, expect, { legacyDropped: true }));
+        return judgeDrainAnchors(anchors, expect);
+    },
+
+    // Is LEGACY_ANCHOR_REWARD_PIN proven on for this network (legacy_reward_pin.js)? False, after a
+    // warning, when this hub's BTC indexer cannot prove it.
+    async legacyPinGateOn(network){
+        if(!this._legacyPinProvenFrom) this._legacyPinProvenFrom = new Map();
+        try {
+            return await legacyPinGateProven((coin, method, params) => this.indexerCall(coin, method, params),
+                String(network || ''), this._legacyPinProvenFrom, Math.floor(Date.now() / 1000));
+        } catch(err){
+            logger.warn('StateAnchorPublisher: LEGACY_ANCHOR_REWARD_PIN not proven from the BTC indexer (' +
+                        (err && err.message) + '); legacy anchor bytes still bind');
+            return false;
+        }
     },
 
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
@@ -211,40 +293,8 @@ module.exports = {
                 let rows = await this.db.getStateCheckpointByChain(String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq));
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
                 let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
-                if(v === 'verified'){
-                    let bound = await this.drainBindingVerdict(e);
-                    if(bound === 'rejected'){
-                        this._deferredRewardAttest.delete(key);
-                        logger.warn('StateAnchorPublisher: reward attestation ' + key + ' txid does not bind to ' +
-                                     '(network, snapshot_block, publisher); dropped, no reward');
-                        continue;
-                    }
-                    if(bound !== 'verified') continue;   // undecided: retained until the TTL
-                    // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
-                    // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's
-                    // getanchorconfirmations check) binds the reward to. `e` also carries the
-                    // publisher's federate flag, so the fan-out happens at the confirmed write.
-                    //
-                    // The entry is dropped only AFTER the write succeeds. Deleting first and
-                    // then awaiting made a transient INSERT error a PERMANENT reward forfeit
-                    // that logged success: the write swallowed the error, the queue no longer
-                    // held the entry, and nothing retried. Retrying is safe and idempotent
-                    // (INSERT IGNORE on uq_reward_tuple), the existing announceRetryTtlMs TTL
-                    // bounds it, and a persistence failure is logged distinctly from the
-                    // re-verification catch below, which is about verifyAnchorOnChain.
-                    try {
-                        await this.recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
-                                                            Number(e.snapshotBlock), e.publisher, e.attestSigs,
-                                                            String(e.txid).toLowerCase(), e);
-                    } catch(werr){
-                        logger.warn('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE ' +
-                                     'but its row FAILED to persist (' + (werr && werr.message) + '); entry retained ' +
-                                     'for a later drain (no reward is lost to a transient write error)');
-                        continue;
-                    }
-                    this._deferredRewardAttest.delete(key);
-                    logger.info('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
-                } else if(v === 'rejected:mismatch' || v === 'rejected:version'){
+                if(v === 'verified') await this.drainVerifiedRewardAttest(key, e);
+                else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     this._deferredRewardAttest.delete(key);
                     logger.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
                                  v + '); dropped, no reward');
@@ -254,6 +304,50 @@ module.exports = {
                              ' re-verification error: ' + (err && err.message));
             }
         }
+    },
+
+    // The drain step for an entry whose anchor verified on chain: bind it, screen the legacy pin,
+    // then write its row. Throws reach the drain's re-verification catch.
+    async drainVerifiedRewardAttest(key, e){
+        let bound = await this.drainBindingVerdict(e, undefined, true);
+        if(bound === 'rejected'){
+            this._deferredRewardAttest.delete(key);
+            logger.warn('StateAnchorPublisher: reward attestation ' + key + ' txid does not bind to ' +
+                         '(network, snapshot_block, publisher); dropped, no reward');
+            return;
+        }
+        if(bound !== 'verified') return;   // undecided: retained until the TTL
+        // A tuple the indexer pins is never minted again once the gate is on, so write nothing for it.
+        if(isPinnedEntry(e) && await this.legacyPinGateOn(e.network)){
+            this._deferredRewardAttest.delete(key);
+            logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
+                         'tuple; dropped, no reward');
+            return;
+        }
+        // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
+        // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's
+        // getanchorconfirmations check) binds the reward to. `e` also carries the
+        // publisher's federate flag, so the fan-out happens at the confirmed write.
+        //
+        // The entry is dropped only AFTER the write succeeds. Deleting first and
+        // then awaiting made a transient INSERT error a PERMANENT reward forfeit
+        // that logged success: the write swallowed the error, the queue no longer
+        // held the entry, and nothing retried. Retrying is safe and idempotent
+        // (INSERT IGNORE on uq_reward_tuple), the existing announceRetryTtlMs TTL
+        // bounds it, and a persistence failure is logged distinctly from the
+        // re-verification catch in the drain, which is about verifyAnchorOnChain.
+        try {
+            await this.recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
+                                                Number(e.snapshotBlock), e.publisher, e.attestSigs,
+                                                String(e.txid).toLowerCase(), e);
+        } catch(werr){
+            logger.warn('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE ' +
+                         'but its row FAILED to persist (' + (werr && werr.message) + '); entry retained ' +
+                         'for a later drain (no reward is lost to a transient write error)');
+            return;
+        }
+        this._deferredRewardAttest.delete(key);
+        logger.info('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
     },
 
     // Record the reward for an adopted bundle only when the indexer binds it to THIS hub

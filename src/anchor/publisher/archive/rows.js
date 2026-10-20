@@ -32,6 +32,7 @@ const eq = require('../../../consensus/equivocation_header.js');
 const gateRegistry = require('../../../consensus/gate_registry');
 const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const nodeUtil = require('node:util');
+const { readArchiveSeqFloor } = require('./seq_floor_seed.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -181,12 +182,16 @@ module.exports = {
         await this.backfillListRows(batchSeq, txid, listIds);
     },
 
-    async getNextBatchSeq(){
-        // Spans every batch_seq-bearing table so a fresh seq is unique across
-        // matches, calls AND rewards (consensus-uniform: all hubs compute the
+    // `leaderMin` is passed only by the v1 leader draw (leaderBatchSeqAboveOwn); the
+    // follower refusal and the fold co-sign equality call this with no argument.
+    async getNextBatchSeq(leaderMin){
+        // Spans every batch_seq-bearing table (listed in db.getNextAnchorBatchSeq) so a
+        // fresh seq is unique across all of them (consensus-uniform: all hubs compute the
         // same next seq from quorum-agreed rows).
         let r = await this.db.getNextAnchorBatchSeq();
         let local = (r && r.length > 0) ? Number(r[0].next_seq) : 0;
+        // Start the leader's draw at its own floor, and measure the peer cap below from there
+        if(Number.isSafeInteger(leaderMin) && leaderMin > local) local = leaderMin;
         // The rows above are consensus-uniform only once every back-fill has
         // landed. _observedConsumedBatchSeq carries the seqs the federation demonstrably
         // spent while this hub was missing one, so the stale hub converges on the
@@ -204,6 +209,48 @@ module.exports = {
                      'already consumed ' + this._observedConsumedBatchSeq + '; drawing ' + floor +
                      ' (this hub is behind on an archive back-fill)');
         return floor;
+    },
+
+    // Highest batch seq this hub's own DOGE address is known to have spent, or -1.
+    ownArchiveSeqFloor(){
+        return Number.isSafeInteger(this._ownArchiveBatchSeq) ? this._ownArchiveBatchSeq : -1;
+    },
+
+    // Record a batch seq our own DOGE address spent: a head this process just sent, or the
+    // highest archive head the DOGE indexer holds for our address. Never fed from a peer.
+    noteOwnArchiveSeq(seq){
+        // Accept only a whole number >= 0 given as a number or numeric string
+        if(typeof seq !== 'number' && typeof seq !== 'string') return;
+        if(seq === '') return;
+        let s = Number(seq);
+        if(!Number.isSafeInteger(s) || s < 0) return;
+        if(s > this.ownArchiveSeqFloor()) this._ownArchiveBatchSeq = s;
+    },
+
+    // Re-read our address's highest archive seq from the DOGE indexer before a leader draw
+    // (retries a failed boot seed, counts a head mined since boot); a failed read keeps the
+    // floor rather than blocking the round. True when the floor rose.
+    async refreshOwnArchiveSeqFloor(){
+        let ix = this.indexers && this.indexers.DOGE;
+        let seq = await readArchiveSeqFloor({
+            indexerCall: (coin, method, params) => this.indexerCall(coin, method, params),
+            dogeAddress: this.dogeAddress, dogeIndexerUrl: ix && ix.url, logger
+        });
+        let before = this.ownArchiveSeqFloor();
+        if(seq !== null) this.noteOwnArchiveSeq(seq);
+        return this.ownArchiveSeqFloor() > before;
+    },
+
+    // Return the v1 leader's seq: `drawn`, or a redraw above every seq our own address spent
+    // (own author history, so no jump cap). Followers never read this floor: chunk sets bind
+    // per (seq, author), so co-signing another author's head under our spent seq reuses nothing.
+    async leaderBatchSeqAboveOwn(drawn){
+        await this.refreshOwnArchiveSeqFloor();
+        let ownSpent = this.ownArchiveSeqFloor();
+        if(ownSpent < 0 || drawn > ownSpent) return drawn;
+        logger.warn('StateAnchorPublisher: next batch seq ' + drawn + ' but this hub\'s own DOGE address ' +
+                     'already spent batch seq ' + ownSpent + '; leading at least ' + (ownSpent + 1));
+        return Math.max(Number(await this.getNextBatchSeq(ownSpent + 1)), ownSpent + 1);
     },
 
     // Maps a state_checkpoints row to the 9 identity fields only; deliberately OMITS

@@ -54,6 +54,9 @@ module.exports = {
         if(txid) await this.markArchiveSent(network, round.batchSeq, txid);
         if(txid && !(result && result.exists)) this.notePendingConfirmation('archive_head', txid, String(round.batchSeq));
         let chunkSeq = this.adoptedChunkSeq(result, round, txid);
+        // Count the head's seq as spent by our address at once, so a partial archive whose
+        // rows stamp nothing can never be re-drawn under the same seq by this process
+        this.noteOwnArchiveSeq(chunkSeq);
         let lostChunks = await this.broadcastArchiveChunks(round, chunkSeq, chunkBroadcaster, cp);
         let onChainValid = this.archiveOnChainValid(round, sigs);
         let noTxid = !txid;
@@ -134,7 +137,7 @@ module.exports = {
                      String(round.chunks.length), round.chunks[0], String(sigs.length)];
         for(let s of sigs) parts.push(s.pubkey, s.sig);
         // The publisher tail is UNCONDITIONAL. Field order MUST match the indexer parser
-        // (anchor.js formats[1]):
+        // (src/actions/anchor/index.js formats[1], read by validate.js readHeadFields):
         // ...|SIG_COUNT|PUBKEY|SIG|...|PUBLISHER|ATTEST_SIG_COUNT|APUBKEY|ASIG|...
         // Mirrors buildV7Payload's tail, empty-publisher fallback included, so the two
         // legs degrade identically.
@@ -209,7 +212,7 @@ module.exports = {
             // resume would either re-pay for the chunks that landed or strand the batch.
             try {
                 let chunkResult = await this.broadcastWithRetry(chunkBroadcaster, v2Payload, undefined,
-                      () => this.findExistingArchiveChunk(cp, round, i));
+                      () => this.findExistingArchiveChunk(cp, round, i, chunkSeq));
                 if(chunkResult && chunkResult.txid && !chunkResult.exists)
                     this.notePendingConfirmation('archive_chunk', chunkResult.txid, round.batchSeq + '/' + i);
             }
@@ -225,7 +228,7 @@ module.exports = {
     // On-chain VALIDITY gate: the source rows are only safe to DEQUEUE if the
     // v1 we just broadcast will pass the indexer's own check. Its wrapper
     // signatures must reach quorum over oracle_publish @ snapshot_block, the
-    // SAME set + threshold the indexer (anchor.js) and full-parse recovery
+    // SAME set + threshold the indexer (quorum.js verifyHeadQuorum) and full-parse recovery
     // verify against. If they don't (e.g. a validator-set drift the signing
     // round could not satisfy), the on-chain v1 is stored `invalid`; dequeuing
     // the rows anyway would strand settled cross_chain_matches/calls in an
@@ -235,7 +238,7 @@ module.exports = {
     // quorumVerified is the SOLE verdict. A `round.validators.length === 1`
     // short-circuit used to sit in front of it, justified by the claim that the
     // indexer stores single-validator anchors as recoverable 'unverified'. It does
-    // not: anchor.js reaches 'unverified' only when it mirrors NO oracle_publish
+    // not: verifyHeadQuorum reaches 'unverified' only when it mirrors NO oracle_publish
     // snapshot at all (oracleN === 0). With a one-member set and a signature from
     // outside it, its membership filter yields zero valid signers and the anchor
     // records 'invalid: insufficient valid signatures (0/1)', while full-parse
@@ -244,7 +247,7 @@ module.exports = {
     // The legitimate single-node federation is unaffected: a sole member that signed
     // its own archive clears quorumVerified on its own (bftQuorumOrSingle(1, 1) === 1).
     // A weighted singleton whose stake is zero, blank-sourced or truncated now fails
-    // closed, which is parity with anchor.js reaching the same verdict on the same
+    // closed, which is parity with verifyHeadQuorum reaching the same verdict on the same
     // bytes, not a regression: the rows stay pending instead of being stranded.
     archiveOnChainValid(round, sigs){
         return this.quorumVerified(round.canonical, sigs, round.validators, round.weighted);

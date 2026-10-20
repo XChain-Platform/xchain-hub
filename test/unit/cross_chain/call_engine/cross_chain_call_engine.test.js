@@ -289,8 +289,10 @@ function registerGetStatsReadFailure() {
       db.findCrossChainCallsByPhase = async () => [
         { target_chain: 'BTC', pending_relay_count: '2' }, { target_chain: 'LTC', pending_relay_count: '3' }];
       engine._resultAttemptFailures = 4;
+      engine._dispatchPollFailures = 2;
       expect(await engine.getStats()).to.deep.equal(
-        { pending_relay_count: 5, pending_by_chain: { BTC: 2, LTC: 3 }, result_attempt_failures: 4 });
+        { pending_relay_count: 5, pending_by_chain: { BTC: 2, LTC: 3 }, result_attempt_failures: 4,
+          dispatch_poll_failures: 2 });
     });
     it('throws on a failed DB read instead of reporting an empty backlog', async function () {
       const { engine, db } = makeEngine();

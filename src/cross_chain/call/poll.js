@@ -26,11 +26,14 @@ const { ALLOWED_CHAINS, RESULT_STATUSES, RESULT_BACKOFF_BASE_MS, RESULT_BACKOFF_
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// Repeat a failing chain's dispatch-poll warn at most this often (one line per tick otherwise).
+const DISPATCH_POLL_WARN_MS = 5 * 60 * 1000;
+
 module.exports = {
-    // Return operator-visible relay backlog depth and lifetime failure counter.
+    // Return operator-visible relay backlog depth and lifetime failure counters.
     // Mirrors getattestationstats: pending_relay_count is the number of dispatch
-    // rows per target chain that do not yet have a result row; result_attempt_failures
-    // is a process-lifetime count of per-call errors in pollTargetResults.
+    // rows per target chain that do not yet have a result row; result_attempt_failures and
+    // dispatch_poll_failures count errors in pollTargetResults and pollSourceRequests.
     async getStats(){
         let rows;
         try {
@@ -49,7 +52,9 @@ module.exports = {
         return {
             pending_relay_count:      rows.reduce((s, r) => s + Number(r.pending_relay_count), 0),
             pending_by_chain:         pending_by_chain,
-            result_attempt_failures:  this._resultAttemptFailures
+            result_attempt_failures:  this._resultAttemptFailures,
+            // Failed source-indexer reads: an outage there adds no dispatch rows to count.
+            dispatch_poll_failures:   this._dispatchPollFailures || 0
         };
     },
 
@@ -94,20 +99,43 @@ module.exports = {
     },
 
     // Discover XCALL v0 requests on `coin` that have reached confirmation depth
-    // and have no dispatch row yet, and run a dispatch round for each.
+    // and have no dispatch row yet, and run a dispatch round for each. A failed read
+    // changes nothing and is retried next poll; it is counted and warned, never silent.
     async pollSourceRequests(coin){
         let res;
         try { res = await this.indexerCall(coin, 'getpendingcrosschaincalls', { limit: 100 }); }
-        catch(e){ return; }
-        if(!res || !Array.isArray(res.calls) || !res.network) return;
+        catch(e){ this.noteDispatchPollFailure(coin, (e && e.message) || String(e)); return; }
+        if(!res || !Array.isArray(res.calls) || !res.network){
+            this.noteDispatchPollFailure(coin, (res && res.error) ? 'indexer answered: ' + res.error :
+                'no request list in the getpendingcrosschaincalls result');
+            return;
+        }
         let latest = Number(res.latest_block_index);
-        if(!Number.isFinite(latest)) return;
+        if(!Number.isFinite(latest)){
+            this.noteDispatchPollFailure(coin, 'non-numeric latest_block_index in the getpendingcrosschaincalls result');
+            return;
+        }
+        if(this._dispatchPollWarnAt) delete this._dispatchPollWarnAt[coin];
 
         for(let call of res.calls){
             try { await this.maybeDispatch(coin, String(res.network), latest, call); }
             catch(e){ logger.warn('CrossChainCall: dispatch attempt failed for ' +
                                    String(call && call.call_id).substring(0, 16) + '...: ' + (e && e.message)); }
         }
+    },
+
+    // Count one failed dispatch-poll read and warn on the first of a run, then at most
+    // once per DISPATCH_POLL_WARN_MS for that chain; a good read re-arms the first warn.
+    noteDispatchPollFailure(coin, cause){
+        this._dispatchPollFailures = (this._dispatchPollFailures || 0) + 1;
+        if(!this._dispatchPollWarnAt) this._dispatchPollWarnAt = {};
+        let now = Date.now();
+        let last = this._dispatchPollWarnAt[coin];
+        if(last !== undefined && now - last < DISPATCH_POLL_WARN_MS) return;
+        this._dispatchPollWarnAt[coin] = now;
+        logger.warn('CrossChainCall: dispatch poll on ' + coin + ' failed (' + cause +
+                    '); confirmed XCALL requests there are not being dispatched (dispatch poll failures so far: ' +
+                    this._dispatchPollFailures + ')');
     },
 
     async maybeDispatch(coin, network, latestBlock, call){
@@ -239,14 +267,15 @@ module.exports = {
     // already in flight); false when the result is not yet available (missing on the
     // target indexer, or not yet at confirmation depth) or this hub refuses to stamp
     // its admission (no fresh admission tip), so the caller can park it (M-14).
+    // A failed lookup throws instead, so the caller counts it in result_attempt_failures.
     async maybeRelayResult(coin, dispatch){
         let callId = String(dispatch.call_id).toLowerCase();
         let roundId = this.roundId('result', callId);
         if(this._inflight.has(roundId)) return true;   // round already progressing; don't park
 
-        let res;
-        try { res = await this.indexerCall(coin, 'getcrosschaincallresult', { call_id: callId }); }
-        catch(e){ return false; }
+        let res = await this.indexerCall(coin, 'getcrosschaincallresult', { call_id: callId });
+        // The indexer answers a refused lookup (database not ready) as a result body, not an RPC error.
+        if(res && res.error) throw new Error('target indexer refused the result lookup: ' + res.error);
         if(!res || res.exists !== true) return false;
 
         // Execution must be at confirmation depth on the target chain before the

@@ -7,6 +7,17 @@ function warnLookupFailure(logger, detail){
     } catch(e) {}
 }
 
+// Sort an author-only getarchiveanchor reply into one outcome: 'error' (the indexer
+// answered with an error), 'none' (no archive under this author), 'invalid' (the seq is
+// not a whole number >= 0) or 'ok' with the integer seq. Every floor reader uses this.
+function classifyArchiveSeqFloorReply(res){
+    if(res && res.error) return { kind: 'error', detail: String(res.error) };
+    if(!res || !res.exists || res.match_batch_seq == null) return { kind: 'none' };
+    const seq = Number(res.match_batch_seq);
+    if(!Number.isSafeInteger(seq) || seq < 0) return { kind: 'invalid', raw: res.match_batch_seq };
+    return { kind: 'ok', seq };
+}
+
 async function readArchiveSeqFloor({ indexerCall, dogeAddress, dogeIndexerUrl, logger }){
     if(!dogeAddress || !dogeIndexerUrl) return null;
 
@@ -18,14 +29,9 @@ async function readArchiveSeqFloor({ indexerCall, dogeAddress, dogeIndexerUrl, l
         return null;
     }
 
-    if(res && res.error){
-        warnLookupFailure(logger, res.error);
-        return null;
-    }
-    if(!res || !res.exists || res.match_batch_seq == null) return null;
-
-    const seq = Number(res.match_batch_seq);
-    return Number.isFinite(seq) && Number.isInteger(seq) && seq >= 0 ? seq : null;
+    const reply = classifyArchiveSeqFloorReply(res);
+    if(reply.kind === 'error') warnLookupFailure(logger, reply.detail);
+    return reply.kind === 'ok' ? reply.seq : null;
 }
 
-module.exports = { readArchiveSeqFloor };
+module.exports = { classifyArchiveSeqFloorReply, readArchiveSeqFloor };

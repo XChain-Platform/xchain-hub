@@ -32,6 +32,7 @@ const logger = getLogger();
 const { installParts } = require('./prototype_parts.js');
 const { ALLOWED_CHAINS, DEFAULT_CONFIRMATIONS, DEFAULT_ATTESTATION_TIMEOUT, DEFAULT_STORE_RETRY_ATTEMPTS, DEFAULT_STORE_RETRY_BASE_MS, STORE_RETRY_MAX_DELAY_MS } = require('./attest/constants.js');
 const roundsPart     = require('./attest/rounds.js');
+const followerPart   = require('./attest/follower.js');
 const membershipPart = require('./attest/membership.js');
 const tallyPart      = require('./attest/tally.js');
 
@@ -118,6 +119,8 @@ class CrossChainEngine extends EventEmitter {
             if (pending.timer) clearTimeout(pending.timer);
             if (pending.storeRedriveTimer) clearTimeout(pending.storeRedriveTimer);
             if (pending.reject) pending.reject(new Error('Cross-chain engine stopped'));
+            // Callers that joined the round hear the same stop.
+            this.settleWaiters(pending, new Error('Cross-chain engine stopped'));
         }
         this.pendingAttestations.clear();
     }
@@ -223,7 +226,7 @@ class CrossChainEngine extends EventEmitter {
 }
 
 installParts(CrossChainEngine.prototype, [
-    roundsPart, membershipPart, tallyPart
+    roundsPart, followerPart, membershipPart, tallyPart
 ]);
 
 module.exports = CrossChainEngine;

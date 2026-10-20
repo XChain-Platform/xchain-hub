@@ -26,6 +26,7 @@
 'use strict';
 
 const { PBFT_PRE_PREPARE } = require('./message_types.js');
+const { isNonMemberSnapshot } = require('./federation_round.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -68,6 +69,13 @@ function proposeRoundQuorum(self, snapshot, weighted) {
             throw new Error('Consensus: refusing to apply config change unilaterally over an EMPTY ' +
                 'active-validator snapshot (block ' + snapshot.blockIndex + ', federated hub); ' +
                 'will retry when the snapshot populates');
+        }
+        // Refuse a one-member snapshot that does not hold this hub: the sole member alone
+        // may apply over it, and a non-member applying would commit a change no member ratified.
+        if (isNonMemberSnapshot(self, snapshot)) {
+            throw new Error('Consensus: refusing to apply config change unilaterally over a one-member ' +
+                'active-validator snapshot (block ' + snapshot.blockIndex + ', federated hub) that does ' +
+                'not hold this hub; will retry when the snapshot changes');
         }
         if (self.minValidators > 1) {
             logger.warn('Consensus: operating in single-node mode (MIN_VALIDATORS=' + self.minValidators + ' but quorum is 0)');

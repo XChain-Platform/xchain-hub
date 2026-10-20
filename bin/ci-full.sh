@@ -142,10 +142,10 @@ chain_registry_check() {
   upstream="$(git -C "$wallet" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
   if [ -n "$upstream" ]; then
     behind="$(git -C "$wallet" rev-list --count "HEAD..$upstream" -- \
-      packages/core/src/registry/descriptors bin/chain-registry.sync.json 2>/dev/null || echo 0)"
+      packages/core/src/registry/descriptors tools/chain-registry.sync.json 2>/dev/null || echo 0)"
   fi
   if [ "$behind" -eq 0 ]; then
-    node "$wallet/bin/sync-chain-registry.mjs" --check
+    node "$wallet/tools/sync-chain-registry.mjs" --check
     return
   fi
 
@@ -156,16 +156,16 @@ chain_registry_check() {
   mkdir -p "$stage/xchain-wallet" "$stage/xchain-hub/src"
   if ! git -C "$wallet" archive "$upstream" \
       package.json \
-      bin/sync-chain-registry.mjs \
-      bin/chain-registry.sync.json \
-      bin/lib/checkout-freshness.mjs \
+      tools/sync-chain-registry.mjs \
+      tools/chain-registry.sync.json \
+      tools/lib/checkout-freshness.mjs \
       packages/core/src \
       | tar -x -C "$stage/xchain-wallet"; then
     rm -rf -- "$stage"
     return 1
   fi
   cp "$SELF/src/chain-registry.json" "$stage/xchain-hub/src/chain-registry.json"
-  node "$stage/xchain-wallet/bin/sync-chain-registry.mjs" --check
+  node "$stage/xchain-wallet/tools/sync-chain-registry.mjs" --check
   local status=$?
   rm -rf -- "$stage"
   return "$status"
