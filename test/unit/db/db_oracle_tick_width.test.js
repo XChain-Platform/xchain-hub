@@ -11,34 +11,25 @@
 // contact legal@dankest.llc.
 //
 // oracle_prices must store every field the PRICE v1 ingest gate admits, and a
-// deployed hub widens tick only after its mirrors have. Three arms:
+// deployed hub widens tick only after its mirrors have. Two arms:
 //   DEFINITION - the column widths in src/sql/oracle_prices.sql cover the gate bounds.
-//   GATE       - without XCHAIN_HUB_ORACLE_TICK_MIRRORS_WIDENED=1 the widen never runs.
-//   HELPER     - migrateColumnLength widens a narrower live column and nothing else.
+//   MIGRATION  - the dated widen is manual, so no boot runs it before the operator has
+//                widened the mirrors; it stays pending on a narrower live column.
 
 const fs         = require('fs');
 const path       = require('path');
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const proxyquire = require('proxyquire');
+const files = require('../../../src/db/schema/sql_migration_files.js');
+const { planEndState, schemaModel, unmetEndState } = require('../../../src/db/schema/migration_end_state.js');
 
 const { MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('../../../src/constants.js');
 
 const DEF_PATH = path.join(__dirname, '..', '..', '..', 'src', 'sql', 'oracle_prices.sql');
-const FLAG = 'XCHAIN_HUB_ORACLE_TICK_MIRRORS_WIDENED';
+const MIGRATIONS = path.join(__dirname, '..', '..', '..', 'src', 'sql', 'migrations');
+const WIDEN_FILE = '2026-10-19-oracle-prices-widen-tick.sql';
 
 // A Database over stubbed mariadb + fs, matching the charset migration suite.
-function makeDb() {
-    const mockConn = { query: sinon.stub().resolves([]), release: sinon.stub().resolves(), end: sinon.stub().resolves() };
-    const mockPool = { getConnection: sinon.stub().resolves(mockConn), end: sinon.stub().resolves() };
-    const Database = proxyquire('../../../src/db', {
-        mariadb: { createPool: sinon.stub().returns(mockPool), createConnection: sinon.stub().resolves(mockConn) },
-        fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') },
-        path:    require('path')
-    });
-    return { db: new Database('localhost', 3306, 'test_db', 'user', 'pass'), mockConn };
-}
-
 // The declared spec of one column ("VARCHAR(250) NOT NULL"), comment and comma stripped.
 function declaredSpec(column) {
     const line = fs.readFileSync(DEF_PATH, 'utf8').split('\n').find(l => new RegExp('^\\s*' + column + '\\s').test(l));
@@ -62,73 +53,25 @@ function registerDefinitionSuite() {
     });
 }
 
-function registerGateSuite() {
-    describe('migrateOracleTickWidth (the mirrors-first gate)', function () {
-        afterEach(() => { delete process.env[FLAG]; });
-
-        it('skips and warns while the operator has not attested the mirrors', async function () {
-            const { db, mockConn } = makeDb();
-            const widen = sinon.spy(db, 'migrateColumnLength');
-            expect(await db.migrateOracleTickWidth()).to.equal(false);
-            expect(widen.called).to.equal(false);
-            expect(mockConn.query.called).to.equal(false);
-            expect(console.warn.calledWithMatch(new RegExp(FLAG))).to.equal(true);
-        });
-
-        it('does not treat any value but 1 as the attestation', async function () {
-            process.env[FLAG] = 'true';
-            const { db } = makeDb();
-            const widen = sinon.stub(db, 'migrateColumnLength').resolves(true);
-            await db.migrateOracleTickWidth();
-            expect(widen.called).to.equal(false);
-        });
-
-        it('widens to the definition spec once the flag is 1', async function () {
-            process.env[FLAG] = '1';
-            const { db } = makeDb();
-            const widen = sinon.stub(db, 'migrateColumnLength').resolves(true);
-            await db.migrateOracleTickWidth();
-            expect(widen.calledOnce).to.equal(true);
-            expect(widen.firstCall.args).to.deep.equal(['oracle_prices', 'tick', declaredWidth('tick'), declaredSpec('tick')]);
-        });
-
-        it('runMigrations reaches the gate on every boot', async function () {
-            const { db } = makeDb();
-            for (const m of ['migrateUniqueKey', 'migrateIndex', 'migrateEnumColumn', 'migrateColumnType', 'migrateColumnCharset'])
-                sinon.stub(db, m).resolves();
-            const gate = sinon.stub(db, 'migrateOracleTickWidth').resolves(false);
-            await db.runMigrations();
-            expect(gate.calledOnce).to.equal(true);
-        });
-    });
+function tickShortfall(liveWidth) {
+    const raw = files.readMigration(MIGRATIONS, WIDEN_FILE);
+    const tick = { t: 'oracle_prices', c: 'tick', dt: 'varchar', cs: 'utf8mb4', len: liveWidth };
+    return unmetEndState(planEndState(files.splitMigrationStatements(raw)), schemaModel([tick], []));
 }
 
-function registerHelperSuite() {
-    describe('migrateColumnLength', function () {
-        it('issues the MODIFY when the live column is narrower', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ len: 50 }]).onCall(1).resolves([]);
-            expect(await db.migrateColumnLength('oracle_prices', 'tick', 250, 'VARCHAR(250) NOT NULL')).to.equal(true);
-            expect(mockConn.query.getCall(1).args[0]).to.equal('ALTER TABLE `oracle_prices` MODIFY `tick` VARCHAR(250) NOT NULL');
-            expect(mockConn.release.called).to.equal(true);
+function registerMigrationSuite() {
+    describe('the dated widen (the mirrors-first order)', function () {
+        it('is manual, so no boot widens the hub before its mirrors', function () {
+            expect(files.migrationMode(files.readMigration(MIGRATIONS, WIDEN_FILE))).to.equal('manual');
         });
-
-        it('no-ops at or above the target, when absent, and on an unreadable length', async function () {
-            for (const answer of [[{ len: 250 }], [{ len: 300 }], [], [{ len: null }]]) {
-                const { db, mockConn } = makeDb();
-                mockConn.query.onCall(0).resolves(answer);
-                expect(await db.migrateColumnLength('oracle_prices', 'tick', 250, 'VARCHAR(250) NOT NULL')).to.equal(false);
-                expect(mockConn.query.callCount, JSON.stringify(answer)).to.equal(1);
-            }
+        it('restates the definition spec', function () {
+            expect(files.splitMigrationStatements(files.readMigration(MIGRATIONS, WIDEN_FILE)))
+                .to.deep.equal(['ALTER TABLE `oracle_prices` MODIFY `tick` ' + declaredSpec('tick')]);
         });
-
-        it('logs the hand-run statement and releases rather than taking the boot down', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ len: 50 }]).onCall(1).rejects(new Error('errno 1071'));
-            expect(await db.migrateColumnLength('oracle_prices', 'tick', 250, 'VARCHAR(250) NOT NULL')).to.equal(false);
-            expect(console.error.calledWithMatch(/MIGRATION FAILED: oracle_prices\.tick/)).to.equal(true);
-            expect(console.error.calledWithMatch(/ALTER TABLE `oracle_prices` MODIFY `tick` VARCHAR\(250\) NOT NULL/)).to.equal(true);
-            expect(mockConn.release.called).to.equal(true);
+        it('stays pending on a narrower live column and is baselined at or above the target', function () {
+            expect(tickShortfall(50)).to.have.lengthOf(1);
+            expect(tickShortfall(declaredWidth('tick'))).to.deep.equal([]);
+            expect(tickShortfall(255)).to.deep.equal([]);
         });
     });
 }
@@ -142,6 +85,5 @@ describe('oracle_prices stores every PRICE v1 field the ingest gate admits', fun
     afterEach(() => sinon.restore());
 
     registerDefinitionSuite();
-    registerGateSuite();
-    registerHelperSuite();
+    registerMigrationSuite();
 });

@@ -22,17 +22,21 @@
 // Two arms, one per path a deployed hub can take:
 //   DEFINITION - src/sql/attestation_responses.sql declares the charset, which is
 //                what verifyTables gives a hub whose table does not exist yet.
-//   MIGRATION  - runMigrations widens it, which is the ONLY thing that reaches a hub
-//                whose table already exists: alterTableForDrift adds a missing column
-//                and never restates an existing one.
+//   MIGRATION  - the dated widen under src/sql/migrations restates it, which is the ONLY
+//                thing that reaches a hub whose table already exists: alterTableForDrift
+//                adds a missing column and never restates an existing one. The runner
+//                keeps that file pending on any hub still on utf8mb3.
 
 const fs         = require('fs');
 const path       = require('path');
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const proxyquire = require('proxyquire');
+const files = require('../../../../src/db/schema/sql_migration_files.js');
+const { planEndState, schemaModel, unmetEndState } = require('../../../../src/db/schema/migration_end_state.js');
 
 const DEF_PATH = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'attestation_responses.sql');
+const MIGRATIONS = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'migrations');
+const WIDEN_FILE = '2026-10-19-enum-charset-and-voting-window-widens.sql';
 
 // The columns that hold provider bytes. provider_id is deliberately absent: a mirror row
 // exists only for a round that reached quorum, which requires a governance-registered
@@ -40,21 +44,6 @@ const DEF_PATH = path.join(__dirname, '..', '..', '..', '..', 'src', 'sql', 'att
 const PROVIDER_BYTE_COLUMNS = ['response_payload', 'meta'];
 
 // A Database over stubbed mariadb + fs, matching db.coverage.test.js.
-function makeDb() {
-    const mockConn = {
-        query:   sinon.stub().resolves([]),
-        release: sinon.stub().resolves(),
-        end:     sinon.stub().resolves()
-    };
-    const mockPool = { getConnection: sinon.stub().resolves(mockConn), end: sinon.stub().resolves() };
-    const Database = proxyquire('../../../../src/db', {
-        mariadb: { createPool: sinon.stub().returns(mockPool), createConnection: sinon.stub().resolves(mockConn) },
-        fs:      { readdirSync: sinon.stub().returns([]), readFileSync: sinon.stub().returns('') },
-        path:    require('path')
-    });
-    return { db: new Database('localhost', 3306, 'test_db', 'user', 'pass'), mockConn };
-}
-
 // The declared charset of one column in the definition file, or null when it declares none
 // (in which case it inherits the table's utf8mb3 tail).
 function declaredCharset(column) {
@@ -65,72 +54,27 @@ function declaredCharset(column) {
     return m ? m[1].toLowerCase() : null;
 }
 
-function registerCharsetMigrationHelperSuite() {
-describe('migrateColumnCharset', function () {
-        it('issues the MODIFY when the live column is still utf8mb3', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb3' }]).onCall(1).resolves([]);
-            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
-                'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
-            expect(mockConn.query.callCount).to.equal(2);
-            expect(mockConn.query.getCall(1).args[0])
-                .to.equal('ALTER TABLE `attestation_responses` MODIFY `meta` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('no-ops on a hub already at the target charset', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb4' }]);
-            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
-            expect(mockConn.query.callCount).to.equal(1);
-            expect(mockConn.release.called).to.be.true;
-        });
-
-        it('no-ops when the table does not exist yet (the CREATE TABLE covers it)', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([]);
-            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4', 'TEXT CHARACTER SET utf8mb4');
-            expect(mockConn.query.callCount).to.equal(1);
-        });
-
-        it('logs the hand-run statement and releases rather than taking the boot down', async function () {
-            const { db, mockConn } = makeDb();
-            mockConn.query.onCall(0).resolves([{ CHARACTER_SET_NAME: 'utf8mb3' }])
-                          .onCall(1).rejects(new Error('alter failed'));
-            await db.migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
-                'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
-            expect(console.error.calledWithMatch(/MIGRATION FAILED: attestation_responses\.meta/)).to.be.true;
-            expect(console.error.calledWithMatch(/ALTER TABLE `attestation_responses` MODIFY `meta`/)).to.be.true;
-            expect(mockConn.release.called).to.be.true;
-        });
-    });
+// The widen file's provider-byte statements against a live table at the given charset.
+function charsetShortfall(liveCharset) {
+    const statements = files.splitMigrationStatements(files.readMigration(MIGRATIONS, WIDEN_FILE))
+        .filter(s => /`attestation_responses`/.test(s));
+    const columns = PROVIDER_BYTE_COLUMNS.map(c => ({ t: 'attestation_responses', c, dt: c === 'meta' ? 'text' : 'mediumtext', cs: liveCharset }));
+    return { statements, unmet: unmetEndState(planEndState(statements), schemaModel(columns, [])) };
 }
 
-function registerCharsetMigrationsSuite() {
-describe('runMigrations (what a deployed hub gets)', function () {
-        it('widens both provider-byte columns to utf8mb4', async function () {
-            const { db } = makeDb();
-            sinon.stub(db, 'migrateUniqueKey').resolves();
-            sinon.stub(db, 'migrateIndex').resolves();
-            sinon.stub(db, 'migrateEnumColumn').resolves();
-            sinon.stub(db, 'migrateColumnType').resolves();
-            const widen = sinon.stub(db, 'migrateColumnCharset').resolves();
-
-            await db.runMigrations();
-
-            for (const column of PROVIDER_BYTE_COLUMNS) {
-                const call = widen.getCalls().find(c => c.args[1] === column);
-                expect(call, column + ' is not widened on a deployed hub').to.exist;
-                expect(call.args[0]).to.equal('attestation_responses');
-                expect(call.args[2]).to.equal('utf8mb4');
-                // The restated column must match the definition file, or the two schema
-                // paths converge on different shapes.
-                expect(call.args[3]).to.include('CHARACTER SET utf8mb4');
-                expect(call.args[3]).to.include('COLLATE utf8mb4_general_ci');
-                expect(call.args[3]).to.not.match(/NOT\s+NULL/i);
-            }
-            expect(widen.getCall(0).args[3]).to.match(/^MEDIUMTEXT\b/);
-            expect(widen.getCall(1).args[3]).to.match(/^TEXT\b/);
+function registerCharsetMigrationSuite() {
+describe('the dated widen (what a deployed hub gets)', function () {
+        it('restates both provider-byte columns as utf8mb4', function () {
+            const { statements } = charsetShortfall('utf8mb4');
+            expect(statements).to.have.lengthOf(PROVIDER_BYTE_COLUMNS.length);
+            for (const column of PROVIDER_BYTE_COLUMNS)
+                expect(statements.some(s => s.includes('`' + column + '`') && /CHARACTER SET utf8mb4/.test(s)), column).to.equal(true);
+        });
+        it('stays pending on a hub whose columns are still utf8mb3', function () {
+            expect(charsetShortfall('utf8mb3').unmet).to.have.lengthOf(PROVIDER_BYTE_COLUMNS.length);
+        });
+        it('is baselined on a hub already at utf8mb4', function () {
+            expect(charsetShortfall('utf8mb4').unmet).to.deep.equal([]);
         });
     });
 }
@@ -160,8 +104,6 @@ describe('attestation_responses holds every provider body the on-chain path hold
     afterEach(() => sinon.restore());
 
     registerCharsetDefinitionSuite();
+    registerCharsetMigrationSuite();
 
-    registerCharsetMigrationsSuite();
-
-    registerCharsetMigrationHelperSuite();
 });

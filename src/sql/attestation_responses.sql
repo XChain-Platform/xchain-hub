@@ -76,7 +76,7 @@
 -- A COLUMN added to this file arrives on both sides at startup (db.alterTableForDrift).
 -- A column RETYPED here does not: that reconciler adds a missing column and never
 -- restates an existing one, so a type or charset change needs a dated migration on the
--- indexer and a runMigrations step on the hub.
+-- indexer and on the hub.
 --
 -- CHARSET: `response_payload` and `meta` hold PROVIDER bytes, and their on-chain twins
 -- (attests.response_payload, attests.meta) are utf8mb4, so both are utf8mb4 here as well.

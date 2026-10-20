@@ -16,11 +16,15 @@
  * migrationMode is the same function the decoder's migration runner uses
  * (xchain-decoder/src/db/migration_statements.js), kept line for line so a hub
  * file and a decoder file carry one tag grammar. listDatedMigrations names the
- * files a runner would apply, in the order it would apply them.
+ * files a runner would apply, in the order it would apply them. The rest read one
+ * file's body, its ledger checksum and its statements for the runner in
+ * schema/migration_runner.js.
  */
 'use strict';
 
-const fs   = require('fs');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 
 const DATED_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
 
@@ -66,4 +70,51 @@ function listDatedMigrations(dir){
     return files;
 }
 
-module.exports = { migrationMode, listDatedMigrations };
+// One migration file's body. The runner reads it once and hashes, gates and splits
+// that same text, so the ledger checksum always describes the statements it ran.
+function readMigration(dir, file){
+    return fs.readFileSync(path.join(dir, file), 'utf8');
+}
+
+// The ledger identity of a migration body: an applied file whose hash changes has
+// been edited after the fact. The same sha256 the indexer and decoder ledgers record.
+function migrationChecksum(raw){
+    return crypto.createHash('sha256').update(String(raw)).digest('hex');
+}
+
+// Split a migration body into its statements. `--` line comments are dropped and a
+// ';' ends a statement only outside a quoted span, so a ';' in a header comment or a
+// string literal never cuts a statement in two. Doubled quotes are escapes.
+function splitMigrationStatements(raw){
+    const sql = String(raw);
+    const out = [];
+    let current = '';
+    let quote = null;
+    for(let i = 0; i < sql.length; i++){
+        const ch = sql[i];
+        if(quote){
+            current += ch;
+            if(ch === quote){
+                if(sql[i + 1] === quote) current += sql[++i];
+                else quote = null;
+            }
+            continue;
+        }
+        if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; current += ch; continue; }
+        if(ch === '-' && sql[i + 1] === '-'){
+            while(i < sql.length && sql[i] !== '\n') i++;
+            current += '\n';
+            continue;
+        }
+        if(ch === ';'){
+            if(current.trim() !== '') out.push(current.trim());
+            current = '';
+            continue;
+        }
+        current += ch;
+    }
+    if(current.trim() !== '') out.push(current.trim());
+    return out;
+}
+
+module.exports = { migrationMode, listDatedMigrations, readMigration, migrationChecksum, splitMigrationStatements };

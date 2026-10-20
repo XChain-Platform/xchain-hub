@@ -87,32 +87,6 @@ describe('DDL: checkpoint and price archive bookkeeping', function () {
     });
 });
 
-describe('migrateArchiveBookkeepingColumns() for checkpoints and prices', function () {
-    it('adds every missing column, and none once they exist', async function () {
-        const { db, mockConn } = makeDb();
-        let existing = { state_checkpoints: ['id'], price_snapshots: ['id', 'status'] };
-        mockConn.query.callsFake(async (sql, args) => {
-            if (/information_schema\.columns/.test(sql)) return (existing[args[1]] || []).map(c => ({ c }));
-            return [];
-        });
-        await db.migrateArchiveBookkeepingColumns();
-        let alters = mockConn.query.getCalls().map(c => c.args[0]).filter(s => /ALTER TABLE/.test(s));
-        for (let [t, c] of [['state_checkpoints', 'batch_seq'], ['price_snapshots', 'batch_seq'],
-            ['price_snapshots', 'archived_status'], ['price_snapshots', 'archived_batch_block_time'],
-            ['price_snapshots', 'archived_proof_sha']]) {
-            expect(alters.some(a => a.includes('ALTER TABLE `' + t + '` ADD COLUMN `' + c + '`')), t + '.' + c).to.equal(true);
-        }
-
-        existing = {
-            state_checkpoints: ['id', 'batch_seq'],
-            price_snapshots: ['id', 'batch_seq', 'archived_status', 'archived_batch_block_time', 'archived_proof_sha']
-        };
-        mockConn.query.resetHistory();
-        await db.migrateArchiveBookkeepingColumns();
-        expect(mockConn.query.getCalls().some(c => /ALTER TABLE/.test(c.args[0]))).to.equal(false);
-    });
-});
-
 describe('state_checkpoints archive selectors and stamp', function () {
     it('pending is batch_seq IS NULL, ordered by (chain, network, checkpoint_seq)', async function () {
         const db = stubbedDb();

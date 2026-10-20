@@ -25,6 +25,7 @@
   "scripts": {
     "api": "node ./src/api.js",
     "lint": "eslint .",
+    "migrate": "node src/db/migration/migrate.js",
     "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage": "c8 --all --reporter=text --reporter=html --include 'src/**/*.js' --exclude 'src/api.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage:check": "c8 --all --check-coverage --lines 95 --statements 95 --branches 82.7 --functions 93.6 --reporter=text-summary --include 'src/**/*.js' --exclude 'src/api.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
