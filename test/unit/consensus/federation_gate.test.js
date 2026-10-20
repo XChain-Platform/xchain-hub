@@ -110,8 +110,10 @@ function registerOracleTests() {
 
         await finalizeRoundMethods.finalizeRound.call(ctx, 2, 10, 100);
 
+        // Regtest runs stake-weighted at this height, so the weighted guard, which applies
+        // the same widened test, skips first instead of downgrading to a count quorum.
         expect(stored).to.have.length(1);
-        expect(stored[0][3]).to.equal('no deterministic capability snapshot');
+        expect(stored[0][3]).to.equal('weighted quorum active but weight snapshot unavailable');
     });
 }
 

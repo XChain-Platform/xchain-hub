@@ -61,6 +61,10 @@ module.exports = {
         this._archivePublishing = null;
         this._attestRound        = null;  // leader-side publisher-attestation round (one at a time)
         this._archiveAttestRound = null;  // leader-side ARCHIVE publisher-attestation round (one at a time)
+        // XANCPUB slot -> the payload this hub signed there (attest_round.js
+        // claimAttestSlot), and how many second payloads it has refused.
+        this._attestSlots        = new Map();
+        this._attestSlotRefusals = 0;
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
         this._callHandler      = null;
         this._flushing         = false;

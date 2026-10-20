@@ -21,6 +21,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const canonicalForms = require('./canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
@@ -31,6 +32,17 @@ const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { XANCPUB_SIGN_REQ, XANCPUB_SIGN } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+// XANCPUB slots held in memory before the oldest is dropped; the durable
+// consensus_state row still answers for a dropped slot.
+const ATTEST_SLOT_MEMORY = 4096;
+// consensus_state key prefix for one signed XANCPUB slot; the slot digest that
+// follows keeps the key under the table's 64-character limit.
+const ATTEST_SLOT_KEY_PREFIX = 'xancpub_slot:';
+
+function sha256Hex(text){
+    return crypto.createHash('sha256').update(String(text)).digest('hex');
+}
 
 module.exports = {
 
@@ -148,7 +160,6 @@ module.exports = {
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
         let canonical = this.attestationCanonical(b, publisher);
-        let mySig     = this.identity.sign(canonical);
 
         // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
         // this file fails closed on an unresolved set, and the two resolvers used across
@@ -171,6 +182,11 @@ module.exports = {
         // caller defers the bundle) rather than emit one whose reward can never be credited.
         if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
 
+        // One XANCPUB signature per slot: a hub that already co-signed another
+        // publisher here would hand the indexer a slashable publisher-only pair, so
+        // it abstains and the caller defers the bundle (see claimAttestSlot).
+        if(!(await this.claimAttestSlot(canonical))) return { met: false, sigs: [] };
+        let mySig = this.identity.sign(canonical);
         let signatures = new Map();
         signatures.set(me, mySig);
 
@@ -256,9 +272,88 @@ module.exports = {
         let canonical = this.attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
+        // Co-sign through the slot latch: a failover can propose a second publisher here.
+        return await this.coSignBundleAttestation(network, snapshotBlock, myPubkey, canonical);
+    },
+
+    // Broadcast this hub's XANCPUB co-signature unless it already signed a different
+    // publisher in the slot: rank-unlocked failover can propose one at the same
+    // snapshot_block. Resolves true only after co-signing, falsy on a refusal.
+    async coSignBundleAttestation(network, snapshotBlock, myPubkey, canonical){
+        if(!(await this.claimAttestSlot(canonical))) return;
         this.peerManager.broadcast(XANCPUB_SIGN, { network: network, snapshot_block: snapshotBlock,
                                                   sig_pubkey: myPubkey, sig: this.identity.sign(canonical) });
         return true;
+    },
+
+    // The equivocation slot a header-carrying canonical signs into: its literal
+    // prefix through the `||` key/content boundary, which is exactly what both
+    // messages of a SLASH proof must share. Null for a headerless canonical.
+    attestSlotOf(canonical){
+        let text = String(canonical);
+        if(!text.startsWith('EQUIV|')) return null;
+        let end = text.indexOf('||');
+        return end < 0 ? null : text.slice(0, end + 2);
+    },
+
+    // Claim the right to sign an XANCPUB `canonical`: true for an unsigned slot and
+    // for the payload already signed there, false for a DIFFERENT payload in a slot
+    // this hub signed, in this process or (via consensus_state) before a restart.
+    // The indexer slashes two signatures in one slot that differ only in the
+    // publisher, so the refusal costs the failed-over round its quorum (bundle
+    // deferred, archive count-0 tail) and never costs a bond. The memory entry is
+    // set before the first await, so two concurrent requests cannot both pass.
+    async claimAttestSlot(canonical){
+        let slot = this.attestSlotOf(canonical);
+        if(slot === null) return true;
+        let digest = sha256Hex(canonical);
+        let slots = this._attestSlots || (this._attestSlots = new Map());
+        let held = slots.get(slot);
+        if(held && held.digest !== digest) return this.refuseSecondAttestation(slot, held);
+        if(held) return (await held.stored) === digest;
+        let entry = { digest, stored: null, refused: false };
+        entry.stored = this.persistAttestSlot(slot, digest);
+        slots.set(slot, entry);
+        while(slots.size > ATTEST_SLOT_MEMORY) slots.delete(slots.keys().next().value);
+        let stored = await entry.stored;
+        if(stored === digest) return true;
+        // A failed write (null) frees the slot for a later retry; a different stored
+        // payload, signed before a restart, becomes the slot's memory entry.
+        if(slots.get(slot) === entry) slots.delete(slot);
+        if(stored === null) return false;
+        let prior = { digest: stored, stored: Promise.resolve(stored), refused: false };
+        slots.set(slot, prior);
+        return this.refuseSecondAttestation(slot, prior);
+    },
+
+    // First writer wins in consensus_state: returns the payload digest the slot's
+    // row holds after the insert, or null when the row cannot be written or read,
+    // which fails the claim closed.
+    async persistAttestSlot(slot, digest){
+        let key = ATTEST_SLOT_KEY_PREFIX + sha256Hex(slot).slice(0, 48);
+        try {
+            await this.db.createConsensusStateIfAbsent(key, digest);
+            let rows = await this.db.findConsensusState(key);
+            let stored = rows && rows.length ? String(rows[0].value || '') : '';
+            if(!stored) throw new Error('consensus_state row ' + key + ' absent after insert');
+            return stored;
+        } catch(e){
+            logger.error('StateAnchorPublisher: cannot record the XANCPUB slot ' + slot +
+                         ' (' + (e && e.message) + '); not signing it until the record succeeds');
+            return null;
+        }
+    },
+
+    // Log a refused second payload once per slot and count every refusal.
+    refuseSecondAttestation(slot, held){
+        this._attestSlotRefusals = (this._attestSlotRefusals || 0) + 1;
+        if(!held.refused){
+            held.refused = true;
+            logger.error('StateAnchorPublisher: SECOND XANCPUB PAYLOAD in slot ' + slot + ': this hub ' +
+                         'already signed a different publisher there and refuses this one. Two ' +
+                         'signatures in one slot differing in the publisher are slashable.');
+        }
+        return false;
     },
 
     async handleAttestSign(envelope){

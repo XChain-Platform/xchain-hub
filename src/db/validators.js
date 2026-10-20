@@ -38,6 +38,12 @@ module.exports = {
         return conn.query('DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [roundNumber, rewardType, qualifier]);
     },
 
+    // Deletes one validator's unarchived reward for one logical anchor. An archived row
+    // (batch_seq set) already rode an on-chain archive and is never touched.
+    async deleteUnarchivedValidatorReward(validatorPubkey, roundNumber, rewardType, qualifier) {
+        return this.doQuery('DELETE FROM validator_rewards WHERE validator_pubkey = ? AND round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL', [validatorPubkey, roundNumber, rewardType, qualifier]);
+    },
+
     // Reads rows from validators.
     // Moved here from src/XChainHub.js:961.
     async findActiveValidatorChains() {

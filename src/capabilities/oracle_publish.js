@@ -54,18 +54,70 @@
  *
  ********************************************************************/
 
+const crypto = require('crypto');
+const coins = require('../coins');
 const { loadSignerHooks } = require('../lib/signer_loader.js');
 
-// Dogecoin base58 pay-to-pubkey-hash prefixes by network, from net.pubKeyHash in
-// src/coins/DOGE.js: mainnet 0x1e renders as 'D', testnet 0x71 as 'n', and regtest
-// reuses the Bitcoin-testnet byte 0x6f, which renders as 'm' or 'n'. P2SH is not
-// accepted: the publisher signs with a single-key wallet.
-const DOGE_ADDRESS_RE = {
-    mainnet: /^D[a-km-zA-HJ-NP-Z1-9]{33}$/,
-    testnet: /^n[a-km-zA-HJ-NP-Z1-9]{33}$/,
-    regtest: /^[mn][a-km-zA-HJ-NP-Z1-9]{33}$/,
-};
-const DOGE_ADDRESS_PREFIX = { mainnet: "'D'", testnet: "'n'", regtest: "'m' or 'n'" };
+// Dogecoin addresses are Base58Check: a version byte, a 20-byte key hash and a
+// 4-byte checksum. The version byte comes ONLY from net.pubKeyHash in the coin
+// registry, never a hand copy (testnet 0x71 and regtest 0x6f both render as 'n').
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const P2PKH_PAYLOAD_BYTES = 25;
+
+// Return the version byte of a valid 25-byte Base58Check address, else null.
+// Rejects a bad character, a wrong length and a checksum mismatch alike.
+function base58CheckVersion(address) {
+    let s = String(address);
+    let n = 0n;
+    for (let ch of s) {
+        let digit = BASE58_ALPHABET.indexOf(ch);
+        if (digit < 0) return null;
+        n = n * 58n + BigInt(digit);
+    }
+    // Each leading '1' encodes one leading zero byte that the number drops.
+    let zeros = 0;
+    while (zeros < s.length && s[zeros] === '1') zeros++;
+    let hex = n === 0n ? '' : n.toString(16);
+    if (hex.length % 2) hex = '0' + hex;
+    let bytes = Buffer.concat([Buffer.alloc(zeros), Buffer.from(hex, 'hex')]);
+    if (bytes.length !== P2PKH_PAYLOAD_BYTES) return null;
+    // The checksum is the first 4 bytes of sha256(sha256(version + hash)).
+    let body = bytes.subarray(0, 21);
+    let digest = crypto.createHash('sha256').update(crypto.createHash('sha256').update(body).digest()).digest();
+    if (!digest.subarray(0, 4).equals(bytes.subarray(21))) return null;
+    return bytes[0];
+}
+
+// Base58 of the lowest (fill 0x00) or highest (fill 0xff) payload one version
+// byte can produce, so the operator hint names that byte's leading characters.
+function base58Bound(versionByte, fill) {
+    let n = BigInt(versionByte);
+    for (let i = 0; i < P2PKH_PAYLOAD_BYTES - 1; i++) n = (n << 8n) | BigInt(fill);
+    let out = '';
+    while (n > 0n) { out = BASE58_ALPHABET[Number(n % 58n)] + out; n /= 58n; }
+    return out;
+}
+
+// Operator-facing prefix hint built from the registry byte: "'D'" on mainnet,
+// "'n'" on testnet, "'m' or 'n'" on regtest.
+function prefixHint(versionByte) {
+    let lo = base58Bound(versionByte, 0x00)[0];
+    let hi = base58Bound(versionByte, 0xff)[0];
+    return lo === hi ? "'" + lo + "'" : "'" + lo + "' or '" + hi + "'";
+}
+
+// The registry's P2PKH version byte for this network, or null for a network the
+// registry does not know. P2SH is not accepted: the publisher signs with a
+// single-key wallet.
+function dogePubKeyHash(network) {
+    try {
+        return coins.getCoinConfig('DOGE', network).net.pubKeyHash;
+    } catch (e) {
+        // Only an unknown network reads as "unknown"; any other registry fault surfaces.
+        if (e && /^Unknown network/.test(String(e.message))) return null;
+        throw e;
+    }
+}
 
 exports.selfTest = async (config) => {
     let entry = (config && config.oracle_publish) || null;
@@ -80,15 +132,18 @@ exports.selfTest = async (config) => {
     // mainnet: guessing here is what would let a testnet hub silently validate a
     // mainnet address and spend real DOGE.
     let network = String((config && config.HUB_NETWORK) || '').toLowerCase();
-    let re = DOGE_ADDRESS_RE[network];
-    if (!re) {
+    let version = network ? dogePubKeyHash(network) : null;
+    if (version === null) {
         return { ok: false, reason: 'oracle_publish cannot validate doge_address: HUB_NETWORK is ' +
                                     (network ? '"' + network + '" (unknown)' : 'not set') };
     }
-    if (!re.test(String(entry.doge_address))) {
+    // Decode the address and require this network's exact version byte plus a valid
+    // checksum: a first-character test cannot tell testnet 0x71 from regtest 0x6f.
+    if (base58CheckVersion(entry.doge_address) !== version) {
         return { ok: false, reason: 'oracle_publish.doge_address is not a valid DOGE ' + network +
-                                    ' address (expected ' + DOGE_ADDRESS_PREFIX[network] +
-                                    ' prefix, 34 chars)' };
+                                    ' address (expected a P2PKH address with version byte 0x' +
+                                    version.toString(16) + ', ' + prefixHint(version) +
+                                    ' prefix, and a valid checksum)' };
     }
     if (!entry.doge_wallet) {
         return { ok: false, reason: 'oracle_publish.doge_wallet not configured' };

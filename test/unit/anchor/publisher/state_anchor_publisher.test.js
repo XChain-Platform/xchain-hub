@@ -194,16 +194,27 @@ function registerCadenceCases() {
         // stand-down log to mention. Eligibility is therefore FLOOR(seq / 6) % N.
         // Seeds (step 6, odd): 970001 already anchored, 970007 (ordinal 161667, odd ->
         // skipped), 970013 (ordinal 161668, even -> the latest eligible un-anchored).
-        let bus = buildMesh(1, {
-            cfg: { ANCHOR_CHECKPOINT_EVERY_N: '2' },
-            mutate: (self, db) => {
-                db.checkpoints.length = 0;
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 1, block_index: 493, checkpoint_seq: 970001, anchor_txid: 'old' }));
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, block_index: 494, checkpoint_seq: 970007, anchor_txid: null }));
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 3, block_index: 495, checkpoint_seq: 970013, anchor_txid: null }));
-            }
-        });
+        // N=2 is an override, honoured on regtest only; the mesh hub carries no network,
+        // so HUB_NETWORK decides it, read once while buildMesh constructs the publisher.
+        let savedNetwork = process.env.HUB_NETWORK;
+        process.env.HUB_NETWORK = 'regtest';
+        let bus;
+        try {
+            bus = buildMesh(1, {
+                cfg: { ANCHOR_CHECKPOINT_EVERY_N: '2' },
+                mutate: (self, db) => {
+                    db.checkpoints.length = 0;
+                    db.checkpoints.push(Object.assign({}, CP_ROW, { id: 1, block_index: 493, checkpoint_seq: 970001, anchor_txid: 'old' }));
+                    db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, block_index: 494, checkpoint_seq: 970007, anchor_txid: null }));
+                    db.checkpoints.push(Object.assign({}, CP_ROW, { id: 3, block_index: 495, checkpoint_seq: 970013, anchor_txid: null }));
+                }
+            });
+        } finally {
+            if (savedNetwork === undefined) delete process.env.HUB_NETWORK;
+            else process.env.HUB_NETWORK = savedNetwork;
+        }
         let nd = bus.nodes[0];
+        expect(nd.pub.anchorEveryNCheckpoints, 'the regtest override reached the publisher').to.equal(2);
         await startAll(bus);
         await nd.pub.flush();
         await waitUntil(() => nd.db.checkpoints.some(r => r.checkpoint_seq === 970013 && r.anchor_txid), { label: 'the latest eligible ordinal to be anchored' });

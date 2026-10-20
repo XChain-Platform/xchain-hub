@@ -20,8 +20,26 @@
  *
  ********************************************************************/
 
-const { getLogger } = require('../observability');
+const { getLogger, getRegistry } = require('../observability');
 const logger = getLogger();
+
+// Throttle the unverified-acceptance warning per (pubkey, capability, reason); peers
+// re-gossip every activation on each recheck tick, so an indexer outage would flood the log.
+const UNVERIFIED_LOG_WINDOW_MS = 60000;
+const UNVERIFIED_LOG_MAX_KEYS  = 1000;
+
+// Count activations accepted without a stake check; built at first use, once per process.
+let _unverifiedCounter = null;
+function unverifiedCounter(){
+    if(!_unverifiedCounter){
+        _unverifiedCounter = getRegistry().counter({
+            name: 'xchain_capability_qualification_unverified_total',
+            help: 'Capability activations accepted without a stake-snapshot check, by capability and reason',
+            labelNames: ['capability', 'reason']
+        });
+    }
+    return _unverifiedCounter;
+}
 
 class CapabilityGossip {
 
@@ -172,26 +190,58 @@ class CapabilityGossip {
             // a peer must not be able to advertise a capability it is not actually staked for.
             // When the indexer cannot be consulted, meaning no block in the message or an
             // unreachable indexer, accept the claim to preserve liveness; slashing-for-failure
-            // stays the backstop.
+            // stays the backstop. Every such unchecked acceptance is counted and logged.
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, true, null);
             let qualified = true;
+            let unverified = null;
+            let error = null;
             try {
-                let snap = (this.capabilitySnapshot && data.block_at !== undefined && data.block_at !== null)
-                    ? await this.capabilitySnapshot.getSnapshot(data.capability, data.block_at)
-                    : null;
-                if(snap && !this.capabilitySnapshot.isInSnapshot(snap, data.pubkey)){
-                    logger.warn('Capability activation from ' + envelope.sender + ' for "' + data.capability +
-                        '" rejected: pubkey ' + data.pubkey + ' is not in the indexer stake snapshot at block ' +
-                        data.block_at + ' (claimed qualification it is not staked for).');
-                    qualified = false;
+                if(!this.capabilitySnapshot) unverified = 'no_snapshot_service';
+                else if(data.block_at === undefined || data.block_at === null) unverified = 'no_block';
+                else {
+                    let snap = await this.capabilitySnapshot.getSnapshot(data.capability, data.block_at);
+                    // getSnapshot answers null, rather than throwing, when the indexer is down or refuses.
+                    if(!snap) unverified = 'snapshot_unavailable';
+                    else if(!this.capabilitySnapshot.isInSnapshot(snap, data.pubkey)){
+                        logger.warn('Capability activation from ' + envelope.sender + ' for "' + data.capability +
+                            '" rejected: pubkey ' + data.pubkey + ' is not in the indexer stake snapshot at block ' +
+                            data.block_at + ' (claimed qualification it is not staked for).');
+                        qualified = false;
+                    }
                 }
-            } catch(e){ /* indexer hiccup; fall back to accepting (liveness) */ }
+            } catch(e){
+                unverified = 'snapshot_error';
+                error = e;
+            }
+            if(unverified) this.noteUnverifiedQualification(envelope, data, unverified, error);
             await this.capabilityRegistry.setQualification(data.pubkey, data.capability, qualified, data.block_at || null);
             await this.capabilityRegistry.setEnabled(data.pubkey, data.capability, true);
         } else if(envelope.type === 'CAPABILITY_DEACTIVATED'){
             // Failing the peer's self-test is what routes work away from it.
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, false, data.reason || 'peer reported deactivation');
         }
+    }
+
+    // Record a stake-backed claim accepted without a snapshot check. The counter moves on
+    // every one; the warning is throttled. A capability outside the known set is labelled
+    // 'other', since a peer chooses the string and must not grow the series without bound.
+    noteUnverifiedQualification(envelope, data, reason, error){
+        let known = this.capabilityRegistry.getCapabilities ? this.capabilityRegistry.getCapabilities() : [];
+        let capability = known.indexOf(data.capability) === -1 ? 'other' : data.capability;
+        unverifiedCounter().inc({ capability: capability, reason: reason });
+
+        let log = this._unverifiedQualificationLog || (this._unverifiedQualificationLog = new Map());
+        let key = String(data.pubkey).toLowerCase() + '|' + capability + '|' + reason;
+        let now = Date.now();
+        let last = log.get(key);
+        if(last !== undefined && now - last < UNVERIFIED_LOG_WINDOW_MS) return;
+        // Re-insert so the map stays ordered oldest-first, then drop the oldest past the cap.
+        log.delete(key);
+        log.set(key, now);
+        while(log.size > UNVERIFIED_LOG_MAX_KEYS) log.delete(log.keys().next().value);
+        logger.warn('Capability activation from ' + (envelope && envelope.sender) + ' for "' + data.capability +
+            '" accepted WITHOUT a stake check (' + reason + (error ? ': ' + (error.message || String(error)) : '') +
+            '): pubkey ' + data.pubkey + ', block_at ' + data.block_at);
     }
 
     // Exact decimal string comparison. Aggregated stake can exceed float64's safe-integer

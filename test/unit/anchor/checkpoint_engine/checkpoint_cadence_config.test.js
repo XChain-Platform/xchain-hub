@@ -22,7 +22,7 @@ const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine.
 const StateAnchorPublisher  = require('../../../../src/anchor/publisher.js');
 
 const KNOBS = ['CHECKPOINT_INTERVAL_BLOCKS', 'CHECKPOINT_POLL_MS',
-               'CHECKPOINT_ROUND_TIMEOUT_MS', 'CHECKPOINT_CONFIRMATIONS'];
+               'CHECKPOINT_ROUND_TIMEOUT_MS', 'CHECKPOINT_CONFIRMATIONS', 'HUB_NETWORK'];
 
 function makeHub(p2pConfig) {
     return { db: { doQuery: async () => [] }, p2pConfig: p2pConfig || {} };
@@ -35,6 +35,8 @@ function registerIntervalResolutionTests() {
         });
 
         it('honours a positive operator value from env and from p2pConfig', function () {
+            // Regtest is the one network that honours an override (the resolver pins the rest).
+            process.env.HUB_NETWORK = 'regtest';
             expect(resolveCheckpointIntervalBlocks({ CHECKPOINT_INTERVAL_BLOCKS: '12' })).to.equal(12);
             process.env.CHECKPOINT_INTERVAL_BLOCKS = '9';
             expect(resolveCheckpointIntervalBlocks({ CHECKPOINT_INTERVAL_BLOCKS: '12' })).to.equal(9);
@@ -55,6 +57,8 @@ function registerCadenceParityTests() {
     describe('engine and anchor publisher resolve the same step', function () {
         for (let raw of ['6', '12', 'abc', '0', '-3']) {
             it('agrees on CHECKPOINT_INTERVAL_BLOCKS=' + JSON.stringify(raw), function () {
+                // On regtest, so a non-canonical value reaches both readers rather than the pin.
+                process.env.HUB_NETWORK = 'regtest';
                 process.env.CHECKPOINT_INTERVAL_BLOCKS = raw;
                 let engine    = new StateCheckpointEngine(makeHub());
                 let publisher = new StateAnchorPublisher(makeHub());

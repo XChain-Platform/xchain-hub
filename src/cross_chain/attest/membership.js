@@ -54,8 +54,8 @@ module.exports = {
         // Message handler
         this._messageHandler = null;
 
-        // Sequence counter for attestation ordering
-        this.seq = 0;
+        // No proposer counter: any hub opens a round from a request (rounds.js requestAttestation),
+        // so nothing here elects a proposer from the live set.
     },
 
     // --- Message handlers ---
@@ -145,14 +145,6 @@ module.exports = {
         }
         // Fall back to full validator set
         return this.validatorSet;
-    },
-
-    getLeader(seq, sourceChain, destChain) {
-        let set = (sourceChain && destChain)
-            ? this.getChainPairSet(sourceChain, destChain)
-            : this.validatorSet;
-        if (set.length === 0) return null;
-        return set[seq % set.length];
     },
 
     // Resolve the round's quorum from a deterministic block-boundary snapshot

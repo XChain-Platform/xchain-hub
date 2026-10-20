@@ -219,17 +219,18 @@ function registerMultiValidatorAttestationTests() {
 }
 
 async function createMultiValidatorEngine(db) {
-    // This node must BE the leader the engine elects, or requestAttestation
-    // refuses. The rotation is set[seq % N] and the first request runs at
-    // seq 1, so the leader is index 1, not index 0.
-    let leaderIdx = 1 % VALIDATORS_4.length;
+    // Any member may propose, so this node is index 0, which the retired seq
+    // rotation (set[seq % N], first request at seq 1) would have refused.
+    // It signs as that member, so its own vote counts toward the snapshot quorum.
+    let leaderIdx = 0;
     let peerIdxs  = VALIDATORS_4.map((_, i) => i).filter(i => i !== leaderIdx).slice(0, 2);
     // CrossChainEngine.resolveQuorum fails CLOSED for a federated hub with no
     // deterministic cross_chain snapshot, so a validator set alone is not
     // enough fixture: it needs a snapshot at a real block height too.
     let hub = createTestHub(db, VALIDATORS_4[leaderIdx].addr, {
         btcLatestBlock:      800000,
-        capabilitySnapshot:  createCapabilitySnapshotStub(VALIDATORS_4)
+        capabilitySnapshot:  createCapabilitySnapshotStub(VALIDATORS_4),
+        identity:            { getPubkeyHex: () => VALIDATORS_4[leaderIdx].pubkey, sign: () => 'aa'.repeat(64) }
     });
     let engine = new CrossChainEngine(hub);
     engine.setValidatorSet(VALIDATORS_4);
@@ -237,11 +238,15 @@ async function createMultiValidatorEngine(db) {
     return { hub, engine, peerIdxs };
 }
 
+// Votes carry the proven signing key PeerManager stamps on a verified envelope,
+// since the tally counts keys, never sender addrs.
 function emitAttestationVotes(hub, peerIdxs, type, attestationId, digest) {
     for (let i of peerIdxs) {
-        hub._peerManager.emit('message', buildEnvelope(type, {
+        let envelope = buildEnvelope(type, {
             attestationId: attestationId, digest: digest
-        }, VALIDATORS_4[i].addr));
+        }, VALIDATORS_4[i].addr);
+        envelope.sig_pubkey = VALIDATORS_4[i].pubkey;
+        hub._peerManager.emit('message', envelope);
     }
 }
 

@@ -132,3 +132,52 @@ describe('archive bridge and policy follower verification', () => {
         expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }))).to.equal(false);
     });
 });
+
+describe('archive bridge and policy row shape', () => {
+    it('refuses a quorum-signed policy row filed under bridge_transfers', async () => {
+        const pub = buildPub();
+        const row = sign(pub, policy(), 3);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [row] }))).to.equal(false);
+    });
+
+    it('refuses a quorum-signed transfer row filed under policy_snapshots', async () => {
+        const pub = buildPub();
+        const row = sign(pub, bridge(), 3);
+        row.policy_hash = policy().policy_hash;
+        row.allow_list = policy().allow_list;
+        row.block_list = policy().block_list;
+        row.sleeping = 0;
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }))).to.equal(false);
+    });
+
+    it('refuses without throwing a row carrying both ids in either array', async () => {
+        const pub = buildPub();
+        const both = Object.assign(bridge(), { snapshot_id: 'b'.repeat(64) });
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [both] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [both] }))).to.equal(false);
+    });
+
+    it('refuses without throwing a row carrying neither id or a malformed id', async () => {
+        const pub = buildPub();
+        const neither = bridge();
+        delete neither.transfer_id;
+        const nonHex = Object.assign(bridge(), { transfer_id: 'g'.repeat(64) });
+        const short = Object.assign(bridge(), { transfer_id: 'a'.repeat(63) });
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [neither] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [neither] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [nonHex] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [short] }))).to.equal(false);
+    });
+
+    // Followers co-sign an id case-insensitively, so a refused held row would stall every later archive.
+    it('accepts a quorum-signed held row whose id is upper-case hex', async () => {
+        const transfer = Object.assign(bridge(), { transfer_id: 'A'.repeat(64) });
+        const snapshot = Object.assign(policy(), { snapshot_id: 'B'.repeat(64) });
+        const pub = buildPub({ bridge: transfer, policy: snapshot });
+        sign(pub, transfer, 3);
+        sign(pub, snapshot, 3);
+        expect(await pub.verifyArchiveAgainstLocal(archive({
+            bridge_transfers: [transfer], policy_snapshots: [snapshot]
+        }))).to.equal(true);
+    });
+});

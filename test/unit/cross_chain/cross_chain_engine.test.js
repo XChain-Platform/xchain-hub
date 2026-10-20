@@ -144,27 +144,32 @@ function registerFeature3resolveQuorumFailClosed1223() {
     registerFeature3resolveQuorumFailClosed1223Part1();
   });
 }
+// Any hub opens a round from a request: the live set and a per-hub counter elect nobody.
 function registerFeature4getLeaderPart1() {
-  it('rotates through validators by seq % N', function () {
+  it('opens a round for every request in a row, whatever the old seq rotation would pick', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
-    expect(rootSuiteEngine.getLeader(0, null, null)).to.equal(VALIDATORS_3[0]);
-    expect(rootSuiteEngine.getLeader(1, null, null)).to.equal(VALIDATORS_3[1]);
-    expect(rootSuiteEngine.getLeader(3, null, null)).to.equal(VALIDATORS_3[0]);
+    wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
+    rootSuitePm.validatorAddr = VALIDATORS_3[0].addr;
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    rootSuiteEngine.requestAttestation('BTC', 2, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuiteEngine.pendingAttestations.size === 2, { label: 'both rounds to open' });
   });
-  it('uses chain-pair set for leader selection', function () {
+  it('opens a round when the live chain-pair set leaves this hub out', async function () {
     let pairSet = [makeValidator(5), makeValidator(6)];
     rootSuiteEngine.chainPairValidators = new Map([['BTC-LTC', pairSet]]);
     rootSuiteEngine.setValidatorSet(VALIDATORS_7);
-    expect(rootSuiteEngine.getLeader(0, 'BTC', 'LTC')).to.equal(pairSet[0]);
-    expect(rootSuiteEngine.getLeader(1, 'BTC', 'LTC')).to.equal(pairSet[1]);
+    wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
+    rootSuitePm.validatorAddr = VALIDATORS_7[0].addr;
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuiteEngine.pendingAttestations.has('BTC:1:LTC'), { label: 'the round to open' });
   });
-  it('returns null for empty set', function () {
-    rootSuiteEngine.setValidatorSet([]);
-    expect(rootSuiteEngine.getLeader(0, null, null)).to.be.null;
+  it('keeps no proposer election or counter on the engine', function () {
+    expect(rootSuiteEngine.getLeader).to.equal(undefined);
+    expect(rootSuiteEngine.seq).to.equal(undefined);
   });
 }
 function registerFeature4getLeader() {
-  describe('getLeader()', function () {
+  describe('proposer (no live-set election)', function () {
     registerFeature4getLeaderPart1();
   });
 }
@@ -294,16 +299,13 @@ function registerFeature6requestAttestationPart3() {
     let doge = await rootSuiteEngine.requestAttestation('DOGE', 1, 'BTC');
     expect(doge.confirmations).to.equal(60);
   });
-  it('throws when not the leader in multi-node mode', async function () {
+  it('proposes from a hub outside the live set in multi-node mode', async function () {
     rootSuiteEngine.setValidatorSet(VALIDATORS_3);
     wireLiveMirrorSnapshot(rootSuiteEngine, rootSuiteHub);
     rootSuitePm.validatorAddr = 'ws://not-in-set:10001';
-    try {
-      await rootSuiteEngine.requestAttestation('BTC', 1, 'LTC');
-      expect.fail('should have thrown');
-    } catch (e) {
-      expect(e.message).to.include('Not the leader');
-    }
+    rootSuiteEngine.requestAttestation('BTC', 1, 'LTC').catch(() => {});
+    await waitUntil(() => rootSuitePm.broadcast.calledWith('XCHAIN_ATTEST_PROPOSE'), { label: 'the PROPOSE broadcast' });
+    expect(rootSuiteEngine.pendingAttestations.has('BTC:1:LTC')).to.equal(true);
   });
 }
 function registerFeature6requestAttestation() {

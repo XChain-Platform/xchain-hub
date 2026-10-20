@@ -17,6 +17,7 @@ const { expect }           = require('chai');
 const fs                   = require('fs');
 const path                 = require('path');
 const StateAnchorPublisher = require('../../../../src/anchor/publisher');
+const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const PUB   = 'cd'.repeat(32);
 const OTHER = 'ef'.repeat(32);
@@ -50,7 +51,12 @@ describe('reward drain: txid binding', function () {
     it('the vendored binding is a byte twin of the indexer copy', function () {
         let mine = path.join(__dirname, '../../../../src/anchor/anchor_proof_binding.js');
         let theirs = path.join(__dirname, '../../../../../xchain-indexer/src/consensus/doge_peer_clients/anchor_proof_client/binding.js');
-        if (!fs.existsSync(theirs)) this.skip();
+        let indexer = siblingCheckout(__dirname, '../../../../../xchain-indexer/package.json');
+        // Fail in every mode when the indexer is here but its binding is not: it was moved or renamed.
+        if (indexer.usable && !fs.existsSync(theirs))
+            throw new Error('xchain-indexer is present but ' + theirs + ' is missing; re-point this byte-twin guard');
+        // Skip without the indexer, but fail when the run declared its siblings supplied.
+        if (!skipOrFail(this, siblingCheckout(__dirname, theirs), 'the anchor proof binding byte-twin guard')) return;
         expect(fs.readFileSync(mine).equals(fs.readFileSync(theirs))).to.equal(true);
     });
 

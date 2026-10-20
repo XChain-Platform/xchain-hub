@@ -72,10 +72,16 @@ describe('capabilities/cross_chain selfTest()', function () {
 
 let oraclePub;
 
+// Checksum-valid P2PKH addresses from the DOGE registry address books: mainnet
+// 0x1e, testnet 0x71, and two regtest 0x6f addresses (one 'm', one 'n').
+const DOGE_MAINNET_GAS = 'DGasfpttCnTijuuoAdiJ9sXJjG7vQ5pMkW';
+const DOGE_TESTNET_GAS = 'ngasn6zHFzJ72zpk3DBKmXhD2XtszujSDW';
+const DOGE_REGTEST_N   = 'n1AvTJLLSA1NHamHd5KFj9mRn6BEcwnVbf';
+
 function registerOraclePublishSourceTests() {
 it('returns ok=false when HUB_NETWORK is absent', async function () {
         let r = await oraclePub.selfTest({
-            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_MAINNET_GAS, doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
         expect(r.reason).to.include('HUB_NETWORK is not set');
@@ -84,7 +90,7 @@ it('returns ok=false when HUB_NETWORK is absent', async function () {
     it('returns ok=false when HUB_NETWORK is unrecognised', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'stagenet',
-            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_MAINNET_GAS, doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
         expect(r.reason).to.include('unknown');
@@ -94,7 +100,7 @@ it('returns ok=false when HUB_NETWORK is absent', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'mainnet',
             oracle_publish: {
-                doge_address: 'D' + 'A'.repeat(33),
+                doge_address: DOGE_MAINNET_GAS,
                 // no doge_wallet
             }
         });
@@ -102,15 +108,15 @@ it('returns ok=false when HUB_NETWORK is absent', async function () {
         expect(r.reason).to.include('doge_wallet');
     });
 
-    it('returns ok=true with valid address (D-prefix + 33 base58 chars) and wallet', async function () {
+    it('returns ok=true with a checksum-valid mainnet P2PKH address and wallet', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'mainnet',
             oracle_publish: {
-                doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', // valid format
+                doge_address: DOGE_MAINNET_GAS, // version 0x1e, valid checksum
                 doge_wallet:  '/path/to/wallet'
             }
         });
-        expect(r.ok).to.be.true;
+        expect(r.ok, r.reason).to.be.true;
     });
 }
 
@@ -118,17 +124,29 @@ function registerOraclePublishShapeTests() {
 it('accepts a testnet DOGE address on a testnet hub', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'testnet',
-            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_TESTNET_GAS, doge_wallet: '/path' }
         });
-        expect(r.ok).to.be.true;
+        expect(r.ok, r.reason).to.be.true;
     });
 
-    it('accepts a testnet-format DOGE address on a regtest hub', async function () {
+    // Testnet 0x71 and regtest 0x6f both render 'n', so only the decoded version
+    // byte keeps a DOGE-testnet address off a regtest hub.
+    it('rejects a DOGE TESTNET 0x71 address on a regtest hub', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'regtest',
-            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_TESTNET_GAS, doge_wallet: '/path' }
         });
-        expect(r.ok).to.be.true;
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE regtest address');
+    });
+
+    it('rejects an n-prefixed regtest 0x6f address on a testnet hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'testnet',
+            oracle_publish: { doge_address: DOGE_REGTEST_N, doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE testnet address');
     });
 
     // Gated per-network rather than permissive: a mainnet hub holding a testnet
@@ -136,7 +154,7 @@ it('accepts a testnet DOGE address on a testnet hub', async function () {
     it('rejects a MAINNET address on a testnet hub', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'testnet',
-            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_MAINNET_GAS, doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
         expect(r.reason).to.include('not a valid DOGE testnet address');
@@ -145,19 +163,21 @@ it('accepts a testnet DOGE address on a testnet hub', async function () {
     it('rejects a TESTNET address on a mainnet hub', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'mainnet',
-            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_TESTNET_GAS, doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
         expect(r.reason).to.include('not a valid DOGE mainnet address');
     });
 }
 
-// Base58 of a 25-byte P2PKH payload whose hash and checksum bytes are all `fill`:
-// the lowest (0x00) and highest (0xff) addresses one version byte can produce.
+// Base58Check of one version byte, 20 hash bytes all `fill` and the real checksum:
+// fill 0x00 and 0xff give the lowest and highest addresses one version byte makes.
 function dogeP2pkhBound(versionByte, fill) {
+    const crypto = require('crypto');
     const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-    let n = BigInt(versionByte);
-    for (let i = 0; i < 24; i++) n = (n << 8n) | BigInt(fill);
+    let body = Buffer.concat([Buffer.from([versionByte]), Buffer.alloc(20, fill)]);
+    let sum  = crypto.createHash('sha256').update(crypto.createHash('sha256').update(body).digest()).digest();
+    let n = BigInt('0x' + Buffer.concat([body, sum.subarray(0, 4)]).toString('hex'));
     let out = '';
     while (n > 0n) { out = ALPHABET[Number(n % 58n)] + out; n /= 58n; }
     return out;
@@ -187,15 +207,15 @@ function registerOraclePublishRegistryPrefixTests() {
     it('names both m and n in the regtest rejection message', async function () {
         let r = await oraclePub.selfTest({
             HUB_NETWORK: 'regtest',
-            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+            oracle_publish: { doge_address: DOGE_MAINNET_GAS, doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
         expect(r.reason).to.include('not a valid DOGE regtest address');
         expect(r.reason).to.include("'m' or 'n'");
     });
 
-    // The prefix table is a hand copy of the registry's pubKeyHash bytes, so pin it:
-    // both extremes of every network's version byte must pass on that network.
+    // The accepted version byte must track the registry's pubKeyHash bytes, so pin
+    // it: both extremes of every network's version byte must pass on that network.
     it('accepts the lowest and highest P2PKH address of each network registry pubKeyHash', async function () {
         for (const network of ['mainnet', 'testnet', 'regtest']) {
             const version = coins.getCoinConfig('DOGE', network).net.pubKeyHash;

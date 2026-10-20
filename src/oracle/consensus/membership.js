@@ -23,6 +23,7 @@
 'use strict';
 
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
+const { roundIsFederated } = require('../../consensus/federation.js');
 
 module.exports = {
 
@@ -175,16 +176,20 @@ module.exports = {
     // bypass in a federation self-finalizes the round with ONE signature, storing
     // a divergent 'finalized' row and publishing a PRICE v0 the indexer's
     // >2/3-stake gate then rejects. Such a round must be SKIPPED instead. The
-    // federation test is `getQuorum() > 0` (validatorSet has >=2 registered
-    // members, or a live peer is connected); a genuine single-node / regtest
-    // bootstrap has `getQuorum() === 0`, so it keeps the self-finalize path. A
+    // federation test is roundIsFederated at the round's anchor height (consensus/
+    // federation.js), the one the leader's snapshot gates use: `getQuorum() > 0`
+    // (validatorSet has >=2 registered members, or it is empty and a live peer is
+    // connected) or, once FEDERATED_HUB_ACTIVATION is active there, any federation
+    // signal, which also covers a one-entry validatorSet with open peers. A genuine
+    // single-node / regtest bootstrap is neither, so it keeps the self-finalize
+    // path. Without a height only the quorum half applies. A
     // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
     // earlier on both round paths by hasDeterministicSnapshot.
-    isEmptyFederationSnapshot(snapshot) {
+    isEmptyFederationSnapshot(snapshot, btcBlockHeight) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
         let empty = !Array.isArray(vals) || vals.length === 0;
-        return empty && this.getQuorum() > 0;
+        return empty && roundIsFederated(this, btcBlockHeight);
     },
 
     // Fail-closed gate for a federated hub: a block-anchored snapshot is what makes the

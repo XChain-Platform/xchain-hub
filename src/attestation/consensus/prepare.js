@@ -105,9 +105,10 @@ module.exports = {
     // sender, not just the leader: a dead leader must not block an
     // outage from being recorded. Safety comes from the co-sign rules
     // (mayCoSignNonOk: a hub only vouches for what it observed), never from
-    // trusting the sender. The one exception is a judge_model no_quorum,
-    // which only the leader can derive, so it is leader-only (see
-    // nonOkDerivationRefuses).
+    // trusting the sender. Every status is still self-derivation gated:
+    // a judge_model no_quorum, which only the leader can derive, is
+    // leader-only, and a provider_error waits until this hub could reach it
+    // itself (see nonOkDerivationRefuses).
     adoptNonOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks){
         if(body.length !== 0 || meta !== ''){
             logger.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
@@ -214,6 +215,7 @@ module.exports = {
             // derivedWinner === null: this hub independently derives no_quorum,
             // so adopting and co-signing below is self-evidenced.
         }
+        if(status === 'provider_error') return this.providerErrorUnderivable(envelope, pending, rid, senderPubkey);
         return false;
     },
 
