@@ -8,6 +8,7 @@ const path = require('node:path');
 const DexEngine = require('../../../src/cross_chain/dex_engine.js');
 const remote = require('../../../src/cross_chain/remote_token_snapshots.js');
 const queries = require('../../../src/db/snapshots/remote_token_snapshots.js');
+const { getLogger } = require('../../../src/observability');
 
 const NETWORK = 'regtest';
 const SNAPSHOT_BLOCK = 840000;
@@ -277,6 +278,51 @@ function registerPublicationTests(){
     });
 }
 
+// Run one mirror call against a stub broadcaster, capturing the error log and resync reasons.
+async function mirrorWithRead(read, dropAllForResync){
+    const logger = getLogger();
+    const errors = [];
+    const resyncs = [];
+    const broadcaster = {
+        subscribers: new Set(['mirror']),
+        broadcastRow: () => assert.fail('a gap must not stream a row'),
+        dropAllForResync: dropAllForResync || ((reason) => resyncs.push(reason))
+    };
+    const original = logger.error;
+    logger.error = (message) => { errors.push(String(message)); };
+    try {
+        await remote.enginePart.mirrorRemoteTokenSnapshot.call({
+            db: { getRemoteTokenSnapshotById: read }, broadcaster
+        }, 'snapshot-gap');
+    } finally {
+        logger.error = original;
+    }
+    return { errors, resyncs };
+}
+
+function registerMirrorGapTests(){
+    it('logs an empty read-back before forcing the mirror resync', async function(){
+        const { errors, resyncs } = await mirrorWithRead(async () => []);
+        assert.deepStrictEqual(resyncs, ['remote_token_snapshots mirror gap']);
+        assert.strictEqual(errors.length, 1);
+        assert.match(errors[0], /\(the committed row read back empty\); forcing subscriber resync$/);
+    });
+
+    it('logs a thrown read-back with its cause before forcing the mirror resync', async function(){
+        const { errors, resyncs } = await mirrorWithRead(async () => { throw new Error('hub db unavailable'); });
+        assert.deepStrictEqual(resyncs, ['remote_token_snapshots mirror gap']);
+        assert.strictEqual(errors.length, 1);
+        assert.match(errors[0], /\(hub db unavailable\); forcing subscriber resync$/);
+    });
+
+    it('keeps a failing resync call out of the committed write path', async function(){
+        const { errors } = await mirrorWithRead(async () => [],
+            () => { throw new Error('broadcaster down'); });
+        assert.strictEqual(errors.length, 2);
+        assert.match(errors[1], /subscriber resync after the mirror gap failed: broadcaster down$/);
+    });
+}
+
 function registerPersistenceTests(){
     it('stores the attested row and exposes deterministic mirror reads', async function(){
         const doQuery = queryRecorder({ affectedRows: 1 });
@@ -303,6 +349,8 @@ function registerPersistenceTests(){
             /ORDER BY snapshot_block DESC, source_action_index DESC, snapshot_id DESC LIMIT 1$/);
         assert.deepStrictEqual(doQuery.calls[0][1], [NETWORK, 'DOGE', 'ART']);
     });
+
+    registerMirrorGapTests();
 
     it('defines the mirror table with the attested token fields and pin index', function(){
         const sql = fs.readFileSync(path.join(

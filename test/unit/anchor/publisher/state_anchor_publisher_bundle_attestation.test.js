@@ -330,4 +330,24 @@ function registerImpostorCase() {
         await Promise.all(handled);
         expect(impostor.pub._attestRound.signatures.size, 'only the impostor self-sig').to.equal(1);
     });
+
+    it('followers refuse to co-sign a bundle built on a superseded checkpoint row', async function () {
+        // Every follower holds a newer eligible unanchored row for the chain, so the
+        // proposer's row is one the followers' own selector never publishes.
+        let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+        let leader = v0Order(bus)[0];
+        let stride = leader.pub.checkpointIntervalBlocks * leader.pub.anchorEveryNCheckpoints;
+        for (let nd of bus.nodes) {
+            if (nd === leader) continue;
+            let held = nd.db.checkpoints[0];
+            nd.db.checkpoints.push(Object.assign({}, held, { id: 2, block_index: held.block_index + 1,
+                block_hash: 'f0'.repeat(32), checkpoint_seq: held.checkpoint_seq + stride }));
+        }
+        await startAll(bus);
+        await leader.pub.flush();
+        await waitUntil(() => leader.pub.unattestedDeferrals > 0,
+            { label: 'the leader to defer a bundle no follower co-signs' });
+        expect(leader.published.some(p => p.split('|')[1] === '0'),
+            'no v0 bundle is published over a superseded row').to.be.false;
+    });
 }

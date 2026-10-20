@@ -188,6 +188,26 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         expect(c.pending.get(RID).status).to.equal('no_quorum');
     }); });
 
+// With no ok proposal this hub derives provider_error, so a no_quorum PREPARE
+    // raced ahead of proposal collection must not be adopted or co-signed.
+describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () { beforeEach(hookAt107990); afterEach(hookAt108336); it('refuses a no_quorum PREPARE when every proposal is provider_error', async function () {
+        let rs = roundState(me, [me, p1, p2], EMPTY, 'http_get', 3);
+        rs.myProposal = { body: EMPTY, meta: '', status: 'provider_error' };
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
+        // The racing sender's PREPARE arrives first and is buffered until `need` proposals are in.
+        c.handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, EMPTY, '', 'provider_error'));
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
+        await flush();
+        // The replayed no_quorum PREPARE is refused, and this hub's own derivation wins.
+        expect(pending.status).to.equal('provider_error');
+    }); });
+
 // item 5305: the self-derivation gate keys on the pinned STRATEGY while the
     // sync/async shape of agree() rides the MODULE, so a byte_equality provider
     // exporting an async agree() reaches this synchronous handler. Its pending

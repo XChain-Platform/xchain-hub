@@ -273,6 +273,9 @@ const foldPublisherMethods = {
             ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer, { allowUnconfirmed: true }));
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
                                                            broadcaster, archiveSection.cp);
+        // Count a partial archive's seq as consumed, as followers do from our FINALIZED: its
+        // rows may stamp nothing, and the fold co-sign needs every hub to draw the same next seq
+        if(lostChunks > 0) this.noteConsumedBatchSeq(archiveSection.batchSeq, 'own partial fold archive ' + txid);
         let ids = this.archiveBackfillIds(archiveSection, lostChunks, true, false);
         let backfillArgs = [archiveSection.batchSeq, ids.matchIds, txid, ids.callIds, ids.rewardIds,
                             ids.bridgeIds, ids.policyIds, ids.checkpointIds,

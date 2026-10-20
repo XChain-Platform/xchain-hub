@@ -56,4 +56,14 @@ function wrapParts(proposePart, prePreparePart) {
     ];
 }
 
-module.exports = { isFederated, isFederatedAt, noteBlockHeight, wrapParts };
+// True when a federated engine's snapshot has members but this hub is not one of them.
+// A one-member set also yields getQuorum 0, and only its sole member may act alone over
+// it (the DEX soleSelf rule); a hub with no identity counts as a non-member.
+function isNonMemberSnapshot(engine, snapshot) {
+    if (!engine.isFederated() || !snapshot || !Array.isArray(snapshot.validators) ||
+        snapshot.validators.length === 0) return false;
+    const self = engine.selfPubkey();
+    return !self || !snapshot.validators.some(v => v && String(v.pubkey).toLowerCase() === self);
+}
+
+module.exports = { isFederated, isFederatedAt, noteBlockHeight, wrapParts, isNonMemberSnapshot };

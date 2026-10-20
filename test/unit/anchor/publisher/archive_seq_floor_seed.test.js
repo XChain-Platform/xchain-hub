@@ -16,6 +16,7 @@ const StateAnchorPublisher = require('../../../../src/anchor/publisher');
 function makePublisher(overrides){
     const calls = [];
     const consumed = [];
+    const own = [];
     const pub = {
         dogeAddress: 'Dpublisher',
         indexers: { DOGE: { url: 'http://doge-indexer' } },
@@ -23,11 +24,12 @@ function makePublisher(overrides){
             calls.push({ coin, method, params });
             return { exists: false };
         },
-        noteConsumedBatchSeq(seq, why){ consumed.push({ seq, why }); }
+        noteConsumedBatchSeq(seq, why){ consumed.push({ seq, why }); },
+        noteOwnArchiveSeq(seq){ own.push(seq); }
     };
     Object.assign(pub, overrides || {});
     pub.seedArchiveSeqFloor = StateAnchorPublisher.prototype.seedArchiveSeqFloor;
-    return { pub, calls, consumed };
+    return { pub, calls, consumed, own };
 }
 
 async function captureWarnings(fn){
@@ -74,6 +76,7 @@ describe('StateAnchorPublisher: archive sequence floor seed result', function ()
         expect(rig.consumed).to.deep.equal([{
             seq: 41, why: 'boot-time floor seed from the DOGE indexer'
         }]);
+        expect(rig.own, 'own-address floor').to.deep.equal([41]);
     });
 
 });
@@ -86,6 +89,25 @@ describe('StateAnchorPublisher: archive sequence floor seed tolerance', function
         expect(rig.calls).to.have.length(1);
         expect(rig.consumed).to.deep.equal([]);
         expect(warnings.some(line => /found no archive/.test(line))).to.equal(true);
+    });
+
+    it('reports an indexer error reply as a failed lookup rather than as no archive', async function () {
+        for(const detail of ['indexer database not ready', 'failed to look up archive anchor']){
+            const rig = makePublisher({ indexerCall: async () => ({ error: detail }) });
+            const warnings = await captureWarnings(() => rig.pub.seedArchiveSeqFloor());
+            expect(rig.consumed).to.deep.equal([]);
+            expect(warnings.some(line => line.includes('seed failed') && line.includes(detail))).to.equal(true);
+            expect(warnings.some(line => /found no archive/.test(line))).to.equal(false);
+        }
+    });
+
+    it('leaves the floor untouched for a fractional, negative or non-numeric seq', async function () {
+        for(const raw of [1.5, -0.5, -1, 'abc']){
+            const rig = makePublisher({ indexerCall: async () => ({ exists: true, match_batch_seq: raw }) });
+            const warnings = await captureWarnings(() => rig.pub.seedArchiveSeqFloor());
+            expect(rig.consumed).to.deep.equal([]);
+            expect(warnings.some(line => /invalid seq/.test(line))).to.equal(true);
+        }
     });
 
     it('catches an indexer rejection and warns without throwing', async function () {

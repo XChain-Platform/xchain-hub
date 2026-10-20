@@ -231,10 +231,9 @@ module.exports = {
         let publisher = String(d.publisher || '').toLowerCase();
         if(publisher !== sender) return;
 
-        // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block,
-        // hash-ordered by the bundle election key) and confirm the proposer is
-        // rank-unlocked on the SAME failover ladder publishBundle used, bounded to our own
-        // BTC tip (anti-spam; the binding security is the byte-match below).
+        // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block, hash-ordered by
+        // the bundle election key) and confirm the proposer is rank-unlocked on publishBundle's
+        // ladder. Ranks unlock with block age, unbounded; the selector match below pins the tip.
         let eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
         {
@@ -264,6 +263,7 @@ module.exports = {
             if(local[0].anchor_txid != null) return;                       // already anchored: a second publisher must not earn the reward
             mine.push(local[0]);
         }
+        if(!(await this.sectionsAreSelectorRows(network, snapshotBlock, mine))) return;
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
         // The proposer's own SNAPSHOT_BLOCK claim has to be the one our rows produce, or
         // the canonical we co-sign would name a block the bundle does not commit to.
@@ -274,6 +274,32 @@ module.exports = {
 
         // Co-sign through the slot latch: a failover can propose a second publisher here.
         return await this.coSignBundleAttestation(network, snapshotBlock, myPubkey, canonical);
+    },
+
+    // True when every section is the row this hub's own bundle selector would publish for
+    // its chain: the newest anchor-eligible unanchored checkpoint. An older unanchored seq is
+    // superseded and never anchored, so a bundle built on one is declined, with a warning.
+    async sectionsAreSelectorRows(network, snapshotBlock, rows){
+        let eligible;
+        try {
+            eligible = await this.findAnchorEligibleSections();
+        } catch(err){
+            logger.warn('StateAnchorPublisher: declining XANCPUB co-sign for ' + network + ' @ ' + snapshotBlock +
+                        ': the bundle selector could not be read (' + (err && err.message) + ')');
+            return false;
+        }
+        let newest = new Map();
+        for(let r of (eligible || [])) if(String(r.network) === network) newest.set(String(r.chain), r);
+        for(let row of rows){
+            let sel = newest.get(String(row.chain));
+            if(sel && Number(sel.block_index) === Number(row.block_index) &&
+               Number(sel.checkpoint_seq) === Number(row.checkpoint_seq)) continue;
+            logger.warn('StateAnchorPublisher: declining XANCPUB co-sign for ' + network + ' @ ' + snapshotBlock +
+                        ': section ' + row.chain + ' seq ' + row.checkpoint_seq + ' is not the newest eligible ' +
+                        'unanchored checkpoint here (' + (sel ? 'selector holds seq ' + sel.checkpoint_seq : 'none') + ')');
+            return false;
+        }
+        return true;
     },
 
     // Broadcast this hub's XANCPUB co-signature unless it already signed a different

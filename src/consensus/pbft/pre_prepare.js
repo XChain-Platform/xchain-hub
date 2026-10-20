@@ -26,6 +26,7 @@
 'use strict';
 
 const { PBFT_PREPARE } = require('./message_types.js');
+const { isNonMemberSnapshot } = require('./federation_round.js');
 const { noteDrop } = require('../diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -167,6 +168,14 @@ function followerRoundQuorum(self, ctx) {
         logger.warn('Consensus: declining to PREPARE for seq ' + seq +
             ' over an EMPTY active-validator snapshot (block ' + btcBlockHeight +
             ', federated hub); a legitimate leader skips such a round.');
+        return null;
+    }
+    // Decline a quorum-0 round over a one-member snapshot that does not hold this hub
+    // (follower twin of the propose() refusal): its sole member applies directly.
+    if (quorum === 0 && isNonMemberSnapshot(self, snapshot)) {
+        logger.warn('Consensus: declining to PREPARE for seq ' + seq +
+            ' over a one-member active-validator snapshot (block ' + btcBlockHeight +
+            ', federated hub) that does not hold this hub.');
         return null;
     }
 

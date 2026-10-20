@@ -47,6 +47,9 @@ function logUnheld(subject, basis){
                 ' predates our local history; accepting on ' + basis + ' alone');
 }
 
+// Keep batch_block_time in the compare: no signature covers it, so this is the follower's only check.
+// A follower whose batch ingest lags (0 or a later landing) refuses an honest round, as finalized_apply
+// does; the row re-pends when its stamp changes, but a self-finalized row keeps an orphaned landing's stamp.
 function samePriceRow(local, archived, signatureProofed){
     const keys = signatureProofed ? ['id', 'consensus_proof', 'validator_count'] : ['id'];
     return sameRowExcept(local, archived, keys);
@@ -88,6 +91,9 @@ function sameSignedPriceFields(first, row){
 // A proofed row this hub does not hold must be a plain finalized round row: the PRICE v0
 // signature leaves status and consensus_round uncovered, and every writer stores a
 // signed round as finalized at consensus round 1. Skipped and disputed need a held twin.
+// The signature also leaves reference_chain, source_chain, source_action_index and
+// batch_block_time uncovered, and honest hubs store differing shapes for them, so for an
+// unheld row those four columns are unverified claims that rest on the co-signers alone.
 function unheldProofedPriceRefusal(row){
     if(String(row.status) !== 'finalized')
         return 'is ' + row.status + ' with no byte-identical held row';

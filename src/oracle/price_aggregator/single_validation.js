@@ -22,8 +22,12 @@ function validateOraclePriceIdentity(priceData) {
 }
 
 function validateOraclePriceValue(priceData, network, coin) {
-    if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
-        !(parseFloat(priceData.value) < PRICE_MAX)) return 'invalid value';
+    // Refuse a value that is not a plain decimal or is not strictly inside (0, PRICE_MAX),
+    // written in the same two-negated form as the round and batch ingest checks so NaN
+    // fails at both ends.
+    if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) ||
+        !(parseFloat(String(priceData.value)) > 0) ||
+        !(parseFloat(String(priceData.value)) < PRICE_MAX)) return 'invalid value';
     if (isPriceV1CanonicalActive(priceData.block_time, network, coin) &&
         !isCanonicalPriceV1Value(priceData.value)) return 'invalid value';
     if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&

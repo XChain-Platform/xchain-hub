@@ -238,6 +238,42 @@ function registerFeature6requestAttestationPart1() {
     expect(threw, 'should refuse over an empty snapshot').to.be.true;
   });
 }
+// A one-member snapshot also yields quorum 0, and only its sole member may attest alone.
+function registerFeature6requestAttestationOneMember() {
+  it('REFUSES to finalize unilaterally over a one-member cross_chain snapshot that does not hold this hub', async function () {
+    rootSuiteEngine.setValidatorSet(VALIDATORS_3);
+    rootSuiteHub.resolveBtcLatestBlock = async () => 800000;
+    rootSuiteHub.capabilitySnapshot = {
+      getSnapshot: async () => ({ validators: [{ pubkey: VALIDATORS_3[1].pubkey }], count: 1 }),
+      getQuorum: () => 0
+    };
+    let heard = [];
+    rootSuiteEngine.on('attestation:finalized', a => heard.push(a));
+    let caught = null;
+    try {
+      await rootSuiteEngine.requestAttestation('BTC', 7, 'LTC');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'should refuse over a non-self one-member snapshot').to.be.an('error');
+    expect(caught.message).to.match(/does not hold this hub/);
+    expect(heard).to.deep.equal([]);
+    expect(rootSuiteEngine.finalized.has('BTC:7:LTC')).to.be.false;
+  });
+  it('lets the sole member of a one-member cross_chain snapshot finalize alone', async function () {
+    rootSuiteEngine.setValidatorSet(VALIDATORS_3);
+    rootSuiteHub.resolveBtcLatestBlock = async () => 800000;
+    let self = rootSuiteEngine.selfPubkey();
+    expect(self, 'the engine resolves its own signing key').to.be.a('string');
+    rootSuiteHub.capabilitySnapshot = {
+      getSnapshot: async () => ({ validators: [{ pubkey: self.toUpperCase() }], count: 1 }),
+      getQuorum: () => 0
+    };
+    let result = await rootSuiteEngine.requestAttestation('BTC', 7, 'LTC');
+    expect(result.status).to.equal('attested');
+    expect(rootSuiteEngine.finalized.has('BTC:7:LTC')).to.be.true;
+  });
+}
 function registerFeature6requestAttestationPart2() {
   it('returns stored attestation if already finalized', async function () {
     rootSuiteEngine.finalized.add('BTC:42:LTC');
@@ -311,6 +347,7 @@ function registerFeature6requestAttestationPart3() {
 function registerFeature6requestAttestation() {
   describe('requestAttestation()', function () {
     registerFeature6requestAttestationPart1();
+    registerFeature6requestAttestationOneMember();
     registerFeature6requestAttestationPart2();
     registerFeature6requestAttestationNested5();
     registerFeature6requestAttestationPart3();

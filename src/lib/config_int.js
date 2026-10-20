@@ -46,4 +46,20 @@ function positiveIntConfig(raw, dflt, name) {
     return dflt;
 }
 
-module.exports = { positiveIntConfig };
+/**
+ * Operator-supplied integer config where 0 is meaningful, honoured when non-negative.
+ *
+ * @param {*} raw       the raw config/env value
+ * @param {number} dflt the site's default, used for any negative or unparseable value
+ * @param {string} name config key name, named in the warning when the fallback fires
+ * @returns {number}
+ */
+function nonNegativeIntConfig(raw, dflt, name) {
+    if (raw === undefined || raw === null || raw === '') return dflt;
+    let n = parseInt(raw, 10);
+    if (Number.isInteger(n) && n >= 0) return n;
+    logger.warn('config: ' + name + '="' + raw + '" is not a non-negative integer; using the default (' + dflt + ')');
+    return dflt;
+}
+
+module.exports = { positiveIntConfig, nonNegativeIntConfig };

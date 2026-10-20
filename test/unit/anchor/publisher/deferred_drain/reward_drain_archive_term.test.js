@@ -66,6 +66,30 @@ async function drain(anchors, over) {
     return pub;
 }
 
+// A past-term archive entry is refused before any DOGE call, so an empty, missing or failed
+// answer cannot hold it; below the term an empty first page still defers.
+async function expectPastTermRefusedBeforeDoge() {
+    for (const answer of [{ exists: false, anchors: [] }, { exists: true, anchors: [] }, null, 'throw']) {
+        let held = makePub([]);
+        held.indexerCalls = 0;
+        held.indexerCall = async () => {
+            held.indexerCalls++;
+            if (answer === 'throw') throw new Error('DOGE indexer unreachable');
+            return answer;
+        };
+        held._deferredRewardAttest.set('k', entry({ snapshotBlock: SNAPSHOT_PAST_TERM }));
+        await held.runRewardAttestDrain();
+        expect(held.written, JSON.stringify(answer)).to.deep.equal([]);
+        expect(held._deferredRewardAttest.size, JSON.stringify(answer)).to.equal(0);
+        expect(held.indexerCalls, JSON.stringify(answer)).to.equal(0);
+    }
+    let below = makePub([]);
+    below.indexerCall = async () => ({ exists: false, anchors: [] });
+    below._deferredRewardAttest.set('k', entry());
+    await below.runRewardAttestDrain();
+    expect(below._deferredRewardAttest.size, 'below the term an empty first page still defers').to.equal(1);
+}
+
 describe('reward drain: archive fold-term screen', function () {
     it('holds the term gate row equal to the indexer row and the canonical constants', function () {
         if (!skipOrFail(this, siblingCheckout(__dirname, INDEXER_REGISTRY), 'the archive term row parity guard')) return;
@@ -114,6 +138,7 @@ describe('reward drain: archive fold-term screen', function () {
                               { snapshotBlock: SNAPSHOT_PAST_TERM });
         expect(pub.written).to.deep.equal([]);
         expect(pub._deferredRewardAttest.size).to.equal(0);
+        await expectPastTermRefusedBeforeDoge();
     });
 
     it('leaves a bundle reward unscreened past the term', async function () {

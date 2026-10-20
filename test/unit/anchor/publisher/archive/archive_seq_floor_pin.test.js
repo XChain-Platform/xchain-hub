@@ -47,6 +47,16 @@ describe('StateAnchorPublisher: archive batch-seq floor pin', function () {
         expect(pub._observedConsumedBatchSeq).to.equal(-1);
     });
 
+    it('ignores fractional and negative observations', function () {
+        const pub = mkPub();
+        pub.noteConsumedBatchSeq(1.5, 'test');
+        pub.noteConsumedBatchSeq(-0.5, 'test');
+        pub.noteConsumedBatchSeq('2.5', 'test');
+        expect(pub._observedConsumedBatchSeq).to.equal(-1);
+        pub.noteConsumedBatchSeq('4', 'test');
+        expect(pub._observedConsumedBatchSeq).to.equal(4);
+    });
+
     it('raises the floor on a note and never lowers it on a smaller later note', function () {
         const pub = mkPub();
         pub.noteConsumedBatchSeq(7, 'test');

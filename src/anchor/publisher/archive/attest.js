@@ -126,7 +126,7 @@ module.exports = {
     // Run the archive publisher-attestation round for a batch THIS hub is publishing
     // (mirrors runPublisherAttestationRound for the archive leg). The signing/quorum set
     // is resolved at the wrapper checkpoint's snapshot_block, the SAME set the indexer
-    // (anchor.js formats[1]) verifies the attestation against.
+    // (consensus/anchor_reward_derive.js verifyAttestation) verifies the attestation against.
     // The oracle_publish set the archive round tallies against, or null when the
     // snapshot is unavailable and the round must abstain rather than discard the archive.
     async runArchiveAttestationRound(cp, batchSeq, publisher){

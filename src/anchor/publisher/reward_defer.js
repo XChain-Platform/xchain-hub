@@ -200,7 +200,7 @@ module.exports = {
     // whose round_reference differs from its snapshot_block is counted, since the bundle
     // round IS its snapshot block and judgeAnchors can never bind such a tuple.
     // judgeDrainAnchors adds the indexer's archive fold-term screen around that rule.
-    // An anchor_archive entry past the BTC-side term is rejected even with no evidence, as the indexer never mints it.
+    // An anchor_archive entry past the BTC-side term is rejected before any DOGE call, as the indexer never mints it.
     // With no DOGE indexer wired, or with a response that omits the anchor rows, there is
     // no binding evidence. Feed that empty set through judgeAnchors so it remains unknown
     // rather than inheriting verifyAnchorOnChain's checkpoint-only verdict.
@@ -208,7 +208,6 @@ module.exports = {
     // drain's burial depth; the adoption ownership check passes 0.
     // `screenLegacy` true applies the indexer's LEGACY_ANCHOR_REWARD_PIN drop; only the write drain asks.
     async drainBindingVerdict(e, minConfirmations, screenLegacy){
-        let minConf = (minConfirmations != null) ? Number(minConfirmations) : this.dogeConfirmations;
         if(e.rewardType === 'anchor_bundle' && Number(e.roundReference) !== Number(e.snapshotBlock)){
             this._rewardBundleRoundMismatch = (this._rewardBundleRoundMismatch || 0) + 1;
             logger.warn('StateAnchorPublisher: anchor_bundle reward entry with round_reference ' + e.roundReference +
@@ -217,8 +216,9 @@ module.exports = {
         let expect = {
             rewardType: e.rewardType, network: e.network, publisher: e.publisher,
             roundReference: Number(e.roundReference), snapshotBlock: Number(e.snapshotBlock),
-            minConfirmations: minConf
+            minConfirmations: (minConfirmations != null) ? Number(minConfirmations) : this.dogeConfirmations
         };
+        if(String(expect.rewardType) === 'anchor_archive' && archiveTermActive(String(expect.network || ''), 'BTC', expect.snapshotBlock)) return 'rejected';
         let txid = String(e.txid).toLowerCase();
         let anchors = [];
         let after = null;
