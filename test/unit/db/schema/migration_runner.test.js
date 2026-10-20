@@ -98,6 +98,7 @@ function registerBootTests() {
             makeDir({ '2026-10-19-widen-tick.sql': MANUAL + WIDEN_TICK });
             const result = await db.runDatedMigrations({ dir });
             expect(result.pending).to.deep.equal(['2026-10-19-widen-tick.sql']);
+            expect(result.pendingTables).to.deep.equal({ '2026-10-19-widen-tick.sql': ['oracle_prices'] });
             expect(result.applied).to.deep.equal([]);
             expect(ledger).to.deep.equal([]);
             expect(executed).to.deep.equal([]);
@@ -267,13 +268,14 @@ function registerTimeoutFallbackTests() {
 
 function registerEntryPointTests() {
     describe('Database.prototype.runMigrations()', function () {
-        it('settles the dated files and then asserts the mirror keys, in that order', async function () {
+        it('settles the dated files and then asserts the mirror keys with the pending tables, in that order', async function () {
             const order = [];
-            sinon.stub(db, 'runDatedMigrations').callsFake(async (opts) => { order.push(['dated', opts]); return { applied: [] }; });
-            sinon.stub(db, 'assertMirrorKeysWide').callsFake(async () => { order.push(['keys']); });
+            const settled = { applied: [], pendingTables: { 'w.sql': ['capability_snapshots'] } };
+            sinon.stub(db, 'runDatedMigrations').callsFake(async (opts) => { order.push(['dated', opts]); return settled; });
+            sinon.stub(db, 'assertMirrorKeysWide').callsFake(async (pending) => { order.push(['keys', pending]); });
             const result = await db.runMigrations({ includeManual: true });
-            expect(order).to.deep.equal([['dated', { includeManual: true }], ['keys']]);
-            expect(result).to.deep.equal({ applied: [] });
+            expect(order).to.deep.equal([['dated', { includeManual: true }], ['keys', settled.pendingTables]]);
+            expect(result).to.equal(settled);
         });
     });
 }

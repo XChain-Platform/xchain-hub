@@ -66,6 +66,12 @@ function setSessionStatementTime(conn, ms){
     return conn.query('SET SESSION max_statement_time = ?', [ms / 1000]);
 }
 
+// The tables a plan's statements touch, in first-seen order.
+function touchedTables(plan){
+    const tables = plan.columns.map(c => c.table).concat([...plan.indexes.values()].map(i => i.table));
+    return [...new Set(tables)];
+}
+
 // A name that matches no committed file is almost always a typo, and applying
 // nothing would look like a clean run, so it is refused with the list of names.
 function assertTargetsKnown(only, files, dir){
@@ -92,15 +98,16 @@ module.exports = {
 
     // Settle every dated migration file. opts.includeManual applies manual files
     // (the operator path); opts.only limits the run to the named files; opts.dir
-    // overrides src/sql/migrations. Returns what happened to each file, and
-    // lockSkipped when another process held the migration lock.
+    // overrides src/sql/migrations. Returns what happened to each file, the tables
+    // each gated pending file touches (pendingTables, so a later boot check can name
+    // the file that fixes it), and lockSkipped when another process held the lock.
     async runDatedMigrations(opts = {}){
         const files = this.constructor.io.migrationFiles;
         const dir = opts.dir || path.join(this.constructor.io.sqlDir, 'migrations');
         const only = opts.only == null ? null
             : new Set([].concat(opts.only).map(s => String(s).trim()).filter(Boolean));
         const ctx = { dir, only, includeManual: !!opts.includeManual, files,
-            result: { applied: [], pending: [], baselined: [], lockSkipped: false } };
+            result: { applied: [], pending: [], baselined: [], pendingTables: {}, lockSkipped: false } };
 
         const names = files.listDatedMigrations(dir);
         assertTargetsKnown(only, names, dir);
@@ -146,7 +153,8 @@ module.exports = {
 
         const mode = files.migrationMode(raw);
         const statements = files.splitMigrationStatements(raw);
-        const unmet = unmetEndState(planEndState(statements), await this.readLiveSchemaModel(conn));
+        const plan = planEndState(statements);
+        const unmet = unmetEndState(plan, await this.readLiveSchemaModel(conn));
         if(unmet.length === 0){
             await conn.query(RECORD_SQL, [name, checksum, mode]);
             result.baselined.push(name);
@@ -155,6 +163,7 @@ module.exports = {
         }
         if(mode !== 'auto' && !includeManual){
             result.pending.push(name);
+            result.pendingTables[name] = touchedTables(plan);
             logger.warn('runDatedMigrations: PENDING (mode=' + mode + ') ' + name + ': ' + unmet.slice(0, 3).join('; ') +
                 (unmet.length > 3 ? '; and ' + (unmet.length - 3) + ' more' : '') + '. ' + APPLY_HINT);
             return;

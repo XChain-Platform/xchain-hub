@@ -210,10 +210,11 @@ class Database {
     // runner (schema/migration_runner.js): a file whose end state already holds is
     // recorded, an auto file is applied, and a manual one waits for the operator
     // path, which passes { includeManual: true }. The mirror key check runs last
-    // either way, so a hub whose widen is still pending refuses to serve.
+    // either way, so a hub whose widen is still pending refuses to serve, and it is
+    // handed the pending files by table so the refusal names the one to apply.
     async runMigrations(opts){
         const result = await this.runDatedMigrations(opts);
-        await this.assertMirrorKeysWide();
+        await this.assertMirrorKeysWide(result.pendingTables);
         return result;
     }
 

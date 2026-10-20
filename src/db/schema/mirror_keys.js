@@ -31,9 +31,22 @@ const MIRROR_KEYS = [
     }
 ];
 
+// The operator step that rebuilds a narrow or missing mirror key: the dated widen,
+// applied with the migrate command, named by file when the runner reported it pending.
+function remedyFor(table, pendingTables){
+    const files = Object.keys(pendingTables || {}).filter(file =>
+        (pendingTables[file] || []).indexOf(table) !== -1);
+    const what = files.length > 0
+        ? 'the pending ' + files.join(', ')
+        : 'the dated unique-key widen under src/sql/migrations';
+    return 'Run `npm run migrate` to apply ' + what + ', then start the hub again.';
+}
+
 module.exports = {
 
-    async assertMirrorKeysWide(){
+    // pendingTables maps each gated pending migration file to the tables it touches
+    // (the runner's result), so a refusal can name the file that fixes the key.
+    async assertMirrorKeysWide(pendingTables = {}){
         const db = await this.getConnection();
         try {
             for(const key of MIRROR_KEYS){
@@ -60,7 +73,8 @@ module.exports = {
                 throw new Error('Refusing to start: UNIQUE KEY ' + key.name + ' on ' + key.table +
                     ' must cover (' + key.columns.join(', ') + '); found ' +
                     (columns.length > 0 ? '(' + columns.join(', ') + ')' : 'no index') +
-                    (rows && rows.length > 0 && !unique ? ' and it is not unique' : '') + '.');
+                    (rows && rows.length > 0 && !unique ? ' and it is not unique' : '') + '. ' +
+                    remedyFor(key.table, pendingTables));
             }
         } finally {
             await db.release();
