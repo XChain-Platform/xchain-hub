@@ -51,10 +51,10 @@
   },
   "gate_key_count": 47,
   "absent_gates": [],
-  "hub_only_rules_digest": "da2de030c5c3fa382d84221772f5f1ab67e4f63395ad38b906403ae81533666b",
+  "hub_only_rules_digest": "2caec1edbddd41271e1efbc144d214e75fd93919c21da5fe9a6a925063d05c33",
   "hub_only_rules_gates": {
     "anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":157073}",
-    "anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN": "{\"mainnet\":9999999999,\"regtest\":9999999999,\"testnet\":1792303200}",
+    "anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN": "{\"mainnet\":9999999999,\"regtest\":9999999999,\"testnet\":1792454400}",
     "anchor/reorg_handler/snapshot_lock.REORG_SNAPSHOT_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":156230}",
     "anchor/reorg_handler/snapshot_round.REORG_DIGEST_V2_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":157073}",
     "anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION": "{\"BTC:testnet\":157073,\"DOGE:testnet\":68009330,\"LTC:testnet\":4928460,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",

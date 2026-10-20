@@ -124,4 +124,4 @@ addGate('anchor_archive_fold_term_activation.ANCHOR_ARCHIVE_FOLD_TERM_ACTIVATION
 // anchor/publisher/legacy_reward_pin: the time columns of the indexer's LEGACY_ANCHOR_REWARD_PIN protocol change.
 // It keeps the hub's own key, since the activation census refuses a hub time row under a change key and
 // set-activation-heights arms only the indexer row; reward_drain_legacy_pin.test.js holds the two equal.
-addGate('anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN', 'time', { mainnet: UNARMED, testnet: 1792303200, regtest: UNARMED });
+addGate('anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN', 'time', { mainnet: UNARMED, testnet: 1792454400, regtest: UNARMED });
