@@ -186,7 +186,7 @@ jobs:
           node-version: "22.22.3"
 
       - name: Chain-registry snapshot vs canonical wallet descriptors
-        run: node xchain-wallet/bin/sync-chain-registry.mjs --check
+        run: node xchain-wallet/tools/sync-chain-registry.mjs --check
 
       # The roster is read out of the script itself, so adding a consumer there
       # cannot leave this job checking a stale subset.
@@ -350,12 +350,16 @@ jobs:
           repository: XChain-Platform/xchain-sync
           path: xchain-sync
 
-      # The hub baseline is the revision whose generated pins the re-pin was
-      # taken against, so the title rewrites that pin already accepted are in it.
+      # The hub baseline is re-taken at the develop revision after the dated
+      # .sql migration runner retired the fixed DDL modules and their tests, the
+      # anchor cadence pin rewrote its titles, and the signer example and the
+      # configuration reference moved to their documentation homes. Every drop
+      # against the earlier baseline came from those deliberate rewrites, which
+      # the rename map cannot carry because whole files and titles went away.
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
-          ref: da159cba9baca5d661f4ff559807c48f6344da75
+          ref: 26c072c9d0b5d9872b91ed80078ba9ff44869baf
           path: suite-title-pins/hub/xchain-hub
 
       - name: Check out the re-taken SDK suite-title pin

@@ -192,14 +192,12 @@ describe('chain-registry snapshot consistency', function () {
 
     // Skips when xchain-wallet is not checked out (standalone hub deploy), but hard-fails
     // in the required-siblings lane (XCHAIN_REQUIRE_SIBLINGS=1, bin/ci-all.sh) so a
-    // mis-resolved sibling path cannot silently retire this byte-parity guard (item 2435).
+    // mis-resolved sibling path cannot silently retire this byte-parity guard.
     //
-    // The skip is no longer the only thing standing between a descriptor fix and a
-    // superseded snapshot: it used to be, and a corrected bitcoin-regtest
-    // encoder port sat unmirrored on origin for both repos because a hub-only run
-    // skipped here and a wallet-only run looked at nothing. The wallet now commits
-    // bin/chain-registry.sync.json beside its descriptors and fails its own unit
-    // suite when the two disagree, with no checkout of this repo present.
+    // The wallet also commits tools/chain-registry.sync.json beside its
+    // descriptors and fails its own unit suite when the two disagree, so a
+    // descriptor change that never reached this snapshot fails there as well,
+    // with no checkout of this repo present.
     it('matches the wallet bundled descriptors byte-for-byte (skip if sibling absent)', async function () {
         const walletDescriptors = path.join(__dirname,
             '../../../../xchain-wallet/packages/core/src/registry/descriptors/index.js');
@@ -212,6 +210,6 @@ describe('chain-registry snapshot consistency', function () {
         const mod = await import(walletDescriptors);
         expect(JSON.stringify(SNAPSHOT.descriptors)).to.equal(
             JSON.stringify(mod.BUNDLED_DESCRIPTORS),
-            'snapshot drifted; run xchain-wallet/bin/sync-chain-registry.mjs');
+            'snapshot drifted; run xchain-wallet/tools/sync-chain-registry.mjs');
     });
 });
