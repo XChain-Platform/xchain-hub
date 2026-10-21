@@ -19,8 +19,9 @@
 # Every xchain-* service is an independent repo with its own package.json, so a
 # shared /metrics exporter cannot be an internal npm dependency without a
 # publish step and six lockfile bumps. Instead xchain-hub/src/observability/ is
-# CANONICAL and this script copies it verbatim into each consumer. Copies are
-# byte-identical by construction, and `--check` fails on any that is not.
+# CANONICAL and this script copies it into each consumer. The implementation is
+# byte-identical; the indexer gets an exact projection that omits test-only
+# exports from its public module surface. `--check` fails on any other change.
 #
 # WHERE THE CHECK ACTUALLY RUNS. For its first months this script was hand-run
 # only: no npm script, no workflow and no gate invoked it, so "byte-identical by
@@ -83,6 +84,43 @@ skipped=0
 missing=0
 compared=0
 
+project_source() {
+    local consumer="$1"
+    local file="$2"
+    local src="$SRC_DIR/$file"
+    if [[ "$consumer" != "xchain-indexer" ]]; then
+        cat "$src"
+        return
+    fi
+    case "$file" in
+        metrics.js)
+            sed \
+                -e '/^    Counter,$/d' \
+                -e '/^    Gauge,$/d' \
+                -e '/^    Histogram,$/d' \
+                -e '/^    DEFAULT_MAX_SERIES,$/d' \
+                -e 's/^    \/\/ exported for the unit suite and for services that build their own names$/    \/\/ exported for services that build their own labels/' \
+                -e 's/^    escapeLabelValue,$/    escapeLabelValue/' \
+                -e '/^    escapeHelp,$/d' \
+                -e '/^    formatValue,$/d' \
+                -e '/^    METRIC_NAME_RE,$/d' \
+                -e '/^    LABEL_NAME_RE$/d' \
+                "$src"
+            ;;
+        logShipper.js)
+            sed '/^module.exports = {$/,$d' "$src"
+            printf '%s\n' \
+                'module.exports = {' \
+                '    createLogShipper, readLogEnv, redactFields, scrubMessage, formatTextLine' \
+                '};'
+            ;;
+        index.js)
+            sed '/^    unpatchConsole,$/d' "$src"
+            ;;
+        *) cat "$src" ;;
+    esac
+}
+
 for consumer in "${CONSUMERS[@]}"; do
     dest_root="$PLATFORM_ROOT/$consumer"
     if [[ ! -d "$dest_root/src" ]]; then
@@ -99,20 +137,23 @@ for consumer in "${CONSUMERS[@]}"; do
     fi
     dest_dir="$dest_root/src/observability"
     for f in "${FILES[@]}"; do
-        src="$SRC_DIR/$f"
         dst="$dest_dir/$f"
         if [[ $CHECK_ONLY -eq 1 ]]; then
             compared=$((compared + 1))
-            if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
+            if [[ ! -f "$dst" ]] || ! cmp -s <(project_source "$consumer" "$f") "$dst"; then
                 echo "DRIFT  $consumer/src/observability/$f"
                 drift=$((drift + 1))
             fi
         else
             mkdir -p "$dest_dir"
-            if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+            if [[ -f "$dst" ]] && cmp -s <(project_source "$consumer" "$f") "$dst"; then
                 continue
             fi
-            cp "$src" "$dst"
+            mkdir -p "$HUB_ROOT/tmp"
+            projected="$(mktemp "$HUB_ROOT/tmp/observability-sync.XXXXXX")"
+            project_source "$consumer" "$f" > "$projected"
+            cp "$projected" "$dst"
+            rm -f -- "$projected"
             echo "copied $consumer/src/observability/$f"
             copied=$((copied + 1))
         fi
@@ -134,7 +175,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
     if [[ $drift -gt 0 || $missing -gt 0 ]]; then
         exit 1
     fi
-    echo "OK: $compared vendored observability file(s) match the canonical module" \
+    echo "OK: $compared vendored observability file(s) match their canonical projections" \
          "($((${#CONSUMERS[@]} - skipped)) of ${#CONSUMERS[@]} consumers checked)"
     exit 0
 fi

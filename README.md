@@ -189,10 +189,12 @@ starts and no socket opens. Turn the endpoint on with `METRICS_ENABLED=1` (add
 [the hub configuration page](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md); the exported metric names and the wiring
 API are in [`src/observability/README.md`](src/observability/README.md).
 
-This directory is the CANONICAL copy of the shared module. After
-editing it, re-run `bin/sync-observability.sh` to refresh the vendored copies in
-the sibling services; drift fails the parity check CI runs across those copies,
-which you can run locally with `bin/sync-observability.sh --check`.
+This directory is the CANONICAL copy of the shared module. After editing it,
+re-run `bin/sync-observability.sh` to refresh the vendored projections in the
+sibling services. Implementations remain byte-identical; the indexer projection
+omits test-only exports from its public surface. Drift fails the parity check CI
+runs across those copies, which you can run locally with
+`bin/sync-observability.sh --check`.
 
 ### Shim controls, and the defaults in force
 
