@@ -123,6 +123,20 @@ async function resetOrphanedLandingBlockTimes(sourceChain, b) {
     }
 }
 
+async function readRetractedBatchRounds(sourceChain, b) {
+    let batchRounds = [];
+    try {
+        let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+        for (let row of (rows || [])) {
+            let n = parseInt(row.round_number);
+            if (Number.isFinite(n)) batchRounds.push(n);
+        }
+    } catch (e) {
+        logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
+    }
+    return batchRounds;
+}
+
 module.exports = {
 
     // Retract price rows seeded from PRICE actions that an indexer rolled back
@@ -155,18 +169,7 @@ module.exports = {
         let { from, to, gen, bounded, fenced } = bounds;
 
         let seam = publishedMarkerSeam.call(this);
-        let batchRounds = [];
-        if (seam.canClearMarkers) {
-            try {
-                let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, from, to, gen, bounded, fenced);
-                for (let row of (rows || [])) {
-                    let n = parseInt(row.round_number);
-                    if (Number.isFinite(n)) batchRounds.push(n);
-                }
-            } catch (e) {
-                logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
-            }
-        }
+        let batchRounds = seam.canClearMarkers ? await readRetractedBatchRounds.call(this, sourceChain, bounds) : [];
 
         // Awaited only when there is a fence to write, so an unfenced retraction issues
         // its DELETE without yielding first, in the same tick the unsplit method did.
