@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-21
+
+### Added
+- Exposed oracle quorum margins in price snapshots.
+- Pinned the testnet oracle epoch and resolved it through the network pin at boot.
+
+### Fixed
+- Reset orphaned price batch landing times on every retraction.
+- Compared only signed price columns in the archive recovery round trip.
+- Held bound port-0 listeners instead of freeing probed ports.
+
 ## [0.26.0] - 2026-10-20
 
 ### Added
