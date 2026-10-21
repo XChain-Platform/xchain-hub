@@ -52,23 +52,28 @@ function memDb(rows) {
   };
 }
 
-// Reserve a loopback port by binding and releasing it, so SEED_NODES can be
-// written before any PeerManager starts listening.
-function freePort() {
+// Bind port 0 and KEEP the listener open, so the OS-assigned port stays ours
+// while SEED_NODES are written. The caller passes reservation.port to the signer
+// config and calls release() immediately before PeerManager.start() re-binds it
+// (PeerManager treats P2P_PORT 0 as unset, so it cannot bind port 0 itself).
+function reservePort() {
   return new Promise((resolve, reject) => {
     let srv = net.createServer();
     srv.on('error', reject);
     srv.listen(0, '127.0.0.1', () => {
-      let port = srv.address().port;
-      srv.close(() => resolve(port));
+      resolve({
+        port: srv.address().port,
+        release: () => new Promise(done => srv.close(() => done()))
+      });
     });
   });
 }
 let oracleBatchSignerOverRealP2PTransportSuite1Managers = [];
 let oracleBatchSignerOverRealP2PTransportSuite1Signers = [];
 async function oracleBatchSignerOverRealP2PTransportSuite1BootMesh(n, perNodeRounds) {
-  let ports = [];
-  for (let i = 0; i < n; i++) ports.push(await freePort());
+  let reservations = [];
+  for (let i = 0; i < n; i++) reservations.push(await reservePort());
+  let ports = reservations.map(r => r.port);
   let addrs = ports.map(p => 'ws://127.0.0.1:' + p);
   let identities = [];
   for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(20 + i).repeat(32).slice(0, 64)));
@@ -90,6 +95,7 @@ async function oracleBatchSignerOverRealP2PTransportSuite1BootMesh(n, perNodeRou
     // Option A transport auth: every mesh key is chain-effective here, which is
     // what a live federation's snapshot refresh installs.
     pm.setEffectiveSignerSet(new Set(pubkeys));
+    await reservations[i].release();
     await pm.start();
     oracleBatchSignerOverRealP2PTransportSuite1Managers.push(pm);
     let hub = {
