@@ -19,6 +19,52 @@
 
 const roundPresence = require('../../lib/oracle_round_presence.js');   // oracle round presence/divergence
 const { validateLimit, strictInt } = require('../validate');
+const swq = require('../../consensus/stake_weighted_quorum.js');
+const { computeQuorumMargin } = require('../../oracle/quorum_margin.js');
+
+function quorumInputs(row) {
+    if (!row || row.status !== 'finalized' || typeof row.consensus_proof !== 'string') return null;
+    let proof;
+    try { proof = JSON.parse(row.consensus_proof); }
+    catch (e) { return null; }
+    let sigs = Array.isArray(proof) ? proof : proof && proof.sigs;
+    let anchor = Array.isArray(proof) ? row.reference_block : proof && proof.batch && proof.batch.btc_block_height;
+    if (!Array.isArray(sigs) || !Number.isFinite(Number(anchor))) return null;
+    let signers = sigs.map(s => s && s.pubkey).filter(pk => typeof pk === 'string');
+    if (signers.length !== sigs.length) return null;
+    return { anchor: Number(anchor), signers };
+}
+
+async function quorumMarginFor(hub, inputs) {
+    if (!inputs || !hub.capabilitySnapshot) return null;
+    let weighted = swq.isStakeWeightedQuorumActive(inputs.anchor, hub.network);
+    let snapshots = hub.capabilitySnapshot;
+    let snapshot = weighted
+        ? (typeof snapshots.getWeightSnapshot === 'function'
+            ? await snapshots.getWeightSnapshot('price', inputs.anchor) : null)
+        : (typeof snapshots.getSnapshot === 'function'
+            ? await snapshots.getSnapshot('price', inputs.anchor) : null);
+    if (!snapshot || !Array.isArray(snapshot.validators)) return null;
+    let validators = snapshot.validators;
+    if (weighted && snapshot.truncated === true) {
+        validators = validators.slice();
+        validators.truncated = true;
+    }
+    return computeQuorumMargin({ weighted, validators, signers: inputs.signers });
+}
+
+async function addQuorumMargins(hub, rows) {
+    let margins = new Map();
+    return Promise.all(rows.map(async row => {
+        let inputs = quorumInputs(row);
+        let key = inputs && JSON.stringify([inputs.anchor, inputs.signers]);
+        if (key && !margins.has(key)) {
+            margins.set(key, quorumMarginFor(hub, inputs).catch(() => null));
+        }
+        let quorumMargin = key ? await margins.get(key) : null;
+        return Object.assign({}, row, { quorum_margin: quorumMargin });
+    }));
+}
 
 function buildOracleRpc(ctx) {
     return Object.assign({}, oracleStatusRpc(ctx), priceReadsRpc(ctx), roundPresenceRpc(ctx));
@@ -76,13 +122,14 @@ function priceReadsRpc(ctx) {
         // status is optional and additive: omitted/'finalized' preserves the
         // historical finalized-only contract; 'all' includes skipped/disputed
         // rows for health/monitoring consumers (dashboard oracle-feed parity).
-        async getpricesnapshots({limit, status, with_watermark}){
+        async getpricesnapshots({limit, status, with_watermark, with_quorum_margin}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
             if (status !== undefined && status !== 'finalized' && status !== 'all')
                 return {error: "status must be 'finalized' or 'all'"};
             try {
                 let snapshots = await hub.getPriceSnapshots(limit || 50, status);
+                if (with_quorum_margin) snapshots = await addQuorumMargins(hub, snapshots);
                 // with_watermark is optional and additive: health consumers (the
                 // dashboard's pairHealth) need a server-clock watermark so row age
                 // is computed entirely in the hub's clock domain instead of diffing

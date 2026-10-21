@@ -2694,10 +2694,6 @@
       "7e4efa52996dc92f5ad0e4614f39f5425a3aa73896ff5603a9e337c261f28c84",
       "98f93d5050351ff02455029acf273c13dab6cd6da72e2d9e75e741766b3980c2"
     ],
-    "332d728d3fb99ca4": [
-      "bb611fa781c76fc356cee2ea8c7f130d7041953e7a742a277ca6434e3ebe5b55",
-      "65afac80d1f8ee5fa3d832ddb89cd02e48a8b03f7650855af6cf44b602340085"
-    ],
     "336a4e8312b1b4c3": [
       "cfcccd946e5fda154a485ca656e6f9cdf418ed667d250a0099dbb008abc2430c",
       "e40f5fbff197c913112f3859a9a7cac86949798098e36fb74daf76f08f68a6c4",
@@ -3333,6 +3329,14 @@
       "f1177cf6f94e6f2975644f131122506537f4538bec4082e6d69ba91f64abbc17",
       "c20201adfbdba6930beb093e22cdcfe9a0e5ba6854f68c64aa59663b063c24cb",
       "3fa81b223c4186ef936fcfe38eb59c0208595dcb2fa3dfbbd05736d44e6e3d90"
+    ],
+    "41318f11b88e0694": [
+      "751ff8e2a62cfd34d385fc4eaa38b021070a3a3fbc933478b5ad8e63890ba41e",
+      "772ebd2b3c692a4f4b0f84b60b8178f9222fde58ff4108cd89e63c38f9dc06ae",
+      "8c2b417e7097e250ab17b9695045c31fe795fbb2582e35a87ff181a0b307426d",
+      "94b49329661ebdff5bfddc06e33f1c336999ec3877ed7140b6aa30cbf96151ba",
+      "8b5315014aac91c8e535c18946b3b3b51c58e52283ccefe34002b7aedd3e43de",
+      "e333a64fcbb16c2829401feb10df7f3826168ac264ba8ee760ba276d3cf5615c"
     ],
     "414b54ebfddfcdcb": [
       "e79518c461adad72b9accba65a7f1e507fd07e85fe513d2eb7c85673a390c4b9",
@@ -5157,6 +5161,11 @@
       "1a41444a3976b6b4b4ea7c37c390b2d3e4f43234d8cf45201076c8ebec4b5592",
       "12a808beb5fdc2a398f2653c8b03d4f62fbf914ed3383c76db97f99222906e1c",
       "256d0143bbd7cece678d709b32b228e7908bf81f23dba57e84d812b81eef108f"
+    ],
+    "637366ac03d9525c": [
+      "bb611fa781c76fc356cee2ea8c7f130d7041953e7a742a277ca6434e3ebe5b55",
+      "16eccefa5818528c5c1999f41e14f079e9b3c71000a88ef8d1f0bd32c1d08524",
+      "65afac80d1f8ee5fa3d832ddb89cd02e48a8b03f7650855af6cf44b602340085"
     ],
     "638fa1b77f782a34": [
       "74f4d6b2421a1ddddfe783020a6fd91531a6c979ad861bab6873f7dd9eb741ad",
@@ -12819,7 +12828,7 @@
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
-        "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
+        "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
@@ -12843,6 +12852,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_quorum_margin.test.js": "41318f11b88e0694",
         "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
@@ -13885,7 +13895,7 @@
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
-        "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
+        "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
@@ -13909,6 +13919,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_quorum_margin.test.js": "41318f11b88e0694",
         "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
@@ -14981,7 +14992,7 @@
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
-        "test/unit/api/docs_openrpc.test.js": "332d728d3fb99ca4",
+        "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
         "test/unit/api/feed_rpc_allowlist.test.js": "562b15f2c1f59cbc",
         "test/unit/api/health_probes.test.js": "2fc544b1b5c03420",
@@ -15005,6 +15016,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_quorum_margin.test.js": "41318f11b88e0694",
         "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
