@@ -14,12 +14,13 @@
 // differing env value is ignored with a warning; otherwise the env value stands.
 
 const { getLogger } = require('../observability');
+const { ORACLE_EPOCH_START_PINS } = require('../constants');
 
 function defaultWarn(msg) {
     getLogger().warn(msg);
 }
 
-function resolveOracleEpochStart(network, envRaw, pins, warn) {
+function resolveOracleEpochStart(network, envRaw, pins = ORACLE_EPOCH_START_PINS, warn) {
     const parsed = parseInt(envRaw, 10);
     const net = String(network || '').toLowerCase();
     if (net === 'regtest' || !pins || !Object.prototype.hasOwnProperty.call(pins, net)) return parsed;

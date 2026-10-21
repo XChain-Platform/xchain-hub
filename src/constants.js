@@ -247,7 +247,15 @@ const DEFAULT_ANCHOR_ROUND_TIMEOUT_MS = 120000;
 // entry here together: an entry without branches re-opens exactly this hole.
 const SUPPORTED_CONSENSUS_STRATEGIES = Object.freeze(['byte_equality', 'judge_model']);
 
-module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
+// Per-network oracle epoch start pins (Unix ms), keyed by lowercase HUB_NETWORK.
+// On a network named here the pin wins and a differing ORACLE_EPOCH_START env
+// value is ignored with a warning (oracle/oracle_epoch.js); regtest is never
+// governed. The epoch anchors round numbering and MUST be fleet-uniform, so an
+// entry is added only by a coordinated change here. No network is pinned yet:
+// the env value stands everywhere until a federation epoch is agreed.
+const ORACLE_EPOCH_START_PINS = Object.freeze({});
+
+module.exports = { PRICE_MAX, ORACLE_EPOCH_START_PINS, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
                    DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
                    DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES,
                    DEFAULT_XDEX_ROUND_TIMEOUT_MS, DEFAULT_ANCHOR_ROUND_TIMEOUT_MS,
