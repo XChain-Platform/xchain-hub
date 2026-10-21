@@ -127,10 +127,11 @@ afterEach(function(){ sinon.restore(); });
 
 describe('CrossChainBridgeEngine: anchor proof-ready activation', function(){
     it('the flag-day row is armed on regtest and unarmed on mainnet and testnet for DOGE and LTC', function(){
-        for(const coin of ['DOGE', 'LTC']){
+        for(const [coin, height] of [['DOGE', 68012800], ['LTC', 4930600]]){
             expect(registry.activeAt(GATE, 'regtest', coin, 1, null)).to.equal(true);
             expect(registry.activeAt(GATE, 'mainnet', coin, 999999999, null)).to.equal(false);
-            expect(registry.activeAt(GATE, 'testnet', coin, 999999999, null)).to.equal(false);
+            expect(registry.activeAt(GATE, 'testnet', coin, height - 1, null)).to.equal(false);
+            expect(registry.activeAt(GATE, 'testnet', coin, height, null)).to.equal(true);
         }
     });
 });

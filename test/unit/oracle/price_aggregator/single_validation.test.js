@@ -43,7 +43,8 @@ function registerIdentityTests() {
 
 function registerValueTests() {
     it('rejects out-of-range and over-precision values', function () {
-        for (const value of ['0', '-1', '1.123456789', String(PRICE_MAX + 1)]) {
+        for (const value of ['0', '0.00000000', '-1', '1.123456789', String(PRICE_MAX), String(PRICE_MAX + 1),
+                             'NaN', 'Infinity', NaN, Infinity]) {
             expect(validateOraclePriceValue({ value, block_time: LEGACY_BLOCK_TIME }, 'mainnet', 'BTC'))
                 .to.equal('invalid value');
         }

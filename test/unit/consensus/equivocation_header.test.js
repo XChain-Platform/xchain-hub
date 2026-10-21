@@ -86,12 +86,13 @@ function registerCrossServiceParityTests() {
     // by the dedicated consensus-primitive conformance gate, so the skip is not a false
     // green on this fork-class invariant.
     describe('cross-service activation parity', function () {
-        // Cold-loading three sibling repos from a busy CI disk is the slow step, so the ceiling is venue-scale rather than local-scale.
+        // Cold-loading four sibling repos from a busy CI disk is the slow step, so the ceiling is venue-scale rather than local-scale.
         this.timeout(60000);
         let copies;
         before(function () {
             copies = {
                 indexer:  loadSibling('xchain-indexer/src/consensus/equivocation_header.js'),
+                sync:     loadSibling('xchain-sync/src/consensus/equivocation_header.js'),
                 sdk:      loadSibling('xchain-sdk/src/consensus/equivocation_header.js'),
                 explorer: loadSibling('xchain-explorer/src/consensus/equivocation_header.js'),
             };
@@ -103,7 +104,7 @@ function registerCrossServiceParityTests() {
             expect(eq.EQUIV_HEADER_ACTIVATION).to.deep.equal(canonical);
         });
         it('all 5 copies == hub (map + tags + builder bytes)', function () {
-            // hub + indexer (server consensus) + sdk + explorer (client checkpoint
+            // hub + indexer + sync (server consensus) + sdk + explorer (client checkpoint
             // verifiers). A drift in ANY copy flips the header on different blocks → fork.
             if (Object.values(copies).includes(null)) return this.skip();
             const ref = eq.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');

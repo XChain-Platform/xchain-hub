@@ -26,10 +26,10 @@ function buildCrossChainRpc(ctx) {
 function crossChainCallRpc(ctx) {
     const { hub } = ctx;
     return {
-        // Get cross-chain call relay backlog depth and lifetime failure counter.
+        // Get cross-chain call relay backlog depth and lifetime failure counters.
         // pending_relay_count is the number of dispatch rows without a result row
-        // (per target chain and total); result_attempt_failures is a process-lifetime
-        // count of per-call errors in the relay result poll. Mirrors getattestationstats.
+        // (per target chain and total); result_attempt_failures counts relay result poll errors
+        // and dispatch_poll_failures failed source-indexer request reads. Mirrors getattestationstats.
         async getcrosschaincallstats(){
             if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
             try {

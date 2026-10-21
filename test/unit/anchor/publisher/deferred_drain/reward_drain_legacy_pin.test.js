@@ -31,7 +31,7 @@ const INDEXER_PINS     = path.join(INDEXER, 'src/consensus/anchor_reward_derive'
 const HUB_PINS         = path.join(__dirname, '../../../../../src/anchor');
 
 // The testnet instant of the gate, and the BTC indexer tip every scenario reads.
-const INSTANT = 1792303200;
+const INSTANT = 1792454400;
 const TIP     = 160000;
 // The bundle reward family's burial depth on both sides.
 const MIN_CONF = 6;

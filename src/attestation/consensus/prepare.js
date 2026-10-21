@@ -207,13 +207,14 @@ module.exports = {
                     '(config error: strategy/module shape mismatch)');
                 return true;
             }
-            if(derivedWinner){
+            // Refuse our own ok winner, and a round with no ok proposal (this hub derives provider_error
+            // there). Past this, this hub derives no_quorum itself, so co-signing below is self-evidenced.
+            if(derivedWinner || okForVerdict.length === 0){
                 logger.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
-                    '... for ' + rid.substring(0,16) + '... (own agree() derives an ok winner; not co-signing)');
+                    '... for ' + rid.substring(0,16) + '... (' + (derivedWinner ? 'own agree() derives an ok winner'
+                    : 'no ok proposal; own derivation is provider_error') + '; not co-signing)');
                 return true;
             }
-            // derivedWinner === null: this hub independently derives no_quorum,
-            // so adopting and co-signing below is self-evidenced.
         }
         if(status === 'provider_error') return this.providerErrorUnderivable(envelope, pending, rid, senderPubkey);
         return false;

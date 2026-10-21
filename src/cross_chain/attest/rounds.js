@@ -138,6 +138,15 @@ module.exports = {
                 ' unilaterally over an EMPTY cross_chain snapshot (block ' + btcBlockHeight +
                 '); will retry when the snapshot populates');
         }
+        // Refuse a one-member snapshot that does not hold this hub: only its sole member may
+        // attest alone, so a non-member would mint a row no qualifying validator signed.
+        let self = this.selfPubkey();
+        if (snap && Array.isArray(snap.validators) &&
+            !(self && snap.validators.some(v => v && String(v.pubkey).toLowerCase() === self))) {
+            throw new Error('CrossChain: refusing to finalize attestation ' + attestationId +
+                ' unilaterally over a cross_chain snapshot (block ' + btcBlockHeight +
+                ') that does not hold this hub; will retry when the snapshot changes');
+        }
         let attestation = {
             attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
             destChain, confirmations, status: 'attested',

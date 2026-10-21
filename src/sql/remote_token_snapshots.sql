@@ -1,6 +1,9 @@
 -- Federation-attested metadata for tokens observed on remote DEX legs.
 -- admit_block_<c> is the signed admission height on chain <c>, stamped from
 -- remote_token_admission_activation at the row's snapshot_block; NULL below it.
+-- Rows stay out of the ANCHOR archive and return through the hub mirror and peer catch-up,
+-- so nothing writes anchor_txid or batch_seq; they stay declared because boot drift repair
+-- only adds columns and deployed tables already carry them.
 DROP TABLE IF EXISTS remote_token_snapshots;
 CREATE TABLE remote_token_snapshots (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

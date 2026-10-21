@@ -24,12 +24,10 @@
 'use strict';
 
 const hubConfig = require('../../config');
-const { positiveIntConfig } = require('../../lib/config_int.js');
+const { positiveIntConfig, nonNegativeIntConfig } = require('../../lib/config_int.js');
 const { resolveRoundCadence } = require('../round_cadence.js');
-const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
-        DEFAULT_BATCH_LANDING_RESERVE_MS,
-        LEGACY_BATCH_WINDOW_ROUNDS } = require('../price_batch_cadence.js');
-const { createHourlyWindowPlan } = require('./window_plan.js');
+const { worstCaseSnapshotAgeMs } = require('../price_batch_cadence.js');
+const { resolveBatchWindow } = require('../batch_window_config.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -62,16 +60,6 @@ const DEFAULT_BATCH_CATCHUP_BACKLOG_INTERVAL_MS = 60000;
 const DEFAULT_CATCHUP_MAX_ATTEMPTS   = 6;
 const DEFAULT_CATCHUP_RETIRE_AFTER_MS = 6 * 3600000;
 
-// Millisecond knobs where 0 is a meaningful setting (it disables the timer it sizes),
-// which positiveIntConfig cannot express because it rejects 0 as out of range.
-function nonNegativeIntConfig(raw, dflt, name) {
-    if (raw === undefined || raw === null || raw === '') return dflt;
-    let n = parseInt(raw, 10);
-    if (Number.isInteger(n) && n >= 0) return n;
-    logger.warn('config: ' + name + '="' + raw + '" is not a non-negative integer; using the default (' + dflt + ')');
-    return dflt;
-}
-
 module.exports = {
 
     initBatchRailConfig(hub, cfg) {
@@ -81,11 +69,7 @@ module.exports = {
         // reads (pair widening, sig tally, stake-weighted quorum).
         this.network = (hub && hub.network) ? String(hub.network) : '';
 
-        // Read BEFORE the window size: the window ceiling is derived from the grace,
-        // the round cadence and the pinned staleness bound (see below).
-        this.batchGraceMs         = positiveIntConfig(
-            hubConfig.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
-            300000, 'ORACLE_BATCH_GRACE_MS');
+        // ORACLE_BATCH_GRACE_MS is read with the window size in initBatchWindow.
         this.batchBufferMaxRounds = positiveIntConfig(
             hubConfig.ORACLE_BATCH_BUFFER_MAX_ROUNDS || cfg.ORACLE_BATCH_BUFFER_MAX_ROUNDS,
             4032, 'ORACLE_BATCH_BUFFER_MAX_ROUNDS');
@@ -131,36 +115,39 @@ module.exports = {
     // honouring it does not give the operator a cheaper rail, it gives them a chain
     // whose fees cannot be priced.
     initBatchWindow(cfg) {
-        this.roundIntervalMs      = resolveRoundCadence(cfg).roundInterval;
-        this.batchLandingReserveMs = nonNegativeIntConfig(
-            hubConfig.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
-            DEFAULT_BATCH_LANDING_RESERVE_MS, 'ORACLE_BATCH_LANDING_RESERVE_MS');
-        this.oracleMaxPriceAgeMs  = pinnedMaxPriceAgeMs(this.network);
+        // The batch signer resolves its window through the same function, so the two agree.
+        let w;
+        try {
+            w = resolveBatchWindow({
+                network: this.network,
+                cfg,
+                enabled: Boolean(this.hub && this.hub.oracleConsensus),
+                roundIntervalMs: resolveRoundCadence(cfg).roundInterval
+            });
+        } catch (e) {
+            logger.error('OraclePublisher: CRITICAL - invalid hourly window plan: ' +
+                (e && e.message));
+            throw e;
+        }
+        this.roundIntervalMs       = w.roundIntervalMs;
+        this.batchGraceMs          = w.graceMs;
+        this.batchLandingReserveMs = w.landingReserveMs;
+        this.oracleMaxPriceAgeMs   = w.maxPriceAgeMs;
+        this.batchWindowRoundsCeiling = w.ceiling;
+        this.batchWindowRounds     = w.smallRounds;
 
-        let cadence = maxBatchWindowRounds({
-            maxPriceAgeMs:    this.oracleMaxPriceAgeMs,
-            roundIntervalMs:  this.roundIntervalMs,
-            graceMs:          this.batchGraceMs,
-            landingReserveMs: this.batchLandingReserveMs
-        });
-        this.batchWindowRoundsCeiling = cadence.ceiling;
-
-        this.batchWindowRounds    = positiveIntConfig(
-            hubConfig.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
-            cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
-            'ORACLE_BATCH_WINDOW_ROUNDS');
-        if (cadence.ceiling !== null && this.batchWindowRounds > cadence.ceiling) {
-            logger.warn('config: ORACLE_BATCH_WINDOW_ROUNDS=' + this.batchWindowRounds +
+        // Say so when the resolver clamped an operator value down to the ceiling.
+        if (w.requestedRounds !== w.smallRounds) {
+            logger.warn('config: ORACLE_BATCH_WINDOW_ROUNDS=' + w.requestedRounds +
                 ' would leave the newest price snapshot up to ' +
-                Math.round(worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+                Math.round(worstCaseSnapshotAgeMs(w.requestedRounds, {
                     roundIntervalMs: this.roundIntervalMs, graceMs: this.batchGraceMs,
                     landingReserveMs: this.batchLandingReserveMs }) / 1000) +
                 's old against a ' + Math.round(this.oracleMaxPriceAgeMs / 1000) +
-                's fee-price staleness bound; clamping to ' + cadence.ceiling +
+                's fee-price staleness bound; clamping to ' + w.ceiling +
                 ' round(s) per batch so native-coin fees stay priceable.');
-            this.batchWindowRounds = cadence.ceiling;
         }
-        if (cadence.ceiling !== null && !cadence.satisfiable) {
+        if (w.ceiling !== null && !w.satisfiable) {
             logger.warn('OraclePublisher: no batch window fits the ' +
                 Math.round(this.oracleMaxPriceAgeMs / 1000) + 's fee-price staleness bound at a ' +
                 Math.round(this.roundIntervalMs / 1000) + 's round interval with a ' +
@@ -170,25 +157,7 @@ module.exports = {
                 'unpriceable between batches until the round interval or the grace comes down.');
         }
 
-        this.initHourlyWindowPlan();
-    },
-
-    initHourlyWindowPlan() {
-        let hourly;
-        try {
-            hourly = createHourlyWindowPlan({
-                network: this.network,
-                enabled: Boolean(this.hub && this.hub.oracleConsensus),
-                smallRounds: this.batchWindowRounds,
-                roundIntervalMs: this.roundIntervalMs,
-                graceMs: this.batchGraceMs,
-                landingReserveMs: this.batchLandingReserveMs
-            });
-        } catch (e) {
-            logger.error('OraclePublisher: CRITICAL - invalid hourly window plan: ' +
-                (e && e.message));
-            throw e;
-        }
+        let hourly = w.hourly;
         this.windowPlan = hourly.plan;
         this.hourlyWindowFirstRound = hourly.firstRound;
         this.oracleHourlyWindowRounds = hourly.largeRounds;

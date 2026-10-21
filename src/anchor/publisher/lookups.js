@@ -349,9 +349,12 @@ module.exports = {
     // skipping the batch (stranding it). An absent head answers "chunk absent", which is
     // right in both directions: on a fresh publish the head is still in the mempool and
     // every chunk must go out, and with no head there is nothing for a chunk to attach to.
-    async findExistingArchiveChunk(cp, round, chunkIndex){
+    async findExistingArchiveChunk(cp, round, chunkIndex, chunkSeq){
         let res = await this.archiveAnchorLookup(cp, round);
         if(!res) return null;
+        // Count a slot only under the seq this chunk is addressed to (the indexer scopes
+        // chunks by author and seq, so a same-content head under another seq fills none of ours)
+        if(Number(res.match_batch_seq) !== Number(chunkSeq)) return null;
         let present = Array.isArray(res.chunks_present) ? res.chunks_present.map(Number) : [];
         if(!present.includes(Number(chunkIndex))) return null;
         return { exists: true, txid: res.txid || null };

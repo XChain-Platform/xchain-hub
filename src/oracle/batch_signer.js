@@ -44,11 +44,7 @@ const gateRegistry      = require('../consensus/gate_registry');
 const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { resolveRoundCadence } = require('./round_cadence.js');
-const hubConfig         = require('../config');
-const { maxBatchWindowRounds, pinnedMaxPriceAgeMs,
-        DEFAULT_BATCH_LANDING_RESERVE_MS,
-        LEGACY_BATCH_WINDOW_ROUNDS } = require('./price_batch_cadence.js');
-const { createHourlyWindowPlan } = require('./publisher/window_plan.js');
+const { resolveBatchWindow } = require('./batch_window_config.js');
 const ah                = require('../lib/admission_height.js');
 const { getLogger } = require('../observability');
 const logger = getLogger();
@@ -78,43 +74,6 @@ const MESSAGE_HANDLERS = { [XPRICEB_SIGN_REQ]: 'handleSignReq', [XPRICEB_SIGN]: 
 // failover windows can no longer change that answer.
 const CO_SIGNED_WINDOW_MEMO_MAX = 256;
 
-function nonNegativeInt(raw, dflt) {
-    if (raw === undefined || raw === null || raw === '') return dflt;
-    let n = parseInt(raw, 10);
-    return Number.isInteger(n) && n >= 0 ? n : dflt;
-}
-
-function signerWindowPlan(network, cfg, enabled) {
-    let roundIntervalMs = resolveRoundCadence(cfg).roundInterval;
-    let graceMs = positiveIntConfig(
-        hubConfig.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
-        300000, 'ORACLE_BATCH_GRACE_MS');
-    let landingReserveMs = nonNegativeInt(
-        hubConfig.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
-        DEFAULT_BATCH_LANDING_RESERVE_MS);
-    let cadence = maxBatchWindowRounds({
-        maxPriceAgeMs: pinnedMaxPriceAgeMs(network),
-        roundIntervalMs,
-        graceMs,
-        landingReserveMs
-    });
-    let smallRounds = positiveIntConfig(
-        hubConfig.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
-        cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
-        'ORACLE_BATCH_WINDOW_ROUNDS');
-    if (cadence.ceiling !== null && smallRounds > cadence.ceiling) {
-        smallRounds = cadence.ceiling;
-    }
-    return createHourlyWindowPlan({
-        network,
-        enabled,
-        smallRounds,
-        roundIntervalMs,
-        graceMs,
-        landingReserveMs
-    });
-}
-
 class OracleBatchSigner {
 
     constructor(hub){
@@ -127,8 +86,13 @@ class OracleBatchSigner {
 
         let cfg = (hub && hub.p2pConfig) ? hub.p2pConfig : {};
         try {
-            this.windowPlan = signerWindowPlan(
-                this.network, cfg, Boolean(hub && hub.oracleConsensus)).plan;
+            // The publisher resolves its window through the same function, so the two agree.
+            this.windowPlan = resolveBatchWindow({
+                network: this.network,
+                cfg,
+                enabled: Boolean(hub && hub.oracleConsensus),
+                roundIntervalMs: resolveRoundCadence(cfg).roundInterval
+            }).hourly.plan;
         } catch (e) {
             logger.error('OracleBatchSigner: CRITICAL - invalid hourly window plan: ' +
                 (e && e.message));

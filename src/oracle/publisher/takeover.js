@@ -61,8 +61,8 @@ module.exports = {
     // An unreadable on-chain check declines as if observed but is counted on its own.
     async attemptTakeover(windowIndex) {
         if (!this.enabled) return false;
-        let first = windowIndex * this.batchWindowRounds;
-        let last  = first + this.batchWindowRounds - 1;
+        // The plan's range, so the guards below check the rounds assembleWindow publishes.
+        let { first, last } = this.windowPlan.rangeOf(windowIndex);
 
         // 1. The leader published after all. Nothing to do; prune our copy, and a
         // takeover of ours that never reached the queue is no longer owed.

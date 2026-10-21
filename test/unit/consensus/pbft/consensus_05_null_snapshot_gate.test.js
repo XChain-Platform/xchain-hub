@@ -153,6 +153,53 @@ it('(b2) follower declines to PREPARE over an EMPTY federation snapshot', async 
 });
 });
 
+// A one-member snapshot also yields quorum 0, so only its sole member may apply alone.
+function wireOneMemberSnapshot(pubkey) {
+    consensus.setValidatorSet(VALIDATORS_4);
+    pm.validatorAddr = VALIDATORS_4[0].addr;
+    consensus.minValidators = 4;
+    hub.capabilitySnapshot = {
+        getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 1, validators: [{ pubkey }] }),
+        getQuorum: sinon.stub().returns(0)
+    };
+    hub.resolveBtcLatestBlock = sinon.stub().resolves(800000);
+}
+
+describe('Consensus (PBFT)', function () {
+    installSuiteHooks1();
+describe('null-snapshot fail-closed gate (#5334)', function () {
+it('(a3) propose() throws over a one-member snapshot that does not hold this hub', async function () {
+            wireOneMemberSnapshot(VALIDATORS_4[1].pubkey);
+            let caught = null;
+            try {
+                await consensus.propose({ cfg: 1 });
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('one-member');
+            expect(hub.applyConfig.called).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+it('(b3) follower declines to PREPARE over a one-member snapshot that does not hold this hub', async function () {
+            wireOneMemberSnapshot(VALIDATORS_4[1].pubkey);
+            let config = { x: 1 };
+            await consensus.handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
+                data: { seq: 5, view: 0, configDigest: consensus.digest(config), config, btcBlockHeight: 800000 }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+it('(c3) the sole member of a one-member snapshot still applies directly', async function () {
+            wireOneMemberSnapshot(hub.getIdentity().getPubkeyHex().toUpperCase());
+            expect(await consensus.propose({ ok: true })).to.be.true;
+            expect(hub.applyConfig.calledOnceWith({ ok: true })).to.be.true;
+        });
+});
+});
+
 describe('Consensus (PBFT)', function () {
     installSuiteHooks1();
 describe('null-snapshot fail-closed gate (#5334)', function () {

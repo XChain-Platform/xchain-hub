@@ -322,15 +322,28 @@ const enginePart = {
         const broadcaster = this.broadcaster;
         if(!broadcaster) return;
         if(broadcaster.subscribers && broadcaster.subscribers.size === 0) return;
+        let failure = null;
         try {
             const rows = await this.db.getRemoteTokenSnapshotById(snapshotId);
             if(rows && rows.length){
                 broadcaster.broadcastRow({ table: 'remote_token_snapshots', row: rows[0] });
                 return;
             }
-        } catch(_error){}
-        if(typeof broadcaster.dropAllForResync === 'function')
-            broadcaster.dropAllForResync('remote_token_snapshots mirror gap');
+            failure = 'the committed row read back empty';
+        } catch(error){
+            failure = (error && error.message) ? error.message : String(error);
+        }
+        // Name the cause before the fleet-wide resync (a thrown read vs an empty read-back).
+        logger.error('RemoteToken: could not stream a committed remote_token_snapshots row to mirror subscribers (' +
+                     failure + '); forcing subscriber resync');
+        // Keep a broadcaster fault out of the caller's catch: the row is already committed.
+        try {
+            if(typeof broadcaster.dropAllForResync === 'function')
+                broadcaster.dropAllForResync('remote_token_snapshots mirror gap');
+        } catch(error){
+            logger.error('RemoteToken: subscriber resync after the mirror gap failed: ' +
+                         ((error && error.message) ? error.message : String(error)));
+        }
     }
 };
 
