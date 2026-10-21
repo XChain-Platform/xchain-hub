@@ -122,7 +122,8 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence) {
             // own batch takes this branch (it finalized them all itself), so
             // stamping only the stored rows would leave the one node kind that
             // produces rounds unable to tell a landed round from an unlanded one.
-            await this.stampBatchLanding(r.round, head.blockTime);
+            await this.stampBatchLanding(r.round, head.blockTime,
+                { sourceChain: sourceChain, actionIndex: fence.sourceActionIndex, generation: fence.pushGeneration });
             continue;
         }
 
@@ -190,11 +191,20 @@ module.exports = {
     //
     // Returns the number of rows re-emitted (0 when an earlier batch already stamped
     // the round at or below this clock).
-    async stampBatchLanding(round, blockTime) {
+    //
+    // `source` ({ sourceChain, actionIndex, generation }, optional) names the landing, and is
+    // written onto a self-finalized row (no action index of its own) that this landing's
+    // clock now holds, so that retracting the landing can take the stamp back (retract.js).
+    async stampBatchLanding(round, blockTime, source) {
         let landed = Number(blockTime);
         if (!Number.isSafeInteger(landed) || landed <= 0) return 0;
         try {
             await this.db.updatePriceSnapshotByRoundNumber(landed, round, landed);
+            if (source && source.sourceChain && Number.isSafeInteger(Number(source.actionIndex))
+                && source.actionIndex !== null) {
+                await this.db.stampSelfFinalizedLandingSource(round, landed, source.sourceChain,
+                    Number(source.actionIndex), Number(source.generation) || 0);
+            }
             // Re-read rather than trust an affected-row count: the mirror applier is an
             // upsert keyed on (round_number, coin_pair), so it needs the WHOLE row, and
             // selecting the rows that now carry THIS clock also skips the no-op case

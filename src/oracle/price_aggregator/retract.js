@@ -106,6 +106,27 @@ function emitRetractionDeletes(sourceChain, b, snapDeleted, oracleDeleted) {
     }
 }
 
+// A retracted landing also stamped the landing clock onto rows this hub finalized itself
+// (no action index, so the delete below never matches them). Left alone the clock would
+// outlive the landing, and because the earliest landing wins the re-landed batch could never
+// replace it: two hubs would end with different batch_block_time. Reset those rows to not
+// landed and re-emit them whole so every mirror takes the reset before the re-landing.
+async function resetLandingStampedRows(sourceChain, b) {
+    let rows = await this.db.findLandingStampedSelfFinalizedRounds(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+    let rounds = [];
+    for (let row of (rows || [])) {
+        let n = parseInt(row.round_number);
+        if (Number.isFinite(n)) rounds.push(n);
+    }
+    if (rounds.length === 0) return;
+    await this.db.resetLandingStampedSelfFinalizedRows(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+    for (let n of rounds) {
+        for (let row of ((await this.db.findPriceSnapshotsForRound(n)) || [])) {
+            this.emit('row:inserted', { table: 'price_snapshots', row: row, origin: 'chain-ingest' });
+        }
+    }
+}
+
 module.exports = {
 
     // Retract price rows seeded from PRICE actions that an indexer rolled back
@@ -155,6 +176,13 @@ module.exports = {
         // its DELETE without yielding first, in the same tick the unsplit method did.
         let fenceError = bounds.fenced ? await persistIngestFence.call(this, sourceChain, bounds) : null;
         if (fenceError) return fenceError;
+
+        try {
+            await resetLandingStampedRows.call(this, sourceChain, bounds);
+        } catch (e) {
+            logger.error(nodeUtil.format('PriceAggregator: could not reset landing stamps for ' + sourceChain + ':', e && e.message));
+            return { error: 'landing stamps not reset for ' + sourceChain + ' (' + ((e && e.message) || 'unknown error') + ')' };
+        }
 
         let snapResult = await snapshotRetractionDelete.call(this, sourceChain, bounds);
         let oracleResult = await oraclePriceRetractionDelete.call(this, sourceChain, bounds);

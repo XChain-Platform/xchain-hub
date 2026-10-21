@@ -33,6 +33,17 @@ const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 // unchanged, and both db_prototype_install.test.js and the test/helpers/mockHub
 // scanner, which read the exported object of each <family>.js and <family>/index.js
 // under src/db, still see every price method this family owns.
+// WHERE tail for the self-finalized rows a landing stamped (negative push_generation, see
+// stampSelfFinalizedLandingSource) inside a retraction's range and generation fence.
+function landingStampedWhere(sourceChain, from, to, gen, bounded, fenced) {
+    let where = 'source_chain = ? AND push_generation < 0 AND source_action_index'
+        + (bounded ? ' >= ? AND source_action_index <= ?' : ' >= ?') + (fenced ? ' AND -push_generation - 1 <= ?' : '');
+    let args = [sourceChain, from];
+    if (bounded) args.push(to);
+    if (fenced) args.push(gen);
+    return [where, args];
+}
+
 module.exports = Object.assign({}, priceIngestWatermarks, {
 
     // Reads rows from price_snapshots.
@@ -180,6 +191,35 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
     },
 
+    // Records WHICH landing stamped a self-finalized row (source_action_index NULL), so a
+    // reorg retraction of that landing can take the stamp back. Only rows this landing's
+    // clock currently holds are marked (earliest landing wins, so a later overlapping landing
+    // stamps nothing), and batch-proofed rows already carry their own source. The generation
+    // is stored as -(gen + 1): a negative push_generation is the marker that a row is
+    // self-finalized and landing-stamped, and no reader of price_snapshots uses the column.
+    async stampSelfFinalizedLandingSource(round, landed, sourceChain, actionIndex, generation) {
+        return this.doQuery(`UPDATE price_snapshots SET source_chain = ?, source_action_index = ?, push_generation = ?
+            WHERE round_number = ? AND status != 'skipped' AND source_action_index IS NULL AND batch_block_time = ?
+            AND consensus_proof NOT LIKE '{"batch":%'`, [sourceChain, actionIndex, -(generation + 1), round, landed]);
+    },
+
+    // Rounds of self-finalized rows stamped by a landing inside a retraction range. Read before
+    // the reset, same bound and fence arguments as the retraction delete.
+    async findLandingStampedSelfFinalizedRounds(sourceChain, from, to, gen, bounded, fenced) {
+        let [where, args] = landingStampedWhere(sourceChain, from, to, gen, bounded, fenced);
+        return this.doQuery('SELECT DISTINCT round_number FROM price_snapshots WHERE ' + where, args);
+    },
+
+    // Takes a rolled-back landing's stamp off the self-finalized rows it marked: the clock
+    // returns to 0 (not landed) and the row to its self-finalized shape (the source_chain
+    // column default, no action index, generation 0), so a later landing of the same batch
+    // stamps it afresh and every hub converges on that landing's clock.
+    async resetLandingStampedSelfFinalizedRows(sourceChain, from, to, gen, bounded, fenced) {
+        let [where, args] = landingStampedWhere(sourceChain, from, to, gen, bounded, fenced);
+        return this.doQuery(`UPDATE price_snapshots SET batch_block_time = 0, source_chain = 'DOGE',
+            source_action_index = NULL, push_generation = 0 WHERE ` + where, args);
+    },
+
     // Reads the newest price_snapshots rows in every status, skipped and disputed
     // included, for health consumers. Moved here from src/XChainHub.js:969, the
     // status 'all' branch.
@@ -300,7 +340,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
         let params = [];
         for (let p of pairs) {
             params.push(round, p.pair, p.price, referenceBlock, referenceChain, timestamp,
-                        validatorCount, proofJson, referenceChain, sourceActionIndex, pushGeneration, createdAt,
+                        validatorCount, proofJson, sourceChain || referenceChain, sourceActionIndex, pushGeneration, createdAt,
                         admitCols.admit_block_btc, admitCols.admit_block_ltc, admitCols.admit_block_doge);
         }
         let query = `INSERT INTO price_snapshots
@@ -327,9 +367,10 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // observed torn is the round. batch_block_time only ever moves EARLIER (or fills a 0), so
     // a re-landing of the same round cannot push the fee-pricing bound later. The admission
     // columns are bound AFTER created_at so every positional reader of these params keeps its
-    // index. `referenceChain` fills both reference_chain and source_chain.
+    // index. `referenceChain` fills reference_chain and, unless `sourceChain` is given, source_chain too
+    // (a mirrored landing-stamped self-finalized row keeps its landing chain apart from its BTC reference).
     async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
-                                     sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {
+                                     sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols, sourceChain) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
         let params = [];
         for (let p of pairs) {

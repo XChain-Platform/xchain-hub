@@ -113,7 +113,7 @@ function storePriceSnapshot(db, row) {
         row.validator_count, row.consensus_proof, row.source_action_index, row.push_generation, row.created_at];
     if (row.batch_block_time !== null && row.batch_block_time !== undefined) {
         common.splice(9, 0, row.batch_block_time);
-        return db.setBatchPriceSnapshotRound(...common, admissionBlocks(row));
+        return db.setBatchPriceSnapshotRound(...common, admissionBlocks(row), row.source_chain);
     }
     if (row.source_chain !== null && row.source_chain !== undefined) {
         return db.setPushedPriceSnapshotRound(...common, admissionBlocks(row));
