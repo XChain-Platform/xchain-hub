@@ -10,11 +10,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Oracle epoch start, resolved from the env value and a per-network pin table.
-// The epoch anchors fleet-wide round numbering, so on a network the table names
-// the pin wins and a differing env value is set-but-IGNORED, with a warning.
-// Regtest, and any network the table does not name, keeps the env value as parsed
-// today. The table is an argument: nothing is read from or chosen in this module.
+// Oracle epoch start: on a network the pin table names, the pin wins and a
+// differing env value is ignored with a warning; otherwise the env value stands.
 
 const { getLogger } = require('../observability');
 
