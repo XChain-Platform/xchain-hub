@@ -1958,6 +1958,9 @@
       "b6ae262f5577042591d33fa3c9394809411edcb7b9110cc0df6a0ba3d4b39bb1",
       "f3d577f5877362ac4627d2126d939f78df7d650ef1663f35d5cbcd86e9ef2106"
     ],
+    "267f634d55fc1cb0": [
+      "267f634d55fc1cb06e967581a0c91ecb52a6287a58a0386bcf61e6fb8e46c80f"
+    ],
     "27256091d8b6f5af": [
       "b4532417c6f17800546d9d5905a0014cfad4ccdac96b7df9027126deb6e10bc7",
       "f083c705d6fdb446b90fb050a032f69baf92be527c3f54bb044acbcac2819765",
@@ -11612,9 +11615,6 @@
       "98d08664d071d96cf2534764703e3b5af1b31c3d3041a9189e7c49305ed2ab6c",
       "1d2b11616df7aeff45a2e4f7c85fda691bf5ceae34630208302351aa17dff8a4"
     ],
-    "eb0e1f7fa008c1c4": [
-      "eb0e1f7fa008c1c450bd0179aeb2461d8eaa6657625a617c1ddb3fa97c3ec9ae"
-    ],
     "ebcf07d0fd46e332": [
       "38c141ffd21c329cc11a0d04b58737c509e12aa64bc1ce27162885c4aeeada92",
       "5d679c9d01f3ca79e4785e7d306bd74b0d6beb9bc421cd56d2e6e4487da2af70",
@@ -12709,7 +12709,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
-        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "eb0e1f7fa008c1c4",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
@@ -13777,7 +13777,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
-        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "eb0e1f7fa008c1c4",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
@@ -14875,7 +14875,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
-        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "eb0e1f7fa008c1c4",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
