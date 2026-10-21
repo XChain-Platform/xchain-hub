@@ -1205,6 +1205,13 @@
       "5de5d48e0967b786a28c3c9bda1cba613e74d5e9120b561a7cc65be62878d9a5",
       "a785390171fac7bc10502faaf63ec4f6a0082e7f60f8b0ad2a533635130844cf"
     ],
+    "1acfb6aa92f1a41b": [
+      "fa17dfc1dd2a04e81791ae718a2ed50acc2753515a27e6e01821584b30504e1e",
+      "0768adb58326047dc50d675df6da801228aa55f1f56f08c2889288aa0f7abf89",
+      "1ba736f6112ce9e01a81655dbac47507033bb0e764e1cac1877ced0c84db8ba4",
+      "cf1d06cc8afa85217f8c64412ab151852919f050b61a0906f093aa9d30d21778",
+      "d3ed2a7de7daaf2a7188e247603c4d5f8d065d579b39ebc86ae60a9dbf0594ba"
+    ],
     "1aeddc526653631d": [
       "db61c6f2fc158fa88a613377d90795632682f7468c6d402acc674c3921544cfe",
       "da438591037d357df6081c782ce5b638e4e75abbad5b2d28c836b72391c1ff45",
@@ -12613,8 +12620,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1005,
-      "titleCount": 9196,
+      "fileCount": 1006,
+      "titleCount": 9201,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12829,6 +12836,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
@@ -13677,8 +13685,8 @@
       }
     },
     "test": {
-      "fileCount": 1005,
-      "titleCount": 9196,
+      "fileCount": 1006,
+      "titleCount": 9201,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13893,6 +13901,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
@@ -14688,8 +14697,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1088,
-      "titleCount": 10063,
+      "fileCount": 1089,
+      "titleCount": 10068,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14987,6 +14996,7 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
+        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
