@@ -267,7 +267,7 @@ it('returns ok=false when oracle_publish config is missing', async function () {
 
 describe('capabilities/oracle_publish selfTest()', function () {
     before(function () {
-        oraclePub = require('../../../src/capabilities/oracle_publish');
+        oraclePub = proxyquire('../../../src/capabilities/oracle_publish', { '../lib/signer_loader.js': { loadSignerHooks: () => ({ source: '/test/signer.js', walletSignFn() {}, broadcastFn() {} }) } });
     });
 
     registerOraclePublishCoreTests();

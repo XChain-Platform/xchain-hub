@@ -195,13 +195,14 @@ describe('capabilities/oracle_publish broadcast presence check', function () {
         assert.ok(/unusable/.test(r.reason), r.reason);
     });
 
-    it('leaves the no-signer-module posture unchanged', async function () {
-        // An unset HUB_SIGNER_MODULE is the hub's documented "publishers stay
-        // idle" state, which the publishers announce themselves. Failing it here
-        // would strip oracle_publish from every hub that has never had a signer,
-        // which is a different condition from the one being closed.
+    it('fails when no signer module is configured', async function () {
+        // oracle_publish is the archive election set. An idle member can win rank
+        // zero forever on a static regtest tip, where block-based failover never
+        // unlocks, so only hubs that can broadcast may qualify.
         const mod = load(() => null);
-        assert.strictEqual((await mod.selfTest(VALID)).ok, true);
+        const r = await mod.selfTest(VALID);
+        assert.strictEqual(r.ok, false);
+        assert.ok(/not configured/.test(r.reason), r.reason);
     });
 
     it('still enforces the address and wallet checks ahead of the signer check', async function () {
