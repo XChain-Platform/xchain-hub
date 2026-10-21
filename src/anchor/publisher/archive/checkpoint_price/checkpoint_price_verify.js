@@ -49,7 +49,8 @@ function logUnheld(subject, basis){
 
 // Keep batch_block_time in the compare: no signature covers it, so this is the follower's only check.
 // A follower whose batch ingest lags (0 or a later landing) refuses an honest round, as finalized_apply
-// does; the row re-pends when its stamp changes, but a self-finalized row keeps an orphaned landing's stamp.
+// does; the row re-pends when its stamp changes. A self-finalized row's stamp is taken back when its landing
+// is retracted (retract.js), so a follower compares the re-landed batch's clock.
 function samePriceRow(local, archived, signatureProofed){
     const keys = signatureProofed ? ['id', 'consensus_proof', 'validator_count'] : ['id'];
     return sameRowExcept(local, archived, keys);
