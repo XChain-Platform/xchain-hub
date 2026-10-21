@@ -248,11 +248,8 @@ const DEFAULT_ANCHOR_ROUND_TIMEOUT_MS = 120000;
 const SUPPORTED_CONSENSUS_STRATEGIES = Object.freeze(['byte_equality', 'judge_model']);
 
 // Per-network oracle epoch start pins (Unix ms), keyed by lowercase HUB_NETWORK.
-// On a network named here the pin wins and a differing ORACLE_EPOCH_START env
-// value is ignored with a warning (oracle/oracle_epoch.js); regtest is never
-// governed. The epoch anchors round numbering and MUST be fleet-uniform, so an
-// entry is added only by a coordinated change here. No network is pinned yet:
-// the env value stands everywhere until a federation epoch is agreed.
+// A pinned network ignores a differing ORACLE_EPOCH_START env with a warning;
+// regtest is never governed. Fleet-uniform: add entries only by coordinated change.
 const ORACLE_EPOCH_START_PINS = Object.freeze({});
 
 module.exports = { PRICE_MAX, ORACLE_EPOCH_START_PINS, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
