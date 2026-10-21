@@ -14,25 +14,31 @@
  *
  * XChain Hub - query methods for the price rail tables.
  *
- * Owns src/sql/price_snapshots.sql, the finalized price snapshots, and exports the
- * whole price family: the src/sql/price_ingest_watermarks.sql queries live in
- * price_ingest_watermarks.js beside this file and are spread into the mixin below.
- * src/db/index.js installs that one object on Database.prototype, so callers keep
- * writing db.<method>() and never see which file the query lives in.
+ * Owns src/sql/price_snapshots.sql and exports the whole price family; the
+ * price_ingest_watermarks.sql queries live in price_ingest_watermarks.js beside this
+ * file and are spread into the mixin below. src/db/index.js installs that one object
+ * on Database.prototype, so callers keep writing db.<method>().
  *
- * Add a query as one more object-literal method before the closing brace: one
- * statement per method, ? placeholders, and a get/find/create/update/set/delete/
- * is/has verb prefix naming the table family it reads.
+ * Add a query as one more method before the closing brace: one statement per method,
+ * ? placeholders, and a get/find/create/update/set/delete/is/has verb prefix.
  *
  ********************************************************************/
 
 const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 
-// The fence queries (price_ingest_watermarks) are spread in from the file above, so
-// this module still exports ONE price-family mixin: src/db/index.js installs it
-// unchanged, and both db_prototype_install.test.js and the test/helpers/mockHub
-// scanner, which read the exported object of each <family>.js and <family>/index.js
-// under src/db, still see every price method this family owns.
+// Self-finalized rows (no source_action_index) a retracted PRICE batch landing stamped: same
+// batch_block_time, round inside the landing's first_round..last_round.
+function orphanedLandingQuery(head, set, sourceChain, from, to, gen, bounded, fenced) {
+    const args = [sourceChain, from];
+    if (bounded) args.push(to);
+    if (fenced) args.push(gen);
+    const range = bounded ? ' >= ? AND batch_landed.source_action_index <= ?' : ' >= ?';
+    const sql = `${head} price_snapshots AS self_finalized JOIN price_snapshots AS batch_landed ON self_finalized.batch_block_time = batch_landed.batch_block_time AND self_finalized.round_number BETWEEN CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.first_round')) AS UNSIGNED) AND CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.last_round')) AS UNSIGNED) ${set} WHERE self_finalized.source_action_index IS NULL AND self_finalized.consensus_proof NOT LIKE '{"batch":%' AND self_finalized.batch_block_time > 0 AND batch_landed.source_chain = ? AND batch_landed.source_action_index${range}${fenced ? ' AND batch_landed.push_generation <= ?' : ''} AND batch_landed.consensus_proof LIKE '{"batch":%'`;
+    return [sql, args];
+}
+
+// The fence queries (price_ingest_watermarks) are spread in from the file above, so this
+// module still exports ONE price-family mixin that src/db/index.js installs unchanged.
 module.exports = Object.assign({}, priceIngestWatermarks, {
 
     // Reads rows from price_snapshots.
@@ -164,12 +170,9 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     },
 
     // Reads every disputed price_snapshots row inside a reorg bound, whole, for the mirror
-    // broadcast that follows updatePriceSnapshotByBlockTimestamp. Same bound and unit as that
-    // UPDATE (bound in ms, block_timestamp in seconds). SELECT * because the indexer mirror
-    // upserts on (round_number, coin_pair) and takes a disputed row whole, so it needs the
-    // shape the snapshot endpoint serves (findPriceSnapshotsById). Rows an earlier reorg
-    // already disputed inside the bound are read too: re-emitting them is idempotent and
-    // heals a mirror that was disconnected for that earlier dispute.
+    // broadcast that follows updatePriceSnapshotByBlockTimestamp (same bound and unit: bound
+    // in ms, block_timestamp in seconds). SELECT * because the mirror upserts a disputed row
+    // whole. Rows an earlier reorg already disputed are re-read: re-emitting is idempotent.
     async findDisputedPriceSnapshotsAfterBlockTimestamp(bound) {
         return this.doQuery(`SELECT * FROM price_snapshots WHERE status = 'disputed' AND block_timestamp > ? / 1000 ORDER BY id ASC`, [bound]);
     },
@@ -178,6 +181,14 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
+    },
+
+    async findSelfFinalizedRoundsForBatchRetraction(...query) {
+        return this.doQuery(...orphanedLandingQuery('SELECT DISTINCT self_finalized.round_number FROM', '', ...query));
+    },
+
+    async resetSelfFinalizedBatchBlockTimeForRetraction(...query) {
+        return this.doQuery(...orphanedLandingQuery('UPDATE', 'SET self_finalized.batch_block_time = 0', ...query));
     },
 
     // Reads the newest price_snapshots rows in every status, skipped and disputed
@@ -204,10 +215,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     //
     // Strictly below, and keyed on the round rather than "the newest row I have", because
     // §4 requires the winsorization anchor to be consensus-derived: rounds finalize
-    // asynchronously, so two honest validators reading "latest finalized" at different
-    // instants would clamp band-edge fills against different references and diverge past
-    // the co-sign band, turning every thin round into a slashing lottery. Walking back
-    // from R-1 is deterministic for everyone.
+    // asynchronously, so "latest finalized" differs per validator and would diverge past
+    // the co-sign band. Walking back from R-1 is deterministic for everyone.
     async getLatestFinalizedPriceBelowRound(pair, round) {
         return this.doQuery(
     `SELECT price FROM price_snapshots
@@ -286,14 +295,11 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // Writes one externally pushed PRICE v0 round, every pair, in ONE multi-row INSERT.
     // Moved here from src/oracle/price_aggregator.js:722.
     //
-    // Upsert, not a plain INSERT: a 'skipped' placeholder row may already occupy this
-    // (round_number, coin_pair) key, and it is overwritten with the real finalized data; for
-    // an already-finalized row this is an idempotent no-op of identical data. created_at is
-    // intentionally NOT overwritten, so it keeps when the hub first recorded the round. One
-    // statement lands the whole round atomically, because the hub Database has no
-    // transaction API. The admission columns are bound AFTER created_at so every positional
-    // reader of these params keeps its index. `referenceChain` fills both reference_chain and
-    // source_chain, as the caller's source chain (or null) did.
+    // Upsert, not a plain INSERT: a 'skipped' placeholder may already occupy this key and is
+    // overwritten with the real data; a finalized row is an idempotent no-op. created_at is
+    // NOT overwritten. One statement lands the round atomically (no transaction API). The
+    // admission columns are bound AFTER created_at so positional readers keep their index.
+    // `referenceChain` fills both reference_chain and source_chain.
     async setPushedPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                       sourceActionIndex, pushGeneration, createdAt, admitCols) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
@@ -323,11 +329,10 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // Writes one round of a landed PRICE batch, every pair, in ONE multi-row INSERT.
     // Moved here from src/oracle/price_aggregator.js:1183.
     //
-    // One statement PER ROUND, not one for the whole batch: the unit that must never be
-    // observed torn is the round. batch_block_time only ever moves EARLIER (or fills a 0), so
-    // a re-landing of the same round cannot push the fee-pricing bound later. The admission
-    // columns are bound AFTER created_at so every positional reader of these params keeps its
-    // index. `referenceChain` fills both reference_chain and source_chain.
+    // One statement PER ROUND: the unit that must never be observed torn is the round.
+    // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push
+    // the fee-pricing bound later. The admission columns are bound AFTER created_at so
+    // positional readers keep their index. `referenceChain` fills reference_chain and source_chain.
     async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                      sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
