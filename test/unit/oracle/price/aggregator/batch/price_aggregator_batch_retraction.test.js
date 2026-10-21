@@ -114,8 +114,10 @@ function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Tests1() 
         await agg.retractFromActionIndex('LTC', 10);
 
         let calls = hub.db.doQuery.getCalls();
-        expect(calls.length).to.equal(3);
-        expect(calls.slice(1).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
+        // The orphaned-landing reset lookup runs with or without a publisher.
+        expect(calls.length).to.equal(4);
+        expect(calls[0].args[0]).to.include('self_finalized.source_action_index IS NULL');
+        expect(calls.slice(2).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
     });
 }
 

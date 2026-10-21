@@ -110,6 +110,41 @@ async function leavesLandingQueuedOnFailure() {
     expect(self.emit.called).to.equal(false);
 }
 
+// A publisher without clearPublishedMarkers (or no publisher at all) still has
+// self-finalized rows stamped by the orphaned landing, so the reset must not
+// hang off the marker seam.
+async function resetsWithoutMarkerSeam() {
+    sinon.stub(console, 'warn');
+    const order = [];
+    const self = {
+        hub: { oraclePublisher: {} },
+        fenceNetwork: () => 'mainnet',
+        emit: sinon.stub(),
+        db: {
+            findBatchPriceSnapshotRoundsForRetraction: sinon.stub().resolves([{ round_number: 101 }]),
+            findSelfFinalizedRoundsForBatchRetraction: async (...args) => {
+                order.push(['find-reset', ...args]);
+                return [{ round_number: 101 }];
+            },
+            resetSelfFinalizedBatchBlockTimeForRetraction: async (...args) => {
+                order.push(['reset', ...args]);
+                return { affectedRows: 1 };
+            },
+            findPriceSnapshotsForRound: async () => [{ round_number: 101, source_action_index: null, batch_block_time: 0 }],
+            insertPriceTombstonesForRetraction: async () => ({ affectedRows: 1 }),
+            deletePriceSnapshotsForRetraction: async () => ({ affectedRows: 1 }),
+            deleteOraclePricesForRetraction: async () => ({ affectedRows: 0 })
+        }
+    };
+
+    const result = await retractFromActionIndex.call(self, 'LTC', 12);
+
+    expect(order.map(entry => entry[0])).to.deep.equal(['find-reset', 'reset']);
+    expect(order[1].slice(1, 3)).to.deep.equal(['LTC', 12]);
+    expect(self.db.findBatchPriceSnapshotRoundsForRetraction.called).to.equal(false);
+    expect(result).to.deep.equal({ retracted: { price_snapshots: 1, oracle_prices: 0 } });
+}
+
 async function keepsReLandEligible() {
     const doQuery = sinon.stub().resolves({ affectedRows: 1 });
     await prices.updatePriceSnapshotByRoundNumber.call({ doQuery }, 1700009999, 101, 1700009999);
@@ -128,6 +163,8 @@ describe('orphaned PRICE batch landing time retraction', function () {
     it('resets and re-emits self-finalized rows before retractFromActionIndex deletes the landing', resetsBeforeDelete);
 
     it('leaves the landing queued when resetting batch_block_time fails', leavesLandingQueuedOnFailure);
+
+    it('resets batch_block_time when the publisher cannot clear markers', resetsWithoutMarkerSeam);
 
     it('keeps the re-land path eligible to replace the reset zero clock', keepsReLandEligible);
 });

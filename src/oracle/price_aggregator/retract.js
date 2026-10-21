@@ -176,14 +176,15 @@ module.exports = {
         let fenceError = bounds.fenced ? await persistIngestFence.call(this, sourceChain, bounds) : null;
         if (fenceError) return fenceError;
 
-        if (seam.canClearMarkers) {
-            try {
-                await resetOrphanedLandingBlockTimes.call(this, sourceChain, bounds);
-            } catch (e) {
-                logger.error(nodeUtil.format('PriceAggregator: could not reset orphaned batch landing times for ' + sourceChain + ':', e && e.message));
-                return { error: 'batch landing times not reset for ' + sourceChain
-                    + ' (' + ((e && e.message) || 'unknown error') + ')' };
-            }
+        // Runs on every retraction, publisher or not: a hub whose publisher cannot
+        // clear markers still stamped self-finalized rows from the orphaned landing,
+        // and leaving that stamp makes its archive diverge from a hub that never saw it.
+        try {
+            await resetOrphanedLandingBlockTimes.call(this, sourceChain, bounds);
+        } catch (e) {
+            logger.error(nodeUtil.format('PriceAggregator: could not reset orphaned batch landing times for ' + sourceChain + ':', e && e.message));
+            return { error: 'batch landing times not reset for ' + sourceChain
+                + ' (' + ((e && e.message) || 'unknown error') + ')' };
         }
 
         let snapResult = await snapshotRetractionDelete.call(this, sourceChain, bounds);
