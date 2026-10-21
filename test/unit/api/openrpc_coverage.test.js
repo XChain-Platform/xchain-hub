@@ -122,7 +122,7 @@ function registerOpenrpcJsonMethodCoverageSuite1Part1() {
     }
   });
   it('extracts sane handler parameter lists', () => {
-    assert.deepStrictEqual(openrpcJsonMethodCoverageSuite1HandlerParams.getpricesnapshots, ['limit', 'status', 'with_watermark'], 'handler-param extraction broken for getpricesnapshots');
+    assert.deepStrictEqual(openrpcJsonMethodCoverageSuite1HandlerParams.getpricesnapshots, ['limit', 'status', 'with_watermark', 'with_quorum_margin'], 'handler-param extraction broken for getpricesnapshots');
     assert.deepStrictEqual(openrpcJsonMethodCoverageSuite1HandlerParams.getallconfigs, ['since_updated_at', 'include_secrets'], 'handler-param extraction broken for the params-object form');
     assert.deepStrictEqual(openrpcJsonMethodCoverageSuite1HandlerParams.ping, [], 'ping takes no named params');
   });
@@ -178,6 +178,9 @@ function registerOpenrpcJsonMethodCoverageSuite1Part2() {
     assert.ok(branches.some(b => b.type === 'array'), 'bare-array branch');
     assert.ok(branches.some(b => Array.isArray(b.required) && b.required.join() === 'watermark,snapshots'), 'watermark branch');
     assert.ok(branches.some(b => Array.isArray(b.required) && b.required.join() === 'error'), 'in-result error-envelope branch');
+    const item = branches.find(b => b.type === 'array').items;
+    assert.deepStrictEqual(item.properties.quorum_margin.required, ['mode', 'met', 'oneFaultTolerant', 'signers']);
+    assert.deepStrictEqual(item.properties.quorum_margin.type, ['object', 'null']);
   });
 }
 describe('openrpc.json method coverage', () => {

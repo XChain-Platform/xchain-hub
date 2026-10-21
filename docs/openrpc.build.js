@@ -36,6 +36,18 @@ const SNAPSHOTS_ARRAY = {
             validator_count: { type: 'number' },
             consensus_round: { type: 'number' },
             status:          { type: 'string', enum: ['finalized', 'skipped', 'disputed'] },
+            quorum_margin: {
+                type: ['object', 'null'],
+                description: 'Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.',
+                properties: {
+                    mode:             { type: 'string', enum: ['count', 'stake'] },
+                    met:              { type: 'boolean' },
+                    oneFaultTolerant: { type: 'boolean' },
+                    signers:          { type: 'number' },
+                    quorum:           { type: 'number' },
+                },
+                required: ['mode', 'met', 'oneFaultTolerant', 'signers'],
+            },
         },
     },
 };
@@ -133,7 +145,7 @@ const METHODS = [
     ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain (mesh-internal, keyed like a write). Secret-bearing params (rpc/DB passwords) are REDACTED to the literal "[redacted]" unless include_secrets is set, which needs HUB_CONFIG_SECRETS_API_KEY when the hub configures one and the bulk key otherwise; the response reports secrets_redacted and redacted_params. since_updated_at returns only entries changed after that timestamp.', ['since_updated_at', 'include_secrets'], { auth: true }],
     ['updateconfig', 'Update a service config entry (PBFT-replicated in validator mode).', ['config'], { auth: true }],
     ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the tightest per-coin price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.', []],
-    ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds). status=\'all\' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the tightest per-coin price-age bound getprice enforces.', ['limit', 'status', 'with_watermark'], { result: SNAPSHOTS_RESULT }],
+    ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds). status=\'all\' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the tightest per-coin price-age bound getprice enforces. with_quorum_margin adds each row\'s count- or stake-mode quorum margin, including whether one signer or signing source could have been lost.', ['limit', 'status', 'with_watermark', { name: 'with_quorum_margin', schema: { type: 'boolean' } }], { result: SNAPSHOTS_RESULT }],
     ['getoracleroundpresence', 'Per-round oracle PRESENCE over a range: for every round in [from_round, to_round], whether this hub recorded it at all and how it ended (finalized / skipped / disputed / missing), plus the explicit `missing` list and a `digest` over the (round, status) sequence. Poll several hubs over the same range and compare digests to detect federation divergence about which rounds happened. Omitted bounds anchor on this hub\'s highest recorded round and the last `limit` rounds (default 50, max 1000).', ['from_round', 'to_round', 'limit']],
     ['getprice', 'Latest finalized price for a pair (e.g. BTC/USD).', ['coin_pair']],
     ['getfeequote', 'Protocol fee quote for an action (native-coin USD-pegged fees).', ['action', 'chain']],

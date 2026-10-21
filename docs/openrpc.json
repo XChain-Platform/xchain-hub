@@ -137,7 +137,7 @@
     },
     {
       "name": "getpricesnapshots",
-      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the tightest per-coin price-age bound getprice enforces.",
+      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the tightest per-coin price-age bound getprice enforces. with_quorum_margin adds each row's count- or stake-mode quorum margin, including whether one signer or signing source could have been lost.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -171,6 +171,13 @@
               "number",
               "object"
             ]
+          }
+        },
+        {
+          "name": "with_quorum_margin",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],
@@ -219,6 +226,40 @@
                       "finalized",
                       "skipped",
                       "disputed"
+                    ]
+                  },
+                  "quorum_margin": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "count",
+                          "stake"
+                        ]
+                      },
+                      "met": {
+                        "type": "boolean"
+                      },
+                      "oneFaultTolerant": {
+                        "type": "boolean"
+                      },
+                      "signers": {
+                        "type": "number"
+                      },
+                      "quorum": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "met",
+                      "oneFaultTolerant",
+                      "signers"
                     ]
                   }
                 }
@@ -278,6 +319,40 @@
                           "finalized",
                           "skipped",
                           "disputed"
+                        ]
+                      },
+                      "quorum_margin": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "count",
+                              "stake"
+                            ]
+                          },
+                          "met": {
+                            "type": "boolean"
+                          },
+                          "oneFaultTolerant": {
+                            "type": "boolean"
+                          },
+                          "signers": {
+                            "type": "number"
+                          },
+                          "quorum": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "met",
+                          "oneFaultTolerant",
+                          "signers"
                         ]
                       }
                     }
