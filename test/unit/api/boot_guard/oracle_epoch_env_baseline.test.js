@@ -136,12 +136,13 @@ async function boot(env) {
     return captured;
 }
 
+// Only an unpinned network reads the raw env here; oracle_epoch_pin.test.js covers testnet.
 describe('src/api.js p2pConfig ORACLE_EPOCH_START from the raw env', function () {
     // The first proxyquire of api.js loads its whole require graph.
     this.timeout(20000);
     afterEach(function () { sinon.restore(); });
 
-    for (const network of ['mainnet', 'testnet', 'regtest']) {
+    for (const network of ['mainnet', 'regtest']) {
         it(`hands p2pConfig the number 1700000000000 on ${network} for the string 1700000000000`, async function () {
             const { p2pConfig, exits } = await boot({ HUB_NETWORK: network, ORACLE_EPOCH_START: '1700000000000' });
             expect(exits).to.deep.equal([]);
@@ -150,19 +151,19 @@ describe('src/api.js p2pConfig ORACLE_EPOCH_START from the raw env', function ()
     }
 
     it('truncates 1700000000999.7 to 1700000000999 through parseInt', async function () {
-        const { p2pConfig, exits } = await boot({ HUB_NETWORK: 'testnet', ORACLE_EPOCH_START: '1700000000999.7' });
+        const { p2pConfig, exits } = await boot({ HUB_NETWORK: 'mainnet', ORACLE_EPOCH_START: '1700000000999.7' });
         expect(exits).to.deep.equal([]);
         expect(p2pConfig.ORACLE_EPOCH_START).to.equal(1700000000999);
     });
 
-    it('boots testnet on not-a-number with 0 exits and hands the hub NaN', async function () {
-        const { p2pConfig, exits } = await boot({ HUB_NETWORK: 'testnet', ORACLE_EPOCH_START: 'not-a-number' });
+    it('boots mainnet on not-a-number with 0 exits and hands the hub NaN', async function () {
+        const { p2pConfig, exits } = await boot({ HUB_NETWORK: 'mainnet', ORACLE_EPOCH_START: 'not-a-number' });
         expect(exits).to.have.lengthOf(0);
         expect(Number.isNaN(p2pConfig.ORACLE_EPOCH_START)).to.equal(true);
     });
 
-    it('calls process.exit with 1 first when testnet boots with the epoch unset', async function () {
-        const { exits } = await boot({ HUB_NETWORK: 'testnet' });
+    it('calls process.exit with 1 first when mainnet boots with the epoch unset', async function () {
+        const { exits } = await boot({ HUB_NETWORK: 'mainnet' });
         expect(exits[0]).to.equal(1);
     });
 });
