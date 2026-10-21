@@ -81,7 +81,7 @@ class StakeShareWatcher {
      * @param {object} hub   XChainHub (needs resolveBtcIndexerUrl, resolveBtcLatestBlock and
      *                       btcIndexerHeaders; capabilityRegistry, stakeWeightFeed and
      *                       capabilitySnapshot are read the way the gate reads them).
-     * @param {object} [opts] test seams: env, now, log, monitor, pollMs,
+     * @param {object} [opts] test seams: env, now, log, infoLog, monitor, pollMs,
      *                       CapabilitySnapshot (the reader class).
      */
     constructor(hub, opts) {
@@ -89,6 +89,8 @@ class StakeShareWatcher {
         this.hub  = hub;
         this.env  = hubConfig.env(opts.env);
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
+        this.infoLog = typeof opts.infoLog === 'function' ? opts.infoLog
+            : (typeof opts.log === 'function' ? opts.log : (msg) => logger.info(msg));
         this._SnapshotClass = opts.CapabilitySnapshot || CapabilitySnapshot;
         this._reader = null;
 
@@ -125,7 +127,7 @@ class StakeShareWatcher {
         let scoped  = coins.ALLOWED_COINS.filter(c => c !== GATE_CHAIN &&
             envList(this.env['HUB_OPERATOR_STAKE_SOURCES_' + c]).length > 0);
         if (dropped.length === 0 && scoped.length === 0) return;
-        this._log('Stake-share monitor watches ' + GATE_CHAIN + ' only: capability staking is ' +
+        this.infoLog('Stake-share monitor watches ' + GATE_CHAIN + ' only: capability staking is ' +
             'BTC-only and the stake-weighted gate reads no other chain. Ignoring ' +
             (dropped.length ? 'HUB_STAKE_SHARE_CHAINS entries ' + dropped.join(',') : '') +
             (dropped.length && scoped.length ? ' and ' : '') +
@@ -163,7 +165,7 @@ class StakeShareWatcher {
             this.pollOnce().catch(e => this._log('Stake-share poll failed: ' + ((e && e.message) || e)));
         }, this.pollMs);
         if (this._timer.unref) this._timer.unref();
-        this._log('Stake-share monitor watching ' + this.chains.join(',') + ' for ' +
+        this.infoLog('Stake-share monitor watching ' + this.chains.join(',') + ' for ' +
             this.capabilities.join(',') + ' every ' + this.pollMs + 'ms against the two-thirds ' +
             'stake-weighted commit gate');
         return true;
