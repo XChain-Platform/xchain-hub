@@ -10040,6 +10040,19 @@
       "77c4f13dc93eca08f7a30404ff25be11bd80f08cf2c432d5d5543bc43de46cb5",
       "9f206a99fc11ca4d984e250bd241fdd606512c900e521fdeb96e5d8c25f5ec91"
     ],
+    "c36938a89a2c9780": [
+      "dc5cd5c59b23813f734bb8c5831e812f7a95577e6050b7d7f455c3806b84cd94",
+      "eebbb61199e44053480299fc84bcc580f0d6e53dbbd9b92071986a40c34e046f",
+      "65ae2c8c5921eec747dd4ad8c332e149c2624c8aed343422bf921abaf586ad84",
+      "2d0f080c35feb73cef197d88e37db042bb59888403fa435c83b672156a56aa49",
+      "f43026158b18148a9357a771dfaa728033ba9ceeb477db7c14e3478c961010ab",
+      "3be3727a085430877051658da1c00c52b7353509a9c5ca84f5b3b8d2b8318539",
+      "a319a98fdbb7e82e3809451508f51fd0504c3a4acbd28c2f94ef8f3a6ef92a3f",
+      "7651128914759a514bae4ce4b37a5e78dff241a6671a371078d4e58842de55b6",
+      "f0fc9359ab5bfa1a17b832faaace58d9be199a551e5668b8c12e41f6740f6f4c",
+      "092397f5da912790d931976038a67b3a9af1f7c1cb85b417a7a61dc034d39a34",
+      "fd2dfa65e5fdcf73585022f0eb817f17c04272e3d3d6d64308e286c1baeb83b6"
+    ],
     "c384789280e4e265": [
       "321611a3976c00be1f69de24ed23c4265cc05d3c4335073508c70d8f829c0436",
       "825a69805572d0f0dc5638acd0f1da23a918ddef5a08be051afd2e25ed5d352a",
@@ -12636,8 +12649,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1008,
-      "titleCount": 9213,
+      "fileCount": 1009,
+      "titleCount": 9224,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12823,6 +12836,7 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
+        "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
@@ -13703,8 +13717,8 @@
       }
     },
     "test": {
-      "fileCount": 1008,
-      "titleCount": 9213,
+      "fileCount": 1009,
+      "titleCount": 9224,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13890,6 +13904,7 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
+        "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
@@ -14717,8 +14732,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1091,
-      "titleCount": 10080,
+      "fileCount": 1092,
+      "titleCount": 10091,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14987,6 +15002,7 @@
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
+        "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
