@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Released with the testnet arming patch; this component carries no code change.
+- Updated the Node base image to 22.23.4, which fixes ten Node security issues.
 
 ## [0.26.1] - 2026-10-21
 
