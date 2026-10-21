@@ -1958,6 +1958,9 @@
       "b6ae262f5577042591d33fa3c9394809411edcb7b9110cc0df6a0ba3d4b39bb1",
       "f3d577f5877362ac4627d2126d939f78df7d650ef1663f35d5cbcd86e9ef2106"
     ],
+    "267f634d55fc1cb0": [
+      "267f634d55fc1cb06e967581a0c91ecb52a6287a58a0386bcf61e6fb8e46c80f"
+    ],
     "27256091d8b6f5af": [
       "b4532417c6f17800546d9d5905a0014cfad4ccdac96b7df9027126deb6e10bc7",
       "f083c705d6fdb446b90fb050a032f69baf92be527c3f54bb044acbcac2819765",
@@ -2735,15 +2738,6 @@
     "341036533a8483e8": [
       "f4636d5db3c786455530f6552bf60dd39d1c4e0ccbfb7cca9bfc0ebf20be5a98",
       "95cd013aa45bff66d7fb17e636efa0918aa4d2db57f43e7b3e6e56abe6780815"
-    ],
-    "344742e2657adb5f": [
-      "e242b81b1f9009f886bbe2f037fdd38aa9572b5841c605b4fa8ad03244b3c910",
-      "67e06952ed088ee609f0a52b10f49c775a6b6e65d82db60fb60c4e938f88be91",
-      "c96c1e8fc05005b2b702e9a383b36fb3aee8eeeec7574adc8824579b041f0bfe",
-      "6a506603e3d303d3e116529443fd02123991b000c4f04a49ebc342829504561b",
-      "d004c6d90bc46d33168e003d098789c1b0c145cffd74b436d73359accadb7614",
-      "c7a541a71eda98e3e8ef60f541cc723f86546e7917bbb5b56e032a19315d4056",
-      "49d3aefc7ca5bd08f83355d7b9d791de2dd74666c862bfaa54ac617d919bffba"
     ],
     "344864211046a4fa": [
       "a32d884f3dc18c2286ba3540242ee29e9ffe064ff301684e71c2124f5fe9a751",
@@ -12646,7 +12640,7 @@
         "ci:regression"
       ],
       "fileCount": 1009,
-      "titleCount": 9220,
+      "titleCount": 9214,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12715,6 +12709,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
@@ -13334,7 +13329,6 @@
         "test/unit/oracle/consensus/oracle_consensus_pbft.test.js": "53f0ae3edce4c887",
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
-        "test/unit/oracle/consensus/oracle_epoch.test.js": "344742e2657adb5f",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
@@ -13714,7 +13708,7 @@
     },
     "test": {
       "fileCount": 1009,
-      "titleCount": 9220,
+      "titleCount": 9214,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13783,6 +13777,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
@@ -14402,7 +14397,6 @@
         "test/unit/oracle/consensus/oracle_consensus_pbft.test.js": "53f0ae3edce4c887",
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
-        "test/unit/oracle/consensus/oracle_epoch.test.js": "344742e2657adb5f",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
@@ -14729,7 +14723,7 @@
     },
     "test:all": {
       "fileCount": 1092,
-      "titleCount": 10087,
+      "titleCount": 10081,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14881,6 +14875,7 @@
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_rows.test.js": "aeba197a4334112b",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_serialize.test.js": "5ddb3450a1c99fbf",
         "test/unit/anchor/publisher/archive/list/state_anchor_publisher_archive_list_snapshot_verify.test.js": "58941a4b6adc2cb8",
+        "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
@@ -15500,7 +15495,6 @@
         "test/unit/oracle/consensus/oracle_consensus_pbft.test.js": "53f0ae3edce4c887",
         "test/unit/oracle/consensus/oracle_consensus_quorum.test.js": "e7a76545698b7e6a",
         "test/unit/oracle/consensus/oracle_consensus_self_connection_quorum.test.js": "bede6ad06ea8007e",
-        "test/unit/oracle/consensus/oracle_epoch.test.js": "344742e2657adb5f",
         "test/unit/oracle/consensus/oracle_single_source_rounds.test.js": "4c7fab3e80c600ac",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_even_reference.test.js": "a100c97bac6b50e8",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_price_spelling.test.js": "1339b5f339b1f46e",
