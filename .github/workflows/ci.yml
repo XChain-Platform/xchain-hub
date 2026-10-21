@@ -370,14 +370,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sdk
-          ref: 1bf6a6b8447ac44657f3a2c9c8175d96415917ab
+          ref: 474ec74818524055c6a4dae6d2cb9520bf60f257
           path: suite-title-pins/sdk/xchain-sdk
 
       - name: Check out the re-taken sync suite-title pin
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sync
-          ref: 3736aee511c57891c674fa67f703b7af5a1b3a9d
+          ref: c10ffb8451b1c39276e11f35cca9b072225fdddc
           path: suite-title-pins/sync/xchain-sync
 
       - name: Verify complete sibling checkout roster
