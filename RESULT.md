@@ -12,4 +12,7 @@ The acceptance test (stamp a self-finalized row from a landing, roll it back, re
 ## Tests
 npm ci --ignore-scripts, then mocha on price_aggregator_batch_landing_time.test.js, test/unit/anchor/publisher/archive/price/*.test.js and hub_db_broadcaster_chain_ingest.test.js: 48 passing, 0 failing, 1 pending.
 
+## Note
+An earlier RESULT.md commit sits before the comment commit on this branch; this final commit is the current report.
+
 RUN-COMPLETE 3ce34520da92d3900d76dc478a2c7bde
