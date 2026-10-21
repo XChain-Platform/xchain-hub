@@ -72,8 +72,10 @@ function refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_FEED_API_KEY, HUB_AL
 
 // Validator mode needs ORACLE_EPOCH_START and HUB_NETWORK; a standalone hub may leave
 // HUB_NETWORK unset, but a value it does set must name a real network.
-function refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK }) {
-    if (P2P_VALIDATOR_ADDR && !hubConfig.ORACLE_EPOCH_START) {
+function refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK, oracleEpochPins = {} }) {
+    const hasPinnedEpoch = (HUB_NETWORK === 'mainnet' || HUB_NETWORK === 'testnet')
+        && Object.prototype.hasOwnProperty.call(oracleEpochPins, HUB_NETWORK);
+    if (P2P_VALIDATOR_ADDR && !hubConfig.ORACLE_EPOCH_START && !hasPinnedEpoch) {
         logger.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
         process.exit(1);
     }
