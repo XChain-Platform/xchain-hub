@@ -1205,13 +1205,6 @@
       "5de5d48e0967b786a28c3c9bda1cba613e74d5e9120b561a7cc65be62878d9a5",
       "a785390171fac7bc10502faaf63ec4f6a0082e7f60f8b0ad2a533635130844cf"
     ],
-    "1acfb6aa92f1a41b": [
-      "fa17dfc1dd2a04e81791ae718a2ed50acc2753515a27e6e01821584b30504e1e",
-      "0768adb58326047dc50d675df6da801228aa55f1f56f08c2889288aa0f7abf89",
-      "1ba736f6112ce9e01a81655dbac47507033bb0e764e1cac1877ced0c84db8ba4",
-      "cf1d06cc8afa85217f8c64412ab151852919f050b61a0906f093aa9d30d21778",
-      "d3ed2a7de7daaf2a7188e247603c4d5f8d065d579b39ebc86ae60a9dbf0594ba"
-    ],
     "1aeddc526653631d": [
       "db61c6f2fc158fa88a613377d90795632682f7468c6d402acc674c3921544cfe",
       "da438591037d357df6081c782ce5b638e4e75abbad5b2d28c836b72391c1ff45",
@@ -3784,6 +3777,17 @@
       "19bdb71fdcb0aa205ed8c5b1133edd004c366f4277318028065127e58f425c20",
       "d2350169f9749da571181ad7c17e94df976af864ba222d9e33aa4d8e888bca8d",
       "5490b744ef351b3df688ae891d9e6ccb7798b767d7053cf6239bf217e3b679f4"
+    ],
+    "49e00d3a49c57f9b": [
+      "075ac3139c0e504ff416ce3f43d31ebbbe4cb0eb03dc76bdff2bf64a295ea271",
+      "b7004eba390b450c03dedb3a0b9471c2c9d1bccc9471c0aa167835ba54080c8f",
+      "4431cd975d5934e73eedd56c1df9366f154f9979f8187e73f870ba698bcd79c9",
+      "22a5aa1d3ba35bbd5405b24d4e1fdd7c6c10b73caff888e63c778ae2aa2b03bb",
+      "4a32504b93562908d675d8664579efed4ffc6e9b83488f5278943aa03112c432",
+      "6cfb66df2833b17a616da37b159baf1c0592eebf893e860267f454648ba698a8",
+      "d1f09b1bbe0b46e958dc39eac8beed23b22cd6eabbedbf548abc302e0de3196a",
+      "58141f286243c7dfb9d6219dad148d97817aa6cfbefdf7830c84ba3bd910ccaa",
+      "11cd32d2195d1bf20f39731822b919bd023a708e6c52f767dd61bfa4e50b4882"
     ],
     "49ff97219882c8a0": [
       "8fa941740edd271ffe8aace69c1a6cb69a656a74723a6b98605aac8fda4a7120",
@@ -12610,7 +12614,7 @@
         "ci:regression"
       ],
       "fileCount": 1005,
-      "titleCount": 9192,
+      "titleCount": 9196,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12825,7 +12829,6 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
-        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
@@ -13303,6 +13306,7 @@
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_unverified.test.js": "b68f97a4aa50831d",
+        "test/unit/oracle/consensus/quorum_margin.test.js": "49e00d3a49c57f9b",
         "test/unit/oracle/consensus/round/oracle_consensus_broadcast_gap.test.js": "cc9bb7eda4d0904a",
         "test/unit/oracle/consensus/round/oracle_consensus_early_buffer.test.js": "07559983091dc0fb",
         "test/unit/oracle/consensus/round/oracle_consensus_follower_round_duplicate_propose.test.js": "e78cfd00d0b2ff38",
@@ -13674,7 +13678,7 @@
     },
     "test": {
       "fileCount": 1005,
-      "titleCount": 9192,
+      "titleCount": 9196,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13889,7 +13893,6 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
-        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
@@ -14367,6 +14370,7 @@
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_unverified.test.js": "b68f97a4aa50831d",
+        "test/unit/oracle/consensus/quorum_margin.test.js": "49e00d3a49c57f9b",
         "test/unit/oracle/consensus/round/oracle_consensus_broadcast_gap.test.js": "cc9bb7eda4d0904a",
         "test/unit/oracle/consensus/round/oracle_consensus_early_buffer.test.js": "07559983091dc0fb",
         "test/unit/oracle/consensus/round/oracle_consensus_follower_round_duplicate_propose.test.js": "e78cfd00d0b2ff38",
@@ -14685,7 +14689,7 @@
     },
     "test:all": {
       "fileCount": 1088,
-      "titleCount": 10059,
+      "titleCount": 10063,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -14983,7 +14987,6 @@
         "test/unit/api/redaction/config_redaction.test.js": "e438fae7475708b5",
         "test/unit/api/redaction/get_all_configs_redaction.test.js": "e1685d27fbc4bfa9",
         "test/unit/api/rpc_cross_chain_call_id.test.js": "bd5ea188c2c8564e",
-        "test/unit/api/rpc_price_snapshots_shape.test.js": "1acfb6aa92f1a41b",
         "test/unit/api/sensitive_read_auth.test.js": "af274c77e32f0547",
         "test/unit/api/system_updateconfig_network.test.js": "4a590d714ed67ac5",
         "test/unit/attestation/admit_map_wire_divergent_tip.test.js": "72ca5679a6b0395f",
@@ -15461,6 +15464,7 @@
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation.test.js": "e4eb9b2e97f76ce9",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_floor.test.js": "bbeaa65bab61dc48",
         "test/unit/oracle/consensus/propose/oracle_consensus_propose_validation_unverified.test.js": "b68f97a4aa50831d",
+        "test/unit/oracle/consensus/quorum_margin.test.js": "49e00d3a49c57f9b",
         "test/unit/oracle/consensus/round/oracle_consensus_broadcast_gap.test.js": "cc9bb7eda4d0904a",
         "test/unit/oracle/consensus/round/oracle_consensus_early_buffer.test.js": "07559983091dc0fb",
         "test/unit/oracle/consensus/round/oracle_consensus_follower_round_duplicate_propose.test.js": "e78cfd00d0b2ff38",
