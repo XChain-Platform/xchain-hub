@@ -11,32 +11,60 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const { ORACLE_EPOCH_START_PINS } = require('../../../src/constants');
-const { resolveOracleEpochStart } = require('../../../src/oracle/oracle_epoch.js');
+const { ORACLE_EPOCH_START_PINS } = require('../../../../src/constants');
+const { resolveOracleEpochStart } = require('../../../../src/oracle/oracle_epoch.js');
 
-describe('ORACLE_EPOCH_START_PINS and the default resolver table', function () {
-    it('is a frozen table of lowercase network keys to non-negative integer ms', function () {
+// The epoch every testnet validator runs today; the pin must match it exactly.
+const TESTNET_EPOCH = 1787875200000;
+
+function run(network, envRaw) {
+    const warnings = [];
+    const value = resolveOracleEpochStart(network, envRaw, undefined, (s) => warnings.push(s));
+    return { value, warnings };
+}
+
+describe('ORACLE_EPOCH_START_PINS through the default resolver table', function () {
+    it('is a frozen table of lowercase network keys with no regtest or mainnet entry', function () {
         expect(Object.isFrozen(ORACLE_EPOCH_START_PINS)).to.equal(true);
+        expect(ORACLE_EPOCH_START_PINS).to.not.have.property('regtest');
+        expect(ORACLE_EPOCH_START_PINS).to.not.have.property('mainnet');
         for (const [net, pin] of Object.entries(ORACLE_EPOCH_START_PINS)) {
             expect(net).to.equal(net.toLowerCase());
-            expect(net).to.not.equal('regtest');
-            expect(Number.isInteger(pin) && pin >= 0).to.equal(true);
+            expect(Number.isSafeInteger(pin) && pin >= 0).to.equal(true);
         }
     });
 
-    it('resolves every pinned network to its pin and warns on a mismatched env', function () {
-        for (const [net, pin] of Object.entries(ORACLE_EPOCH_START_PINS)) {
-            const warnings = [];
-            expect(resolveOracleEpochStart(net, String(pin + 1), undefined, (m) => warnings.push(m))).to.equal(pin);
-            expect(warnings).to.have.length(1);
-            expect(resolveOracleEpochStart(net, String(pin), undefined, (m) => warnings.push(m))).to.equal(pin);
-            expect(warnings).to.have.length(1);
+    it('pins testnet to the epoch the testnet fleet runs', function () {
+        expect(ORACLE_EPOCH_START_PINS.testnet).to.equal(TESTNET_EPOCH);
+        expect(run('testnet', undefined).value).to.equal(ORACLE_EPOCH_START_PINS.testnet);
+    });
+
+    it('returns the testnet pin silently when the env matches', function () {
+        const r = run('testnet', String(TESTNET_EPOCH));
+        expect(r.value).to.equal(TESTNET_EPOCH);
+        expect(r.warnings).to.have.length(0);
+    });
+
+    it('returns the testnet pin and warns once when the env differs', function () {
+        const r = run('testnet', '1700000000000');
+        expect(r.value).to.equal(TESTNET_EPOCH);
+        expect(r.warnings).to.have.length(1);
+        expect(r.warnings[0]).to.include('ORACLE_EPOCH_START=1700000000000').and.include('testnet');
+    });
+
+    it('returns the testnet pin silently when the env is absent', function () {
+        for (const absent of [undefined, null, '']) {
+            const r = run('testnet', absent);
+            expect(r.value).to.equal(TESTNET_EPOCH);
+            expect(r.warnings).to.have.length(0);
         }
     });
 
-    it('honours the env on an unpinned network when no table is passed', function () {
-        const warnings = [];
-        expect(resolveOracleEpochStart('unpinned-net', '7', undefined, (m) => warnings.push(m))).to.equal(7);
-        expect(warnings).to.have.length(0);
+    it('honours the env on regtest and mainnet', function () {
+        for (const net of ['regtest', 'mainnet']) {
+            const r = run(net, '5');
+            expect(r.value).to.equal(5);
+            expect(r.warnings).to.have.length(0);
+        }
     });
 });
