@@ -23,4 +23,14 @@ describe('docs/openrpc.json', function () {
         const names = doc.methods.map((m) => m.name);
         assert.strictEqual(new Set(names).size, names.length, 'method names must be unique');
     });
+
+    it('documents the opt-in price snapshot quorum margin', function () {
+        const method = doc.methods.find((m) => m.name === 'getpricesnapshots');
+        const param = method.params.find((p) => p.name === 'with_quorum_margin');
+        assert.deepStrictEqual(param.schema, { type: 'boolean' });
+        const rows = method.result.schema.oneOf.find((branch) => branch.type === 'array');
+        const margin = rows.items.properties.quorum_margin;
+        assert.deepStrictEqual(margin.type, ['object', 'null']);
+        assert.deepStrictEqual(margin.required, ['mode', 'met', 'oneFaultTolerant', 'signers']);
+    });
 });

@@ -22,8 +22,9 @@ const INDEXER_ROOT = [
 const indexerLoad = { error: null }; // an indexer cloned without its node_modules cannot load: skip below, never abort the run
 const indexerModule = rel => { try { return INDEXER_ROOT && !indexerLoad.error ? require(path.join(INDEXER_ROOT, rel)) : {}; } catch (err) { indexerLoad.error = err; return {}; } };
 if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETWORK: 'regtest' });
-const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519] = ['bin/recovery.js', 'test/fixtures/anchor-archive.js',
-    'test/helpers/recovery_stubs.js', 'src/consensus/bridge_settle.js', 'src/consensus/ed25519.js'].map(indexerModule);
+const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519, indexerPrices] = ['bin/recovery.js',
+    'test/fixtures/anchor-archive.js', 'test/helpers/recovery_stubs.js', 'src/consensus/bridge_settle.js',
+    'src/consensus/ed25519.js', 'bin/recovery/checkpoint_price.js'].map(indexerModule);
 const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK;
 const TXID = 'ab'.repeat(32), PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -325,11 +326,13 @@ function registerPriceTest(state){
         ]);
         expect(stamps.filter(stamp => stamp[0] === 'tombstone')).to.have.length(1);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
-        expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS);
+        // The price signatures do not cover these columns, so recovery writes defaults, not the archived values.
+        const unsigned = indexerPrices.UNSIGNED_PRICE_DEFAULTS || {}, unsignedKeys = Object.keys(unsigned);
+        expectRows(recovered.db.prices, archive.price_snapshots, PRICE_KEYS.filter(key => !unsignedKeys.includes(key)));
+        expect(recovered.db.prices.map(row => project(row, unsignedKeys))).to.deep.equal(recovered.db.prices.map(() => unsigned));
         expectRows(recovered.db.tombstones, archive.price_tombstones, PRICE_TOMBSTONE_KEYS);
         expect(recovered.report.tombstones).to.equal(1);
-        const signedRound = recovered.db.prices.filter(row => row.round_number === 11);
-        const first = signedRound[0];
+        const signedRound = recovered.db.prices.filter(row => row.round_number === 11), first = signedRound[0];
         const canonical = indexerEd25519.buildPriceV0Payload(
             first.round_number, first.block_timestamp,
             signedRound.map(row => ({ coinPair: row.coin_pair, price: row.price })),
@@ -337,15 +340,13 @@ function registerPriceTest(state){
         expect(canonical).to.equal(publisher.priceSnapshotCanonical(signedRound));
         expectIndexerQuorum(recovered.recovery, canonical, first.consensus_proof,
             setFor(archive, 'price', first.reference_block));
-        const batchRow = recovered.db.prices.find(row => row.round_number === 12);
-        const batchProof = JSON.parse(batchRow.consensus_proof);
+        const batchRow = recovered.db.prices.find(row => row.round_number === 12), batchProof = JSON.parse(batchRow.consensus_proof);
         const batchCanonical = indexerEd25519.buildPriceBatchPayload(
             batchProof.batch.first_round, batchProof.batch.last_round,
             batchProof.batch.btc_block_height, [{
                 round: batchRow.round_number,
                 timestamp: batchRow.block_timestamp,
-                btcBlockHeight: batchRow.admit_block_btc == null
-                    ? batchRow.reference_block : batchRow.admit_block_btc,
+                btcBlockHeight: batchRow.admit_block_btc ?? batchRow.reference_block,
                 pairs: [{ coinPair: batchRow.coin_pair, price: batchRow.price }],
                 admitBlocks: priceAdmitBlocks(batchRow)
             }], 'regtest');
@@ -353,8 +354,7 @@ function registerPriceTest(state){
             setFor(archive, 'price', batchProof.batch.btc_block_height));
     });
 }
-function expectBytes(actual, expected){ expect(JSON.stringify(actual))
-    .to.equal(JSON.stringify(expected)); }
+function expectBytes(actual, expected){ expect(JSON.stringify(actual)).to.equal(JSON.stringify(expected)); }
 function registerFixtureBytesTest(){
     it('keeps the indexer fixture byte-exact for every quorum-table vector row', function(){
         const emptyKeys = [];

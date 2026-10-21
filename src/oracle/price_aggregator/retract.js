@@ -106,6 +106,37 @@ function emitRetractionDeletes(sourceChain, b, snapDeleted, oracleDeleted) {
     }
 }
 
+async function resetOrphanedLandingBlockTimes(sourceChain, b) {
+    const rows = await this.db.findSelfFinalizedRoundsForBatchRetraction(
+        sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+    const rounds = [...new Set((Array.isArray(rows) ? rows : [])
+        .map(row => Number(row.round_number))
+        .filter(Number.isSafeInteger))];
+    if (rounds.length === 0) return;
+    await this.db.resetSelfFinalizedBatchBlockTimeForRetraction(
+        sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+    for (const round of rounds) {
+        const resetRows = await this.db.findPriceSnapshotsForRound(round);
+        for (const row of (Array.isArray(resetRows) ? resetRows : [])) {
+            this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
+        }
+    }
+}
+
+async function readRetractedBatchRounds(sourceChain, b) {
+    let batchRounds = [];
+    try {
+        let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+        for (let row of (rows || [])) {
+            let n = parseInt(row.round_number);
+            if (Number.isFinite(n)) batchRounds.push(n);
+        }
+    } catch (e) {
+        logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
+    }
+    return batchRounds;
+}
+
 module.exports = {
 
     // Retract price rows seeded from PRICE actions that an indexer rolled back
@@ -138,23 +169,23 @@ module.exports = {
         let { from, to, gen, bounded, fenced } = bounds;
 
         let seam = publishedMarkerSeam.call(this);
-        let batchRounds = [];
-        if (seam.canClearMarkers) {
-            try {
-                let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, from, to, gen, bounded, fenced);
-                for (let row of (rows || [])) {
-                    let n = parseInt(row.round_number);
-                    if (Number.isFinite(n)) batchRounds.push(n);
-                }
-            } catch (e) {
-                logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
-            }
-        }
+        let batchRounds = seam.canClearMarkers ? await readRetractedBatchRounds.call(this, sourceChain, bounds) : [];
 
         // Awaited only when there is a fence to write, so an unfenced retraction issues
         // its DELETE without yielding first, in the same tick the unsplit method did.
         let fenceError = bounds.fenced ? await persistIngestFence.call(this, sourceChain, bounds) : null;
         if (fenceError) return fenceError;
+
+        // Runs on every retraction, publisher or not: a hub whose publisher cannot
+        // clear markers still stamped self-finalized rows from the orphaned landing,
+        // and leaving that stamp makes its archive diverge from a hub that never saw it.
+        try {
+            await resetOrphanedLandingBlockTimes.call(this, sourceChain, bounds);
+        } catch (e) {
+            logger.error(nodeUtil.format('PriceAggregator: could not reset orphaned batch landing times for ' + sourceChain + ':', e && e.message));
+            return { error: 'batch landing times not reset for ' + sourceChain
+                + ' (' + ((e && e.message) || 'unknown error') + ')' };
+        }
 
         let snapResult = await snapshotRetractionDelete.call(this, sourceChain, bounds);
         let oracleResult = await oraclePriceRetractionDelete.call(this, sourceChain, bounds);

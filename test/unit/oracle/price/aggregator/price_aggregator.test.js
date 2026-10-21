@@ -67,9 +67,9 @@ function registerPriceaggregatorRetractfromactionindex1Tests1() {
 
         let result = await agg.retractFromActionIndex('BTC', 500);
 
-        // Tombstone insert, then two DELETE statements
+        // Orphaned-landing reset lookup, tombstone insert, then two DELETE statements
         let calls = hub.db.doQuery.getCalls();
-        expect(calls.length).to.equal(3);
+        expect(calls.length).to.equal(4);
 
         let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
         let oracleCall = calls.find(c => /^DELETE FROM oracle_prices/.test(c.args[0]));

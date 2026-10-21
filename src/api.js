@@ -70,12 +70,12 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 // change JS type mid-stream. Importing is what makes that identity structural.
 const { bigIntReplacer } = require('./lib/bigint_replacer.js');
 const { resolveRoundCadence } = require('./oracle/round_cadence.js');
+const { resolveOracleEpochStart } = require('./oracle/oracle_epoch.js');
 const { parseCorsOrigin } = require('./api/cors_origin.js');
 const { parseExemptLocal } = require('./api/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
-// #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
-// #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
-const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
+// Shared constants: the co-sign/slash deviation band (#1299) and the per-network oracle epoch pins.
+const { ORACLE_DEVIATION_THRESHOLD, ORACLE_EPOCH_START_PINS } = require('./constants');
 const { installMiddleware } = require('./api/middleware');
 const { buildRpcController } = require('./api/rpc');
 const { mountSnapshotRoutes } = require('./api/rest/hub_db_snapshot');
@@ -198,7 +198,7 @@ const P2P_VALIDATOR_ADDR = hubConfig.P2P_VALIDATOR_ADDR || '';
 const HUB_NETWORK = (hubConfig.HUB_NETWORK || '').toLowerCase();
 // Refuse an undeclared keyless write surface, then a bad ORACLE_EPOCH_START or HUB_NETWORK.
 refuseUnsafeAuthPosture({ logger, HUB_API_KEY, HUB_FEED_API_KEY, HUB_ALLOW_UNAUTHENTICATED, P2P_VALIDATOR_ADDR, SENSITIVE_READ_AUTH });
-refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK });
+refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWORK, oracleEpochPins: ORACLE_EPOCH_START_PINS });
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
     HUB_NETWORK:            HUB_NETWORK,
     P2P_PORT:               parseInt(hubConfig.P2P_PORT) || 10001,
@@ -248,7 +248,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     XCHAIN_PRICE_BOOTSTRAP_SATS:      hubConfig.XCHAIN_PRICE_BOOTSTRAP_SATS || '',
     XCHAIN_PRICE_MIN_BTC_VOLUME:      hubConfig.XCHAIN_PRICE_MIN_BTC_VOLUME || '',
 
-    ORACLE_EPOCH_START:     parseInt(hubConfig.ORACLE_EPOCH_START),
+    ORACLE_EPOCH_START:     resolveOracleEpochStart(HUB_NETWORK, hubConfig.ORACLE_EPOCH_START),   // a pinned network ignores the env, with a warning
     // Positive-only: the interval divides elapsed time into federation round numbers.
     // First resolution of the process-wide cadence; every later reader gets this value.
     // Resolved from an empty cfg so only the resolver's regtest-gated env arm can move it.

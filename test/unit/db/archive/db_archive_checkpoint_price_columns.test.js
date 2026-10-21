@@ -206,6 +206,7 @@ describe('retraction records tombstones before deleting', function () {
             fenceNetwork: () => 'regtest',
             db: {
                 bumpPriceIngestWatermark: async () => {},
+                findSelfFinalizedRoundsForBatchRetraction: async () => [],
                 insertPriceTombstonesForRetraction: async () => { order.push('tombstone'); return { affectedRows: 1 }; },
                 deletePriceSnapshotsForRetraction: async () => { order.push('delete-snapshots'); return { affectedRows: 1 }; },
                 deleteOraclePricesForRetraction: async () => { order.push('delete-oracle'); return { affectedRows: 0 }; }

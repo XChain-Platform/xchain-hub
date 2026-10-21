@@ -356,6 +356,10 @@ jobs:
       # configuration reference moved to their documentation homes. Every drop
       # against the earlier baseline came from those deliberate rewrites, which
       # the rename map cannot carry because whole files and titles went away.
+      # The SDK and sync baselines are re-taken at their v0.26.0 develop
+      # back-merges: the SDK folded its scripts into bin and renamed the
+      # template-sync suite, and sync retired the utf8mb4 twin title when the
+      # parity check moved into its own test file.
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
@@ -366,14 +370,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sdk
-          ref: ebe94f35ef76056cd9925e23fc794495bbc2eeb5
+          ref: 474ec74818524055c6a4dae6d2cb9520bf60f257
           path: suite-title-pins/sdk/xchain-sdk
 
       - name: Check out the re-taken sync suite-title pin
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sync
-          ref: 1a764b2c84c8c226e2e2d0c5d743b007fa2ba458
+          ref: c10ffb8451b1c39276e11f35cca9b072225fdddc
           path: suite-title-pins/sync/xchain-sync
 
       - name: Verify complete sibling checkout roster
