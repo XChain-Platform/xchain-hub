@@ -17,9 +17,9 @@ const { refuseInvalidNetwork } = require('../../../../src/api/boot_guard.js');
 const EPOCH_ERROR = 'Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)';
 const NETWORK_ERROR = 'Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)';
 
-describe('refuseInvalidNetwork() oracle epoch pins', function () {
-    let exits, errors, logger;
+let exits, errors, logger;
 
+function useHarness() {
     beforeEach(function () {
         exits = [];
         errors = [];
@@ -30,17 +30,21 @@ describe('refuseInvalidNetwork() oracle epoch pins', function () {
     afterEach(function () {
         sinon.restore();
     });
+}
 
-    function run({ epoch, network, pins, passPins = true }) {
-        const options = {
-            logger,
-            hubConfig: { ORACLE_EPOCH_START: epoch },
-            P2P_VALIDATOR_ADDR: 'validator-address',
-            HUB_NETWORK: network
-        };
-        if (passPins) options.oracleEpochPins = pins;
-        refuseInvalidNetwork(options);
-    }
+function run({ epoch, network, pins, passPins = true }) {
+    const options = {
+        logger,
+        hubConfig: { ORACLE_EPOCH_START: epoch },
+        P2P_VALIDATOR_ADDR: 'validator-address',
+        HUB_NETWORK: network
+    };
+    if (passPins) options.oracleEpochPins = pins;
+    refuseInvalidNetwork(options);
+}
+
+describe('refuseInvalidNetwork() oracle epoch pins', function () {
+    useHarness();
 
     it('accepts a testnet validator with no epoch env and an illustrative testnet pin', function () {
         run({ network: 'testnet', pins: { testnet: 1700000000000 } });
@@ -59,6 +63,10 @@ describe('refuseInvalidNetwork() oracle epoch pins', function () {
         expect(exits).to.deep.equal([1]);
         expect(errors).to.deep.equal([EPOCH_ERROR]);
     });
+});
+
+describe('refuseInvalidNetwork() oracle epoch pins', function () {
+    useHarness();
 
     it('still refuses regtest when the table has a regtest entry', function () {
         run({ network: 'regtest', pins: { regtest: 1700000000000 } });
