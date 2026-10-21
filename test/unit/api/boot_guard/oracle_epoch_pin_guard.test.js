@@ -86,9 +86,15 @@ describe('refuseInvalidNetwork() oracle epoch pins', function () {
         expect(errors).to.deep.equal([]);
     });
 
-    it('reports only the HUB_NETWORK error when the epoch env is set and HUB_NETWORK is invalid', function () {
+    it('reports only the HUB_NETWORK error when a pinned network has its epoch env set and HUB_NETWORK is invalid', function () {
         run({ epoch: '1700000000000', network: 'bogusnet', pins: { testnet: 1700000000000 } });
         expect(exits).to.deep.equal([1]);
         expect(errors).to.deep.equal([NETWORK_ERROR]);
+    });
+
+    it('reports the epoch error then the HUB_NETWORK error when the epoch env is missing, the table has a testnet entry and HUB_NETWORK is invalid', function () {
+        run({ network: 'bogusnet', pins: { testnet: 1700000000000 } });
+        expect(exits).to.deep.equal([1, 1]);
+        expect(errors).to.deep.equal([EPOCH_ERROR, NETWORK_ERROR]);
     });
 });

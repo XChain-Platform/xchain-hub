@@ -10947,6 +10947,16 @@
       "7b796957723a1010b77ad014761cc24444dbfd07a36309345b42eef052f54562",
       "362852cf6ac97af09002ab917cce4bfb9e6d98a5e55ab2072852ecd73d32ae06"
     ],
+    "d7e26a56ca77185a": [
+      "a9a62df74f2fe11e403a8c0cf9ccacaed1de5d6afce20f88f09d13a2b7e5a2bb",
+      "eccc681681004a5bbcea7f37ec3551af3c38cfe0728c8e25c7bf0daf5d29ac6a",
+      "cbb291a76fa16d33904f45065dc697f276248dfde7b2bcd2ae82fca665b0cb51",
+      "1c138c1aa6168dbcfd2b1617a62bc3c375889b6127dabcc54dff236465d09a11",
+      "da5609dc8fa15fd9d605843bb3fe125dcde6ee325e87f8c3edb77db4d3e3aa91",
+      "64aaf70406560e2b615cebbaa45ddc72d63416637ea7f596bc4fee0c7147f177",
+      "8596e02f717e2c92d38f470cd0d7bc7f8343a28fec6a18c42d5d8b2d1a232467",
+      "3b2b20e826b4c803edcec38e38a80c72c800e469fb7be2b5889e67124368f7f2"
+    ],
     "d7eab67243cfc407": [
       "10f828d6d2d651f3ceba7f3ee8893c6bf3deb4692cffccfc29732f9dbbf4bd94",
       "e11c8f47eb4d7dc75f5e97ba2f8919ef817abfd6bebbf69771d5db50574d9db5",
@@ -11481,15 +11491,6 @@
     "e78cfd00d0b2ff38": [
       "7ae4d11166d8fd5ef5e6431daf50424b055740be0f33d4d8b55058496835a3e5",
       "41f1014fb3a7b54af247a35d6cbec3dda04b2762cf947c537dc9424b273b79c3"
-    ],
-    "e79c8ed75ebe4413": [
-      "a9a62df74f2fe11e403a8c0cf9ccacaed1de5d6afce20f88f09d13a2b7e5a2bb",
-      "eccc681681004a5bbcea7f37ec3551af3c38cfe0728c8e25c7bf0daf5d29ac6a",
-      "cbb291a76fa16d33904f45065dc697f276248dfde7b2bcd2ae82fca665b0cb51",
-      "1c138c1aa6168dbcfd2b1617a62bc3c375889b6127dabcc54dff236465d09a11",
-      "e970495a2a2d567cec9509b303092e84e77b80f28ba63a44bb81dc79809b6fd8",
-      "8596e02f717e2c92d38f470cd0d7bc7f8343a28fec6a18c42d5d8b2d1a232467",
-      "3b2b20e826b4c803edcec38e38a80c72c800e469fb7be2b5889e67124368f7f2"
     ],
     "e7a76545698b7e6a": [
       "3c7e45c642bc3bbbbd14e784f30487c0128b996f7c10212b37058a954b0933af",
@@ -12671,7 +12672,7 @@
         "ci:regression"
       ],
       "fileCount": 1012,
-      "titleCount": 9239,
+      "titleCount": 9240,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12859,7 +12860,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
-        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "e79c8ed75ebe4413",
+        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
@@ -13742,7 +13743,7 @@
     },
     "test": {
       "fileCount": 1012,
-      "titleCount": 9239,
+      "titleCount": 9240,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13930,7 +13931,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
-        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "e79c8ed75ebe4413",
+        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
@@ -14760,7 +14761,7 @@
     },
     "test:all": {
       "fileCount": 1095,
-      "titleCount": 10106,
+      "titleCount": 10107,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15031,7 +15032,7 @@
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "c36938a89a2c9780",
-        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "e79c8ed75ebe4413",
+        "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
