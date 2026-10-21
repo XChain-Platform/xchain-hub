@@ -28,6 +28,21 @@
 
 const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 
+function orphanedLandingJoin(sourceChain, from, to, gen, bounded, fenced) {
+    const actionRange = 'batch_landed.source_action_index'
+        + (bounded ? ' >= ? AND batch_landed.source_action_index <= ?' : ' >= ?');
+    const where = `self_finalized.source_action_index IS NULL
+            AND self_finalized.consensus_proof NOT LIKE '{"batch":%'
+            AND self_finalized.batch_block_time > 0
+            AND batch_landed.source_chain = ? AND ${actionRange}`
+        + (fenced ? ' AND batch_landed.push_generation <= ?' : '')
+        + ` AND batch_landed.consensus_proof LIKE '{"batch":%'`;
+    const args = [sourceChain, from];
+    if (bounded) args.push(to);
+    if (fenced) args.push(gen);
+    return { where, args };
+}
+
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so
 // this module still exports ONE price-family mixin: src/db/index.js installs it
 // unchanged, and both db_prototype_install.test.js and the test/helpers/mockHub
@@ -178,6 +193,30 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
+    },
+
+    async findSelfFinalizedRoundsForBatchRetraction(sourceChain, from, to, gen, bounded, fenced) {
+        const { where, args } = orphanedLandingJoin(sourceChain, from, to, gen, bounded, fenced);
+        return this.doQuery(`SELECT DISTINCT self_finalized.round_number
+            FROM price_snapshots AS self_finalized
+            JOIN price_snapshots AS batch_landed
+              ON self_finalized.batch_block_time = batch_landed.batch_block_time
+             AND self_finalized.round_number BETWEEN
+                 CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.first_round')) AS UNSIGNED)
+                 AND CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.last_round')) AS UNSIGNED)
+            WHERE ${where}`, args);
+    },
+
+    async resetSelfFinalizedBatchBlockTimeForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+        const { where, args } = orphanedLandingJoin(sourceChain, from, to, gen, bounded, fenced);
+        return this.doQuery(`UPDATE price_snapshots AS self_finalized
+            JOIN price_snapshots AS batch_landed
+              ON self_finalized.batch_block_time = batch_landed.batch_block_time
+             AND self_finalized.round_number BETWEEN
+                 CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.first_round')) AS UNSIGNED)
+                 AND CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.last_round')) AS UNSIGNED)
+            SET self_finalized.batch_block_time = 0
+            WHERE ${where}`, args);
     },
 
     // Reads the newest price_snapshots rows in every status, skipped and disputed
