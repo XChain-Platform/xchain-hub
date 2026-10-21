@@ -356,6 +356,10 @@ jobs:
       # configuration reference moved to their documentation homes. Every drop
       # against the earlier baseline came from those deliberate rewrites, which
       # the rename map cannot carry because whole files and titles went away.
+      # The SDK and sync baselines are re-taken at their v0.26.0 develop
+      # back-merges: the SDK folded its scripts into bin and renamed the
+      # template-sync suite, and sync retired the utf8mb4 twin title when the
+      # parity check moved into its own test file.
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
