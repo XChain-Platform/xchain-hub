@@ -12,6 +12,7 @@
 
 const crypto     = require('crypto');
 const { expect } = require('chai');
+const proxyquire = require('proxyquire');
 
 // The oracle_publish self-test decodes doge_address as Base58Check, so it enforces
 // the checksum, the exact registry version byte and the P2PKH-only rule, none of
@@ -44,7 +45,11 @@ describe('capabilities/oracle_publish selfTest() address decode', function () {
     let oraclePub;
     let coins;
     before(function () {
-        oraclePub = require('../../../src/capabilities/oracle_publish');
+        oraclePub = proxyquire('../../../src/capabilities/oracle_publish', {
+            '../lib/signer_loader.js': {
+                loadSignerHooks: () => ({ source: '/test/signer.js', walletSignFn() {}, broadcastFn() {} })
+            }
+        });
         coins     = require('../../../src/coins');
     });
 
