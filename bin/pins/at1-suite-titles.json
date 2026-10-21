@@ -5551,6 +5551,9 @@
       "86ecaa78d1dbc99553bbaabd9af8de864bf38057114a7b43561a713f466560d5",
       "95ecd26fa3c1645767a539009170245187a9a77bfc8155732c885cdbfa4f8a14"
     ],
+    "670245bae2894c3d": [
+      "670245bae2894c3dc4d9e83b48c2a4ff90ac93c84f05f0807e36e57901f51a1f"
+    ],
     "673a8862f1486c11": [
       "4072376eb93bbcb17ea626ec58eb29059084e3a206de9a92a3ca39570aac200d",
       "38f54107a796b6d486188aed2aaf2724010521738432f76c39d86f8d1da8b894",
@@ -12685,8 +12688,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1014,
-      "titleCount": 9250,
+      "fileCount": 1015,
+      "titleCount": 9251,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13699,6 +13702,7 @@
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
         "test/unit/validators/stake_share_watcher.test.js": "53f72bf7b35db285",
         "test/unit/validators/stake_share_watcher_gate_parity.test.js": "08f83b56a396e177",
+        "test/unit/validators/stake_share_watcher_log_levels.test.js": "670245bae2894c3d",
         "test/unit/validators/stake_weight_feed_standalone_hub.test.js": "0e8e87e747233c5b",
         "test/unit/validators/validator_identity.test.js": "e73e7f11ff61e39d",
         "test/unit/validators/validator_set_propagation.test.js": "27e5566114270dd1"
@@ -13758,8 +13762,8 @@
       }
     },
     "test": {
-      "fileCount": 1014,
-      "titleCount": 9250,
+      "fileCount": 1015,
+      "titleCount": 9251,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14772,14 +14776,15 @@
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
         "test/unit/validators/stake_share_watcher.test.js": "53f72bf7b35db285",
         "test/unit/validators/stake_share_watcher_gate_parity.test.js": "08f83b56a396e177",
+        "test/unit/validators/stake_share_watcher_log_levels.test.js": "670245bae2894c3d",
         "test/unit/validators/stake_weight_feed_standalone_hub.test.js": "0e8e87e747233c5b",
         "test/unit/validators/validator_identity.test.js": "e73e7f11ff61e39d",
         "test/unit/validators/validator_set_propagation.test.js": "27e5566114270dd1"
       }
     },
     "test:all": {
-      "fileCount": 1097,
-      "titleCount": 10117,
+      "fileCount": 1098,
+      "titleCount": 10118,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15875,6 +15880,7 @@
         "test/unit/validators/stake_share_monitor_projection.test.js": "2875a678a5b2fc4a",
         "test/unit/validators/stake_share_watcher.test.js": "53f72bf7b35db285",
         "test/unit/validators/stake_share_watcher_gate_parity.test.js": "08f83b56a396e177",
+        "test/unit/validators/stake_share_watcher_log_levels.test.js": "670245bae2894c3d",
         "test/unit/validators/stake_weight_feed_standalone_hub.test.js": "0e8e87e747233c5b",
         "test/unit/validators/validator_identity.test.js": "e73e7f11ff61e39d",
         "test/unit/validators/validator_set_propagation.test.js": "27e5566114270dd1"
