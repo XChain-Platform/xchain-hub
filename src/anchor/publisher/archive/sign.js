@@ -23,7 +23,6 @@
 
 const selfTest = require.main === module
     ? [require('node:assert/strict'), require('node:test')] : null;
-const canonicalForms = require('../canonical_forms.js');
 const zlib = require('zlib');
 const ValidatorIdentity = require('../../../validators/identity.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
@@ -59,11 +58,17 @@ module.exports = {
             return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
                 'election_block=' + electionBlock + ' local_tip=' + myBtc);
         let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
-        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock))
+        if(electionPubkeys.length === 0 || !electionPubkeys.includes(sender))
             return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null)
             return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
+        // Decode only after authenticating an election-set member. A valid body supplies
+        // the content anchor; a missing body retains the wrapper-only admission path long
+        // enough to bind the authenticated leader before the co-sign checks reject it.
+        let archive = this.decodeArchiveProposal(d);
+        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock, archive))
+            return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let myNextSeq = await this.getNextBatchSeq();
         if(this.refusedStaleArchiveSeq(d, sender, myNextSeq))
             return this.noteArchiveSignReqRefusal('batch_seq_stale', d, sender,
@@ -85,7 +90,6 @@ module.exports = {
         if(!mine) return this.noteArchiveSignReqRefusal('local_checkpoint_mismatch', d, sender);
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
-        let archive = this.decodeArchiveProposal(d);
         if(!archive) return this.noteArchiveSignReqRefusal('archive_invalid', d, sender);
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
         // decides which oracle_publish group the completeness check requires, and `mine`
@@ -130,20 +134,20 @@ module.exports = {
     // empties the signing set too and this hub was not going to co-sign either way.
     // The residual case (electionBlock unresolvable while snapshot_block is cached)
     // costs one co-signature on one round, which the round timeout re-runs.
-    archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock){
+    archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock, archive){
         if(electionPubkeys.length === 0) return false;
         {
-            // Same wrapper-anchored key + failover ladder the leader used. Keyed on the
-            // WIRE checkpoint only: the wire batch_seq no longer reaches the key, so a
-            // verifier whose own batch numbering has drifted from the proposer's still
-            // derives the identical rank order.
+            // Same content-anchored key + failover ladder the leader used. The archive
+            // CRC in the verified canonical binds the block from which this is derived.
+            // The wire batch_seq does not reach the key, so a verifier whose own batch
+            // numbering drifted still derives the identical order.
             // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
             // Runs for a single-member set too, so the
             // sole elected leader cannot be impersonated by a non-member.
-            let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
-            let since = electionBlock - Number(cp.snapshot_block);
-            if(!this.rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
+            const decision = this.archiveElectionDecision(
+                cp, archive, electionPubkeys, sender, electionBlock);
+            if(!decision.unlocked) return false;                            // not unlocked on the failover ladder
         }
         return true;
     },
