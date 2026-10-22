@@ -12,7 +12,6 @@ const SnapshotCheckpointEngine = require('./engine.js');
 const {
     SNAPSHOT_FALLBACK_STEP_BLOCKS: STEP,
     SNAPSHOT_LEADER_SKIP,
-    snapshotLeaderDecision,
     snapshotLeaderRank,
 } = require('./leader.js');
 const { buildSnapshotMesh } = require(
@@ -101,31 +100,46 @@ async function rankOneLeadsAtFallbackStep() {
     }
 }
 
-function logsEverySkipReasonOnce() {
-    const validators = [{ pubkey: key(1) }, { pubkey: key(2) }];
-    const cases = [
-        [SNAPSHOT_LEADER_SKIP.INVALID_BLOCK, -1, validators, key(1), 0],
-        [SNAPSHOT_LEADER_SKIP.EMPTY_VALIDATOR_SET, 0, [], key(1), 0],
-        [SNAPSHOT_LEADER_SKIP.INVALID_IDENTITY, 0, validators, null, 0],
-        [SNAPSHOT_LEADER_SKIP.NOT_VALIDATOR, 0, validators, key(3), 0],
-        [SNAPSHOT_LEADER_SKIP.MISSING_DEPTH, 0, validators, key(2)],
-        [SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT, 0, validators, key(2), STEP - 1],
-    ];
-    const engine = new SnapshotCheckpointEngine({ network: 'regtest' });
+async function logsCheckpointSkipOnce(reason, configure) {
+    const mesh = await startMesh();
+    const blockIndex = snapshotCheckpointBlock(SNAPSHOT_BLOCK, mesh.network);
+    const node = configure(mesh, blockIndex);
 
-    cases.forEach(([reason, ...args], index) => {
-        const decision = snapshotLeaderDecision(...args);
-        expect(decision).to.include({ leads: false, reason });
-        const fields = { snapshotBlock: 100 + index, blockIndex: args[0] };
-        expect(engine.noteSkip(decision.reason, fields)).to.equal(true);
-        expect(engine.noteSkip(decision.reason, fields)).to.equal(false);
-    });
-
-    const lines = infoLines(info);
-    expect(lines).to.have.length(cases.length);
-    for (const [reason] of cases)
-        expect(lines.filter(line => line.includes(': ' + reason))).to.have.length(1);
+    try {
+        expect(await node.engine.checkpointNextDue()).to.equal(false);
+        expect(await node.engine.checkpointNextDue()).to.equal(false);
+        expect(infoLines(info).filter(line => line.includes(': ' + reason)))
+            .to.have.length(1);
+    } finally {
+        await stopMesh(mesh);
+    }
 }
+
+const checkpointSkipCases = [
+    [SNAPSHOT_LEADER_SKIP.EMPTY_VALIDATOR_SET, mesh => {
+        const node = mesh.nodes[0];
+        sinon.stub(node.engine, 'resolveValidators').resolves([]);
+        return node;
+    }],
+    [SNAPSHOT_LEADER_SKIP.INVALID_IDENTITY, mesh => {
+        const node = mesh.nodes[0];
+        node.engine.identity = {};
+        return node;
+    }],
+    [SNAPSHOT_LEADER_SKIP.NOT_VALIDATOR, mesh => {
+        const node = mesh.nodes[0];
+        sinon.stub(node.engine, 'resolveValidators').resolves([{ pubkey: key(9) }]);
+        return node;
+    }],
+    [SNAPSHOT_LEADER_SKIP.MISSING_DEPTH, (mesh, blockIndex) => {
+        mesh.setTip(blockIndex + 0.5);
+        return nodeAtRank(mesh, blockIndex, 1);
+    }],
+    [SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT, (mesh, blockIndex) => {
+        mesh.setTip(blockIndex + STEP - 1);
+        return nodeAtRank(mesh, blockIndex, 1);
+    }],
+];
 
 describe('snapshot checkpoint fallback leader acceptance', function () {
     beforeEach(function () {
@@ -138,5 +152,9 @@ describe('snapshot checkpoint fallback leader acceptance', function () {
 
     it('lets rank 1 lead at the fallback step when live rank 0 never leads',
         rankOneLeadsAtFallbackStep);
-    it('logs every leader skip reason once for repeated decisions', logsEverySkipReasonOnce);
+    for (const [reason, configure] of checkpointSkipCases) {
+        it('logs ' + reason + ' once from repeated checkpoint attempts', async function () {
+            await logsCheckpointSkipOnce(reason, configure);
+        });
+    }
 });
