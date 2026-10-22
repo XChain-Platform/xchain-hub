@@ -57,7 +57,7 @@ function stop(engine) {
 async function handleMessage(engine, envelope) {
     if (!envelope || !envelope.data) return;
     if (envelope.type === XSNP_SIGN_REQ)
-        await handleSignRequest(engine, envelope.data);
+        await handleSignRequest(engine, envelope.data, envelope.sender);
     else if (envelope.type === XSNP_SIGN)
         await handleSignature(engine, envelope.data);
     else if (envelope.type === XSNP_FINALIZED)
@@ -116,9 +116,12 @@ async function lead(engine, cp, validators, snapshotBlock, signature) {
     await advanceLeader(engine, pending);
 }
 
-async function handleSignRequest(engine, request) {
+async function handleSignRequest(engine, request, sender) {
     if (!request || !Number.isSafeInteger(request.snapshot_block) ||
-        request.snapshot_block < 0 || !request.cp) return;
+        request.snapshot_block < 0 || !request.cp) {
+        engine.noteSkip('sign_request_malformed', { sender });
+        return;
+    }
     const myPubkey = String(engine.identity && engine.identity.getPubkeyHex()).toLowerCase();
     if (request.pubkey === myPubkey) return;
 
@@ -139,8 +142,15 @@ async function handleSignRequest(engine, request) {
         record: engine.signedRecord,
         view,
     });
-    if (result.reply && engine.peerManager)
+    if (!result.reply) {
+        engine.noteSkip('sign_request_' + result.refusal, {
+            snapshotBlock: request.snapshot_block,
+            blockIndex: request.cp.block_index,
+            sender,
+        });
+    } else if (engine.peerManager) {
         engine.peerManager.broadcast(XSNP_SIGN, result.reply);
+    }
 }
 
 async function handleSignature(engine, reply) {
