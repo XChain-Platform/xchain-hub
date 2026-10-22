@@ -178,6 +178,13 @@ class SnapshotCheckpointEngine {
             'oracle_publish', snapshotBlock));
     }
 
+    localPubkey() {
+        const pubkey = this.identity && typeof this.identity.getPubkeyHex === 'function'
+            ? this.identity.getPubkeyHex()
+            : null;
+        return typeof pubkey === 'string' ? pubkey.toLowerCase() : pubkey;
+    }
+
     // A tick asked for outside the poll. One that arrives while a tick runs is kept and run
     // after it, since the running tick may have scanned before the new set was written.
     requestTick() {
@@ -266,12 +273,7 @@ class SnapshotCheckpointEngine {
         if (!due) return false;
 
         const validators = await this.resolveValidators(due.snapshot_block);
-        const identityPubkey = typeof this.identity.getPubkeyHex === 'function'
-            ? this.identity.getPubkeyHex()
-            : null;
-        const myPubkey = typeof identityPubkey === 'string'
-            ? identityPubkey.toLowerCase()
-            : identityPubkey;
+        const myPubkey = this.localPubkey();
         const overdue = Number(btcTip) - due.block_index - this.confirmations;
         const decision = snapshotLeaderDecision(
             due.block_index, validators, myPubkey, overdue);
