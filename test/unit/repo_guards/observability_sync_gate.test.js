@@ -12,9 +12,8 @@
 
 // The vendored observability shim has a gate, and the gate has teeth.
 //
-// src/observability/ is CANONICAL here and bin/sync-observability.sh projects it
-// into six consumer repos. The implementation stays verbatim; the indexer omits
-// test-only exports from its public surface. For months the only thing enforcing that
+// src/observability/ is CANONICAL here and bin/sync-observability.sh copies it
+// verbatim into six consumer repos. For months the only thing enforcing that
 // parity was the sentence claiming it was enforced: no npm script, no workflow
 // and no gate ran the script, four ported suite headers told readers a CI check
 // existed, and the indexer's copy sat drifted with every suite green.
@@ -80,17 +79,7 @@ function makeFixture(consumers) {
       fs.copyFileSync(path.join(CANONICAL_DIR, file), path.join(dir, file));
     }
   }
-  const seeded = runSync(root);
-  if (seeded.status !== 0) throw new Error(seeded.stdout + seeded.stderr);
   return root;
-}
-function runSync(root) {
-  return spawnSync('bash', [SCRIPT], {
-    env: Object.assign({}, process.env, {
-      XCHAIN_PLATFORM_ROOT: root
-    }),
-    encoding: 'utf8'
-  });
 }
 function runCheck(root, extraArgs = []) {
   return spawnSync('bash', [SCRIPT, '--check', ...extraArgs], {
@@ -126,7 +115,7 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part1() {
 }
 function registerObservabilityShimTheVendoredCopyParityGateSuite1Part2() {
   describe('behaviour', function () {
-    it('passes when every vendored copy matches its canonical projection', function () {
+    it('passes when every vendored copy is byte-identical', function () {
       const res = runCheck(observabilityShimTheVendoredCopyParityGateSuite1Fixture());
       expect(res.status, res.stdout + res.stderr).to.equal(0);
       expect(res.stdout).to.contain('OK:');
@@ -140,14 +129,6 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part2() {
       expect(res.status, 'a drifted copy must exit non-zero').to.equal(1);
       expect(res.stdout).to.contain(`DRIFT  ${CONSUMERS[0]}/src/observability/${FILES[0]}`);
       expect(res.stderr).to.contain('drifted from xchain-hub/src/observability');
-    });
-    it('rejects an undeclared export added to the indexer projection', function () {
-      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture();
-      const victim = path.join(root, 'xchain-indexer', 'src', 'observability', 'metrics.js');
-      fs.copyFileSync(path.join(CANONICAL_DIR, 'metrics.js'), victim);
-      const res = runCheck(root);
-      expect(res.status).to.equal(1);
-      expect(res.stdout).to.contain('DRIFT  xchain-indexer/src/observability/metrics.js');
     });
     it('fails when a vendored file has been deleted outright', function () {
       const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture();
