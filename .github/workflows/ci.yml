@@ -353,7 +353,8 @@ jobs:
       # The hub baseline is re-taken at the develop revision after the dated
       # .sql migration runner retired the fixed DDL modules and their tests, the
       # anchor cadence pin rewrote its titles, and the signer example and the
-      # configuration reference moved to their documentation homes. Every drop
+      # configuration reference moved to their documentation homes, and again
+      # after the rollcall no-signer test title was reworded. Every drop
       # against the earlier baseline came from those deliberate rewrites, which
       # the rename map cannot carry because whole files and titles went away.
       # The SDK and sync baselines are re-taken at their v0.26.0 develop
@@ -363,7 +364,7 @@ jobs:
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
-          ref: 26c072c9d0b5d9872b91ed80078ba9ff44869baf
+          ref: ff71c546b04db23a0df4111a8db99f40b722956c
           path: suite-title-pins/hub/xchain-hub
 
       - name: Check out the re-taken SDK suite-title pin

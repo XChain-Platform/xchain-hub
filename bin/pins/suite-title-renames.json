@@ -41,6 +41,9 @@
     },
     "test/unit/rollcall/rollcall_round_invariants.test.js": {
       "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in CONFIGURATION.md": "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in the hub configuration page"
+    },
+    "test/unit/rollcall/rollcall_status_rpc.test.js": {
+      "capabilities/oracle_publish broadcast presence check leaves the no-signer-module posture unchanged": "capabilities/oracle_publish broadcast presence check fails when no signer module is configured"
     }
   }
 }
