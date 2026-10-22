@@ -23,7 +23,6 @@
 
 const crypto = require('crypto');
 const { listIdsOf } = require('./list/list_rows_select.js');
-const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -80,9 +79,8 @@ module.exports = {
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return 'none';
 
         const archive  = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
-        const electionAnchor = this.archiveElectionAnchor(JSON.parse(archive.json), cp);
         if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq,
-                                  failoverOnly, electionAnchor)) return 'none';
+                                  failoverOnly, JSON.parse(archive.json))) return 'none';
         let wire      = this.archiveWire(archive.json);
 
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
@@ -148,22 +146,20 @@ module.exports = {
     },
 
     // True when the failover ladder says this hub does not publish this batch now.
-    archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly, electionAnchor){
+    archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly, archive){
         {
             // Unconditional (all set sizes): the membership check above already
             // pins the size-1 identity, and a single-member ladder resolves to
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
-            const order = canonicalForms.hashOrder(this.archiveElectionKey(cp, batchSeq, electionAnchor), electionPubkeys);
-            const contentBlock = electionAnchor && Number(electionAnchor.block);
-            const since = Number.isFinite(electionBlock) && Number.isFinite(contentBlock)
-                ? electionBlock - contentBlock : null;
+            const decision = this.archiveElectionDecision(cp, archive, electionPubkeys, me, electionBlock);
+            const order = decision.order;
             // Same backup-only rule as the v0 path. A leader driving its
             // own batch on the wake cadence would archive whatever few rows are
             // pending every 15 minutes instead of accumulating them to the interval
             // or the size trigger, which is the over-anchoring this mode exists to
             // avoid. Backups are exactly who the wake is for.
             if(failoverOnly && this.isRankZero(order)) return true;
-            if(!this.rankUnlocked(order, me, since)){
+            if(!decision.unlocked){
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
                 // indistinguishable from a broken publisher without this.
@@ -171,7 +167,7 @@ module.exports = {
                             ': rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
                             order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
                             this.electionToleranceBlocks + ' blocks from content block ' +
-                            String(contentBlock) + '), not publishing');
+                            String(decision.anchor && decision.anchor.block) + '), not publishing');
                 return true;                                               // not unlocked on the failover ladder
             }
         }

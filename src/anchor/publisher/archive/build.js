@@ -150,6 +150,26 @@ module.exports = {
         return rank <= unlocked;
     },
 
+    // One derivation for both halves of the signing round. Keeping the anchor, key,
+    // order, elapsed height and unlock verdict together prevents a follower from
+    // silently reverting to the advancing wrapper checkpoint while the leader uses
+    // the oldest pending cargo row.
+    archiveElectionDecision(cp, archive, electionPubkeys, pubkey, electionBlock){
+        const anchor = this.archiveElectionAnchor(archive, cp);
+        const key = this.archiveElectionKey(cp, null, anchor);
+        const order = canonicalForms.hashOrder(key, electionPubkeys);
+        const anchorBlock = anchor && Number(anchor.block);
+        const since = Number.isFinite(electionBlock) && Number.isFinite(anchorBlock)
+            ? electionBlock - anchorBlock : null;
+        return {
+            anchor,
+            key,
+            order,
+            since,
+            unlocked: this.rankUnlocked(order, pubkey, since)
+        };
+    },
+
     // Resolve the qualifying set for (capability, block). Primary source is
     // CapabilitySnapshot.getSnapshot (deterministic from on-chain BTC stakes,
     // identical on EVERY hub), so the archive builder (leader) and the archive

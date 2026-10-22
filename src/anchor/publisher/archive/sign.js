@@ -21,7 +21,6 @@
 
 'use strict';
 
-const canonicalForms = require('../canonical_forms.js');
 const zlib = require('zlib');
 const ValidatorIdentity = require('../../../validators/identity.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
@@ -113,11 +112,9 @@ module.exports = {
             // signer-less rank-0 hub stalls archiving federation-wide.
             // Runs for a single-member set too, so the
             // sole elected leader cannot be impersonated by a non-member.
-            const electionAnchor = this.archiveElectionAnchor(archive, cp);
-            const order = canonicalForms.hashOrder(
-                this.archiveElectionKey(cp, null, electionAnchor), electionPubkeys);
-            const since = electionBlock - Number(electionAnchor && electionAnchor.block);
-            if(!this.rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
+            const decision = this.archiveElectionDecision(
+                cp, archive, electionPubkeys, sender, electionBlock);
+            if(!decision.unlocked) return false;                            // not unlocked on the failover ladder
         }
         return true;
     },
