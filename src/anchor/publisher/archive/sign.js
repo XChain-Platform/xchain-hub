@@ -21,6 +21,8 @@
 
 'use strict';
 
+const selfTest = require.main === module
+    ? [require('node:assert/strict'), require('node:test')] : null;
 const canonicalForms = require('../canonical_forms.js');
 const zlib = require('zlib');
 const ValidatorIdentity = require('../../../validators/identity.js');
@@ -30,15 +32,19 @@ const { XANC_SIGN } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
+const SIGN_REQ_REFUSAL_LOG_MS = 60000;
+
 module.exports = {
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
     async handleSignReq(envelope){
         let d = envelope.data;
-        if(!this.identity || !d || !d.checkpoint) return;
+        if(!this.identity) return this.noteArchiveSignReqRefusal('signer_unavailable', d);
+        if(!d) return this.noteArchiveSignReqRefusal('request_data_missing', d);
+        if(!d.checkpoint) return this.noteArchiveSignReqRefusal('checkpoint_missing', d);
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let sender   = String(d.sig_pubkey || '').toLowerCase();
-        if(sender === myPubkey) return;
+        if(sender === myPubkey) return this.noteArchiveSignReqRefusal('self_request', d, sender);
 
         let cp = d.checkpoint;
         // The publisher is elected by the CURRENT BTC block (not the checkpoint's
@@ -46,15 +52,22 @@ module.exports = {
         // we verify the SENDER's rank against it, bounded to our own view of the
         // BTC tip (anti-spam; the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
-        if(!Number.isFinite(electionBlock)) return;
+        if(!Number.isFinite(electionBlock))
+            return this.noteArchiveSignReqRefusal('election_block_invalid', d, sender);
         let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-        if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
+        if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks)
+            return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
+                'election_block=' + electionBlock + ' local_tip=' + myBtc);
         let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
-        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;
+        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock))
+            return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
-        if(canonical === null) return;
+        if(canonical === null)
+            return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
         let myNextSeq = await this.getNextBatchSeq();
-        if(this.refusedStaleArchiveSeq(d, sender, myNextSeq)) return;
+        if(this.refusedStaleArchiveSeq(d, sender, myNextSeq))
+            return this.noteArchiveSignReqRefusal('batch_seq_stale', d, sender,
+                'local_next_seq=' + myNextSeq);
         this.bindObservedArchiveLeader(d, sender, cp, electionPubkeys);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
@@ -62,25 +75,44 @@ module.exports = {
         // in the current election set would contribute a signature that is dropped
         // on-chain and could drag an otherwise-valid archive below quorum.
         let signingPubkeys = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
-        if(!signingPubkeys.includes(myPubkey)) return;
+        if(!signingPubkeys.includes(myPubkey))
+            return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
         let local = await this.db.getStateCheckpointByChainAndNetwork(cp.chain, cp.network, Number(cp.block_index));
         let mine = this.ownArchiveWrapper(local, cp);
-        if(!mine) return;
+        if(!mine) return this.noteArchiveSignReqRefusal('local_checkpoint_mismatch', d, sender);
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
         let archive = this.decodeArchiveProposal(d);
-        if(!archive) return;
+        if(!archive) return this.noteArchiveSignReqRefusal('archive_invalid', d, sender);
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
         // decides which oracle_publish group the completeness check requires, and `mine`
         // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
-            logger.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
-            return;
+            return this.noteArchiveSignReqRefusal('archive_diverges_from_local', d, sender);
         }
         this.coSignArchive(d, sender, archive, canonical, myPubkey);
+    },
+
+    // Every follower refusal is readable without letting a repeated bad request flood
+    // the log. The reason set is fixed by handleSignReq, so this per-reason map stays
+    // bounded while preserving one independently throttled diagnostic for each guard.
+    noteArchiveSignReqRefusal(reason, d, sender, detail){
+        let loggedAt = this.archiveSignReqRefusalLoggedAt;
+        if(!(loggedAt instanceof Map)) loggedAt = this.archiveSignReqRefusalLoggedAt = new Map();
+        const now = Date.now();
+        const last = loggedAt.get(reason);
+        if(last !== undefined && now - last < SIGN_REQ_REFUSAL_LOG_MS) return;
+        loggedAt.set(reason, now);
+
+        const batchSeq = d && d.batch_seq !== undefined && d.batch_seq !== null
+            ? String(d.batch_seq).slice(0, 32) : 'unknown';
+        let claimedSender = sender || (d && d.sig_pubkey);
+        claimedSender = claimedSender ? String(claimedSender).toLowerCase().slice(0, 128) : 'unknown';
+        logger.warn('StateAnchorPublisher: declining archive SIGN_REQ reason=' + reason +
+            ' batch_seq=' + batchSeq + ' sender=' + claimedSender + (detail ? ' ' + detail : ''));
     },
 
     // Fail CLOSED on an unresolved election set, the same way the LEADER does
@@ -154,10 +186,6 @@ module.exports = {
     refusedStaleArchiveSeq(d, sender, myNextSeq){
         if(Number(d.batch_seq) < myNextSeq){
             let consumed = myNextSeq - 1;
-            logger.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
-                         ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
-                         consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
-                         'behind on the archive back-fill; answering with a stale-seq refusal');
             this.broadcastSeqRefusal(Number(d.batch_seq), consumed);
             return true;
         }
@@ -305,3 +333,68 @@ module.exports = {
     }
 
 };
+
+if(require.main === module){
+    const [assert, test] = selfTest;
+    const methods = module.exports;
+    const myPubkey = 'aa'.repeat(32);
+    const sender = 'bb'.repeat(32);
+    const cases = [
+        'signer_unavailable', 'request_data_missing', 'checkpoint_missing', 'self_request',
+        'election_block_invalid', 'election_block_out_of_tolerance',
+        'sender_not_elected_or_unlocked', 'sender_signature_invalid', 'batch_seq_stale',
+        'signer_not_in_snapshot_set', 'local_checkpoint_mismatch', 'archive_invalid',
+        'archive_diverges_from_local'
+    ];
+    function harness(reason){
+        let coSigned = false;
+        const d = { checkpoint: { chain: 'doge', network: 'regtest', block_index: 12,
+            snapshot_block: 90 }, election_block: 100, batch_seq: 7, sig_pubkey: sender };
+        const pub = Object.assign(Object.create(methods), {
+            identity: reason === 'signer_unavailable' ? null : { getPubkeyHex: () => myPubkey },
+            hub: { resolveBtcLatestBlock: async () => reason === 'election_block_out_of_tolerance' ? 110 : 100 },
+            electionToleranceBlocks: 5,
+            getActiveOraclePublishPubkeys: async (block) =>
+                reason === 'signer_not_in_snapshot_set' && block === 90 ? [sender] : [sender, myPubkey],
+            archiveSenderUnlocked: () => reason !== 'sender_not_elected_or_unlocked',
+            verifiedArchiveCanonical: () => reason === 'sender_signature_invalid' ? null : 'canonical',
+            getNextBatchSeq: async () => reason === 'batch_seq_stale' ? 8 : 1,
+            broadcastSeqRefusal: () => {}, bindObservedArchiveLeader: () => {},
+            db: { getStateCheckpointByChainAndNetwork: async () => [{}] },
+            ownArchiveWrapper: () => reason === 'local_checkpoint_mismatch' ? null : { snapshot_block: 90 },
+            decodeArchiveProposal: () => reason === 'archive_invalid' ? null : { matches: [{}] },
+            verifyArchiveAgainstLocal: async () => reason !== 'archive_diverges_from_local',
+            coSignArchive: () => { coSigned = true; }
+        });
+        if(reason === 'request_data_missing') return { envelope: {}, pub, coSigned: () => coSigned };
+        if(reason === 'checkpoint_missing') delete d.checkpoint;
+        if(reason === 'self_request') d.sig_pubkey = myPubkey;
+        if(reason === 'election_block_invalid') d.election_block = 'invalid';
+        return { envelope: { data: d }, pub, coSigned: () => coSigned };
+    }
+    test('handleSignReq refusal paths log one rate-limited diagnostic', async (t) => {
+        for(const reason of cases){
+            await t.test(reason, async () => {
+                const { envelope, pub, coSigned } = harness(reason);
+                const lines = [];
+                const originalWarn = logger.warn;
+                logger.warn = (line) => lines.push(line);
+                try {
+                    await pub.handleSignReq(envelope);
+                    await pub.handleSignReq(envelope);
+                } finally {
+                    logger.warn = originalWarn;
+                }
+                const seq = reason === 'request_data_missing' ? 'unknown' : 7;
+                const claimedSender = reason === 'request_data_missing' ? 'unknown'
+                    : reason === 'self_request' ? myPubkey : sender;
+                const detail = reason === 'election_block_out_of_tolerance'
+                    ? ' election_block=100 local_tip=110'
+                    : reason === 'batch_seq_stale' ? ' local_next_seq=8' : '';
+                assert.deepEqual(lines, ['StateAnchorPublisher: declining archive SIGN_REQ reason=' +
+                    reason + ' batch_seq=' + seq + ' sender=' + claimedSender + detail]);
+                assert.equal(coSigned(), false);
+            });
+        }
+    });
+}
