@@ -51,18 +51,15 @@ module.exports = {
         // we verify the SENDER's rank against it, bounded to our own view of the
         // BTC tip (anti-spam; the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
-        if(!Number.isFinite(electionBlock))
-            return this.noteArchiveSignReqRefusal('election_block_invalid', d, sender);
+        if(!Number.isFinite(electionBlock)) return this.noteArchiveSignReqRefusal('election_block_invalid', d, sender);
         let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks)
             return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
                 'election_block=' + electionBlock + ' local_tip=' + myBtc);
         let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
-        if(electionPubkeys.length === 0 || !electionPubkeys.includes(sender))
-            return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
+        if(!electionPubkeys.includes(sender)) return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
-        if(canonical === null)
-            return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
+        if(canonical === null) return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
         // Decode only after authenticating an election-set member. A valid body supplies
         // the content anchor; a missing body retains the wrapper-only admission path long
         // enough to bind the authenticated leader before the co-sign checks reject it.
@@ -80,8 +77,7 @@ module.exports = {
         // in the current election set would contribute a signature that is dropped
         // on-chain and could drag an otherwise-valid archive below quorum.
         let signingPubkeys = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
-        if(!signingPubkeys.includes(myPubkey))
-            return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
+        if(!signingPubkeys.includes(myPubkey)) return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
