@@ -23,7 +23,6 @@
 
 const crypto = require('crypto');
 const { listIdsOf } = require('./list/list_rows_select.js');
-const canonicalForms = require('../canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -35,12 +34,12 @@ module.exports = {
 
     // Archive round (v1/v2).
     // Leader = hash-order rank 0 over the oracle_publish set, with the same
-    // failover ladder as the checkpoint leg: the election key is the WRAPPER
-    // checkpoint identity only (chain|network|checkpoint_seq; deterministic + identical
-    // on every hub, and stable while the batch is stalled). The hub-local batch seq is
-    // never part of it (see archiveElectionKey in build.js). Each further rank
-    // unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS past the wrapper
-    // checkpoint's snapshot_block. Without the ladder a signer-less elected
+    // failover ladder as the checkpoint leg: the election key and ladder age use the
+    // oldest block-bearing row in the archive. That row stays pending while newer state
+    // checkpoints arrive, so the ladder cannot reset on the checkpoint cadence. The
+    // hub-local batch seq is never part of the key (see archiveElectionKey in build.js).
+    // Each further rank unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS. Without
+    // the ladder a signer-less elected
     // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could
     // publish; on a static regtest tip the same leader won forever). Returns
     // the flush summary's archive status.
@@ -74,13 +73,14 @@ module.exports = {
         if(this.archiveRoundIntentHeld(liveIntent, network)) return 'intent_held';
 
         let batchSeq = await this.getNextBatchSeq();
-        if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly)) return 'none';
         // Lead only above the seqs our own DOGE address already spent
         batchSeq = await this.leaderBatchSeqAboveOwn(batchSeq);
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return 'none';
 
-        let archive  = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
+        const archive  = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
+        if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq,
+                                  failoverOnly, JSON.parse(archive.json))) return 'none';
         let wire      = this.archiveWire(archive.json);
 
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
@@ -146,27 +146,28 @@ module.exports = {
     },
 
     // True when the failover ladder says this hub does not publish this batch now.
-    archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly){
+    archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly, archive){
         {
             // Unconditional (all set sizes): the membership check above already
             // pins the size-1 identity, and a single-member ladder resolves to
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
-            let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
-            let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
+            const decision = this.archiveElectionDecision(cp, archive, electionPubkeys, me, electionBlock);
+            const order = decision.order;
             // Same backup-only rule as the v0 path. A leader driving its
             // own batch on the wake cadence would archive whatever few rows are
             // pending every 15 minutes instead of accumulating them to the interval
             // or the size trigger, which is the over-anchoring this mode exists to
             // avoid. Backups are exactly who the wake is for.
             if(failoverOnly && this.isRankZero(order)) return true;
-            if(!this.rankUnlocked(order, me, since)){
+            if(!decision.unlocked){
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
                 // indistinguishable from a broken publisher without this.
                 logger.info('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
                             ': rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
                             order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
-                            this.electionToleranceBlocks + ' blocks), not publishing');
+                            this.electionToleranceBlocks + ' blocks from content block ' +
+                            String(decision.anchor && decision.anchor.block) + '), not publishing');
                 return true;                                               // not unlocked on the failover ladder
             }
         }

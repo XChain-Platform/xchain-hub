@@ -105,8 +105,8 @@ module.exports = {
     },
 
     initFailoverLadder(cfg){
-        // Failover-ladder step (see the derivation above; the ladder itself is in
-        // rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
+        // Failover-ladder step (the ladder itself is in rankUnlocked). Archive age starts
+        // at its oldest cargo block, in BTC blocks rather than wall-clock time, so
         // every hub computes the same rank unlock without clock sync; 36 blocks is
         // ~6h at the 10-minute target. The ORDERING is the load-bearing part:
         //   round timeout (120s) + DOGE burial (60 confs, ~1h)
