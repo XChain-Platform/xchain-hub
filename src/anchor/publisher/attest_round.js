@@ -256,7 +256,11 @@ module.exports = {
         // The ladder check runs for EVERY set size: a single-member set must still bind
         // sender === eligible[0] (rank 0), or any current member could impersonate the
         // sole elected publisher. Age counts from the oldest content our rows owe.
-        if(!(await this.bundleSenderUnlocked(network, snapshotBlock, eligible, sender, mine))) return;
+        if(!(await this.bundleSenderUnlocked(network, snapshotBlock, eligible, sender, mine))){
+            logger.warn('StateAnchorPublisher: declining XANCPUB co-sign for ' + network + ' @ ' + snapshotBlock +
+                        ': reason=publisher_rank_locked publisher=' + sender);
+            return;
+        }
         if(!(await this.sectionsAreSelectorRows(network, snapshotBlock, mine))) return;
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
         // The proposer's own SNAPSHOT_BLOCK claim has to be the one our rows produce, or

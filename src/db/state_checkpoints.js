@@ -24,6 +24,14 @@
  *
  ********************************************************************/
 
+const nodeTest = require.main === module ? require('node:test') : null;
+const selfTestAssert = require.main === module ? require('node:assert/strict') : null;
+const SelfTestValidatorIdentity = require.main === module ? require('../validators/identity.js') : null;
+const selfTestCanonicalForms = require.main === module ? require('../anchor/publisher/canonical_forms.js') : null;
+const selfTestLadderMethods = require.main === module ? require('../anchor/publisher/ladder/bundle_content_age.js') : null;
+const selfTestAttestMethods = require.main === module ? require('../anchor/publisher/attest_round.js') : null;
+const selfTestGetLogger = require.main === module ? require('../observability').getLogger : null;
+
 // The newest anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
 // checkpoint ORDINAL (seq divided by the cadence step) is divisible by the anchor stride.
 // Moved here from src/anchor/publisher.js:1065.
@@ -164,15 +172,97 @@ module.exports = {
     // Per chain of one network, the oldest snapshot_block among the anchor-eligible
     // checkpoints above the newest anchored one: the content the v0 bundle has owed since
     // its last anchor. Superseded rows below an anchor are never stamped, so the anchored
-    // seq bounds the age; a chain that never anchored has no row here.
+    // seq bounds the age; without an anchor, the first eligible checkpoint starts the age.
     async findOldestUnanchoredCheckpointBlocksByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
         return this.doQuery(
-            'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc JOIN (' +
+            'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc LEFT JOIN (' +
             '  SELECT chain, network, MAX(checkpoint_seq) AS anchored_seq FROM state_checkpoints' +
             '  WHERE anchor_txid IS NOT NULL AND network = ? GROUP BY chain, network' +
             ') a ON sc.chain = a.chain AND sc.network = a.network ' +
-            'WHERE sc.network = ? AND sc.anchor_txid IS NULL AND sc.checkpoint_seq > a.anchored_seq ' +
+            'WHERE sc.network = ? AND sc.anchor_txid IS NULL ' +
+            'AND (a.anchored_seq IS NULL OR sc.checkpoint_seq > a.anchored_seq) ' +
             'AND MOD(FLOOR(sc.checkpoint_seq / ?), ?) = 0 GROUP BY sc.chain',
             [network, network, checkpointIntervalBlocks, anchorEveryNCheckpoints]);
     }
 };
+
+function buildNeverAnchoredFollowerFixture(){
+    const network = 'regtest';
+    const identities = Array.from({ length: 4 }, () =>
+        new SelfTestValidatorIdentity(SelfTestValidatorIdentity.generate().privkeyHex));
+    const byPubkey = new Map(identities.map(identity => [identity.getPubkeyHex(), identity]));
+    const electionSet = identities.map(identity => identity.getPubkeyHex());
+    const electionKey = 'never-anchored-follower';
+    const order = selfTestCanonicalForms.hashOrder(electionKey, electionSet);
+    const checkpoints = [];
+    for(let block = 106, seq = 8; block <= 136; block += 6, seq++)
+        checkpoints.push({ chain: 'BTC', network, snapshot_block: block, checkpoint_seq: seq,
+                           block_index: 900 + seq, anchor_txid: null });
+    const row = checkpoints[checkpoints.length - 1];
+    const evidence = { sql: '' };
+    const db = {
+        async findOldestUnanchoredCheckpointBlocksByNetwork(...args){
+            return module.exports.findOldestUnanchoredCheckpointBlocksByNetwork.call({
+                doQuery: async sql => {
+                    evidence.sql = sql;
+                    selfTestAssert.equal(checkpoints.some(checkpoint => checkpoint.anchor_txid !== null), false);
+                    return [{ chain: 'BTC', oldest_block: checkpoints[0].snapshot_block }];
+                }
+            }, ...args);
+        },
+        async getStateCheckpointByChain(){ return [row]; }
+    };
+    const sent = [];
+    const follower = Object.assign({}, selfTestLadderMethods, selfTestAttestMethods, {
+        db,
+        identity: byPubkey.get(order[3]),
+        hub: { resolveBtcLatestBlock: async () => 142 },
+        checkpointIntervalBlocks: 1,
+        anchorEveryNCheckpoints: 1,
+        peerManager: { broadcast: type => sent.push(type) },
+        bundleElectionKey: () => electionKey,
+        rankUnlocked: (rankOrder, sender, age) => rankOrder.indexOf(sender) <= Math.floor(age / 36),
+        getActiveOraclePublishPubkeys: async () => electionSet,
+        findAnchorEligibleSections: async () => [row],
+        buildV7Payload: (rows, publisher) => JSON.stringify([rows[0].checkpoint_seq, publisher]),
+        attestationCanonical: (bundle, publisher) => 'XANCPUB|' + bundle.network + '|' + publisher,
+        claimAttestSlot: async () => true
+    });
+    return { network, byPubkey, order, row, evidence, sent, follower };
+}
+
+function neverAnchoredFollowerRequest(fixture, publisher){
+    const { network, byPubkey, row, follower } = fixture;
+    const canonical = follower.attestationCanonical({ network }, publisher);
+    return { data: {
+        network, snapshot_block: row.snapshot_block,
+        sections: [{ chain: row.chain, block_index: row.block_index, checkpoint_seq: row.checkpoint_seq }],
+        body: follower.buildV7Payload([row], publisher), publisher, sig_pubkey: publisher,
+        sig: byPubkey.get(publisher).sign(canonical)
+    } };
+}
+
+async function runNeverAnchoredFollowerRegression(){
+    const fixture = buildNeverAnchoredFollowerFixture();
+    const { network, order, row, evidence, sent, follower } = fixture;
+    const contentBlock = await follower.bundleContentBlock(network, [row]);
+    selfTestAssert.equal(contentBlock, 106);
+    selfTestAssert.equal(follower.bundleLadderBlock([row], 142, contentBlock) - row.snapshot_block, 36);
+    selfTestAssert.match(evidence.sql, /LEFT JOIN/);
+    selfTestAssert.match(evidence.sql, /a\.anchored_seq IS NULL OR sc\.checkpoint_seq > a\.anchored_seq/);
+    selfTestAssert.equal(await follower.handleAttestSignReq(neverAnchoredFollowerRequest(fixture, order[1])), true);
+    selfTestAssert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
+    const warnings = [];
+    const logger = selfTestGetLogger();
+    const warn = logger.warn;
+    logger.warn = message => warnings.push(String(message));
+    try { await follower.handleAttestSignReq(neverAnchoredFollowerRequest(fixture, order[2])); }
+    finally { logger.warn = warn; }
+    selfTestAssert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
+    selfTestAssert.ok(warnings.some(message => message.includes('reason=publisher_rank_locked') &&
+                                                   message.includes('publisher=' + order[2])));
+}
+
+if(require.main === module)
+    nodeTest.test('a never-anchored follower co-signs unlocked rank 1 and explains a locked decline',
+                  runNeverAnchoredFollowerRegression);
