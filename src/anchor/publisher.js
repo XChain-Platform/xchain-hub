@@ -124,6 +124,7 @@ const bundleLadderMethods          = require('./publisher/ladder/bundle_content_
 const publishBundleMethods         = require('./publisher/publish_bundle.js');
 const rewardMethods                = require('./publisher/reward.js');
 const rewardDeferMethods           = require('./publisher/reward_defer.js');
+const rewardJournalMethods         = require('./publisher/reward_journal/journal.js');
 const attestRoundMethods           = require('./publisher/attest_round.js');
 const archiveAttestMethods         = require('./publisher/archive/attest.js');
 const archiveRoundMethods          = require('./publisher/archive/round.js');
@@ -299,6 +300,7 @@ const PART_METHODS = [
     publishBundleMethods,
     rewardMethods,
     rewardDeferMethods,
+    rewardJournalMethods,
     attestRoundMethods,
     archiveAttestMethods,
     archiveRoundMethods,

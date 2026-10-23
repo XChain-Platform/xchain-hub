@@ -50,6 +50,7 @@ describe('StateAnchorPublisher: archive sequence floor seed', function () {
             async resolveMissingIndexerUrls(){ order.push('resolve'); },
             async seedArchiveSeqFloor(){ order.push('seed'); },
             subscribeToAnchorSources(){ order.push('subscribe'); },
+            async restoreDeferredRewardAttest(){ order.push('restore'); },
             startFlushTimers(){ order.push('timers'); },
             intervalMs: 1000,
             startupFlushMs: 0,
@@ -57,7 +58,7 @@ describe('StateAnchorPublisher: archive sequence floor seed', function () {
             dogeAddress: 'Dpublisher'
         };
         await StateAnchorPublisher.prototype.start.call(pub);
-        expect(order).to.deep.equal(['persist', 'resolve', 'seed', 'subscribe', 'timers']);
+        expect(order).to.deep.equal(['persist', 'resolve', 'seed', 'subscribe', 'restore', 'timers']);
     });
 
 });

@@ -172,6 +172,8 @@ module.exports = {
         await this.resolveMissingIndexerUrls();
         await this.seedArchiveSeqFloor();
         this.subscribeToAnchorSources();
+        // Before the drain timer: a restart must not lose the reward attestations it interrupted.
+        await this.restoreDeferredRewardAttest();
         this.startFlushTimers();
         logger.info('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
                     (this.startupFlushMs > 0 ? 'in ' + this.startupFlushMs + 'ms' : 'off') +

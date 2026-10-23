@@ -69,5 +69,17 @@ module.exports = {
     // stands; read it back with findConsensusState to learn which value won.
     async createConsensusStateIfAbsent(key_name, value) {
         return this.doQuery('INSERT IGNORE INTO consensus_state (key_name, value) VALUES (?, ?)', [key_name, value]);
+    },
+
+    // Reads every row whose key_name starts with prefix. The prefix is matched
+    // literally: its _ and % would otherwise be LIKE wildcards.
+    async findConsensusStateByPrefix(prefix) {
+        const pattern = String(prefix).replace(/[\\%_]/g, '\\$&') + '%';
+        return this.doQuery('SELECT key_name, value FROM consensus_state WHERE key_name LIKE ? ORDER BY id', [pattern]);
+    },
+
+    // Deletes one row from consensus_state; deleting an absent key is a no-op.
+    async deleteConsensusState(key_name) {
+        return this.doQuery('DELETE FROM consensus_state WHERE key_name = ?', [key_name]);
     }
 };

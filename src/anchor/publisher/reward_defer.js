@@ -97,12 +97,9 @@ module.exports = {
     // identity (chain/network/blockIndex/checkpointSeq) that verification re-SELECTs, the
     // txid and anchorVersion it must bind, and the attestation tuple to write.
     //
-    // RESIDUAL, deliberate: this queue is in memory, so a restart inside the confirmation
-    // window forfeits THIS hub's own reward for that anchor. That is fail-closed and
-    // fleet-uniform (no row exists, so every indexer derives the same nothing), where
-    // writing at mempool acceptance would be fail-open (a permanent mint for an anchor
-    // that never landed). Making it durable means persisting the XANCPUB sigs, which exist only in
-    // the attestation round's memory today.
+    // Durable across a restart: each entry, XANCPUB sigs included, is journaled to
+    // consensus_state until the drain settles it, and start() restores the queue from
+    // there (reward_journal/journal.js), so a restart inside the window forfeits nothing.
     deferRewardAttestation(e){
         if(!e || !ar.isAnchorRewardDeriveActive(Number(e.snapshotBlock), e.network)) return;   // gate INERT: no rows exist at all
         if(!e.txid || !e.publisher || !Array.isArray(e.attestSigs) || e.attestSigs.length === 0) return;
@@ -114,11 +111,13 @@ module.exports = {
         // hub's own reward; it can never write one.
         if(this._deferredRewardAttest.size >= this.announceQueueMax){
             let oldest = this._deferredRewardAttest.keys().next().value;
-            this._deferredRewardAttest.delete(oldest);
+            this.dropDeferredRewardAttest(oldest);
             logger.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
-        this._deferredRewardAttest.set(key, Object.assign({}, e, { at: Date.now() }));
+        let entry = Object.assign({}, e, { at: Date.now() });
+        this._deferredRewardAttest.set(key, entry);
+        this.persistDeferredRewardAttest(key, entry);
         logger.info('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
                     ' held until anchor ' + e.txid + ' is ' + this.dogeConfirmations + ' deep on DOGE (' +
                     this._deferredRewardAttest.size + ' pending)');
@@ -278,10 +277,11 @@ module.exports = {
 
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
     async runRewardAttestDrain(){
+        await this.restoreDeferredRewardAttest();
         if(this._deferredRewardAttest.size === 0) return;
         for(let [key, e] of [...this._deferredRewardAttest]){
             if(Date.now() - e.at > this.announceRetryTtlMs){
-                this._deferredRewardAttest.delete(key);
+                await this.dropDeferredRewardAttest(key);
                 logger.warn('StateAnchorPublisher: deferred reward attestation ' + key + ' expired after ' +
                              this.announceRetryTtlMs + 'ms without its anchor confirming; dropped (no reward is ' +
                              'derived for an anchor that never landed)');
@@ -295,7 +295,7 @@ module.exports = {
                 let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
                 if(v === 'verified') await this.drainVerifiedRewardAttest(key, e);
                 else if(v === 'rejected:mismatch' || v === 'rejected:version'){
-                    this._deferredRewardAttest.delete(key);
+                    await this.dropDeferredRewardAttest(key);
                     logger.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
                                  v + '); dropped, no reward');
                 }
@@ -311,7 +311,7 @@ module.exports = {
     async drainVerifiedRewardAttest(key, e){
         let bound = await this.drainBindingVerdict(e, undefined, true);
         if(bound === 'rejected'){
-            this._deferredRewardAttest.delete(key);
+            await this.dropDeferredRewardAttest(key);
             logger.warn('StateAnchorPublisher: reward attestation ' + key + ' txid does not bind to ' +
                          '(network, snapshot_block, publisher); dropped, no reward');
             return;
@@ -319,7 +319,7 @@ module.exports = {
         if(bound !== 'verified') return;   // undecided: retained until the TTL
         // A tuple the indexer pins is never minted again once the gate is on, so write nothing for it.
         if(isPinnedEntry(e) && await this.legacyPinGateOn(e.network)){
-            this._deferredRewardAttest.delete(key);
+            await this.dropDeferredRewardAttest(key);
             logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
                          'tuple; dropped, no reward');
             return;
@@ -346,7 +346,7 @@ module.exports = {
                          'for a later drain (no reward is lost to a transient write error)');
             return;
         }
-        this._deferredRewardAttest.delete(key);
+        await this.dropDeferredRewardAttest(key);
         logger.info('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
     },
 
