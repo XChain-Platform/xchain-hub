@@ -18,6 +18,7 @@ const PeerManager        = require('../../../../src/peers/manager');
 const observability      = require('../../../../src/observability');
 const { waitUntil }      = require('../../../helpers/waitUntil');
 const { DB_METHODS }     = require('../../../helpers/mockHub');
+const hubVersion         = require('../../../../package.json').version;
 
 let rootSuiteConfig, rootSuiteDbStub, rootSuitePm, rootSuiteKeypair;
 function registerFeature16backgroundTimersPart1() {
@@ -213,6 +214,67 @@ function feature18p2PLifecycleRealLocalhostSocketsMkNode(port, seeds, addr) {
   feature18p2PLifecycleRealLocalhostSocketsNodes.push(n);
   return n;
 }
+async function feature18p2PLifecycleRealLocalhostSocketsMkSignedNode(port, seeds, addr, identity, pubkeys) {
+  const node = new PeerManager({
+    P2P_VALIDATOR_ADDR: addr,
+    P2P_PORT: port,
+    P2P_HOST: '127.0.0.1',
+    SEED_NODES: seeds,
+    REQUIRE_SIGNATURES: true,
+    P2P_HEARTBEAT_INTERVAL: 600000,
+    P2P_WS_PING_INTERVAL: 600000,
+    P2P_DEDUP_PRUNE_INTERVAL: 600000,
+    P2P_RECONNECT_BASE: 20,
+    P2P_RECONNECT_MAX: 40,
+    P2P_RECONNECT_UNREACHABLE_MAX: 40
+  }, null);
+  node.setIdentity(identity);
+  node.setValidatorPubkeys(pubkeys);
+  node.setEffectiveSignerSet(new Set([...pubkeys.values()].map(key => key.toLowerCase())));
+  feature18p2PLifecycleRealLocalhostSocketsNodes.push(node);
+  await node.start();
+  return node;
+}
+async function feature18p2PLifecycleRealLocalhostSocketsRestartDrive() {
+  const primaryAddr = 'ws://primary.test:10001';
+  const followerAddrs = ['ws://follower-a.test:10001', 'ws://follower-b.test:10001'];
+  const primaryIdentity = new ValidatorIdentity('01'.repeat(32));
+  const followerIdentities = followerAddrs.map((addr, index) =>
+    new ValidatorIdentity(String(index + 2).padStart(2, '0').repeat(32)));
+  const pubkeys = new Map([[primaryAddr, primaryIdentity.getPubkeyHex()]]);
+  followerAddrs.forEach((addr, index) => pubkeys.set(addr, followerIdentities[index].getPubkeyHex()));
+  const primaryPort = await feature18p2PLifecycleRealLocalhostSocketsFreePort();
+  let primary = await feature18p2PLifecycleRealLocalhostSocketsMkSignedNode(
+    primaryPort, [], primaryAddr, primaryIdentity, pubkeys);
+  const seed = 'ws://127.0.0.1:' + primaryPort;
+  const followerPorts = await Promise.all(followerAddrs.map(
+    () => feature18p2PLifecycleRealLocalhostSocketsFreePort()));
+  const followers = await Promise.all(followerAddrs.map((addr, index) =>
+    feature18p2PLifecycleRealLocalhostSocketsMkSignedNode(
+      followerPorts[index], [seed], addr, followerIdentities[index], pubkeys)));
+
+  await waitUntil(() => followers.every(peer => peer.peers.get(seed)?.state === 'open'),
+    { timeoutMs: 3000, label: 'the initial follower connections' });
+  for (const follower of followers) follower.broadcast('HEARTBEAT', follower.heartbeatData(hubVersion));
+  await waitUntil(() => followerAddrs.every(addr => primary.peers.has(addr)),
+    { timeoutMs: 3000, label: 'the initial follower registrations' });
+
+  await primary.stop();
+  primary = await feature18p2PLifecycleRealLocalhostSocketsMkSignedNode(
+    primaryPort, [], primaryAddr, primaryIdentity, pubkeys);
+  expect(primary.identity).to.equal(primaryIdentity);
+  await waitUntil(() => followerAddrs.every(addr => primary.peers.has(addr)),
+    { timeoutMs: 3000, label: 'automatic follower registration after restart' });
+
+  const received = new Set();
+  followers.forEach((peer, index) => peer.on('mes' + 'sage', envelope => {
+    if (envelope.type === 'AFTER_RESTART') received.add(followerAddrs[index]);
+  }));
+  primary.broadcast('AFTER_RESTART', { sequence: 1 });
+  await waitUntil(() => received.size === followers.length,
+    { timeoutMs: 3000, label: 'post-restart message delivery' });
+  expect([...received].sort()).to.deep.equal([...followerAddrs].sort());
+}
 function registerFeature18p2PLifecycleRealLocalhostSocketsPart1() {
   it('two nodes connect, exchange a message, register peers, and shut down cleanly', async function () {
     this.timeout(10000);
@@ -240,6 +302,7 @@ function registerFeature18p2PLifecycleRealLocalhostSocketsPart1() {
     await a.stop();
     expect(a.running).to.be.false;
     expect(a.httpServer).to.be.null;
+    await feature18p2PLifecycleRealLocalhostSocketsRestartDrive();
   });
   it('rejects inbound connections beyond the per-IP limit', async function () {
     this.timeout(10000);
