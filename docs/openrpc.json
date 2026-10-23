@@ -2305,6 +2305,17 @@
               "object"
             ]
           }
+        },
+        {
+          "name": "batches",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
       ],
       "result": {
