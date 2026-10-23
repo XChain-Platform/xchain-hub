@@ -20,7 +20,7 @@
  *
  ********************************************************************/
 
-const { normalizeRetractionBounds } = require('../../lib/retraction_bounds.js');
+const { normalizeRetractionBounds, parseIndex } = require('../../lib/retraction_bounds.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -123,6 +123,47 @@ async function resetOrphanedLandingBlockTimes(sourceChain, b) {
     }
 }
 
+// A retraction carries more windows than this only from a broken sender; refuse it.
+const MAX_RETRACTED_BATCH_WINDOWS = 1000;
+
+// The PRICE batch round windows a retraction names, fail-closed like the bounds:
+// absent means none (an indexer that predates the field), anything malformed is an error.
+function normalizeRetractedBatchWindows(batches) {
+    if (batches === undefined || batches === null) return { windows: [] };
+    if (!Array.isArray(batches) || batches.length > MAX_RETRACTED_BATCH_WINDOWS)
+        return { error: 'invalid batches' };
+    let windows = [];
+    for (let batch of batches) {
+        let first = parseIndex(batch && batch.first_round);
+        let last = parseIndex(batch && batch.last_round);
+        if (first === null || last === null || first < 0 || last < first) return { error: 'invalid batches' };
+        windows.push({ first, last });
+    }
+    return { windows };
+}
+
+// Clear the landing clock on every round of each retracted batch window, whatever path
+// stored the round. The batch-row join above finds only rounds this hub stored from the
+// batch itself, so a batch whose every round this hub had already finalized left its
+// stamp behind; the window names those rounds directly. Re-emits the reset rows so every
+// mirror following this hub clears them too.
+async function resetRetractedBatchWindows(windows) {
+    for (let w of windows) {
+        let rows = await this.db.findPriceSnapshotRoundsLandedBetween(w.first, w.last);
+        let rounds = [...new Set((Array.isArray(rows) ? rows : [])
+            .map(row => Number(row.round_number))
+            .filter(Number.isSafeInteger))];
+        if (rounds.length === 0) continue;
+        await this.db.updatePriceSnapshotsClearBatchBlockTimeBetween(w.first, w.last);
+        for (let round of rounds) {
+            let resetRows = await this.db.findPriceSnapshotsForRound(round);
+            for (let row of (Array.isArray(resetRows) ? resetRows : [])) {
+                this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
+            }
+        }
+    }
+}
+
 async function readRetractedBatchRounds(sourceChain, b) {
     let batchRounds = [];
     try {
@@ -161,11 +202,15 @@ module.exports = {
     // row re-published at a recycled action_index (higher generation) survives even though it falls
     // inside [from, to]. Omitted (older indexer) => no fence == today's behavior; the bound is
     // mirrored onto row:deleted so replicas fence identically.
-    async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration) {
+    // batches (optional) names the round window [{first_round, last_round}] of each PRICE
+    // batch the indexer rolled back; every round inside one has its landing clock cleared.
+    async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration, batches) {
         // Fail-closed on a SUPPLIED-but-invalid bound: a malformed to/generation must not
         // collapse into the absent branch and widen this into the open-ended DELETE below.
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if (bounds.error) return { error: bounds.error };
+        let retracted = normalizeRetractedBatchWindows(batches);
+        if (retracted.error) return { error: retracted.error };
         let { from, to, gen, bounded, fenced } = bounds;
 
         let seam = publishedMarkerSeam.call(this);
@@ -194,6 +239,17 @@ module.exports = {
         let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;
 
         emitRetractionDeletes.call(this, sourceChain, bounds, snapDeleted, oracleDeleted);
+
+        // After the deletes, so the batch's own rows are gone and only surviving rows are
+        // reset and re-emitted. A failure returns an error so the indexer retries: the
+        // deletes above are idempotent and the reset only ever writes 0.
+        try {
+            await resetRetractedBatchWindows.call(this, retracted.windows);
+        } catch (e) {
+            logger.error(nodeUtil.format('PriceAggregator: could not reset retracted batch landing times for ' + sourceChain + ':', e && e.message));
+            return { error: 'batch landing times not reset for ' + sourceChain
+                + ' (' + ((e && e.message) || 'unknown error') + ')' };
+        }
 
         // D28: clear the publisher's durable at-most-once marker for every round the
         // retracted batch carried. Without this the marker outlives the rows it stands

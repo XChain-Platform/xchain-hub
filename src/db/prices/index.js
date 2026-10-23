@@ -183,6 +183,17 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
     },
 
+    // Rounds inside a retracted PRICE batch window that hold a landing stamp, whatever path
+    // stored them (a hub that finalized every round of the batch itself holds no batch row).
+    async findPriceSnapshotRoundsLandedBetween(first, last) {
+        return this.doQuery(`SELECT DISTINCT round_number FROM price_snapshots WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
+    },
+
+    // Clears the landing stamp on every round inside a retracted PRICE batch window.
+    async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last) {
+        return this.doQuery(`UPDATE price_snapshots SET batch_block_time = 0 WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
+    },
+
     async findSelfFinalizedRoundsForBatchRetraction(...query) {
         return this.doQuery(...orphanedLandingQuery('SELECT DISTINCT self_finalized.round_number FROM', '', ...query));
     },
