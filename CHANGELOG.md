@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Published attestation, oracle and roll-call transactions once across refusals, reorgs and restarts, and kept one checkpoint per cadence interval.
 
+## [0.23.3] - 2026-10-21
+
+### Security
+- Updated the Node base image to 22.23.4 for the CVE-2026-111497 Brotli decoder fix.
+
+### Changed
+- Built from v0.23.0, so the v0.23.1 fixes are not included.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added
