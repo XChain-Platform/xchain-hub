@@ -123,3 +123,85 @@ async function learnBtcChainId(engine) {
 }
 
 module.exports = { learnBtcChainId, readIndexerChainId, resolveBtcChainId, REREAD_MS };
+
+if (require.main === module) {
+    const assert = require('node:assert/strict');
+    const test = require('node:test');
+    const SnapshotCheckpointEngine = require('./engine.js');
+
+    test('leads the current slot at its first eligible block with a 100-slot backlog', async () => {
+        const chainId = 'a'.repeat(64);
+        const pubkey = '1'.repeat(64);
+        const capabilityRows = Array.from({ length: 100 }, (_, offset) => ({
+            snapshot_block: 400 + offset,
+            btc_chain_id: null,
+        }));
+        const checkpoints = new Map();
+        let storedChainId = null;
+        const db = {
+            async getChainId() { return storedChainId; },
+            async setChainId(coin, network, value) {
+                assert.equal(coin, 'BTC');
+                assert.equal(network, 'regtest');
+                storedChainId = value;
+            },
+            async doQuery(sql, args) {
+                assert.match(sql, /MAX\(snapshot_block\)/);
+                const newest = Math.max(...capabilityRows
+                    .filter(row => row.btc_chain_id === null)
+                    .map(row => row.snapshot_block));
+                for (const row of capabilityRows) {
+                    if (row.snapshot_block === newest && row.btc_chain_id === null)
+                        row.btc_chain_id = args[0];
+                }
+            },
+            async listUncheckpointedSnapshotBlocks(network, from, burial, limit) {
+                assert.equal(network, 'regtest');
+                return [...new Set(capabilityRows
+                    .filter(row => row.snapshot_block >= from && row.btc_chain_id === storedChainId)
+                    .filter(row => !checkpoints.has(row.snapshot_block - burial))
+                    .map(row => row.snapshot_block))]
+                    .sort((left, right) => left - right)
+                    .slice(0, limit)
+                    .map(snapshotBlock => ({ snapshot_block: snapshotBlock }));
+            },
+            async getSnapshotCheckpoint(chain, network, blockIndex) {
+                assert.equal(chain, 'BTC');
+                assert.equal(network, 'regtest');
+                return checkpoints.get(blockIndex) || null;
+            },
+            async insertSnapshotCheckpoint(checkpoint) {
+                checkpoints.set(checkpoint.block_index, checkpoint);
+                return true;
+            },
+        };
+        const engine = new SnapshotCheckpointEngine({
+            db,
+            network: 'regtest',
+            confirmations: 6,
+            identity: {
+                getPubkeyHex: () => pubkey,
+                sign: () => 'f'.repeat(128),
+            },
+            resolveSnapshotBlock: async () => 499,
+            resolveCapabilityValidators: async () => [{ pubkey }],
+            indexerCall: async (chain, method, params) => {
+                assert.equal(chain, 'BTC');
+                assert.equal(method, 'getblockhashes');
+                return params.block_index === 1
+                    ? { coin: 'BTC', network: 'regtest', block_index: 1, block_hash: chainId }
+                    : {
+                        block_index: params.block_index,
+                        block_hash: 'b'.repeat(64),
+                        state_root: 'c'.repeat(64),
+                        state_root_version: 1,
+                    };
+            },
+        });
+
+        await engine.tick();
+
+        assert.deepEqual([...checkpoints.keys()], [493]);
+        assert.equal(capabilityRows.filter(row => row.btc_chain_id === chainId).length, 1);
+    });
+}
