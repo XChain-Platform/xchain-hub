@@ -24,6 +24,14 @@
  *
  ********************************************************************/
 
+const nodeTest = require.main === module ? require('node:test') : null;
+const selfTestAssert = require.main === module ? require('node:assert/strict') : null;
+const SelfTestValidatorIdentity = require.main === module ? require('../validators/identity.js') : null;
+const selfTestCanonicalForms = require.main === module ? require('../anchor/publisher/canonical_forms.js') : null;
+const selfTestLadderMethods = require.main === module ? require('../anchor/publisher/ladder/bundle_content_age.js') : null;
+const selfTestAttestMethods = require.main === module ? require('../anchor/publisher/attest_round.js') : null;
+const selfTestGetLogger = require.main === module ? require('../observability').getLogger : null;
+
 // The newest anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
 // checkpoint ORDINAL (seq divided by the cadence step) is divisible by the anchor stride.
 // Moved here from src/anchor/publisher.js:1065.
@@ -178,83 +186,83 @@ module.exports = {
     }
 };
 
-if(require.main === module){
-    const { test } = require('node:test');
-    const assert = require('node:assert/strict');
-    const ValidatorIdentity = require('../validators/identity.js');
-    const canonicalForms = require('../anchor/publisher/canonical_forms.js');
-    const ladderMethods = require('../anchor/publisher/ladder/bundle_content_age.js');
-    const attestMethods = require('../anchor/publisher/attest_round.js');
-    const { getLogger } = require('../observability');
-
-    test('a never-anchored follower co-signs unlocked rank 1 and explains a locked decline', async () => {
-        const network = 'regtest';
-        const identities = Array.from({ length: 4 }, () => new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex));
-        const byPubkey = new Map(identities.map(identity => [identity.getPubkeyHex(), identity]));
-        const electionSet = identities.map(identity => identity.getPubkeyHex());
-        const electionKey = 'never-anchored-follower';
-        const order = canonicalForms.hashOrder(electionKey, electionSet);
-        const checkpoints = [];
-        for(let block = 106, seq = 8; block <= 136; block += 6, seq++)
-            checkpoints.push({ chain: 'BTC', network, snapshot_block: block, checkpoint_seq: seq,
-                               block_index: 900 + seq, anchor_txid: null });
-        const row = checkpoints[checkpoints.length - 1];
-        let capturedSql = '';
-        const db = {
-            async findOldestUnanchoredCheckpointBlocksByNetwork(...args){
-                return module.exports.findOldestUnanchoredCheckpointBlocksByNetwork.call({
-                    doQuery: async sql => {
-                        capturedSql = sql;
-                        assert.equal(checkpoints.some(checkpoint => checkpoint.anchor_txid !== null), false);
-                        return [{ chain: 'BTC', oldest_block: checkpoints[0].snapshot_block }];
-                    }
-                }, ...args);
-            },
-            async getStateCheckpointByChain(){ return [row]; }
-        };
-        const sent = [];
-        const follower = Object.assign({}, ladderMethods, attestMethods, {
-            db,
-            identity: byPubkey.get(order[3]),
-            hub: { resolveBtcLatestBlock: async () => 142 },
-            checkpointIntervalBlocks: 1,
-            anchorEveryNCheckpoints: 1,
-            peerManager: { broadcast: type => sent.push(type) },
-            bundleElectionKey: () => electionKey,
-            rankUnlocked: (rankOrder, sender, age) => rankOrder.indexOf(sender) <= Math.floor(age / 36),
-            getActiveOraclePublishPubkeys: async () => electionSet,
-            findAnchorEligibleSections: async () => [row],
-            buildV7Payload: (rows, publisher) => JSON.stringify([rows[0].checkpoint_seq, publisher]),
-            attestationCanonical: (bundle, publisher) => 'XANCPUB|' + bundle.network + '|' + publisher,
-            claimAttestSlot: async () => true
-        });
-        const request = publisher => {
-            const identity = byPubkey.get(publisher);
-            const canonical = follower.attestationCanonical({ network }, publisher);
-            return { data: {
-                network, snapshot_block: row.snapshot_block,
-                sections: [{ chain: row.chain, block_index: row.block_index, checkpoint_seq: row.checkpoint_seq }],
-                body: follower.buildV7Payload([row], publisher),
-                publisher, sig_pubkey: publisher, sig: identity.sign(canonical)
-            } };
-        };
-
-        const contentBlock = await follower.bundleContentBlock(network, [row]);
-        assert.equal(contentBlock, 106);
-        assert.equal(follower.bundleLadderBlock([row], 142, contentBlock) - row.snapshot_block, 36);
-        assert.match(capturedSql, /LEFT JOIN/);
-        assert.match(capturedSql, /a\.anchored_seq IS NULL OR sc\.checkpoint_seq > a\.anchored_seq/);
-        assert.equal(await follower.handleAttestSignReq(request(order[1])), true);
-        assert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
-
-        const warnings = [];
-        const logger = getLogger();
-        const warn = logger.warn;
-        logger.warn = message => warnings.push(String(message));
-        try { await follower.handleAttestSignReq(request(order[2])); }
-        finally { logger.warn = warn; }
-        assert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
-        assert.ok(warnings.some(message => message.includes('reason=publisher_rank_locked') &&
-                                           message.includes('publisher=' + order[2])));
+function buildNeverAnchoredFollowerFixture(){
+    const network = 'regtest';
+    const identities = Array.from({ length: 4 }, () =>
+        new SelfTestValidatorIdentity(SelfTestValidatorIdentity.generate().privkeyHex));
+    const byPubkey = new Map(identities.map(identity => [identity.getPubkeyHex(), identity]));
+    const electionSet = identities.map(identity => identity.getPubkeyHex());
+    const electionKey = 'never-anchored-follower';
+    const order = selfTestCanonicalForms.hashOrder(electionKey, electionSet);
+    const checkpoints = [];
+    for(let block = 106, seq = 8; block <= 136; block += 6, seq++)
+        checkpoints.push({ chain: 'BTC', network, snapshot_block: block, checkpoint_seq: seq,
+                           block_index: 900 + seq, anchor_txid: null });
+    const row = checkpoints[checkpoints.length - 1];
+    const evidence = { sql: '' };
+    const db = {
+        async findOldestUnanchoredCheckpointBlocksByNetwork(...args){
+            return module.exports.findOldestUnanchoredCheckpointBlocksByNetwork.call({
+                doQuery: async sql => {
+                    evidence.sql = sql;
+                    selfTestAssert.equal(checkpoints.some(checkpoint => checkpoint.anchor_txid !== null), false);
+                    return [{ chain: 'BTC', oldest_block: checkpoints[0].snapshot_block }];
+                }
+            }, ...args);
+        },
+        async getStateCheckpointByChain(){ return [row]; }
+    };
+    const sent = [];
+    const follower = Object.assign({}, selfTestLadderMethods, selfTestAttestMethods, {
+        db,
+        identity: byPubkey.get(order[3]),
+        hub: { resolveBtcLatestBlock: async () => 142 },
+        checkpointIntervalBlocks: 1,
+        anchorEveryNCheckpoints: 1,
+        peerManager: { broadcast: type => sent.push(type) },
+        bundleElectionKey: () => electionKey,
+        rankUnlocked: (rankOrder, sender, age) => rankOrder.indexOf(sender) <= Math.floor(age / 36),
+        getActiveOraclePublishPubkeys: async () => electionSet,
+        findAnchorEligibleSections: async () => [row],
+        buildV7Payload: (rows, publisher) => JSON.stringify([rows[0].checkpoint_seq, publisher]),
+        attestationCanonical: (bundle, publisher) => 'XANCPUB|' + bundle.network + '|' + publisher,
+        claimAttestSlot: async () => true
     });
+    return { network, byPubkey, order, row, evidence, sent, follower };
 }
+
+function neverAnchoredFollowerRequest(fixture, publisher){
+    const { network, byPubkey, row, follower } = fixture;
+    const canonical = follower.attestationCanonical({ network }, publisher);
+    return { data: {
+        network, snapshot_block: row.snapshot_block,
+        sections: [{ chain: row.chain, block_index: row.block_index, checkpoint_seq: row.checkpoint_seq }],
+        body: follower.buildV7Payload([row], publisher), publisher, sig_pubkey: publisher,
+        sig: byPubkey.get(publisher).sign(canonical)
+    } };
+}
+
+async function runNeverAnchoredFollowerRegression(){
+    const fixture = buildNeverAnchoredFollowerFixture();
+    const { network, order, row, evidence, sent, follower } = fixture;
+    const contentBlock = await follower.bundleContentBlock(network, [row]);
+    selfTestAssert.equal(contentBlock, 106);
+    selfTestAssert.equal(follower.bundleLadderBlock([row], 142, contentBlock) - row.snapshot_block, 36);
+    selfTestAssert.match(evidence.sql, /LEFT JOIN/);
+    selfTestAssert.match(evidence.sql, /a\.anchored_seq IS NULL OR sc\.checkpoint_seq > a\.anchored_seq/);
+    selfTestAssert.equal(await follower.handleAttestSignReq(neverAnchoredFollowerRequest(fixture, order[1])), true);
+    selfTestAssert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
+    const warnings = [];
+    const logger = selfTestGetLogger();
+    const warn = logger.warn;
+    logger.warn = message => warnings.push(String(message));
+    try { await follower.handleAttestSignReq(neverAnchoredFollowerRequest(fixture, order[2])); }
+    finally { logger.warn = warn; }
+    selfTestAssert.equal(sent.filter(type => type === 'XANCPUB_SIGN').length, 1);
+    selfTestAssert.ok(warnings.some(message => message.includes('reason=publisher_rank_locked') &&
+                                                   message.includes('publisher=' + order[2])));
+}
+
+if(require.main === module)
+    nodeTest.test('a never-anchored follower co-signs unlocked rank 1 and explains a locked decline',
+                  runNeverAnchoredFollowerRegression);
