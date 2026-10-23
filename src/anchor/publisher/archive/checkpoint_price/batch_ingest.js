@@ -14,6 +14,13 @@
  *
  * ANCHOR publisher - PRICE batch landing back-fill
  *
+ * A hub stamps batch_block_time only from a pushpricebatch it receives, so a
+ * follower the pushes never reached holds 0 for rounds the leader stamped, and
+ * samePriceRow refuses the leader's archive on that column alone. Before judging
+ * archived price rows, ask the landing chain's indexer which valid batches carry
+ * those rounds and stamp them through PriceAggregator.stampBatchLanding, the same
+ * earliest-landing-wins write a push makes. The compare itself stays strict.
+ *
  ********************************************************************/
 
 'use strict';
@@ -23,6 +30,9 @@ const logger = getLogger();
 
 const PRICE_LANDING_CHAIN = 'DOGE';
 const PRICE_BATCH_LIMIT = 1000;
+// Pages of getpricebatches one back-fill reads; a backlog past this many pages is
+// stamped up to where the answer was complete and the rest waits for the next archive.
+const PRICE_BATCH_MAX_PAGES = 20;
 
 function wholeNumber(value, minimum){
     if(typeof value === 'string' && !/^\d+$/.test(value)) return null;
@@ -31,6 +41,7 @@ function wholeNumber(value, minimum){
     return Number.isSafeInteger(number) && number >= minimum ? number : null;
 }
 
+// Rounds the archive carries with a landing stamp: the only rounds a 0 here can make us refuse.
 function archivedLandingRounds(rows){
     const rounds = new Set();
     for(const row of (rows || [])){
@@ -41,6 +52,7 @@ function archivedLandingRounds(rows){
     return Array.from(rounds).sort((a, b) => a - b);
 }
 
+// Of those, the rounds this hub holds a live row for at batch_block_time 0.
 async function zeroHeldRounds(context, rounds){
     const pending = [];
     for(const round of rounds){
@@ -51,29 +63,33 @@ async function zeroHeldRounds(context, rounds){
     return pending;
 }
 
-function batchLanding(batch, indexedTip){
+// One batch of the answer as { first, last, blockTime }; blockTime is null when the
+// indexer could not resolve the landing clock (or predates the field), which makes
+// every round the batch covers unknown rather than stamped from a later landing.
+function batchLanding(batch){
     const first = wholeNumber(batch && batch.first_round, 0);
     const last = wholeNumber(batch && batch.last_round, 0);
+    if(first === null || last === null || last < first) return null;
     const blockIndex = wholeNumber(batch && batch.block_index, 0);
     const blockTime = wholeNumber(batch && batch.block_time, 1);
-    if(first === null || last === null || last < first || blockIndex === null || blockTime === null)
-        return null;
-    if(indexedTip !== null && blockIndex > indexedTip) return null;
-    return { first, last, blockIndex, blockTime };
+    return { first, last, blockTime: (blockIndex === null || blockTime === null) ? null : blockTime };
 }
 
-function usableBatchLandings(answer){
-    if(!answer || answer.error || !Array.isArray(answer.batches) || answer.truncated) return null;
-    const indexedTip = wholeNumber(answer.block_index, 0);
-    if(answer.batches.length > 0 && indexedTip === null) return null;
-    const batches = answer.batches.map(batch => batchLanding(batch, indexedTip));
-    return batches.every(Boolean) ? batches : null;
+// One getpricebatches page as { batches, truncated }, or null when the answer is unusable.
+function pageLandings(answer){
+    if(!answer || answer.error || !Array.isArray(answer.batches)) return null;
+    const batches = answer.batches.map(batchLanding);
+    if(!batches.every(Boolean)) return null;
+    return { batches, truncated: !!answer.truncated };
 }
 
+// The landing of `round`: the earliest landing clock among the batches carrying it,
+// null when none carries it or any carrier's clock is unknown.
 function earliestLandingForRound(round, batches){
     let landed = null;
     for(const batch of batches){
         if(round < batch.first || round > batch.last) continue;
+        if(batch.blockTime === null) return null;
         if(landed === null || batch.blockTime < landed) landed = batch.blockTime;
     }
     return landed;
@@ -81,37 +97,56 @@ function earliestLandingForRound(round, batches){
 
 module.exports = {
 
-    async backfillPriceBatchLandings(rows){
-        const candidates = await zeroHeldRounds(this, archivedLandingRounds(rows));
-        if(candidates.length === 0) return 0;
+    // Every valid PRICE batch overlapping [first, last] on the landing chain, read page by
+    // page. Batches come back ordered by first_round, so once a page is truncated every
+    // round below its last batch's first_round is fully answered; `completeBelow` is that
+    // bound (last + 1 when the whole range was read). Null when the indexer cannot answer.
+    async fetchPriceBatchLandings(first, last){
+        const batches = [];
+        let from = first;
+        for(let page = 0; page < PRICE_BATCH_MAX_PAGES; page++){
+            const answer = await this.indexerCall(PRICE_LANDING_CHAIN, 'getpricebatches', {
+                first_round: from, last_round: last, limit: PRICE_BATCH_LIMIT
+            });
+            const read = pageLandings(answer);
+            if(read === null) return null;
+            batches.push(...read.batches);
+            if(!read.truncated || read.batches.length === 0) return { batches, completeBelow: last + 1 };
+            const next = read.batches[read.batches.length - 1].first;
+            if(next <= from) return { batches, completeBelow: from };
+            from = next;
+        }
+        return { batches, completeBelow: from };
+    },
 
+    // Stamp the landing clock on rounds the archive carries stamped and this hub holds at 0.
+    // Best effort: any failure leaves the rows as they are, and the strict compare decides.
+    // Returns the number of rows stamped.
+    async backfillPriceBatchLandings(rows){
         const aggregator = this.hub && this.hub.priceAggregator;
         if(!aggregator || typeof aggregator.stampBatchLanding !== 'function') return 0;
-
-        let answer;
+        let stamped = 0;
         try {
-            answer = await this.indexerCall(PRICE_LANDING_CHAIN, 'getpricebatches', {
-                first_round: candidates[0],
-                last_round: candidates[candidates.length - 1],
-                limit: PRICE_BATCH_LIMIT
-            });
+            const candidates = await zeroHeldRounds(this, archivedLandingRounds(rows));
+            if(candidates.length === 0) return 0;
+            const landings = await this.fetchPriceBatchLandings(candidates[0], candidates[candidates.length - 1]);
+            if(landings === null){
+                logger.warn('StateAnchorPublisher: cannot back-fill PRICE batch landing clocks from an unusable indexer answer');
+                return 0;
+            }
+            for(const round of candidates){
+                if(round >= landings.completeBelow) break;
+                const blockTime = earliestLandingForRound(round, landings.batches);
+                if(blockTime !== null) stamped += await aggregator.stampBatchLanding(round, blockTime);
+            }
         } catch(error){
             logger.warn('StateAnchorPublisher: cannot back-fill PRICE batch landing clocks: ' +
                 (error && error.message ? error.message : error));
-            return 0;
+            return stamped;
         }
-
-        const batches = usableBatchLandings(answer);
-        if(batches === null){
-            logger.warn('StateAnchorPublisher: cannot back-fill PRICE batch landing clocks from an incomplete indexer answer');
-            return 0;
-        }
-
-        let stamped = 0;
-        for(const round of candidates){
-            const blockTime = earliestLandingForRound(round, batches);
-            if(blockTime !== null) stamped += await aggregator.stampBatchLanding(round, blockTime);
-        }
+        if(stamped > 0)
+            logger.info('StateAnchorPublisher: back-filled the PRICE batch landing clock on ' + stamped +
+                        ' row(s) from the ' + PRICE_LANDING_CHAIN + ' indexer');
         return stamped;
     }
 

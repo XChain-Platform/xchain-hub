@@ -136,6 +136,7 @@ const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy/
 const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_rows.js');
 const archiveCheckpointPriceVerifyMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_verify.js');
 const archivePriceFloorMethods     = require('./publisher/archive/checkpoint_price/price_common_floor.js');
+const archivePriceLandingMethods   = require('./publisher/archive/checkpoint_price/batch_ingest.js');
 const bundleDoneMethods            = require('./publisher/bundle_done.js');
 const lookupMethods                = require('./publisher/lookups.js');
 const archiveSignMethods           = require('./publisher/archive/sign.js');
@@ -310,6 +311,7 @@ const PART_METHODS = [
     archiveCheckpointPriceMethods,
     archiveCheckpointPriceVerifyMethods,
     archivePriceFloorMethods,
+    archivePriceLandingMethods,
     bundleDoneMethods,
     lookupMethods,
     archiveSignMethods,
