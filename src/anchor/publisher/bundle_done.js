@@ -22,7 +22,6 @@
 
 'use strict';
 
-const canonicalForms = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
@@ -94,13 +93,7 @@ module.exports = {
         // tolerates), never a fork, so using the receiver's own BTC-tip view is safe here.
         let electionSet = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(electionSet.length === 0) return;             // fail closed: unresolved election set
-        {
-            let order = canonicalForms.hashOrder(
-                this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);
-            let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-            let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
-            if(!this.rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
-        }
+        if(!(await this.bundleSenderUnlocked(network, snapshotBlock, electionSet, sender, rows))) return;
         // The election gate proves the SENDER is an elected publisher, NOT that it ever
         // published this anchor. Confirm the bundle is really on DOGE at >=
         // XCHAIN_CONFIRMATIONS_DOGE depth by asking OUR OWN DOGE indexer for the DECODED

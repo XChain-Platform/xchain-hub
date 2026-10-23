@@ -159,5 +159,20 @@ module.exports = {
     // Moved here from src/anchor/publisher.js:1065, the network-scoped branch.
     async findAnchorEligibleUnanchoredCheckpointsByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
         return this.doQuery(PENDING_ANCHOR_CHECKPOINTS_SQL + ' AND sc.network = ?', [checkpointIntervalBlocks, anchorEveryNCheckpoints, network]);
+    },
+
+    // Per chain of one network, the oldest snapshot_block among the anchor-eligible
+    // checkpoints above the newest anchored one: the content the v0 bundle has owed since
+    // its last anchor. Superseded rows below an anchor are never stamped, so the anchored
+    // seq bounds the age; a chain that never anchored has no row here.
+    async findOldestUnanchoredCheckpointBlocksByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
+        return this.doQuery(
+            'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc JOIN (' +
+            '  SELECT chain, network, MAX(checkpoint_seq) AS anchored_seq FROM state_checkpoints' +
+            '  WHERE anchor_txid IS NOT NULL AND network = ? GROUP BY chain, network' +
+            ') a ON sc.chain = a.chain AND sc.network = a.network ' +
+            'WHERE sc.network = ? AND sc.anchor_txid IS NULL AND sc.checkpoint_seq > a.anchored_seq ' +
+            'AND MOD(FLOOR(sc.checkpoint_seq / ?), ?) = 0 GROUP BY sc.chain',
+            [network, network, checkpointIntervalBlocks, anchorEveryNCheckpoints]);
     }
 };

@@ -343,10 +343,9 @@ module.exports = {
             let foldActive = !!(fold && fold.active);
             let order = await this.bundlePublisherOrder(network, snapshotBlock, chains);
             if(!order) return;
-            // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
-            // defaults), since the newest eligible snapshotBlock tracks the tip, so no rank
-            // above 0 unlocks here unless that product reaches the tolerance. Intended: see
-            // the ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
+            // The caller shifted btcBlock (bundleLadderBlock) so this is the age of the
+            // oldest content the bundle owes since its chains last anchored, which keeps
+            // growing across checkpoint churn until a bundle lands.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             if(this.standsDownFromBundle(order, group, since, failoverOnly, skipped)) return;
             if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;

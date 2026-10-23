@@ -22,7 +22,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const canonicalForms = require('./canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
@@ -231,21 +230,12 @@ module.exports = {
         let publisher = String(d.publisher || '').toLowerCase();
         if(publisher !== sender) return;
 
-        // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block, hash-ordered by
-        // the bundle election key) and confirm the proposer is rank-unlocked on publishBundle's
-        // ladder. Ranks unlock with block age, unbounded; the selector match below pins the tip.
+        // The BUNDLE publisher election runs over oracle_publish @ snapshot_block; the proposer's
+        // rank is checked once our own rows are read below, since the ladder ages from the
+        // oldest content they owe. Ranks unlock with block age, unbounded; the selector match
+        // below pins the tip.
         let eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
-        {
-            // Run the ladder check for EVERY set size: a single-member set must
-            // still bind sender === eligible[0] (rank 0), or any current member
-            // could impersonate the sole elected publisher.
-            let order = canonicalForms.hashOrder(
-                this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
-            let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-            let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
-            if(!this.rankUnlocked(order, sender, since)) return;          // proposer not unlocked
-        }
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would drop
         // our attestation signature anyway (same gate the archive follower applies).
         if(!eligible.includes(myPubkey)) return;
@@ -263,6 +253,10 @@ module.exports = {
             if(local[0].anchor_txid != null) return;                       // already anchored: a second publisher must not earn the reward
             mine.push(local[0]);
         }
+        // The ladder check runs for EVERY set size: a single-member set must still bind
+        // sender === eligible[0] (rank 0), or any current member could impersonate the
+        // sole elected publisher. Age counts from the oldest content our rows owe.
+        if(!(await this.bundleSenderUnlocked(network, snapshotBlock, eligible, sender, mine))) return;
         if(!(await this.sectionsAreSelectorRows(network, snapshotBlock, mine))) return;
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
         // The proposer's own SNAPSHOT_BLOCK claim has to be the one our rows produce, or

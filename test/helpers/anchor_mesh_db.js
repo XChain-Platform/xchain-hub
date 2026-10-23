@@ -155,6 +155,22 @@ function checkpointQuery(sql, params, s) {
         }
         return Object.values(latest).filter(r => r.anchor_txid == null && (net == null || r.network === net));
     }
+    if (sql.startsWith('SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block')) {
+        // Faithful to the SQL: per chain, the oldest eligible unanchored row above the
+        // newest anchored seq; a chain with no anchored row yields nothing.
+        let [net, , step, everyN] = params;
+        let anchored = {}, oldest = {};
+        for (let r of checkpoints)
+            if (r.network === net && r.anchor_txid != null)
+                anchored[r.chain] = Math.max(anchored[r.chain] == null ? -1 : anchored[r.chain], r.checkpoint_seq);
+        for (let r of checkpoints) {
+            if (r.network !== net || r.anchor_txid != null || anchored[r.chain] == null) continue;
+            if (r.checkpoint_seq <= anchored[r.chain]) continue;
+            if (Math.floor(r.checkpoint_seq / (step || 1)) % (everyN || 1) !== 0) continue;
+            if (oldest[r.chain] == null || r.snapshot_block < oldest[r.chain]) oldest[r.chain] = r.snapshot_block;
+        }
+        return Object.keys(oldest).map(chain => ({ chain, oldest_block: oldest[chain] }));
+    }
     if (sql.startsWith("SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC")) {
         let sorted = checkpoints.filter(r => r.network === params[0])
             .sort((x, y) => (y.chain === 'BTC') - (x.chain === 'BTC') || y.id - x.id);

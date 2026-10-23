@@ -122,23 +122,13 @@ module.exports = {
         // Never a divergence risk: concurrent unlocked publishers build identical archive
         // bodies, and the per-publisher XANCPUB tail is signed once per slot (claimAttestSlot).
         //
-        // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
-        // anchors to a STALLED batch, so its `since` grows without bound. On the v0
-        // CHECKPOINT BUNDLE leg the newest ELIGIBLE checkpoint tracks the live BTC
-        // tip, so `since` is normally bounded by CHECKPOINT_INTERVAL_BLOCKS *
-        // ANCHOR_CHECKPOINT_EVERY_N, i.e. 6 at the defaults (late rounds stretch it; see
-        // initCheckpointCadence). Rank 1 needs `since` >=
-        // 36, so at the default cadence NO rank above 0 is ever eligible and a bundle
-        // has no failover at all; its liveness rests on per-cycle re-election plus
-        // each hub's independent 24h timer, and a missed cycle costs one snapshot its
-        // own anchor, which the chained hashes recover.
-        // The inertness is therefore a property of the CADENCE, not of the ladder:
-        // ANCHOR_CHECKPOINT_EVERY_N >= 6 puts the bound at or above 36 and the backup
-        // ranks start unlocking here too. Raising that knob is not a cadence-only
-        // change; re-read this stanza before doing it.
-        // Lowering the tolerance is still not the fix: below the DOGE burial window it
-        // buys duplicate spends. A meaningful bundle ladder must measure time or
-        // flush attempts, not BTC-block age against a tip-tracking snapshot.
+        // SCOPE: both legs age from content that stays pending until it anchors. The
+        // archive election anchors to its oldest cargo row; the v0 CHECKPOINT BUNDLE leg
+        // anchors to the first eligible checkpoint of its chains since their last anchor
+        // (bundleContentBlock), not to the newest section, which a new checkpoint replaces
+        // every CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N blocks (6 at the
+        // defaults) and so never reached rank 1's 36. Lowering the tolerance is still not
+        // the fix: below the DOGE burial window it buys duplicate spends.
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).

@@ -120,6 +120,7 @@ const canonicalForms = require('./publisher/canonical_forms.js');
 const stateMethods                 = require('./publisher/state.js');
 const lifecycleMethods             = require('./publisher/lifecycle.js');
 const bundleMethods                = require('./publisher/bundle.js');
+const bundleLadderMethods          = require('./publisher/ladder/bundle_content_age.js');
 const publishBundleMethods         = require('./publisher/publish_bundle.js');
 const rewardMethods                = require('./publisher/reward.js');
 const rewardDeferMethods           = require('./publisher/reward_defer.js');
@@ -292,6 +293,7 @@ const PART_METHODS = [
     stateMethods,
     lifecycleMethods,
     bundleMethods,
+    bundleLadderMethods,
     publishBundleMethods,
     rewardMethods,
     rewardDeferMethods,
