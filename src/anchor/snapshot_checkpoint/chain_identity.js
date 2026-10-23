@@ -66,6 +66,25 @@ async function adoptChainId(engine, stored, resolved) {
         await db.stampNullCapabilitySnapshotChainId(resolved);
 }
 
+// Resolves the id used on cross-chain rows and snapshot envelopes. A pushed tip is the
+// first source for compatibility with existing hubs; followers that receive no tip use
+// the standalone chain id learned from their own BTC indexer.
+async function resolveBtcChainId(db, network) {
+    if (!db) return null;
+    if (typeof db.getChainTip === 'function') {
+        try {
+            const tip = await db.getChainTip('bitcoin', network);
+            if (tip && tip.chainId) return tip.chainId;
+        } catch (_) { /* the standalone id can still be readable */ }
+    }
+    if (typeof db.getChainId === 'function') {
+        try {
+            return (await db.getChainId('bitcoin', network)) || null;
+        } catch (_) { /* an unreadable identity remains unknown */ }
+    }
+    return null;
+}
+
 // Stores the indexer's id when it is new or changed and returns the id now in force (the
 // stored one when the read fails or is not due yet). Never throws: an unknown id only
 // leaves the scan as it was. A db without the id methods is left alone.
@@ -90,4 +109,4 @@ async function learnBtcChainId(engine) {
     }
 }
 
-module.exports = { learnBtcChainId, readIndexerChainId, REREAD_MS };
+module.exports = { learnBtcChainId, readIndexerChainId, resolveBtcChainId, REREAD_MS };
