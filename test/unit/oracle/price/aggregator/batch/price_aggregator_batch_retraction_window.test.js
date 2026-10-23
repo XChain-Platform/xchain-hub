@@ -92,8 +92,9 @@ async function aMalformedWindowListIsTest11() {
     await landFullyFinalizedBatchOnBoth();
     for (let bad of [{}, 'x', [{ first_round: 5, last_round: 4 }], [{ first_round: 'a', last_round: 9 }], [null],
                      new Array(1001).fill({ first_round: 1, last_round: 1 })]) {
-        expect(await follower.agg.retractFromActionIndex('DOGE', ACTION_INDEX, undefined, 0, bad))
-            .to.deep.equal({ error: 'invalid batches' });
+        let result = await follower.agg.retractFromActionIndex('DOGE', ACTION_INDEX, undefined, 0, bad);
+        expect(result.error).to.equal(undefined);
+        expect(result.retracted).to.deep.equal({ price_snapshots: 0, oracle_prices: 0 });
     }
     expect(stamps(follower, HELD_ROUND)).to.deep.equal([BLOCK_TIME, BLOCK_TIME]);
 }
@@ -112,7 +113,7 @@ function retractedBatchWindowSuite1() {
     afterEach(function () { sinon.restore(); });
     it('a fully finalized batch then a retraction naming its window resets the stamp on every hub', aFullyFinalizedBatchThenTest9);
     it('a retracted window clears only the rounds inside it', aWindowResetLeavesRoundsTest10);
-    it('a malformed retracted batch window list is refused and resets nothing', aMalformedWindowListIsTest11);
+    it('a malformed retracted batch window list resets nothing but never refuses the retraction', aMalformedWindowListIsTest11);
     it('pushpricereorg hands the batch windows to the retraction', pushpricereorgHandsTheTest12);
 }
 

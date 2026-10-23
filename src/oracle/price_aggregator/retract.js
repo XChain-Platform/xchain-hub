@@ -126,8 +126,9 @@ async function resetOrphanedLandingBlockTimes(sourceChain, b) {
 // A retraction carries more windows than this only from a broken sender; refuse it.
 const MAX_RETRACTED_BATCH_WINDOWS = 1000;
 
-// The PRICE batch round windows a retraction names, fail-closed like the bounds:
-// absent means none (an indexer that predates the field), anything malformed is an error.
+// The PRICE batch round windows a retraction names: absent means none (an indexer that
+// predates the field). A malformed list resets nothing but never refuses the retraction:
+// the indexer drops an "invalid" refusal as terminal, which would lose the deletes too.
 function normalizeRetractedBatchWindows(batches) {
     if (batches === undefined || batches === null) return { windows: [] };
     if (!Array.isArray(batches) || batches.length > MAX_RETRACTED_BATCH_WINDOWS)
@@ -140,6 +141,15 @@ function normalizeRetractedBatchWindows(batches) {
         windows.push({ first, last });
     }
     return { windows };
+}
+
+// The windows to reset, logging and dropping a malformed list.
+function retractedBatchWindows(sourceChain, batches) {
+    let retracted = normalizeRetractedBatchWindows(batches);
+    if (!retracted.error) return retracted.windows;
+    logger.error('PriceAggregator: ignoring malformed retracted batch windows from ' + sourceChain +
+        '; their landing clocks are not reset');
+    return [];
 }
 
 // Clear the landing clock on every round of each retracted batch window, whatever path
@@ -222,8 +232,7 @@ module.exports = {
         // collapse into the absent branch and widen this into the open-ended DELETE below.
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if (bounds.error) return { error: bounds.error };
-        let retracted = normalizeRetractedBatchWindows(batches);
-        if (retracted.error) return { error: retracted.error };
+        let windows = retractedBatchWindows(sourceChain, batches);
         let { from, to, gen, bounded, fenced } = bounds;
 
         let seam = publishedMarkerSeam.call(this);
@@ -254,7 +263,7 @@ module.exports = {
         emitRetractionDeletes.call(this, sourceChain, bounds, snapDeleted, oracleDeleted);
 
         // After the deletes, so the batch's own rows are gone and only surviving rows are reset.
-        let windowError = await resetRetractedBatchWindowsOrError.call(this, sourceChain, retracted.windows);
+        let windowError = await resetRetractedBatchWindowsOrError.call(this, sourceChain, windows);
         if (windowError) return windowError;
 
         // D28: clear the publisher's durable at-most-once marker for every round the
