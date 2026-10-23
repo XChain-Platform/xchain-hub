@@ -151,7 +151,7 @@ function isDirectFromOutboundPeer(peer, envelope) {
 }
 
 function notePeerMessage(pm, peer, peerAddr, envelope, knownAddr) {
-    const firstFromOutbound = !peer.inbound && !peer.validatorAddr;
+    const firstFromOutbound = envelope.relayed !== true && !peer.inbound && !peer.validatorAddr;
     if (firstFromOutbound) peer.validatorAddr = envelope.sender;
     const inheritedFeedUrl = isDirectFromOutboundPeer(peer, envelope) &&
         pm.recordValidatorFeedUrl(envelope.sender, peer.feedUrl || knownAddr);
@@ -194,19 +194,19 @@ class PeerInbound {
             return;
         }
 
-        if (knownAddr === null && ws._peerAddr === null) {
+        if (knownAddr === null && ws._peerAddr === null && envelope.relayed !== true) {
             ws._peerAddr = envelope.sender;
             this.registerInboundPeer(ws, envelope.sender);
         }
 
-        let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
-        let peer = this.peers.get(peerAddr);
+        const peerAddr = knownAddr || ws._peerAddr;
+        const peer = this.peers.get(peerAddr);
         if (peer) notePeerMessage(this, peer, peerAddr, envelope, knownAddr);
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
         // publisher and will diverge from peerAddr on relayed messages.
-        this.recordPeer(peerAddr, peerAddr, false);
+        if (peerAddr) this.recordPeer(peerAddr, peerAddr, false);
         emitInboundEvents(this, ws, envelope);
 
         this.relay(envelope, ws);
@@ -218,7 +218,10 @@ class PeerInbound {
     // outbound), which both wastes bandwidth and trips the self-connection guard
     // on the other side when the receiving ws is freshly opened.
     relay(envelope, sourceWs) {
-        let serialized = JSON.stringify(envelope);
+        // The relay marker is outside the fixed signature payload. It preserves the
+        // original publisher's signature while preventing the next hop from treating
+        // that publisher as the identity of this connection.
+        const serialized = JSON.stringify({ ...envelope, relayed: true });
         for (let [addr, peer] of this.peers) {
             if (addr === envelope.sender) continue;
             if (peer.ws && peer.ws !== sourceWs && peer.ws.readyState === WebSocket.OPEN) {
