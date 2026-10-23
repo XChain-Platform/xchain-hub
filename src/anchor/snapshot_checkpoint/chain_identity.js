@@ -17,6 +17,12 @@ const { getLogger } = require('../../observability');
 
 const logger = getLogger();
 const HEX_64 = /^[0-9a-f]{64}$/;
+const STAMP_NEWEST_NULL_SNAPSHOT =
+    'UPDATE capability_snapshots cs JOIN (' +
+    'SELECT MAX(snapshot_block) AS snapshot_block FROM capability_snapshots ' +
+    'WHERE btc_chain_id IS NULL' +
+    ') newest ON newest.snapshot_block = cs.snapshot_block ' +
+    'SET cs.btc_chain_id = ? WHERE cs.btc_chain_id IS NULL';
 // Block 1 only changes when a regtest chain is re-genesised, so a minute between reads
 // keeps a stuck or absent indexer to one call a minute however often the engine ticks.
 const REREAD_MS = 60000;
@@ -50,6 +56,13 @@ async function purgeDeadChainRows(db, network) {
         await db.deleteAllCapabilitySnapshots();
 }
 
+async function stampNewestNullSnapshot(db, chainId) {
+    if (typeof db.doQuery === 'function')
+        return db.doQuery(STAMP_NEWEST_NULL_SNAPSHOT, [chainId]);
+    if (typeof db.stampNullCapabilitySnapshotChainId === 'function')
+        return db.stampNullCapabilitySnapshotChainId(chainId);
+}
+
 async function adoptChainId(engine, stored, resolved) {
     const db = engine.db;
     const regtest = engine.network === 'regtest';
@@ -60,10 +73,10 @@ async function adoptChainId(engine, stored, resolved) {
             resolved.slice(0, 12) + ' read from the BTC indexer' +
             (stored ? ' (was ' + stored.slice(0, 12) + ')' : ''));
     }
-    // Regtest only, as on the pushed hub: a set written before the id was known is this
-    // chain's, and left NULL its snapshot would never be checkpointed.
-    if (regtest && typeof db.stampNullCapabilitySnapshotChainId === 'function')
-        await db.stampNullCapabilitySnapshotChainId(resolved);
+    if (regtest && engine.chainIdBackfill !== resolved) {
+        await stampNewestNullSnapshot(db, resolved);
+        engine.chainIdBackfill = resolved;
+    }
 }
 
 // Resolves the id used on cross-chain rows and snapshot envelopes. A pushed tip is the
