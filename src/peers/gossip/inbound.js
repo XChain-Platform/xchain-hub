@@ -27,18 +27,9 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 const { normalizeApiUrl } = require('../hub_advertisement.js');
 
-// The envelope a frame carries, or null when it is not one this hub will look
-// at: unparseable, the wrong shape, or timestamped outside the replay window.
-function parseInboundEnvelope(pm, rawData) {
-    let envelope;
-    try {
-        envelope = JSON.parse(rawData);
-    } catch (e) {
-        logger.warn(nodeUtil.format('P2P: Invalid JSON from peer:', e));
-        return null;
-    }
+const RELAY_AUTH_TYPE = 'P2P_RELAY_AUTH';
 
-    // Guard against non-object JSON values (null, number, string, boolean)
+function validateInboundEnvelope(pm, envelope) {
     if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return null;
 
     if (!envelope.type || typeof envelope.type !== 'string') return null;
@@ -51,10 +42,44 @@ function parseInboundEnvelope(pm, rawData) {
     // cannot be replayed inside the [dedup-expiry, maxSkew] window after its
     // dedup entry is pruned. (Anti-replay for the Option A signed-envelope
     // surface.) Default dedup TTL is 60s; default skew is also 60s.
-    let dedupTTL = parseInt(pm.config.P2P_MSG_DEDUP_TTL) || 60000;
-    let maxSkew  = Math.min(parseInt(pm.config.P2P_MSG_MAX_SKEW_MS) || dedupTTL, dedupTTL);
+    const dedupTTL = parseInt(pm.config.P2P_MSG_DEDUP_TTL) || 60000;
+    const maxSkew  = Math.min(parseInt(pm.config.P2P_MSG_MAX_SKEW_MS) || dedupTTL, dedupTTL);
     if (Math.abs(Date.now() - envelope.timestamp) > maxSkew) return null;
     return envelope;
+}
+
+// The envelope a frame carries, or null when it is not one this hub will look
+// at: unparseable, the wrong shape, or timestamped outside the replay window.
+function parseInboundEnvelope(pm, rawData) {
+    let envelope;
+    try {
+        envelope = JSON.parse(rawData);
+    } catch (e) {
+        logger.warn(nodeUtil.format('P2P: Invalid JSON from peer:', e));
+        return null;
+    }
+    return validateInboundEnvelope(pm, envelope);
+}
+
+function relayBinding(envelope) {
+    const binding = {
+        id: envelope.id,
+        type: envelope.type,
+        sender: envelope.sender,
+        timestamp: envelope.timestamp
+    };
+    if (Object.prototype.hasOwnProperty.call(envelope, 'data')) binding.data = envelope.data;
+    if (Object.prototype.hasOwnProperty.call(envelope, 'sig_pubkey')) binding.sig_pubkey = envelope.sig_pubkey;
+    if (Object.prototype.hasOwnProperty.call(envelope, 'sig')) binding.sig = envelope.sig;
+    return binding;
+}
+
+function relayAuthenticator(pm, envelope) {
+    if (!Object.prototype.hasOwnProperty.call(envelope, 'relay_auth')) return undefined;
+    const auth = validateInboundEnvelope(pm, envelope.relay_auth);
+    if (!auth || auth.type !== RELAY_AUTH_TYPE ||
+        !nodeUtil.isDeepStrictEqual(auth.data, relayBinding(envelope))) return null;
+    return auth;
 }
 
 // The per-peer rate ceiling. False means the message was dropped by it.
@@ -151,7 +176,7 @@ function isDirectFromOutboundPeer(peer, envelope) {
 }
 
 function notePeerMessage(pm, peer, peerAddr, envelope, knownAddr) {
-    const firstFromOutbound = envelope.relayed !== true && !peer.inbound && !peer.validatorAddr;
+    const firstFromOutbound = !peer.inbound && !peer.validatorAddr;
     if (firstFromOutbound) peer.validatorAddr = envelope.sender;
     const inheritedFeedUrl = isDirectFromOutboundPeer(peer, envelope) &&
         pm.recordValidatorFeedUrl(envelope.sender, peer.feedUrl || knownAddr);
@@ -167,8 +192,12 @@ class PeerInbound {
         const envelope = parseInboundEnvelope(this, rawData);
         if (!envelope) return;
 
+        const relayAuth = relayAuthenticator(this, envelope);
+        if (relayAuth === null) return;
+        const connectionEnvelope = relayAuth || envelope;
+
         // Self-connection guard
-        if (envelope.sender === this.validatorAddr) {
+        if (connectionEnvelope.sender === this.validatorAddr) {
             if (ws._peerAddr === null) {
                 ws.close(1000, 'self-connection');
             } else if (knownAddr) {
@@ -177,9 +206,13 @@ class PeerInbound {
             return;
         }
 
-        if (this.seenIds.has(envelope.id)) return;
-        this.addToDedup(envelope.id);
-        if (!admitMessageRate(this, ws, envelope, knownAddr)) return;
+        if (!admitMessageRate(this, ws, connectionEnvelope, knownAddr)) return;
+
+        const relayVerdict = {};
+        if (relayAuth && !this.verifySignature(relayAuth, relayVerdict)) {
+            reportUnverified(this, ws, relayAuth, relayVerdict);
+            return;
+        }
 
         // Two very different faults share this return path: a key we do not
         // authenticate at all (never staked, stake not yet activated, wrong key)
@@ -188,25 +221,30 @@ class PeerInbound {
         // membership-before-crypto order that produces it, are unchanged. No extra
         // throttling here: the per-peer rate limit above already bounds this line,
         // exactly as it did for the single invalid-signature message.
-        let verdict = {};
+        const verdict = {};
         if (!this.verifySignature(envelope, verdict)) {
             reportUnverified(this, ws, envelope, verdict);
             return;
         }
 
-        if (knownAddr === null && ws._peerAddr === null && envelope.relayed !== true) {
-            ws._peerAddr = envelope.sender;
-            this.registerInboundPeer(ws, envelope.sender);
+        if (knownAddr === null && ws._peerAddr === null) {
+            ws._peerAddr = connectionEnvelope.sender;
+            this.registerInboundPeer(ws, connectionEnvelope.sender);
         }
 
         const peerAddr = knownAddr || ws._peerAddr;
         const peer = this.peers.get(peerAddr);
-        if (peer) notePeerMessage(this, peer, peerAddr, envelope, knownAddr);
+        if (peer && (!peer.validatorAddr || peer.validatorAddr === connectionEnvelope.sender)) {
+            notePeerMessage(this, peer, peerAddr, connectionEnvelope, knownAddr);
+        }
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
         // that delivered the message), NOT envelope.sender. The latter is the original
         // publisher and will diverge from peerAddr on relayed messages.
         if (peerAddr) this.recordPeer(peerAddr, peerAddr, false);
+
+        if (this.seenIds.has(envelope.id)) return;
+        this.addToDedup(envelope.id);
         emitInboundEvents(this, ws, envelope);
 
         this.relay(envelope, ws);
@@ -218,10 +256,10 @@ class PeerInbound {
     // outbound), which both wastes bandwidth and trips the self-connection guard
     // on the other side when the receiving ws is freshly opened.
     relay(envelope, sourceWs) {
-        // The relay marker is outside the fixed signature payload. It preserves the
-        // original publisher's signature while preventing the next hop from treating
-        // that publisher as the identity of this connection.
-        const serialized = JSON.stringify({ ...envelope, relayed: true });
+        const relayed = { ...envelope };
+        delete relayed.relay_auth;
+        relayed.relay_auth = this.buildEnvelope(RELAY_AUTH_TYPE, relayBinding(relayed));
+        const serialized = JSON.stringify(relayed);
         for (let [addr, peer] of this.peers) {
             if (addr === envelope.sender) continue;
             if (peer.ws && peer.ws !== sourceWs && peer.ws.readyState === WebSocket.OPEN) {
