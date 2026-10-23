@@ -45,6 +45,15 @@ module.exports = {
             ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' ORDER BY round_number ASC LIMIT ?', [limit]);
     },
 
+    // The same page from `minRound` up, so pending rounds the archive leader omits below
+    // the federation's common floor do not hold the page's head forever.
+    async findPriceSnapshotRoundsByBatchSeqFromRound(minRound, limit) {
+        return this.doQuery(
+            'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + PENDING_PRICE_PREDICATE +
+            ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' AND round_number >= ? ORDER BY round_number ASC LIMIT ?',
+            [minRound, limit]);
+    },
+
     // Every row of the given rounds, pending or not, so a round is archived whole.
     async findPriceSnapshotsForArchiveRounds(rounds) {
         if (!rounds || rounds.length === 0) return [];

@@ -90,6 +90,14 @@ module.exports = {
         return (rewards || []).filter(r => !this.isChainDerivedReward(r));
     },
 
+    // The pending price page, read from the common floor once rounds below it were omitted.
+    pendingPriceRounds(limit){
+        const floor = this.priceArchiveFloor();
+        return floor > 0 && this.db.findPriceSnapshotRoundsByBatchSeqFromRound
+            ? this.db.findPriceSnapshotRoundsByBatchSeqFromRound(floor, limit)
+            : this.db.findPriceSnapshotRoundsByBatchSeq(limit);
+    },
+
     // Every pending archive stream, with sentinel reads for the two protocol caps.
     async gatherArchiveRows(){
         if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
@@ -110,7 +118,7 @@ module.exports = {
                 ? this.db.findListSnapshotsByBatchSeq(ARCHIVE_MAX_LIST_ROWS + 1)
                 : Promise.resolve([]),
             this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
-            this.db.findPriceSnapshotRoundsByBatchSeq(ARCHIVE_MAX_PRICE_ROUNDS + 1),
+            this.pendingPriceRounds(ARCHIVE_MAX_PRICE_ROUNDS + 1),
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);
         rewards = this.dropChainDerivedRewards(rewards);
@@ -119,7 +127,8 @@ module.exports = {
             priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
         policies = policies.slice(0, ARCHIVE_MAX_POLICY_ROWS);
         priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
-        let prices = await this.db.findPriceSnapshotsForArchiveRounds(priceRounds);
+        let prices = await this.priceRoundsAboveCommonFloor(
+            await this.db.findPriceSnapshotsForArchiveRounds(priceRounds));
         return this.archiveRows(matches, calls, rewards, {
             bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
             cappedOrTrimmed: capped

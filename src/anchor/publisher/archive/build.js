@@ -177,7 +177,9 @@ module.exports = {
     // local capability_snapshots table only holds rows a hub persisted while
     // leading, so it can't be the shared source). Falls back to the local
     // table for seeded/regtest stacks with no live BTC resolution.
-    async resolveCapabilitySet(capability, block, network){
+    // `sharedOnly` answers null where only the per-hub local table would answer, so a
+    // caller can ask what every hub resolves alike (the price common floor does).
+    async resolveCapabilitySet(capability, block, network, sharedOnly){
         // Derive the weighted-vs-count set for the RECORD's network (callers
         // pass resolveQuorumNetwork(record, this.network) / the archive network),
         // matching the round/verify gate that judges the resulting set. On a scoped
@@ -215,6 +217,7 @@ module.exports = {
                     return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0'), source: '' }));
             }
         }
+        if(sharedOnly === true) return null;
         // Local-table fallback is gated to seeded/regtest stacks with no live BTC
         // resolution, matching the sibling resolvers
         // (StateCheckpointEngine/CrossChainCallEngine/CrossChainDexEngine, which seed
