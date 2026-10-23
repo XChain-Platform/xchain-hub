@@ -18,6 +18,8 @@
 
 'use strict';
 
+require('./marker_retraction.js');
+
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
