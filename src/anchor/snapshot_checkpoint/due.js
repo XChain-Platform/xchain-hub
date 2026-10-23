@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+const DUE_SCAN_LIMIT = 10;
+
 function asSnapshotBlock(value) {
     if (value === null || value === undefined) return null;
 
@@ -30,11 +32,15 @@ function asFiniteNumber(value) {
 function pickDueSnapshot(snapshotBlocks, view) {
     if (!Array.isArray(snapshotBlocks) || view.inFlight) return null;
 
+    const newestFirst = snapshotBlocks.length >= DUE_SCAN_LIMIT;
     let snapshotBlock = null;
     for (const value of snapshotBlocks) {
         const candidate = asSnapshotBlock(value);
         if (candidate === null || !view.gateActive(candidate)) continue;
-        if (snapshotBlock === null || candidate < snapshotBlock) snapshotBlock = candidate;
+        const preferred = newestFirst
+            ? candidate > snapshotBlock
+            : candidate < snapshotBlock;
+        if (snapshotBlock === null || preferred) snapshotBlock = candidate;
     }
     if (snapshotBlock === null) return null;
 
