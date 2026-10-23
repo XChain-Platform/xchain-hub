@@ -21,6 +21,9 @@
 
 'use strict';
 
+const bundleSelfTest = require.main === module
+    ? [require('node:assert/strict'), require('node:test')] : null;
+const path = require('node:path');
 const canonicalForms = require('../canonical_forms.js');
 const { sortedListRows } = require('./list/list_rows_select.js');
 const { archiveCapabilityWants } = require('./capability_wants.js');
@@ -320,3 +323,34 @@ module.exports = {
     }
 
 };
+
+if(require.main === module){
+    const [assert, test] = bundleSelfTest;
+    const mesh = require(path.join(__dirname, '../../../../test/helpers/anchor_mesh.js'));
+    const { CP_ROW, buildMesh, v0Order, startAll, stopMeshes, parseV7Sections } = mesh;
+
+    test('a backup anchors a mixed-height v0 bundle when rank 0 is signerless', async () => {
+        const bus = buildMesh(4, { btcBlock: 137, network: 'mainnet', checkpointCommitment: true });
+        try {
+            for(const node of bus.nodes){
+                node.db.checkpoints.push(Object.assign({}, CP_ROW, {
+                    chain: 'LTC', network: 'mainnet', snapshot_block: 136,
+                    checkpoint_seq: 7, block_index: 990, anchor_txid: null
+                }));
+            }
+            const order = v0Order(bus, { network: 'mainnet', snapshot_block: 136 });
+            const leader = order[0];
+            const backup = order[1];
+            leader.pub.setBroadcastHook(null);
+            await startAll(bus);
+            assert.equal((await leader.pub.flush()).skipped, 'no_pipeline');
+            await backup.pub.flush();
+            const bundles = backup.published.filter(payload => payload.split('|')[1] === '0');
+            assert.equal(bundles.length, 1);
+            assert.deepEqual(parseV7Sections(bundles[0]).map(section => section.snapshot_block), [100, 136]);
+            assert.equal(backup.pub.getAnchorStats().anchorsAsBackup, 1);
+        } finally {
+            await stopMeshes();
+        }
+    });
+}
