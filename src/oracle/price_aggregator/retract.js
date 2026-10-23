@@ -164,6 +164,19 @@ async function resetRetractedBatchWindows(windows) {
     }
 }
 
+// The window reset as an error return: a failure makes the indexer retry, which is safe
+// because the deletes before it are idempotent and the reset only ever writes 0.
+async function resetRetractedBatchWindowsOrError(sourceChain, windows) {
+    try {
+        await resetRetractedBatchWindows.call(this, windows);
+        return null;
+    } catch (e) {
+        logger.error(nodeUtil.format('PriceAggregator: could not reset retracted batch landing times for ' + sourceChain + ':', e && e.message));
+        return { error: 'batch landing times not reset for ' + sourceChain
+            + ' (' + ((e && e.message) || 'unknown error') + ')' };
+    }
+}
+
 async function readRetractedBatchRounds(sourceChain, b) {
     let batchRounds = [];
     try {
@@ -240,16 +253,9 @@ module.exports = {
 
         emitRetractionDeletes.call(this, sourceChain, bounds, snapDeleted, oracleDeleted);
 
-        // After the deletes, so the batch's own rows are gone and only surviving rows are
-        // reset and re-emitted. A failure returns an error so the indexer retries: the
-        // deletes above are idempotent and the reset only ever writes 0.
-        try {
-            await resetRetractedBatchWindows.call(this, retracted.windows);
-        } catch (e) {
-            logger.error(nodeUtil.format('PriceAggregator: could not reset retracted batch landing times for ' + sourceChain + ':', e && e.message));
-            return { error: 'batch landing times not reset for ' + sourceChain
-                + ' (' + ((e && e.message) || 'unknown error') + ')' };
-        }
+        // After the deletes, so the batch's own rows are gone and only surviving rows are reset.
+        let windowError = await resetRetractedBatchWindowsOrError.call(this, sourceChain, retracted.windows);
+        if (windowError) return windowError;
 
         // D28: clear the publisher's durable at-most-once marker for every round the
         // retracted batch carried. Without this the marker outlives the rows it stands

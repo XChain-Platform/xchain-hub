@@ -16,7 +16,8 @@
  *
  * Owns src/sql/price_snapshots.sql and exports the whole price family; the
  * price_ingest_watermarks.sql queries live in price_ingest_watermarks.js beside this
- * file and are spread into the mixin below. src/db/index.js installs that one object
+ * file and are spread into the mixin below, as are the reorg landing-clock resets in
+ * batch_landing_reset.js. src/db/index.js installs that one object
  * on Database.prototype, so callers keep writing db.<method>().
  *
  * Add a query as one more method before the closing brace: one statement per method,
@@ -25,21 +26,11 @@
  ********************************************************************/
 
 const priceIngestWatermarks = require('./price_ingest_watermarks.js');
-
-// Self-finalized rows (no source_action_index) a retracted PRICE batch landing stamped: same
-// batch_block_time, round inside the landing's first_round..last_round.
-function orphanedLandingQuery(head, set, sourceChain, from, to, gen, bounded, fenced) {
-    const args = [sourceChain, from];
-    if (bounded) args.push(to);
-    if (fenced) args.push(gen);
-    const range = bounded ? ' >= ? AND batch_landed.source_action_index <= ?' : ' >= ?';
-    const sql = `${head} price_snapshots AS self_finalized JOIN price_snapshots AS batch_landed ON self_finalized.batch_block_time = batch_landed.batch_block_time AND self_finalized.round_number BETWEEN CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.first_round')) AS UNSIGNED) AND CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.last_round')) AS UNSIGNED) ${set} WHERE self_finalized.source_action_index IS NULL AND self_finalized.consensus_proof NOT LIKE '{"batch":%' AND self_finalized.batch_block_time > 0 AND batch_landed.source_chain = ? AND batch_landed.source_action_index${range}${fenced ? ' AND batch_landed.push_generation <= ?' : ''} AND batch_landed.consensus_proof LIKE '{"batch":%'`;
-    return [sql, args];
-}
+const batchLandingReset     = require('./batch_landing_reset.js');
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so this
 // module still exports ONE price-family mixin that src/db/index.js installs unchanged.
-module.exports = Object.assign({}, priceIngestWatermarks, {
+module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
 
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/consensus.js:374.
@@ -181,25 +172,6 @@ module.exports = Object.assign({}, priceIngestWatermarks, {
     // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
-    },
-
-    // Rounds inside a retracted PRICE batch window that hold a landing stamp, whatever path
-    // stored them (a hub that finalized every round of the batch itself holds no batch row).
-    async findPriceSnapshotRoundsLandedBetween(first, last) {
-        return this.doQuery(`SELECT DISTINCT round_number FROM price_snapshots WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
-    },
-
-    // Clears the landing stamp on every round inside a retracted PRICE batch window.
-    async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last) {
-        return this.doQuery(`UPDATE price_snapshots SET batch_block_time = 0 WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
-    },
-
-    async findSelfFinalizedRoundsForBatchRetraction(...query) {
-        return this.doQuery(...orphanedLandingQuery('SELECT DISTINCT self_finalized.round_number FROM', '', ...query));
-    },
-
-    async resetSelfFinalizedBatchBlockTimeForRetraction(...query) {
-        return this.doQuery(...orphanedLandingQuery('UPDATE', 'SET self_finalized.batch_block_time = 0', ...query));
     },
 
     // Reads the newest price_snapshots rows in every status, skipped and disputed
