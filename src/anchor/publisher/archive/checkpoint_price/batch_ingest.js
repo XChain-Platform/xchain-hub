@@ -257,3 +257,54 @@ lifecycleMethods.stop = async function(){
 };
 
 module.exports = methods;
+
+async function runBacklogRegression(){
+    const [{ default: assert }, { default: test }, { default: priceQueries }] = await Promise.all([
+        import('node:assert/strict'), import('node:test'), import('../../../../db/prices/index.js')
+    ]);
+
+    test('500 unstamped rounds after 20000 stamped rows clear in bounded pages', async () => {
+        let statement;
+        await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call({
+            async doQuery(sql){ statement = sql; return []; }
+        }, 0, PRICE_BACKFILL_ROW_PAGE);
+        assert.match(statement, /FORCE INDEX \(idx_pair_batchtime_round\)/);
+        assert.match(statement, /pending\.coin_pair = pairs\.coin_pair AND pending\.batch_block_time = 0/);
+
+        const rows = Array.from({ length: 20500 }, (_, index) => ({
+            round_number: index + 1,
+            batch_block_time: index < 20000 ? 1700008000 : 0
+        }));
+        const byRound = new Map(rows.map(row => [row.round_number, row]));
+        const pageSizes = [];
+        const context = Object.assign({}, methods, {
+            db: {
+                async findZeroBatchBlockTimePriceSnapshotRoundsAfter(afterRound, limit){
+                    const page = rows.filter(row => row.round_number > afterRound &&
+                        row.batch_block_time === 0).slice(0, limit);
+                    pageSizes.push(page.length);
+                    return page;
+                }
+            },
+            hub: {
+                priceAggregator: {
+                    async stampBatchLanding(round, blockTime){
+                        const row = byRound.get(round);
+                        if(!row || row.batch_block_time !== 0) return 0;
+                        row.batch_block_time = blockTime;
+                        return 1;
+                    }
+                }
+            },
+            async fetchPriceBatchLandings(first, last){
+                return { batches: [{ first, last, blockTime: 1700009000 }], completeBelow: last + 1 };
+            }
+        });
+
+        assert.equal(await context.runPriceBatchLandingBackfill(), 500);
+        assert.equal(rows.filter(row => row.batch_block_time === 0).length, 0);
+        assert.deepEqual(pageSizes, [100, 100, 100, 100, 100, 0]);
+    });
+}
+
+if(require.main === module) runBacklogRegression();

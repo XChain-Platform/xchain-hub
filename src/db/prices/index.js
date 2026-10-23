@@ -67,13 +67,17 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
     },
 
     // Reads only unstamped, non-skipped rounds for the landing-clock repair sweep.
-    // The round cursor uses idx_round_pair, so each bounded page resumes without
-    // walking earlier rows in application code.
     async findZeroBatchBlockTimePriceSnapshotRoundsAfter(round, limit) {
         return this.doQuery(
-            `SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (idx_round_pair)
-             WHERE round_number > ? AND batch_block_time = 0 AND status != 'skipped'
-             ORDER BY round_number ASC LIMIT ?`, [round, limit]);
+            `SELECT DISTINCT pending.round_number
+             FROM (
+                 SELECT DISTINCT coin_pair
+                 FROM price_snapshots FORCE INDEX (idx_pair_batchtime_round)
+             ) AS pairs
+             STRAIGHT_JOIN price_snapshots AS pending FORCE INDEX (idx_pair_batchtime_round)
+               ON pending.coin_pair = pairs.coin_pair AND pending.batch_block_time = 0
+             WHERE pending.round_number > ? AND pending.status != 'skipped'
+             ORDER BY pending.round_number ASC LIMIT ?`, [round, limit]);
     },
 
     // Reads rows from price_snapshots.
