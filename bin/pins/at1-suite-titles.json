@@ -4221,11 +4221,6 @@
       "753773fbaf870368f92c8afba69a327df03763866d4af03c55cfe5b12d41736a",
       "ec8fc964dbeea19fa84f00db9bb9585c7611c32413d0608cd7b6c06c34fc0233"
     ],
-    "50ad6ada38609e3a": [
-      "a444167bfc7e54965cf54da2c64b209029acb01cf7043c1435288d846ef9049d",
-      "8c1fa6db3722ec14984bf013a457726e7d9c0b03465d7798dfd3ad070249ddf2",
-      "92a8c68e20b2e6587057b7e252a49443ca57f4a8e58ad9984b94730219934862"
-    ],
     "50ee8556e244e56e": [
       "1149d70e4006a2b4e26438f25fe5006b1f09d57fdf6d244365a5187b0cf65370",
       "0bc8791d5972d45fa836b21add32cfce9f91222a0d68169cc179aaf90de20117",
@@ -5554,6 +5549,12 @@
       "545c4f9fdf1b860d3f290dcaa9c719d5fced61003a22782dab678dc531b31bea",
       "5919f6b4051bd0e0bfe09cfbd45d4e92e5abf473f4c6b66df793944df932d5b2",
       "7881162c2bd8d613937ad193fb2fcddff38032a5f13ca1adca5f9ab3c57ea2dc"
+    ],
+    "66ae9ee11cd64fb6": [
+      "a444167bfc7e54965cf54da2c64b209029acb01cf7043c1435288d846ef9049d",
+      "8c1fa6db3722ec14984bf013a457726e7d9c0b03465d7798dfd3ad070249ddf2",
+      "e6db8de85cdfaabdd58bca988a6c83ebf27ae14f396886926ac5257d89c85045",
+      "92a8c68e20b2e6587057b7e252a49443ca57f4a8e58ad9984b94730219934862"
     ],
     "66b448e969926ae4": [
       "db42a28fddff3adc42d03da61e3aa489fe4162a08b0bb3e8126b9e450ac783da",
@@ -12737,7 +12738,7 @@
         "ci:regression"
       ],
       "fileCount": 1022,
-      "titleCount": 9285,
+      "titleCount": 9286,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12811,7 +12812,7 @@
         "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
-        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "50ad6ada38609e3a",
+        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "66ae9ee11cd64fb6",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_hub_local_columns.test.js": "21c182d29054edbd",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_local_skip.test.js": "7c23903029ef5fd5",
@@ -13818,7 +13819,7 @@
     },
     "test": {
       "fileCount": 1022,
-      "titleCount": 9285,
+      "titleCount": 9286,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13892,7 +13893,7 @@
         "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
-        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "50ad6ada38609e3a",
+        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "66ae9ee11cd64fb6",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_hub_local_columns.test.js": "21c182d29054edbd",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_local_skip.test.js": "7c23903029ef5fd5",
@@ -14846,7 +14847,7 @@
     },
     "test:all": {
       "fileCount": 1105,
-      "titleCount": 10152,
+      "titleCount": 10153,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15003,7 +15004,7 @@
         "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "267f634d55fc1cb0",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_proof.test.js": "e6bfcd9a75fcfa14",
         "test/unit/anchor/publisher/archive/price/archive_finalized_price_local_skip.test.js": "b97cfc11de3c8a0d",
-        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "50ad6ada38609e3a",
+        "test/unit/anchor/publisher/archive/price/archive_price_common_floor.test.js": "66ae9ee11cd64fb6",
         "test/unit/anchor/publisher/archive/price/archive_price_tombstone_local_skip.test.js": "577bbb1a5a63e8ed",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_hub_local_columns.test.js": "21c182d29054edbd",
         "test/unit/anchor/publisher/archive/price/archive_price_verify_local_skip.test.js": "7c23903029ef5fd5",
