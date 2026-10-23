@@ -24,6 +24,8 @@
 const http = require('http');
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
+const selfTest = require.main === module
+    ? [require('node:assert/strict'), require('node:test'), require('../manager.js'), require('../../validators/identity.js')] : null;
 const hubVersion = require('../../../package.json').version;
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -307,10 +309,7 @@ class PeerConnections {
 module.exports = PeerConnections;
 
 if (require.main === module) {
-    const assert = require('node:assert/strict');
-    const { test } = require('node:test');
-    const PeerManager = require('../manager.js');
-    const ValidatorIdentity = require('../../validators/identity.js');
+    const [assert, { test }, PeerManager, ValidatorIdentity] = selfTest;
 
     const waitFor = async (predicate, label) => {
         const deadline = Date.now() + 3000;
