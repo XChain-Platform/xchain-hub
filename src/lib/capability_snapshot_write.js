@@ -90,7 +90,12 @@ async function resolveBtcChainId(db){
         // capability_snapshots has no network column: the set belongs to the hub, so the
         // hub's own network is the one to ask about.
         let tip = await db.getChainTip('bitcoin', hubConfig.HUB_NETWORK || '');
-        return (tip && tip.chainId) ? tip.chainId : null;
+        if(tip && tip.chainId) return tip.chainId;
+        // A hub the BTC indexer does not push to has no tip, only the id its snapshot
+        // checkpoint engine read from the indexer, and getChainTip reports nothing
+        // without a tip height.
+        if(typeof db.getChainId !== 'function') return null;
+        return (await db.getChainId('bitcoin', hubConfig.HUB_NETWORK || '')) || null;
     } catch(e){
         return null;
     }

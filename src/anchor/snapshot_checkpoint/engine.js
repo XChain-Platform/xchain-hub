@@ -31,6 +31,7 @@ const {
     snapshotLeaderDecision,
 } = require('./leader.js');
 const { pickDueSnapshot } = require('./due.js');
+const { learnBtcChainId } = require('./chain_identity.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
 const snapshotRound = require('./round.js');
@@ -246,6 +247,8 @@ class SnapshotCheckpointEngine {
         if (this.ticking || !this.identity || !this.db) return;
         this.ticking = true;
         try {
+            // Before the scan: the scan only lists sets stamped with the stored chain id.
+            await learnBtcChainId(this);
             for (let i = 0; i < DUE_LIMIT; i++) {
                 if (!await this.checkpointNextDue()) break;
             }

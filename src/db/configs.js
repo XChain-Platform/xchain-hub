@@ -187,6 +187,24 @@ module.exports = {
         await this.setParams(rows);
     },
 
+    // The chain identity alone, beside the tip params. The BTC indexer pushes its tip to
+    // one hub, so every other hub learns the id from its own indexer read and has no tip
+    // height to store with it; writing a height here would feed the staleness gates a tip
+    // nobody pushed. The SQL join in listUncheckpointedSnapshotBlocks reads this param.
+    async setChainId(coin, network, chainId){
+        await this.setParam(normalizeCoin(coin), network || 'mainnet', 'chain_tips', 'chain_id', chainId);
+    },
+
+    // Returns the stored chain id string, or null. Unlike getChainTip it needs no
+    // block_height, so a hub the indexer never pushes to still reads the id it learned.
+    async getChainId(coin, network){
+        let net = network || 'mainnet';
+        let cfg = await this.getConfig(normalizeCoin(coin), net, 'chain_tips');
+        if(!cfg.chain_id && normalizeCoin(coin) !== coin)
+            cfg = await this.getConfig(coin, net, 'chain_tips');
+        return (typeof cfg.chain_id === 'string' && cfg.chain_id) ? cfg.chain_id : null;
+    },
+
     // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.
     // Returns: { blockHeight, blockTime, chainId } or null if not set.
     async getChainTip(coin, network){
