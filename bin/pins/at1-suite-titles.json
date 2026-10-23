@@ -11599,12 +11599,6 @@
       "ad9d3f2c443d93d2157f10c1d1dd37eb2da966502bdd9520d31a933f27705ba6",
       "aa33fd9f638b3c4ca3c8b5fd8f9a27a905cbc597debf5d789418b3ce10210361"
     ],
-    "e7d84f1f75258308": [
-      "b1a50d33b56ea7173f5af7afdcccba958cb37bd32bd38e3ffc4bfe5fd281fc6e",
-      "7c3d49ea99dc1c4d908f4c5a60d95579fed743e74fd2056cdf9ce0eeb1d042d7",
-      "53fee354df3e4180c59ce9ae4a27c08dff022c98b6ef22cecfddb75e0d7c3135",
-      "8fc12dfdfb4cf47c1e2b846cd39b3becda9542972fa04187ed1ea8d71c029c3f"
-    ],
     "e806936525a1a195": [
       "e4afa81b1a654ce3390f3e96b076663ff64c44765f44b2d16ed0e7cc6eeff9a2",
       "3f7952c2d75455b1f9a64c2d3b5dc1bac35b06bc0f13d126f25444bceff299e1",
@@ -12069,6 +12063,12 @@
       "ca1319f402e03adba40b13f84ebf5dffeda39e1296f3673b90ecc60a48e9b806",
       "4bc942922f1121ba0f8e512580b7029e6b748097a91da148ab5245794e9ae0f2",
       "7cdf613bac963210b588c53dbf17604e8eab78f61322680be0a52a18441f8566"
+    ],
+    "f3531e1bdbbe78dd": [
+      "b1a50d33b56ea7173f5af7afdcccba958cb37bd32bd38e3ffc4bfe5fd281fc6e",
+      "5ba56fed714203b5167b9b198bd8d0a4e2ef489dfe26d40386bf956ea414d529",
+      "53fee354df3e4180c59ce9ae4a27c08dff022c98b6ef22cecfddb75e0d7c3135",
+      "8fc12dfdfb4cf47c1e2b846cd39b3becda9542972fa04187ed1ea8d71c029c3f"
     ],
     "f3a1c1901689df27": [
       "1596eec181661b90889bbef51702bf7284ed28b021d2178b0b8aa98db8091688",
@@ -13502,7 +13502,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "b7e71767cf988b07",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "c2c93472cc749c4d",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "e7d84f1f75258308",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_snapshots.test.js": "0bbc89cade17bb8f",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_validation.test.js": "653eae373a4eaa1f",
         "test/unit/oracle/price/aggregator/price_aggregator.test.js": "6621665506958a37",
@@ -14587,7 +14587,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "b7e71767cf988b07",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "c2c93472cc749c4d",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "e7d84f1f75258308",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_snapshots.test.js": "0bbc89cade17bb8f",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_validation.test.js": "653eae373a4eaa1f",
         "test/unit/oracle/price/aggregator/price_aggregator.test.js": "6621665506958a37",
@@ -15702,7 +15702,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "b7e71767cf988b07",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "c2c93472cc749c4d",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "e7d84f1f75258308",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_snapshots.test.js": "0bbc89cade17bb8f",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_validation.test.js": "653eae373a4eaa1f",
         "test/unit/oracle/price/aggregator/price_aggregator.test.js": "6621665506958a37",
