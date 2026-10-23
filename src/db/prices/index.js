@@ -66,6 +66,16 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
         return this.doQuery('SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
+    // Reads only unstamped, non-skipped rounds for the landing-clock repair sweep.
+    // The round cursor uses idx_round_pair, so each bounded page resumes without
+    // walking earlier rows in application code.
+    async findZeroBatchBlockTimePriceSnapshotRoundsAfter(round, limit) {
+        return this.doQuery(
+            `SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (idx_round_pair)
+             WHERE round_number > ? AND batch_block_time = 0 AND status != 'skipped'
+             ORDER BY round_number ASC LIMIT ?`, [round, limit]);
+    },
+
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/batch_signer.js:560, src/oracle/publisher.js:2327.
     async findPriceSnapshotsByRoundNumber(firstRound, lastRound, status) {
