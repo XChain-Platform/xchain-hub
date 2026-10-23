@@ -154,8 +154,8 @@ const methods = {
         return stamped;
     },
 
-    // One bounded sweep. A table beyond the page budget resumes from its row cursor on
-    // the next slow tick, and wraps at the end so unresolved landing clocks are retried.
+    // One bounded sweep. Production reads only zero-stamped rounds through an indexed
+    // round cursor. The cursor starts over on each slow tick so unresolved clocks retry.
     async runPriceBatchLandingBackfill(){
         if(this.priceLandingBackfillRunning) return 0;
         const aggregator = this.hub && this.hub.priceAggregator;
@@ -163,21 +163,29 @@ const methods = {
         this.priceLandingBackfillRunning = true;
         let stamped = 0;
         try {
-            let cursor = wholeNumber(this.priceLandingBackfillRowCursor, 0) || 0;
+            const indexedQuery = this.db && this.db.findZeroBatchBlockTimePriceSnapshotRoundsAfter;
+            const legacyQuery = this.db && this.db.findPriceSnapshotsById;
+            if(typeof indexedQuery !== 'function' && typeof legacyQuery !== 'function') return 0;
+            let cursor = typeof indexedQuery === 'function' ? 0 :
+                (wholeNumber(this.priceLandingBackfillRowCursor, 0) || 0);
             for(let page = 0; page < PRICE_BACKFILL_MAX_PAGES; page++){
-                if(!this.db || typeof this.db.findPriceSnapshotsById !== 'function') break;
-                const answer = await this.db.findPriceSnapshotsById(cursor, PRICE_BACKFILL_ROW_PAGE);
+                const indexed = typeof indexedQuery === 'function';
+                const answer = indexed ?
+                    await indexedQuery.call(this.db, cursor, PRICE_BACKFILL_ROW_PAGE) :
+                    await legacyQuery.call(this.db, cursor, PRICE_BACKFILL_ROW_PAGE);
                 if(!Array.isArray(answer)) throw new Error('zero-stamped round query returned no row list');
                 if(answer.length === 0){
-                    this.priceLandingBackfillRowCursor = 0;
+                    if(!indexed) this.priceLandingBackfillRowCursor = 0;
                     break;
                 }
-                const nextCursor = Math.max(...answer.map(row => wholeNumber(row && row.id, 1) || 0));
+                const cursorField = indexed ? 'round_number' : 'id';
+                const nextCursor = Math.max(...answer.map(row =>
+                    wholeNumber(row && row[cursorField], 1) || 0));
                 if(nextCursor <= cursor) throw new Error('price snapshot page did not advance');
-                this.priceLandingBackfillRowCursor = nextCursor;
-                const rounds = Array.from(new Set(answer.filter(row =>
-                    String(row && row.status) !== 'skipped' &&
-                    wholeNumber(row && row.batch_block_time, 0) === 0).map(row =>
+                if(!indexed) this.priceLandingBackfillRowCursor = nextCursor;
+                const rounds = Array.from(new Set(answer.filter(row => indexed ||
+                    (String(row && row.status) !== 'skipped' &&
+                    wholeNumber(row && row.batch_block_time, 0) === 0)).map(row =>
                     wholeNumber(row && row.round_number, 0)).filter(round => round !== null)))
                     .sort((a, b) => a - b);
                 if(rounds.length > 0){
@@ -192,7 +200,7 @@ const methods = {
                 }
                 cursor = nextCursor;
                 if(answer.length < PRICE_BACKFILL_ROW_PAGE){
-                    this.priceLandingBackfillRowCursor = 0;
+                    if(!indexed) this.priceLandingBackfillRowCursor = 0;
                     break;
                 }
             }
@@ -249,3 +257,54 @@ lifecycleMethods.stop = async function(){
 };
 
 module.exports = methods;
+
+async function runBacklogRegression(){
+    const [{ default: assert }, { default: test }, { default: priceQueries }] = await Promise.all([
+        import('node:assert/strict'), import('node:test'), import('../../../../db/prices/index.js')
+    ]);
+
+    test('500 unstamped rounds after 20000 stamped rows clear in bounded pages', async () => {
+        let statement;
+        await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call({
+            async doQuery(sql){ statement = sql; return []; }
+        }, 0, PRICE_BACKFILL_ROW_PAGE);
+        assert.match(statement, /FORCE INDEX \(idx_pair_batchtime_round\)/);
+        assert.match(statement, /pending\.coin_pair = pairs\.coin_pair AND pending\.batch_block_time = 0/);
+
+        const rows = Array.from({ length: 20500 }, (_, index) => ({
+            round_number: index + 1,
+            batch_block_time: index < 20000 ? 1700008000 : 0
+        }));
+        const byRound = new Map(rows.map(row => [row.round_number, row]));
+        const pageSizes = [];
+        const context = Object.assign({}, methods, {
+            db: {
+                async findZeroBatchBlockTimePriceSnapshotRoundsAfter(afterRound, limit){
+                    const page = rows.filter(row => row.round_number > afterRound &&
+                        row.batch_block_time === 0).slice(0, limit);
+                    pageSizes.push(page.length);
+                    return page;
+                }
+            },
+            hub: {
+                priceAggregator: {
+                    async stampBatchLanding(round, blockTime){
+                        const row = byRound.get(round);
+                        if(!row || row.batch_block_time !== 0) return 0;
+                        row.batch_block_time = blockTime;
+                        return 1;
+                    }
+                }
+            },
+            async fetchPriceBatchLandings(first, last){
+                return { batches: [{ first, last, blockTime: 1700009000 }], completeBelow: last + 1 };
+            }
+        });
+
+        assert.equal(await context.runPriceBatchLandingBackfill(), 500);
+        assert.equal(rows.filter(row => row.batch_block_time === 0).length, 0);
+        assert.deepEqual(pageSizes, [100, 100, 100, 100, 100, 0]);
+    });
+}
+
+if(require.main === module) runBacklogRegression();
