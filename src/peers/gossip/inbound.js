@@ -22,6 +22,9 @@
 
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
+const nodeTest = require.main === module ? require('node:test') : null;
+const selfTestAssert = require.main === module ? require('node:assert/strict') : null;
+const selfTestRequire = require.main === module ? require('node:module').createRequire(__filename) : null;
 const { notePeerReject, stampRemoteIp } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -80,6 +83,19 @@ function relayAuthenticator(pm, envelope) {
     if (!auth || auth.type !== RELAY_AUTH_TYPE ||
         !nodeUtil.isDeepStrictEqual(auth.data, relayBinding(envelope))) return null;
     return auth;
+}
+
+function authenticatedConnectionEnvelope(pm, ws, envelope, knownAddr) {
+    const relayAuth = relayAuthenticator(pm, envelope);
+    if (relayAuth === null) return null;
+    const connectionEnvelope = relayAuth || envelope;
+    if (!admitMessageRate(pm, ws, connectionEnvelope, knownAddr)) return null;
+    const verdict = {};
+    if (relayAuth && !pm.verifySignature(relayAuth, verdict)) {
+        reportUnverified(pm, ws, relayAuth, verdict);
+        return null;
+    }
+    return connectionEnvelope;
 }
 
 // The per-peer rate ceiling. False means the message was dropped by it.
@@ -192,9 +208,8 @@ class PeerInbound {
         const envelope = parseInboundEnvelope(this, rawData);
         if (!envelope) return;
 
-        const relayAuth = relayAuthenticator(this, envelope);
-        if (relayAuth === null) return;
-        const connectionEnvelope = relayAuth || envelope;
+        const connectionEnvelope = authenticatedConnectionEnvelope(this, ws, envelope, knownAddr);
+        if (!connectionEnvelope) return;
 
         // Self-connection guard
         if (connectionEnvelope.sender === this.validatorAddr) {
@@ -203,14 +218,6 @@ class PeerInbound {
             } else if (knownAddr) {
                 this.dropSelfPeer(ws, knownAddr);
             }
-            return;
-        }
-
-        if (!admitMessageRate(this, ws, connectionEnvelope, knownAddr)) return;
-
-        const relayVerdict = {};
-        if (relayAuth && !this.verifySignature(relayAuth, relayVerdict)) {
-            reportUnverified(this, ws, relayAuth, relayVerdict);
             return;
         }
 
@@ -346,3 +353,46 @@ class PeerInbound {
 }
 
 module.exports = PeerInbound;
+
+function relayedThirdHubMessageNamesConnectingHub() {
+    const PeerManager = selfTestRequire('../manager.js');
+    const ValidatorIdentity = selfTestRequire('../../validators/identity.js');
+    const addresses = ['hub-a', 'hub-b', 'hub-c'];
+    const identities = addresses.map(() => new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex));
+    const pubkeys = new Map(addresses.map((address, index) => [address, identities[index].getPubkeyHex()]));
+    const manager = index => {
+        const instance = new PeerManager({ P2P_VALIDATOR_ADDR: addresses[index], P2P_PORT: 0,
+            P2P_HOST: '127.0.0.1', SEED_NODES: [], REQUIRE_SIGNATURES: true,
+            P2P_MSG_DEDUP_TTL: 60000 }, null);
+        instance.setIdentity(identities[index]);
+        instance.setValidatorPubkeys(pubkeys);
+        return instance;
+    };
+    const origin = manager(0);
+    const connecting = manager(1);
+    const receiving = manager(2);
+    let relayedFrame;
+    const outboundWs = { readyState: WebSocket.OPEN, send(frame, callback) {
+        relayedFrame = frame;
+        if (callback) callback();
+    } };
+    connecting.peers.set(addresses[2],
+        { inbound: false, validatorAddr: addresses[2], ws: outboundWs });
+    connecting.relay(origin.buildEnvelope('THIRD_HUB_MESSAGE', { value: 1 }), null);
+
+    const inboundWs = { _peerAddr: null, _remoteIp: '127.0.0.2',
+        readyState: WebSocket.OPEN, close() {} };
+    const delivered = [];
+    receiving['on']('message', envelope => delivered.push(envelope));
+    receiving.handleInbound(inboundWs, relayedFrame, null);
+
+    selfTestAssert.equal(inboundWs['_peerAddr'], addresses[1]);
+    selfTestAssert.equal(receiving.peers.get(addresses[1]).ws, inboundWs);
+    selfTestAssert.equal(receiving.peers.has(addresses[0]), false);
+    selfTestAssert.equal(delivered.length, 1);
+    selfTestAssert.equal(delivered[0].sender, addresses[0]);
+}
+
+if (require.main === module)
+    nodeTest.test('a relayed third hub message names the authenticated connecting hub',
+        relayedThirdHubMessageNamesConnectingHub);
