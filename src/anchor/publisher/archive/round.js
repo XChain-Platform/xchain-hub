@@ -58,7 +58,7 @@ module.exports = {
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return 'none';
 
-        let rows = await this.gatherArchiveRows();
+        let rows = await this.gatherUnpublishedArchiveRows();
         if(!rows) return 'none';
 
         let cps = await this.latestArchiveWrapperRows();
@@ -174,6 +174,52 @@ module.exports = {
         return false;
     },
 
+    // The pending rows, or null when there are none or they repeat the last complete
+    // publish. Fingerprinted here, before buildSizedArchive trims the set in place.
+    async gatherUnpublishedArchiveRows(){
+        const rows = await this.gatherArchiveRows();
+        if(!rows) return null;
+        rows.rowsFingerprint = this.archiveRowsFingerprint(rows);
+        return this.archiveRepeatsLastPublish(rows.rowsFingerprint) ? null : rows;
+    },
+
+    // Digest of the gathered row set: each row's identity plus the fields whose change
+    // makes it pending again (the same fields the back-fill stamps), so a mutated or
+    // new row changes the digest while an unchanged re-gather reproduces it.
+    archiveRowsFingerprint(rows){
+        const sha = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+        const pick = (list, fn) => (list || []).map(fn);
+        const shape = {
+            matches: pick(rows.matches, m => [m.match_id, m.status]),
+            calls: pick(rows.calls, c => [c.call_id, c.phase, c.status]),
+            rewards: pick(rows.rewards, r => [r.reward_type, r.round_number, r.validator_pubkey, r.round_qualifier]),
+            bridges: pick(rows.bridges, r => [r.transfer_id, r.status]),
+            policies: pick(rows.policies, r => [r.snapshot_id]),
+            lists: listIdsOf(rows.lists).map(r => [r.snapshot_id]),
+            checkpoints: pick(rows.checkpoints, r => [r.chain, r.network, r.checkpoint_seq]),
+            prices: pick(rows.prices, r => [r.round_number, r.coin_pair, r.status, r.batch_block_time,
+                                            sha(r.consensus_proof)]),
+            tombstones: pick(rows.tombstones, r => [r.round_number, r.coin_pair])
+        };
+        return sha(JSON.stringify(shape, (_k, v) => typeof v === 'bigint' ? String(v) : v));
+    },
+
+    // A complete publish stamps its rows, so gathering the identical set again means
+    // the stamps did not take and another round would pay DOGE to repeat an archive
+    // already on chain (batches 151 to 156 on the rail, one spend per wake). Skip it
+    // until a row is added or changes. The memory is per process: a restart allows
+    // one repeat.
+    archiveRepeatsLastPublish(fingerprint){
+        if(!fingerprint || fingerprint !== this._lastPublishedArchiveFingerprint) return false;
+        if(this._archiveRepeatLoggedFingerprint !== fingerprint){
+            this._archiveRepeatLoggedFingerprint = fingerprint;
+            logger.warn('StateAnchorPublisher: pending archive rows are the set batch ' +
+                        this._lastPublishedArchiveBatchSeq + ' already published; not publishing ' +
+                        'them again until a row is added or changes');
+        }
+        return true;
+    },
+
 
     // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block.
     // The block the published v1 declares on the wire is the block the indexer
@@ -260,6 +306,7 @@ module.exports = {
         let round = {
             cp, batchSeq, crc: wire.crc, b64: wire.b64, chunks: wire.chunks, canonical, quorum, weighted, signer, electionBlock,
             count:      archive.count,
+            rowsFingerprint: rows.rowsFingerprint,
             matchIds:   rows.matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    rows.calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase(), round_qualifier: Number(row.round_qualifier || 0) })),

@@ -74,8 +74,14 @@ module.exports = {
         // design, and the head we paid for is accounted for.
         if(txid) await this.settleArchiveIntent(network, round.batchSeq);
         this.announceArchiveFinalized(round, txid, ids);
-        if(lostChunks === 0 && onChainValid && !noTxid)
+        if(lostChunks === 0 && onChainValid && !noTxid){
             this.recordArchivePublish(round, txid, attest.attested, attest.sigs);
+            // Only a complete publish counts: a partial one leaves its rows pending on purpose
+            if(round.rowsFingerprint){
+                this._lastPublishedArchiveFingerprint = round.rowsFingerprint;
+                this._lastPublishedArchiveBatchSeq = round.batchSeq;
+            }
+        }
     },
 
     // Last gate before anything is spent, mirroring the pre-broadcast marker read in
