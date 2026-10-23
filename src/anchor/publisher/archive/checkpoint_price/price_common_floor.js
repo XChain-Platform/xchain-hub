@@ -58,11 +58,12 @@ module.exports = {
         const kept = [], omitted = [];
         let prefix = true;
         for(const [round, group] of roundGroups(prices)){
-            const verifiable = await this.priceRoundVerifiableWithoutHistory(group);
-            if(verifiable) kept.push(...group);
+            const verdict = await this.priceRoundVerifiableWithoutHistory(group);
+            if(verdict === true) kept.push(...group);
             else omitted.push(round);
-            if(!verifiable && prefix) this._priceArchiveFloor = Math.max(this.priceArchiveFloor(), round + 1);
-            if(verifiable) prefix = false;
+            // Only a settled "below the floor" moves the floor; an unanswered read does not
+            if(verdict !== false) prefix = false;
+            if(verdict === false && prefix) this._priceArchiveFloor = Math.max(this.priceArchiveFloor(), round + 1);
         }
         if(omitted.length)
             logger.warn('StateAnchorPublisher: archive omits ' + omitted.length + ' price round(s) (' +
@@ -72,6 +73,9 @@ module.exports = {
         return kept;
     },
 
+    // True when a follower without the round can verify it, false when it cannot, and
+    // null when the shared source failed to answer: that round sits out this batch but
+    // does not move the floor, so a passing outage never skips a round for good.
     // A batch-proofed round carries no signatures, so a follower checks it only against
     // its own held rows and the floor cannot be read from the round; it is kept.
     async priceRoundVerifiableWithoutHistory(group){
@@ -80,7 +84,7 @@ module.exports = {
         const block = Number(first.reference_block);
         let set;
         try { set = await this.resolveCapabilitySet('price', block, this.network, true); }
-        catch(_e){ set = null; }
+        catch(_e){ return null; }
         if(!set || set.length === 0) return false;
         return this.quorumVerified(this.priceSnapshotCanonical(group, this.network),
                                    this.parseSigs(first.consensus_proof), set,

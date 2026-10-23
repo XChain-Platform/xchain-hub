@@ -101,6 +101,16 @@ describe('archive price rounds below the federation common floor', () => {
             .to.equal(false);
     });
 
+    it('sits a round out without moving the floor when the shared source fails to answer', async () => {
+        const leader = hub([], true);
+        const { old, recent } = rounds(leader);
+        leader.capSnapshot = Object.assign({}, sharedSnapshots, {
+            getWeightSnapshot: async () => { throw new Error('indexer unreachable'); }
+        });
+        expect(await leader.priceRoundsAboveCommonFloor(old.concat(recent))).to.deep.equal([]);
+        expect(leader.priceArchiveFloor()).to.equal(0);
+    });
+
     it('keeps every round when no shared snapshot source exists', async () => {
         const leader = hub([], true);
         leader.capSnapshot = null;
