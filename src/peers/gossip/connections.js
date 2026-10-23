@@ -24,6 +24,7 @@
 const http = require('http');
 const WebSocket = require('ws');
 const nodeUtil = require('node:util');
+const hubVersion = require('../../../package.json').version;
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -74,6 +75,7 @@ function acceptInboundSocket(pm, ws, req) {
 // The outbound socket handlers: they own the peer record this dial created.
 function wireOutboundSocket(pm, addr, peer, ws) {
     ws.on('open', () => {
+        const reconnecting = peer.failures > 0;
         peer.ws    = ws;
         peer.state = 'open';
         peer.reconnectDelay = pm.config.P2P_RECONNECT_BASE || 2000;
@@ -81,6 +83,7 @@ function wireOutboundSocket(pm, addr, peer, ws) {
         // ceiling so the next real outage is noticed promptly.
         peer.failures  = 0;
         peer.lastError = null;
+        if (reconnecting) pm.sendToPeer(addr, 'HEARTBEAT', pm.heartbeatData(hubVersion));
         pm.emit('peer:connect', addr);
         logger.info('Connected to peer: ' + addr);
     });
