@@ -33,12 +33,9 @@ const logger = getLogger();
 
 module.exports = {
 
-    // WRAPPER-anchored election key: deterministic, identical on every hub, and STABLE
-    // while the batch is stalled, so the failover ladder has a fixed anchor to climb
-    // against. Every field is the wrapper checkpoint's own identity, all of it
-    // quorum-agreed: chain/network are the wrapper's, and checkpoint_seq is derived from
-    // snapshot_block by the checkpoint engine, so two hubs holding the same wrapper
-    // cannot disagree about the key no matter what else diverges.
+    // Content-anchored election key: deterministic, identical on every hub, and stable
+    // while the oldest row remains pending. The wrapper checkpoint advances on its own
+    // cadence, so it cannot be the ladder anchor for a stalled archive.
     //
     // The batch_seq is deliberately NOT in the key. It came from
     // getNextBatchSeq, which is MAX(batch_seq)+1 over every batch_seq table THIS hub
@@ -50,13 +47,68 @@ module.exports = {
     // or, after a degraded round, each read itself rank 1 under its own key and NEITHER
     // published (hub0 at batch 38, hub1 at batch 39: a stuck federation).
     //
-    // Trade-off taken on purpose: successive batches under one wrapper now elect the same
-    // leader. Rotation still happens as checkpoint_seq advances, and within a wrapper the
-    // ladder (`rankUnlocked` against electionBlock - snapshot_block) is what moves the
-    // publish off a dead leader, which is exactly the job a STABLE anchor is needed for.
-    // `batchSeq` is accepted and ignored so existing call sites/stubs stay valid.
-    archiveElectionKey(cp, batchSeq){                      // eslint-disable-line no-unused-vars
+    // `batchSeq` remains accepted and ignored because it is hub-local until back-fill.
+    // The two-argument form is retained for callers inspecting legacy wrapper elections.
+    archiveElectionKey(cp, batchSeq, anchor){
+        if(anchor && Number.isSafeInteger(anchor.checkpoint_seq))
+            return 'XANCV2|' + anchor.chain + '|' + anchor.network + '|' + String(anchor.checkpoint_seq);
+        const contentBlock = Number(anchor && anchor.block !== undefined ? anchor.block : anchor);
+        if(Number.isSafeInteger(contentBlock) && contentBlock >= 0){
+            if(contentBlock === Number(cp.snapshot_block))
+                return 'XANCV2|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq);
+            return 'XANCV3|' + cp.chain + '|' + cp.network + '|' + String(contentBlock);
+        }
         return 'XANCV2|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq);
+    },
+
+    // Oldest BTC height represented by the archive cargo. New checkpoints can join a
+    // stalled batch without moving this value, so elapsed blocks increase monotonically.
+    // Capability snapshots are derived support rows and deliberately do not participate.
+    archiveElectionAnchor(archive, fallbackCheckpoint){
+        const blocks = [];
+        const add = (rows, field) => {
+            for(const row of (rows || [])){
+                const block = Number(row && row[field]);
+                if(Number.isSafeInteger(block) && block >= 0) blocks.push(block);
+            }
+        };
+        add(archive && archive.matches, 'snapshot_block');
+        add(archive && archive.calls, 'snapshot_block');
+        add(archive && archive.bridge_transfers, 'snapshot_block');
+        add(archive && archive.policy_snapshots, 'snapshot_block');
+        add(archive && archive.list_snapshots, 'snapshot_block');
+        add(archive && archive.state_checkpoints, 'snapshot_block');
+        add(archive && archive.price_snapshots, 'reference_block');
+        add(archive && archive.rewards, 'block_index');
+        const fallbackBlock = Number(fallbackCheckpoint && fallbackCheckpoint.snapshot_block !== undefined
+            ? fallbackCheckpoint.snapshot_block : fallbackCheckpoint);
+        const block = blocks.length ? Math.min(...blocks) : fallbackBlock;
+        if(!Number.isSafeInteger(block) || block < 0) return null;
+
+        let checkpoints = (archive && archive.state_checkpoints || []).filter(row =>
+            Number(row && row.snapshot_block) === block && Number.isSafeInteger(Number(row.checkpoint_seq)));
+        if(fallbackCheckpoint && typeof fallbackCheckpoint === 'object'){
+            const matching = checkpoints.find(row => String(row.chain) === String(fallbackCheckpoint.chain) &&
+                String(row.network) === String(fallbackCheckpoint.network));
+            if(matching) checkpoints = [matching];
+        }
+        if(checkpoints.length){
+            const checkpoint = checkpoints.slice().sort((a, b) => {
+                const ac = String(a.chain), bc = String(b.chain);
+                if(ac !== bc) return ac < bc ? -1 : 1;
+                const an = String(a.network), bn = String(b.network);
+                if(an !== bn) return an < bn ? -1 : 1;
+                return Number(a.checkpoint_seq) - Number(b.checkpoint_seq);
+            })[0];
+            return { block, chain: String(checkpoint.chain), network: String(checkpoint.network),
+                     checkpoint_seq: Number(checkpoint.checkpoint_seq) };
+        }
+        if(fallbackCheckpoint && typeof fallbackCheckpoint === 'object' &&
+           block === Number(fallbackCheckpoint.snapshot_block)){
+            return { block, chain: String(fallbackCheckpoint.chain), network: String(fallbackCheckpoint.network),
+                     checkpoint_seq: Number(fallbackCheckpoint.checkpoint_seq) };
+        }
+        return { block };
     },
 
     // Canonical a follower signs when it REFUSES to co-sign a proposal whose batch_seq it
@@ -96,6 +148,26 @@ module.exports = {
         if(rank === 0) return true;
         let unlocked = Number.isFinite(sinceBlocks) ? Math.floor(Math.max(0, sinceBlocks) / this.electionToleranceBlocks) : 0;
         return rank <= unlocked;
+    },
+
+    // One derivation for both halves of the signing round. Keeping the anchor, key,
+    // order, elapsed height and unlock verdict together prevents a follower from
+    // silently reverting to the advancing wrapper checkpoint while the leader uses
+    // the oldest pending cargo row.
+    archiveElectionDecision(cp, archive, electionPubkeys, pubkey, electionBlock){
+        const anchor = this.archiveElectionAnchor(archive, cp);
+        const key = this.archiveElectionKey(cp, null, anchor);
+        const order = canonicalForms.hashOrder(key, electionPubkeys);
+        const anchorBlock = anchor && Number(anchor.block);
+        const since = Number.isFinite(electionBlock) && Number.isFinite(anchorBlock)
+            ? electionBlock - anchorBlock : null;
+        return {
+            anchor,
+            key,
+            order,
+            since,
+            unlocked: this.rankUnlocked(order, pubkey, since)
+        };
     },
 
     // Resolve the qualifying set for (capability, block). Primary source is
