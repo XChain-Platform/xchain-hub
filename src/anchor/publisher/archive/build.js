@@ -98,6 +98,17 @@ module.exports = {
         return rank <= unlocked;
     },
 
+    electionContentAnchor(rows, fallbackBlock){
+        const blocks = [];
+        for(const row of (rows || [])){
+            const block = Number(row && row.snapshot_block);
+            if(Number.isSafeInteger(block) && block >= 0) blocks.push(block);
+        }
+        const fallback = Number(fallbackBlock);
+        const block = blocks.length ? Math.min(...blocks) : fallback;
+        return Number.isSafeInteger(block) && block >= 0 ? block : null;
+    },
+
     // Resolve the qualifying set for (capability, block). Primary source is
     // CapabilitySnapshot.getSnapshot (deterministic from on-chain BTC stakes,
     // identical on EVERY hub), so the archive builder (leader) and the archive

@@ -116,6 +116,13 @@ module.exports = {
         return order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
     },
 
+    bundleLadderBlock(sections, btcBlock){
+        if(!Number.isFinite(btcBlock)) return btcBlock;
+        const snapshotBlock = Math.max(0, ...(sections || []).map(section => Number(section.snapshot_block)));
+        const anchorBlock = this.electionContentAnchor(sections, snapshotBlock);
+        return anchorBlock === null ? btcBlock : btcBlock + snapshotBlock - anchorBlock;
+    },
+
     // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (its checkpoint
     // ORDINAL, seq divided by the cadence step, divisible by
     // anchorEveryNCheckpoints - see the constructor for why the raw seq cannot
@@ -223,7 +230,8 @@ module.exports = {
                           'signer count comes down');
         }
         for(let group of split.bundles)
-            await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped,
+            await this.publishBundle(signer, network, group, this.bundleLadderBlock(group, btcBlock),
+                                     failoverOnly, anchored, skipped,
                                      { active: foldActive, block: foldBlock });
         if(foldActive) this.suppressLegacyArchiveLeg();
     },
