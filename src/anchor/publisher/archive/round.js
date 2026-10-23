@@ -211,6 +211,7 @@ module.exports = {
     // one repeat.
     archiveRepeatsLastPublish(fingerprint){
         if(!fingerprint || fingerprint !== this._lastPublishedArchiveFingerprint) return false;
+        this._pendingMatches = 0;
         if(this._archiveRepeatLoggedFingerprint !== fingerprint){
             this._archiveRepeatLoggedFingerprint = fingerprint;
             logger.warn('StateAnchorPublisher: pending archive rows are the set batch ' +
