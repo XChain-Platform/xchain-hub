@@ -21,6 +21,9 @@
 const { snapshotCheckpointBlock } = require('../../consensus/snapshot_checkpoint/canonical.js');
 const { parseCapabilityProofQuery } = require('./capability_snapshot_proof/params.js');
 const { createMissLog } = require('./capability_snapshot_proof/miss_log.js');
+const {
+    createUpstreamBudget, resolveProofRpm, upstreamRetryAfterMs
+} = require('./capability_snapshot_proof/upstream_budget.js');
 
 const PUBKEY = /^[0-9a-fA-F]{64}$/;
 
@@ -37,19 +40,40 @@ function defaultPubkeys(rows) {
     return pubkeys;
 }
 
+// One BTC indexer call. Resolves { proof } (null when the indexer had no
+// usable answer) or { retryAfterMs } when the indexer refused this hub's
+// address with a 429; any other failure throws and the route answers 503.
 async function fetchProof(ctx, params) {
     const { hub, axios } = ctx;
     const url = await hub.resolveIndexerUrl('BTC');
-    if (!url) return null;
+    if (!url) return { proof: null };
     const headers = typeof hub.btcIndexerHeaders === 'function'
         ? hub.btcIndexerHeaders()
         : { 'Content-Type': 'application/json' };
-    const response = await axios.post(url, {
-        jsonrpc: '2.0', method: 'getcapabilitystakeproof', params, id: 1
-    }, { headers, timeout: 15000 });
+    let response;
+    try {
+        response = await axios.post(url, {
+            jsonrpc: '2.0', method: 'getcapabilitystakeproof', params, id: 1
+        }, { headers, timeout: 15000 });
+    } catch (error) {
+        const retryAfterMs = upstreamRetryAfterMs(error);
+        if (retryAfterMs === null) throw error;
+        return { retryAfterMs };
+    }
     const data = response && response.data;
-    if (!data || data.error || !data.result || data.result.error) return null;
-    return data.result;
+    if (!data || data.error || !data.result || data.result.error) return { proof: null };
+    return { proof: data.result };
+}
+
+// 429 with Retry-After in whole seconds. The body keeps the { error } shape
+// the mirror clients already read beside 404 and 503.
+function rateLimited(res, retryAfterS) {
+    res.set('Retry-After', String(Math.max(1, Math.ceil(retryAfterS))));
+    return res.status(429).json({ error: 'PROOF_RATE_LIMITED' });
+}
+
+function sleep(ms) {
+    return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 function checkpointBody(snapshotBlock, capability, checkpoint, proof) {
@@ -72,6 +96,9 @@ function checkpointBody(snapshotBlock, capability, checkpoint, proof) {
 function mountCapabilitySnapshotProof(app, ctx) {
     const { hub, HUB_NETWORK, p2pConfig } = ctx;
     const missLog = createMissLog();
+    // One budget per mounted hub: every client's proof fetch draws from it,
+    // so the total this hub sends the BTC indexer stays under its per-IP limit.
+    const budget = ctx.proofBudget || createUpstreamBudget({ rpm: resolveProofRpm(ctx.hubConfig) });
     app.get('/hub-db/snapshot/capability_snapshot_proof', async (req, res) => {
         const parsed = parseCapabilityProofQuery(req.query, configuredCapabilities(hub, p2pConfig));
         if (parsed.error) return res.status(400).json(parsed);
@@ -93,11 +120,20 @@ function mountCapabilitySnapshotProof(app, ctx) {
                 return res.status(404).json({ error: 'SNAPSHOT_NOT_YET_CHECKPOINTED' });
             }
 
-            const proof = await fetchProof(ctx, {
+            const slot = budget.reserve();
+            if (!slot.ok) return rateLimited(res, slot.retryAfterS);
+            await sleep(slot.waitMs);
+
+            const fetched = await fetchProof(ctx, {
                 capability: parsed.capability,
                 block_index: blockIndex,
                 pubkeys,
             });
+            if (fetched.retryAfterMs !== undefined) {
+                budget.pauseFor(fetched.retryAfterMs);
+                return rateLimited(res, fetched.retryAfterMs / 1000);
+            }
+            const proof = fetched.proof;
             if (proof === null) return res.status(503).json({ error: 'PROOF_UNAVAILABLE' });
             return res.status(200).json(checkpointBody(
                 parsed.snapshotBlock, parsed.capability, checkpoint, proof));
