@@ -5352,6 +5352,14 @@
       "288aeb45d747bddecf7543b31287df6338b6f1666400b207bc109310c57b4f92",
       "5b0f78ab829f0451a80360a346c123b8ab0d492c368dd9acede447a2f8256970"
     ],
+    "655d065ffaccdffe": [
+      "c4e4de923af99374b16aa560dca8ae4524f943bd07f88f226b230e52004eca32",
+      "50d99581a19073610b950ef14c59d51a73ffe7da995cce3e4d978d3a4b5085ae",
+      "4a7ef35c049013bb71bd89a47627dfe7fdf31c7b4093f6a72fd94d0319f3eccc",
+      "5c9e235ade46a746ec9ce7e35c1664d8726e1a2be8dbdc37157ffbc37e107079",
+      "32dc5fafc551420bb27cfeccf6c716f6708add22ba6622c0d12b4d57118d7479",
+      "4c8c75bdf98e68e713d175bad1db3adbe3f2041115e10ab9281726b9b6b2a72e"
+    ],
     "6570d185ba838173": [
       "b7b2fbf77594a7790a4615c629dbb0750e6e8caea66f9fafa8c03d6361850c50",
       "9703706db31d479bc98b2baf8bd1e67f5a0e661e5bf6a8607c3299047c0939ba",
@@ -5644,6 +5652,13 @@
     "683d9d8ccab7b066": [
       "14aa5fac81c71001c1368402fdf3b8c558b796630a7e7fe4d40f4d593106e819",
       "781224f2c92c6c0c8a6f197055879644761a4a8189a2c00d37d50bf222ee94f9"
+    ],
+    "687152549e7f4134": [
+      "4a6d88d3b0c3c59925b416e82c34278087df5ea1008ab668887a965b596b0d96",
+      "ec2ec0fa92d708db4c6fc05ccd79802488ce16190a79e9624b404a4c0b9e3f03",
+      "a6d0dbd1d3521bad1dc3467382f6b22f22095706b9972b42eb41f80acfde3990",
+      "a5343b18f695f77ac2a35b64616c1d02fade9a7198bcb66e89aec7374f7abd51",
+      "bc9da3bdf0cc39d7a0814f1eb4d190fe3d0db639f3247d8db8ce0eb732ee6210"
     ],
     "687ed818bedd3418": [
       "fde62f4785a7fa02ffe63b1c55b6d114689d119481d1231fb1f6b7cf9d80a866",
@@ -12695,8 +12710,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1017,
-      "titleCount": 9254,
+      "fileCount": 1019,
+      "titleCount": 9265,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12890,8 +12905,10 @@
         "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/rate_limit.test.js": "687152549e7f4134",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
+        "test/unit/api/capability_snapshot_proof/upstream_budget.test.js": "655d065ffaccdffe",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
@@ -13771,8 +13788,8 @@
       }
     },
     "test": {
-      "fileCount": 1017,
-      "titleCount": 9254,
+      "fileCount": 1019,
+      "titleCount": 9265,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13966,8 +13983,10 @@
         "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/rate_limit.test.js": "687152549e7f4134",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
+        "test/unit/api/capability_snapshot_proof/upstream_budget.test.js": "655d065ffaccdffe",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
@@ -14794,8 +14813,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1100,
-      "titleCount": 10121,
+      "fileCount": 1102,
+      "titleCount": 10132,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15072,8 +15091,10 @@
         "test/unit/api/boot_guard/oracle_epoch_pin_guard.test.js": "d7e26a56ca77185a",
         "test/unit/api/capability_snapshot_proof/miss_log.test.js": "0f0906f4fcb2462a",
         "test/unit/api/capability_snapshot_proof/params.test.js": "8761d137520f9a2c",
+        "test/unit/api/capability_snapshot_proof/rate_limit.test.js": "687152549e7f4134",
         "test/unit/api/capability_snapshot_proof/reply.test.js": "d8a6d18ca39537c7",
         "test/unit/api/capability_snapshot_proof/route.test.js": "904ca9cd1a9f7e0b",
+        "test/unit/api/capability_snapshot_proof/upstream_budget.test.js": "655d065ffaccdffe",
         "test/unit/api/cors_origin.test.js": "108c530a5013a944",
         "test/unit/api/docs_openrpc.test.js": "637366ac03d9525c",
         "test/unit/api/feed_key/feed_key_auth.test.js": "dff76a1ceae2904f",
