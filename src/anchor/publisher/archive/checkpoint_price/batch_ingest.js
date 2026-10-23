@@ -27,12 +27,16 @@
 
 const { getLogger } = require('../../../../observability');
 const logger = getLogger();
+const lifecycleMethods = require('../../lifecycle.js');
 
 const PRICE_LANDING_CHAIN = 'DOGE';
 const PRICE_BATCH_LIMIT = 1000;
 // Pages of getpricebatches one back-fill reads; a backlog past this many pages is
 // stamped up to where the answer was complete and the rest waits for the next archive.
 const PRICE_BATCH_MAX_PAGES = 20;
+const PRICE_BACKFILL_ROW_PAGE = 100;
+const PRICE_BACKFILL_MAX_PAGES = 20;
+const PRICE_BACKFILL_INTERVAL_MS = 15 * 60 * 1000;
 
 function wholeNumber(value, minimum){
     if(typeof value === 'string' && !/^\d+$/.test(value)) return null;
@@ -95,7 +99,7 @@ function earliestLandingForRound(round, batches){
     return landed;
 }
 
-module.exports = {
+const methods = {
 
     // Every valid PRICE batch overlapping [first, last] on the landing chain, read page by
     // page. Batches come back ordered by first_round, so once a page is truncated every
@@ -148,6 +152,100 @@ module.exports = {
             logger.info('StateAnchorPublisher: back-filled the PRICE batch landing clock on ' + stamped +
                         ' row(s) from the ' + PRICE_LANDING_CHAIN + ' indexer');
         return stamped;
+    },
+
+    // One bounded sweep. A table beyond the page budget resumes from its row cursor on
+    // the next slow tick, and wraps at the end so unresolved landing clocks are retried.
+    async runPriceBatchLandingBackfill(){
+        if(this.priceLandingBackfillRunning) return 0;
+        const aggregator = this.hub && this.hub.priceAggregator;
+        if(!aggregator || typeof aggregator.stampBatchLanding !== 'function') return 0;
+        this.priceLandingBackfillRunning = true;
+        let stamped = 0;
+        try {
+            let cursor = wholeNumber(this.priceLandingBackfillRowCursor, 0) || 0;
+            for(let page = 0; page < PRICE_BACKFILL_MAX_PAGES; page++){
+                if(!this.db || typeof this.db.findPriceSnapshotsById !== 'function') break;
+                const answer = await this.db.findPriceSnapshotsById(cursor, PRICE_BACKFILL_ROW_PAGE);
+                if(!Array.isArray(answer)) throw new Error('zero-stamped round query returned no row list');
+                if(answer.length === 0){
+                    this.priceLandingBackfillRowCursor = 0;
+                    break;
+                }
+                const nextCursor = Math.max(...answer.map(row => wholeNumber(row && row.id, 1) || 0));
+                if(nextCursor <= cursor) throw new Error('price snapshot page did not advance');
+                this.priceLandingBackfillRowCursor = nextCursor;
+                const rounds = Array.from(new Set(answer.filter(row =>
+                    String(row && row.status) !== 'skipped' &&
+                    wholeNumber(row && row.batch_block_time, 0) === 0).map(row =>
+                    wholeNumber(row && row.round_number, 0)).filter(round => round !== null)))
+                    .sort((a, b) => a - b);
+                if(rounds.length > 0){
+                    const landings = await this.fetchPriceBatchLandings(rounds[0], rounds[rounds.length - 1]);
+                    if(landings !== null){
+                        for(const round of rounds){
+                            if(round >= landings.completeBelow) break;
+                            const blockTime = earliestLandingForRound(round, landings.batches);
+                            if(blockTime !== null) stamped += await aggregator.stampBatchLanding(round, blockTime);
+                        }
+                    }
+                }
+                cursor = nextCursor;
+                if(answer.length < PRICE_BACKFILL_ROW_PAGE){
+                    this.priceLandingBackfillRowCursor = 0;
+                    break;
+                }
+            }
+        } catch(error){
+            logger.warn('StateAnchorPublisher: cannot sweep zero-stamped PRICE landing clocks: ' +
+                (error && error.message ? error.message : error));
+        } finally {
+            this.priceLandingBackfillRunning = false;
+        }
+        if(stamped > 0)
+            logger.info('StateAnchorPublisher: swept the PRICE batch landing clock onto ' + stamped +
+                        ' row(s) from the ' + PRICE_LANDING_CHAIN + ' indexer');
+        return stamped;
+    },
+
+    // Repair once at startup, then slowly enough that an unavailable indexer is not
+    // hammered. The running guard also keeps an archive-triggered repair independent.
+    async startPriceBatchLandingBackfill(){
+        if(!this.priceLandingBackfillTimer){
+            this.priceLandingBackfillTimer = setInterval(() => {
+                this.runPriceBatchLandingBackfill().catch(error =>
+                    logger.warn('StateAnchorPublisher: PRICE landing-clock sweep failed: ' +
+                        (error && error.message ? error.message : error)));
+            }, PRICE_BACKFILL_INTERVAL_MS);
+            if(this.priceLandingBackfillTimer.unref) this.priceLandingBackfillTimer.unref();
+        }
+        return this.runPriceBatchLandingBackfill();
+    },
+
+    stopPriceBatchLandingBackfill(){
+        if(this.priceLandingBackfillTimer){
+            clearInterval(this.priceLandingBackfillTimer);
+            this.priceLandingBackfillTimer = null;
+        }
     }
 
 };
+
+const lifecycleStart = lifecycleMethods.start;
+const lifecycleStop = lifecycleMethods.stop;
+
+// This part is loaded before lifecycleMethods is installed on the publisher prototype,
+// so extend start and stop here without widening the checkpoint_price surface.
+lifecycleMethods.start = async function(){
+    const result = await lifecycleStart.call(this);
+    if(this.enabled && typeof this.startPriceBatchLandingBackfill === 'function')
+        await this.startPriceBatchLandingBackfill();
+    return result;
+};
+
+lifecycleMethods.stop = async function(){
+    if(typeof this.stopPriceBatchLandingBackfill === 'function') this.stopPriceBatchLandingBackfill();
+    return lifecycleStop.call(this);
+};
+
+module.exports = methods;
