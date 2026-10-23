@@ -277,7 +277,7 @@ async function feature18p2PLifecycleRealLocalhostSocketsRestartDrive() {
 }
 function registerFeature18p2PLifecycleRealLocalhostSocketsPart1() {
   it('two nodes connect, exchange a message, register peers, and shut down cleanly', async function () {
-    this.timeout(15000);
+    this.timeout(10000);
     let portA = await feature18p2PLifecycleRealLocalhostSocketsFreePort();
     let portB = await feature18p2PLifecycleRealLocalhostSocketsFreePort();
     let a = feature18p2PLifecycleRealLocalhostSocketsMkNode(portA, [], 'ws://nodeA:1');
