@@ -119,8 +119,8 @@ module.exports = {
     bundleLadderBlock(sections, btcBlock){
         if(!Number.isFinite(btcBlock)) return btcBlock;
         const snapshotBlock = Math.max(0, ...(sections || []).map(section => Number(section.snapshot_block)));
-        const anchorBlock = this.electionContentAnchor(sections, snapshotBlock);
-        return anchorBlock === null ? btcBlock : btcBlock + snapshotBlock - anchorBlock;
+        const anchor = this.archiveElectionAnchor({ state_checkpoints: sections }, snapshotBlock);
+        return anchor === null ? btcBlock : btcBlock + snapshotBlock - Number(anchor.block);
     },
 
     // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (its checkpoint
