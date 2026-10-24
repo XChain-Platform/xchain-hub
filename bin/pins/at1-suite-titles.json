@@ -4907,6 +4907,13 @@
       "41e6c9a65bcd5b8dbb35b88148e20366773d57d9758ed0fa18e2639b16ed7c6a",
       "286261a9515bb9e4786e7c8385b638154cd8b8cd00155285a89f3595eca4af3f"
     ],
+    "58ef1b9e4dba84ea": [
+      "c4ab2f3f363e00b8887b647ddc9e6101aff674292e856af5adf64cf971bd5bae",
+      "87fd7c3b0ab6376d62acb617234f8defa68aa3f95e234e4afd838330cfd02447",
+      "a9aa719383a4e81a7510f6fe8a62ca06267924fb64a7d29a1a5ecccac6923c8d",
+      "31d0d54ea94e79d0bbed63ae4e8a0bc50b3ce2805b3150ec43ed99dcf407becf",
+      "935bae56d02b95bd8a1d1aae2c8df85dd51058ffd120e1b20964f054ffe346f2"
+    ],
     "597a2a664338906e": [
       "841a762ea4204a0ec3b71e78ae90277b13aac1f00049b04c9ab972bdec413cdc",
       "e7fdb275d3533a6942bbf8c8adc0962e9bcde4640e503a0117f115b92afe4318"
@@ -8538,12 +8545,6 @@
       "4e7bb0c362ebb5e97e7f730e2cac3d4f99623a6fc4ddfd0d3ed788cd33e06d53",
       "9a4a956ccc73e902c3f3857571e2cda6be68b72505ae862471b585475020a947",
       "75fc24af41d961898ca159fd0e98619cff3699f4c9537c79bf45a23d7cab0a02"
-    ],
-    "9f50cad3aa28e0ea": [
-      "87fd7c3b0ab6376d62acb617234f8defa68aa3f95e234e4afd838330cfd02447",
-      "a9aa719383a4e81a7510f6fe8a62ca06267924fb64a7d29a1a5ecccac6923c8d",
-      "31d0d54ea94e79d0bbed63ae4e8a0bc50b3ce2805b3150ec43ed99dcf407becf",
-      "935bae56d02b95bd8a1d1aae2c8df85dd51058ffd120e1b20964f054ffe346f2"
     ],
     "9f6dc076e4b933fb": [
       "6eecd37c5966cb976849d2607e8ecae3d35a470b98cde1bed2a9b65cd5fe64e7",
@@ -12882,7 +12883,7 @@
         "ci:regression"
       ],
       "fileCount": 1039,
-      "titleCount": 9392,
+      "titleCount": 9393,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13852,7 +13853,7 @@
         "test/unit/rollcall/rollcall_status_rpc.test.js": "ae8c994522bae59d",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
-        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "9f50cad3aa28e0ea",
+        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "58ef1b9e4dba84ea",
         "test/unit/shared/admission/admission_height.test.js": "566a02b7261dcb10",
         "test/unit/shared/admission/admission_height_runtime.test.js": "3522894cae9f3f4b",
         "test/unit/shared/admission/admission_network_threading.test.js": "c87858c20273d2d3",
@@ -13980,7 +13981,7 @@
     },
     "test": {
       "fileCount": 1039,
-      "titleCount": 9392,
+      "titleCount": 9393,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14950,7 +14951,7 @@
         "test/unit/rollcall/rollcall_status_rpc.test.js": "ae8c994522bae59d",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
-        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "9f50cad3aa28e0ea",
+        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "58ef1b9e4dba84ea",
         "test/unit/shared/admission/admission_height.test.js": "566a02b7261dcb10",
         "test/unit/shared/admission/admission_height_runtime.test.js": "3522894cae9f3f4b",
         "test/unit/shared/admission/admission_network_threading.test.js": "c87858c20273d2d3",
@@ -15025,7 +15026,7 @@
     },
     "test:all": {
       "fileCount": 1123,
-      "titleCount": 10261,
+      "titleCount": 10262,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16079,7 +16080,7 @@
         "test/unit/rollcall/rollcall_status_rpc.test.js": "ae8c994522bae59d",
         "test/unit/rollcall/validator_order.test.js": "2d844d309ea883e2",
         "test/unit/security/configuration/dependency_advisories.test.js": "5cc2b8143bdd5808",
-        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "9f50cad3aa28e0ea",
+        "test/unit/shared/admission/admission_chain_margin_stamp.test.js": "58ef1b9e4dba84ea",
         "test/unit/shared/admission/admission_height.test.js": "566a02b7261dcb10",
         "test/unit/shared/admission/admission_height_runtime.test.js": "3522894cae9f3f4b",
         "test/unit/shared/admission/admission_network_threading.test.js": "c87858c20273d2d3",

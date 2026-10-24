@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "cac4806586d5e35020f85dd9f0a6b8106f9838a259c9a4b94a6c6cecb2678c06",
+  "consensus_rules_digest": "e6b87d218f6767c08e524a6baaf0bc528971f8a33cb21c3b5375bd510682cd93",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -44,8 +44,8 @@
     "price_scale_activation.PRICE_V1_FEE_MAX_LENGTH": "20",
     "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154777}",
     "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"mainnet\":null,\"regtest\":0}",
-    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16,\"remote_token_snapshots\":14}}",
+    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"LTC:mainnet\":null,\"LTC:testnet\":9999999999,\"mainnet\":null,\"regtest\":0}",
+    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16,\"remote_token_snapshots\":14},\"LTC\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":17,\"remote_token_snapshots\":14}}",
     "order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":156908}",
     "remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":null,\"testnet\":156908}"
   },
