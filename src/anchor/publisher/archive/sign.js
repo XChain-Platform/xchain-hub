@@ -36,8 +36,10 @@ module.exports = {
 
     // Every follower check of an archive round reads its set here; network is
     // the record's quorum network on which that set is judged.
-    async archiveFollowerPubkeys(blockIndex, network){
-        return this.getActiveOraclePublishPubkeys(blockIndex);
+    async archiveFollowerPubkeys(blockIndex, network, capability = 'oracle_publish'){
+        return capability === 'archive_publish'
+            ? this.getArchivePublishPubkeys(blockIndex, network)
+            : this.getActiveOraclePublishPubkeys(blockIndex);
     },
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
@@ -62,7 +64,8 @@ module.exports = {
             return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
                 'election_block=' + electionBlock + ' local_tip=' + myBtc);
         let cpNet = resolveQuorumNetwork(cp, this.network);
-        let electionPubkeys = await this.archiveFollowerPubkeys(electionBlock, cpNet);
+        let electionPubkeys = await this.archiveFollowerPubkeys(
+            electionBlock, cpNet, 'archive_publish');
         if(!electionPubkeys.includes(sender)) return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null) return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
@@ -79,10 +82,11 @@ module.exports = {
         this.bindObservedArchiveLeader(d, sender, cp, electionPubkeys);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
-        // signer holds oracle_publish AT snapshot_block, so a follower present only
-        // in the current election set would contribute a signature that is dropped
-        // on-chain and could drag an otherwise-valid archive below quorum.
-        let signingPubkeys = await this.archiveFollowerPubkeys(Number(cp.snapshot_block), cpNet);
+        // signer holds the gated archive capability AT snapshot_block, so a follower
+        // present only in the current election set would contribute a signature that
+        // is dropped on-chain and could drag an otherwise-valid archive below quorum.
+        let signingPubkeys = await this.archiveFollowerPubkeys(
+            Number(cp.snapshot_block), cpNet, 'archive_publish');
         if(!signingPubkeys.includes(myPubkey)) return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
@@ -94,7 +98,7 @@ module.exports = {
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
         if(!archive) return this.noteArchiveSignReqRefusal('archive_invalid', d, sender);
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
-        // decides which oracle_publish group the completeness check requires, and `mine`
+        // decides which archive signing group the completeness check requires, and `mine`
         // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
             return this.noteArchiveSignReqRefusal('archive_diverges_from_local', d, sender);
@@ -282,14 +286,15 @@ module.exports = {
         // (hub0 batch 38 / hub1 batch 39, neither publishing). Rows stay pending and the
         // next flush draws above the floor.
         //
-        // Authenticated against the oracle_publish set at THIS round's own election
+        // Authenticated against the archive publisher set at THIS round's own election
         // block (the same population that elected the round) plus a signature over the
         // refusal canonical, and only a refusal naming a seq at or above ours can move
         // anything, so a member cannot walk our numbering backwards or forwards at will.
         if(d.consumed_seq !== undefined && d.consumed_seq !== null){
             if(Number(d.consumed_seq) < round.batchSeq) return;
             let electionPubkeys = await this.archiveFollowerPubkeys(
-                round.electionBlock, resolveQuorumNetwork(round.cp, this.network));
+                round.electionBlock, resolveQuorumNetwork(round.cp, this.network),
+                'archive_publish');
             if(!electionPubkeys.includes(pubkey)) return;
             if(!ValidatorIdentity.verify(this.seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;
