@@ -11,46 +11,39 @@ const StateAnchorPublisher = require('../../../src/anchor/publisher');
 const StateCheckpointEngine = require('../../../src/anchor/checkpoint_engine.js');
 const ValidatorIdentity = require('../../../src/validators/identity');
 const rewardGate = require('../../../src/consensus/gates/anchor_reward_gate.js');
-const { BRIDGE_KEYS, POLICY_KEYS, CHECKPOINT_KEYS, PRICE_KEYS } =
-    require('../../../src/anchor/publisher/constants.js');
+const { BRIDGE_KEYS, POLICY_KEYS, CHECKPOINT_KEYS, PRICE_KEYS } = require('../../../src/anchor/publisher/constants.js');
 const vectors = require('../../fixtures/anchor_archive_vectors.json');
 const { siblingCheckout } = require('../../helpers/sibling_checkout.js');
-const INDEXER_ROOT = [
-    path.resolve(__dirname, '../../../../xchain-indexer'),
-    path.resolve(__dirname, '../../../../../../../xchain-indexer')
-].find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
+const INDEXER_ROOT = [path.resolve(__dirname, '../../../../xchain-indexer'),
+    path.resolve(__dirname, '../../../../../../../xchain-indexer')]
+    .find(candidate => siblingCheckout(__dirname, path.join(candidate, 'bin/recovery.js')).usable);
 const indexerLoad = { error: null }; // an indexer cloned without its node_modules cannot load: skip below, never abort the run
 const indexerModule = rel => { try { return INDEXER_ROOT && !indexerLoad.error ? require(path.join(INDEXER_ROOT, rel)) : {}; } catch (err) { indexerLoad.error = err; return {}; } };
 if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETWORK: 'regtest' });
-const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519, indexerPrices] = ['bin/recovery.js',
-    'test/fixtures/anchor-archive.js', 'test/helpers/recovery_stubs.js', 'src/consensus/bridge_settle.js',
-    'src/consensus/ed25519.js', 'bin/recovery/checkpoint_price.js'].map(indexerModule);
+const indexerModules = ['bin/recovery.js', 'test/fixtures/anchor-archive.js', 'test/helpers/recovery_stubs.js',
+    'src/consensus/bridge_settle.js', 'src/consensus/ed25519.js', 'bin/recovery/checkpoint_price.js'];
+const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519, indexerPrices] =
+    indexerModules.map(indexerModule);
 const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK, PRE_GATE_WRAPPER_BLOCK = -1;
 const TXID = 'ab'.repeat(32), PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
 const copy = value => JSON.parse(JSON.stringify(value));
 function sourceFor(key){ return 'src_' + key.pubkey.slice(0, 16); }
 const capabilitySet = keys => keys.map(key => ({ pubkey: key.pubkey, amount: '5', source: sourceFor(key) }));
 function signatures(keys, canonical){
-    return JSON.stringify(keys.slice(0, 3).map(key => ({
-        pubkey: key.pubkey, sig: indexerFixture.signHex(key, canonical)
-    })));
+    return JSON.stringify(keys.slice(0, 3).map(key =>
+        ({ pubkey: key.pubkey, sig: indexerFixture.signHex(key, canonical) })));
 }
 function signRows(rows, keys, canonical){
     return rows.map(input => {
-        const row = copy(input);
-        row.validator_signatures = signatures(keys, canonical(row));
+        const row = copy(input); row.validator_signatures = signatures(keys, canonical(row));
         return row;
     });
 }
-function policyHash(row){
-    return indexerBridge.policyHash(indexerBridge.parseMembership(row.allow_list),
-        indexerBridge.parseMembership(row.block_list), !!row.sleeping);
-}
+function policyHash(row){ return indexerBridge.policyHash(indexerBridge.parseMembership(row.allow_list),
+    indexerBridge.parseMembership(row.block_list), !!row.sleeping); }
 function priceAdmitBlocks(row){
-    if(row.admit_block_btc == null && row.admit_block_ltc == null &&
-       row.admit_block_doge == null) return null;
-    return { BTC: row.admit_block_btc, LTC: row.admit_block_ltc,
-        DOGE: row.admit_block_doge };
+    if(row.admit_block_btc == null && row.admit_block_ltc == null && row.admit_block_doge == null) return null;
+    return { BTC: row.admit_block_btc, LTC: row.admit_block_ltc, DOGE: row.admit_block_doge };
 }
 function signPriceRound(rows, keys){
     const first = rows[0];
@@ -86,32 +79,25 @@ function buildPublisher(db, sets, rewardSource){
             resolveSourceByPubkey: async () => rewardSource || null }
     };
     const publisher = new StateAnchorPublisher(hub);
-    publisher.resolveCapabilitySet = async (capability, block) =>
-        sets[capability + '@' + Number(block)] || [];
+    publisher.resolveCapabilitySet = async (capability, block) => sets[capability + '@' + Number(block)] || [];
     return publisher;
 }
-function rowDb(held, stamps){
-    held = held || {};
-    stamps = stamps || [];
+function rowDb(held = {}, stamps = []){
     return {
-        getCrossChainMatchByMatchId: async id =>
-            (held.matches || []).filter(row => row.match_id === id),
+        getCrossChainMatchByMatchId: async id => (held.matches || []).filter(row => row.match_id === id),
         getCrossChainCallByCallIdAndPhase: async (id, phase) => (held.calls || [])
             .filter(row => row.call_id === id && row.phase === phase),
-        getBridgeTransferByTransferId: async id => (held.bridges || [])
-            .filter(row => row.transfer_id === id),
-        getPolicySnapshotBySnapshotId: async id => (held.policies || [])
-            .filter(row => row.snapshot_id === id),
+        getBridgeTransferByTransferId: async id => (held.bridges || []).filter(row => row.transfer_id === id),
+        getPolicySnapshotBySnapshotId: async id => (held.policies || []).filter(row => row.snapshot_id === id),
         getStateCheckpointByChainAndNetworkAndCheckpointSeq: async (chain, network, seq) =>
-            (held.checkpoints || []).filter(row => row.chain === chain &&
-                row.network === network && Number(row.checkpoint_seq) === Number(seq)),
+            (held.checkpoints || []).filter(row => row.chain === chain && row.network === network &&
+                Number(row.checkpoint_seq) === Number(seq)),
         findPriceSnapshotsForRound: async round => (held.prices || [])
             .filter(row => Number(row.round_number) === Number(round)),
         findValidatorRewardsByRewardType: async () => [],
         updateCrossChainMatchByMatchIdAndBatchSeq: async (...args) => stamps.push(['match', ...args]),
         updateCrossChainCall: async (...args) => stamps.push(['call', ...args]),
-        updateValidatorRewardArchiveBatchSeqByQualifier: async (...args) =>
-            stamps.push(['reward-qualified', ...args]),
+        updateValidatorRewardArchiveBatchSeqByQualifier: async (...args) => stamps.push(['reward-qualified', ...args]),
         updateValidatorRewardArchiveBatchSeq: async (...args) => stamps.push(['reward', ...args]),
         updateBridgeTransferArchiveBatchSeq: async (...args) => stamps.push(['bridge', ...args]),
         updatePolicySnapshotArchiveBatchSeq: async (...args) => stamps.push(['policy', ...args]),
@@ -122,21 +108,19 @@ function rowDb(held, stamps){
 }
 function archiveRows(inputs){
     return {
-        bridges: inputs.bridges || [], policies: inputs.policies || [],
-        checkpoints: inputs.checkpoints || [], prices: inputs.prices || [],
-        tombstones: inputs.tombstones || []
+        bridges: inputs.bridges || [], policies: inputs.policies || [], checkpoints: inputs.checkpoints || [],
+        prices: inputs.prices || [], tombstones: inputs.tombstones || []
     };
 }
 async function buildArchive(publisher, inputs){
     const wrapperBlock = inputs.wrapper_block ?? WRAPPER_BLOCK;
-    const result = await publisher.buildArchive(
-        inputs.network, inputs.batch_seq, inputs.matches || [], wrapperBlock,
+    const result = await publisher.buildArchive(inputs.network, inputs.batch_seq,
+        inputs.matches || [], wrapperBlock,
         inputs.calls || [], inputs.rewards || [], archiveRows(inputs));
     if(wrapperBlock === WRAPPER_BLOCK){
         const archive = JSON.parse(result.json);
-        const publishRows = archive.capability_snapshots
-            .filter(row => row.capability === 'oracle_publish' &&
-                Number(row.snapshot_block) === wrapperBlock)
+        const publishRows = archive.capability_snapshots.filter(row =>
+            row.capability === 'oracle_publish' && Number(row.snapshot_block) === wrapperBlock)
             .map(row => Object.assign({}, row, { capability: 'archive_publish' }));
         archive.capability_snapshots.push(...publishRows);
         result.json = JSON.stringify(archive);
@@ -150,46 +134,38 @@ function headAndChunks(publisher, json, batchSeq, matchCount, wrapperKeys, wrapp
     for(let offset = 0; offset < b64.length; offset += chunkSize)
         chunks.push(b64.slice(offset, offset + chunkSize));
     const crc = publisher.crc32Hex(json);
-    const cp = Object.assign({}, indexerFixture.CP, { snapshot_block: wrapperBlock });
+    const cp = { ...indexerFixture.CP, snapshot_block: wrapperBlock };
     const canonical = publisher.archiveCanonical(cp, batchSeq, matchCount, crc, chunks.length);
     const v1 = Object.assign({}, cp, {
         version: 1, action_index: batchSeq * 10 + 1,
         snapshot_block: wrapperBlock,
-        match_batch_seq: batchSeq, match_count: matchCount,
-        batch_crc32: crc, total_chunks: chunks.length,
-        archive_b64: chunks[0],
+        match_batch_seq: batchSeq, match_count: matchCount, batch_crc32: crc,
+        total_chunks: chunks.length, archive_b64: chunks[0],
         validator_signatures: signatures(wrapperKeys, canonical)
     });
     const v2s = chunks.slice(1).map((archiveB64, index) => ({
         version: 2, action_index: batchSeq * 10 + index + 2,
         match_batch_seq: batchSeq, chunk_index: index + 1,
-        total_chunks: chunks.length,
-        archive_b64: archiveB64
+        total_chunks: chunks.length, archive_b64: archiveB64
     }));
     return { v1, v2s };
 }
 function fixtureArchive(batch){
-    const joined = [batch.v1.archive_b64]
-        .concat(batch.v2s.sort((a, b) => a.chunk_index - b.chunk_index).map(row => row.archive_b64))
-        .join('');
+    const chunks = batch.v2s.sort((a, b) => a.chunk_index - b.chunk_index).map(row => row.archive_b64);
+    const joined = [batch.v1.archive_b64].concat(chunks).join('');
     return JSON.parse(zlib.gunzipSync(Buffer.from(joined, 'base64url')).toString('utf8'));
 }
-function project(row, columns){ return Object.fromEntries(
-    columns.map(column => [column, row[column]])); }
+function project(row, columns){ return Object.fromEntries(columns.map(column => [column, row[column]])); }
 function expectRows(dbRows, hubRows, columns){
-    expect(dbRows.map(row => project(row, columns)))
-        .to.deep.equal(hubRows.map(row => project(row, columns)));
+    expect(dbRows.map(row => project(row, columns))).to.deep.equal(hubRows.map(row => project(row, columns)));
 }
 function setFor(archive, capability, block){
-    return archive.capability_snapshots
-        .filter(row => row.capability === capability && Number(row.snapshot_block) === Number(block))
-        .map(row => ({
-            pubkey: row.signing_pubkey, source: row.source, weight: row.amount
-        }));
+    return archive.capability_snapshots.filter(row => row.capability === capability &&
+        Number(row.snapshot_block) === Number(block)).map(row =>
+        ({ pubkey: row.signing_pubkey, source: row.source, weight: row.amount }));
 }
 function expectIndexerQuorum(recovery, canonical, rawSignatures, set){
-    expect(recovery.quorumVerified(canonical, recovery.parseSigs(rawSignatures), set, true))
-        .to.equal(true);
+    expect(recovery.quorumVerified(canonical, recovery.parseSigs(rawSignatures), set, true)).to.equal(true);
 }
 async function finalize(publisher, inputs){
     const priceIds = (inputs.prices || []).map(row => Object.assign(project(row,
@@ -228,8 +204,7 @@ async function recover(publisher, result, inputs, oracleKeys){
     };
     db.tombstones = tombstones;
     const btcDb = (inputs.rewards || []).length ? recoveryStubs.rewardBtcDbStub() : null;
-    const recovery = new AnchorRecovery(db, { log: () => {},
-        util: recoveryStubs.util, btcDb });
+    const recovery = new AnchorRecovery(db, { log: () => {}, util: recoveryStubs.util, btcDb });
     const report = await recovery.run();
     expect(report.failed).to.deep.equal([]);
     expect(report.verified).to.equal(1);
@@ -240,9 +215,8 @@ function signedBridgePolicyInputs(crossKeys, oracleKeys){
     inputs.matches = signRows(inputs.matches, crossKeys, indexerFixture.matchCanonical);
     inputs.calls = signRows(inputs.calls, crossKeys, indexerFixture.callCanonical);
     inputs.bridges = signRows(inputs.bridges, crossKeys, indexerBridge.transferCanonical);
-    inputs.policies = inputs.policies.map(row => Object.assign({}, row, {
-        policy_hash: policyHash(row)
-    }));
+    inputs.policies = inputs.policies.map(row =>
+        Object.assign({}, row, { policy_hash: policyHash(row) }));
     inputs.policies = signRows(inputs.policies, crossKeys, indexerBridge.policyCanonical);
     const reward = inputs.rewards[0];
     reward.row.validator_pubkey = oracleKeys[0].pubkey;
@@ -252,15 +226,15 @@ function signedBridgePolicyInputs(crossKeys, oracleKeys){
 }
 function signedCheckpointInputs(oracleKeys){
     const inputs = copy(vectors.C.inputs);
-    inputs.checkpoints = signRows(inputs.checkpoints, oracleKeys, row =>
-        StateCheckpointEngine.canonicalCheckpoint(row));
+    inputs.checkpoints = signRows(inputs.checkpoints, oracleKeys,
+        row => StateCheckpointEngine.canonicalCheckpoint(row));
     return inputs;
 }
 function signedPriceInputs(oracleKeys){
     const inputs = copy(vectors.P.inputs);
-    const signatureRound = inputs.prices.filter(row => row.round_number === 11);
-    const batchRow = inputs.prices.find(row => row.round_number === 12);
-    const skipped = inputs.prices.filter(row => row.round_number === 13);
+    const signatureRound = inputs.prices.filter(row => row.round_number === 11),
+        batchRow = inputs.prices.find(row => row.round_number === 12),
+        skipped = inputs.prices.filter(row => row.round_number === 13);
     inputs.prices = signPriceRound(signatureRound, oracleKeys)
         .concat([signPriceBatch(batchRow, oracleKeys)], skipped);
     return inputs;
@@ -398,12 +372,9 @@ function registerFixtureBytesTest(){
 }
 function registerWrapperGateTest(state){
     it('recovers a pre-gate wrapper against oracle_publish', async function(){
-        const inputs = {
-            network: 'regtest', batch_seq: 10, wrapper_block: PRE_GATE_WRAPPER_BLOCK
-        };
+        const inputs = { network: 'regtest', batch_seq: 10, wrapper_block: PRE_GATE_WRAPPER_BLOCK };
         const publisher = buildPublisher(rowDb(), state.sets);
-        const result = await buildArchive(publisher, inputs);
-        const archive = JSON.parse(result.json);
+        const result = await buildArchive(publisher, inputs), archive = JSON.parse(result.json);
         expect(setFor(archive, 'oracle_publish', PRE_GATE_WRAPPER_BLOCK)).to.have.length(4);
         expect(setFor(archive, 'archive_publish', PRE_GATE_WRAPPER_BLOCK)).to.be.empty;
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
