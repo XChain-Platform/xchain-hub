@@ -129,7 +129,7 @@ class Lifecycle {
     // set is ADDITIVE to the registry, so transport auth follows key rotation; it is
     // NEVER cleared on an upstream failure, since the registry stays the auth floor.
     // In-flight guard, the same one pollOwnStake and runOwnCapabilityCheck carry: the
-    // two awaits below are unbounded round trips, so a slow indexer lets the bare
+    // upstream awaits below are unbounded round trips, so a slow indexer lets the bare
     // setInterval stack passes. Each pass resolves the BTC tip at its own START, so an
     // older slow pass finishing last would write the OLDER block's validator snapshot
     // over a newer one and drop a just-rotated key from transport auth. Serializing the
@@ -141,7 +141,17 @@ class Lifecycle {
         this._transportSetRefreshRunning = true;
         try {
             let block = await this.resolveBtcLatestBlock();
-            if(block == null){ this.warnTransportStale('BTC tip unresolved'); return; }
+            // Boot only: a hub holding a last-known-good set keeps it, so the committed
+            // height (which skips the lag and age gates) never replaces a live set.
+            if(block == null && !this._transportSignerSetAt){
+                const heights = await this.resolveBtcCheckpointHeights();
+                block = heights && heights.committedHeight;
+            }
+            if(!Number.isSafeInteger(block) || block <= 0){
+                this.warnTransportStale(this._transportSignerSetAt
+                    ? 'BTC tip unresolved' : 'BTC tip and committed height unresolved');
+                return;
+            }
             let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
             if(!snap || !Array.isArray(snap.validators)){ this.warnTransportStale('validator snapshot unavailable'); return; }
             let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
@@ -182,9 +192,17 @@ class Lifecycle {
             ' (pubkey ' + pubkey + ')');
     }
 
-    // Warn once the last good refresh ages past a threshold. Never clears the set (the
-    // no-fail-open invariant above), and stays silent before the first refresh.
+    // Warn once when boot cannot establish a chain-effective set. After a successful
+    // refresh, warn when the last good set ages past the configured threshold. Neither
+    // path clears the set or changes the registry authentication floor.
     warnTransportStale(why){
+        if(!this._transportSignerSetAt){
+            if(this._transportBootWarningWritten) return;
+            this._transportBootWarningWritten = true;
+            logger.warn('XChainHub: no transport signer set available at boot (' + why +
+                '); peers outside the validator registry will be rejected until refresh succeeds');
+            return;
+        }
         let maxAgeMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_MAX_AGE_MS) || 600000;
         if(this._transportSignerSetAt && (Date.now() - this._transportSignerSetAt) > maxAgeMs){
             logger.warn('XChainHub: transport signer set STALE (' + why + '); retaining last-known-good set of ' +

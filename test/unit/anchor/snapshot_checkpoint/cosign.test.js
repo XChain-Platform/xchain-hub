@@ -90,6 +90,7 @@ describe('snapshot checkpoint co-sign round', function () {
         const mesh = await startMesh({ n: 3, timeoutMs: 12 });
         // Only the round timer is faked, so flush() still drains setImmediate.
         const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const warnLog = sinon.stub(console, 'warn');
         try {
             mesh.drop = envelope => envelope.type === 'XSNP_SIGN';
             const blockIndex = snapshotCheckpointBlock(SNAPSHOT_BLOCK, mesh.network);
@@ -99,12 +100,22 @@ describe('snapshot checkpoint co-sign round', function () {
             expect(leader.engine.snapshotRounds.size).to.equal(1);
             clock.tick(13);
             expect(leader.engine.snapshotRounds.size).to.equal(0);
+            const expired = warnLog.args.map(args => args.map(String).join(' '))
+                .filter(line => line.includes('SnapshotCheckpointEngine: round') &&
+                    line.includes('expired'));
+            expect(expired).to.have.lengthOf(1);
+            expect(expired[0]).to.include('SNAP|BTC|regtest|' + blockIndex);
+            expect(expired[0]).to.include('snapshot block ' + SNAPSHOT_BLOCK);
+            expect(expired[0]).to.include('signers collected 1/3');
+            expect(expired[0]).to.include('stake tallied 100/300');
+            expect(expired[0]).to.include('quorum needs more than two-thirds');
 
             await leader.engine.tick();
             await flush();
             expect(mesh.sent.filter(row => row.type === 'XSNP_SIGN_REQ')).to.have.length(2);
             expectNoCadenceMessages(mesh);
         } finally {
+            warnLog.restore();
             clock.restore();
             await stopMesh(mesh);
         }

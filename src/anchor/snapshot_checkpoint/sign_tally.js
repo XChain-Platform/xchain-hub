@@ -14,7 +14,11 @@
 
 'use strict';
 
-const { snapshotCheckpointCanonical } = require('../../consensus/snapshot_checkpoint/canonical.js');
+const {
+    snapshotCheckpointCanonical,
+    snapshotCheckpointQuorum,
+} = require('../../consensus/snapshot_checkpoint/canonical.js');
+const { totalStake } = require('../../consensus/stake_weighted_quorum.js');
 
 const HEX_64 = /^[0-9a-f]{64}$/i;
 const HEX_128 = /^[0-9a-f]{128}$/i;
@@ -42,6 +46,33 @@ function trustedPubkeys(trustSet) {
         return trusted;
     }
     return trusted;
+}
+
+// Operator diagnostics only. Quorum decisions remain in the canonical
+// stake-weighted predicate called by finalize_policy.
+function snapshotSignTallyStatus(kept, trusted, trustSet, cp, verify) {
+    const signerPubkeys = new Set(kept.map(row => row.pubkey));
+    try {
+        const signedValidators = (trustSet || []).filter(validator => validator &&
+            signerPubkeys.has(String(validator.pubkey).toLowerCase()));
+        return {
+            signerCount: kept.length,
+            validatorCount: trusted.size,
+            stakeTally: totalStake(signedValidators).toString(),
+            totalStake: totalStake(trustSet).toString(),
+            quorumMet: snapshotCheckpointQuorum(Object.assign({}, cp, {
+                validator_signatures: kept,
+            }), trustSet, verify),
+        };
+    } catch (e) {
+        return {
+            signerCount: kept.length,
+            validatorCount: trusted.size,
+            stakeTally: null,
+            totalStake: null,
+            quorumMet: false,
+        };
+    }
 }
 
 function createSnapshotSignTally(snapshotBlock, cp, trustSet, verify) {
@@ -92,7 +123,8 @@ function createSnapshotSignTally(snapshotBlock, cp, trustSet, verify) {
         return kept.map((row) => ({ pubkey: row.pubkey, sig: row.sig }));
     }
 
-    return { add, signatures };
+    const status = () => snapshotSignTallyStatus(kept, trusted, trustSet, cp, verify);
+    return { add, signatures, status };
 }
 
 module.exports = { SIGN_TALLY_DROP, createSnapshotSignTally };

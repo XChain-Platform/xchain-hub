@@ -104,6 +104,7 @@ function initRuntimeState(hub) {
     hub._transportSetRefreshRunning = false;
     hub._transportSignerSet      = new Set();  // last-known-good effective set, lowercased pubkey hex
     hub._transportSignerSetAt    = 0;       // ms epoch of the last successful refresh (0 = never)
+    hub._transportBootWarningWritten = false;
     hub._ownPubkeyInSignerSet    = null;    // true/false once resolved; null = never resolved
     hub._latestBlockIndex        = null;
     hub._latestStakeAmount       = null;
