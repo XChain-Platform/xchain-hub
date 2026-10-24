@@ -7908,6 +7908,13 @@
       "28e4901b56ec2d97fe1eb6634521541f944abd3a6aa57ec4914ee48ae83269db",
       "a0bf59298706d238abce4061ffed2be7a53f9800ad6617e5f791aad1211b41c5"
     ],
+    "9107bc2a1ce9f87e": [
+      "7cb678095e65e2583044c1d2e2df6c391cdeca043901e8445d9000ccea12c32d",
+      "faeb5f6994ffa2ebf0e03cc685a1bc8a90224883478044e2afcab940f6791163",
+      "ee7b9229bc55e75824ceff935811b9221d7df2fec201bea9a6d75a645fe7cf49",
+      "f7840d0648636fefc6beb5049ec992f654988a9ebf395bcc3b6ae4fb4cbe06ee",
+      "84604a1d38f8c18b6274381723cb8fea5e364cc75144b0a558f422bb3a935744"
+    ],
     "9163864e09185997": [
       "0e7bac9e5b85ee421a223ea7606e58244e4d182e1699b7b89f823df9e582f417",
       "b6f5ec671d93cfea78a168d7c7eb3aed8275c6c7a35595b77d22c00a20cc3212",
@@ -13002,6 +13009,7 @@
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_build.test.js": "6d09115193e0c90f",
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_verify.test.js": "02ff2041e0e56f34",
         "test/unit/anchor/publisher/archive/quorum/archive_follower_set_seam.test.js": "b8b49bb3c7133a01",
+        "test/unit/anchor/publisher/archive/quorum/archive_mesh_capability_sets.test.js": "9107bc2a1ce9f87e",
         "test/unit/anchor/publisher/archive/quorum/archive_snapshot_wants_parity.test.js": "433414aee0336f17",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_completeness.test.js": "d0fecb90a8e3248a",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
@@ -14105,6 +14113,7 @@
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_build.test.js": "6d09115193e0c90f",
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_verify.test.js": "02ff2041e0e56f34",
         "test/unit/anchor/publisher/archive/quorum/archive_follower_set_seam.test.js": "b8b49bb3c7133a01",
+        "test/unit/anchor/publisher/archive/quorum/archive_mesh_capability_sets.test.js": "9107bc2a1ce9f87e",
         "test/unit/anchor/publisher/archive/quorum/archive_snapshot_wants_parity.test.js": "433414aee0336f17",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_completeness.test.js": "d0fecb90a8e3248a",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
@@ -15239,6 +15248,7 @@
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_build.test.js": "6d09115193e0c90f",
         "test/unit/anchor/publisher/archive/price/state_anchor_publisher_archive_checkpoint_price_verify.test.js": "02ff2041e0e56f34",
         "test/unit/anchor/publisher/archive/quorum/archive_follower_set_seam.test.js": "b8b49bb3c7133a01",
+        "test/unit/anchor/publisher/archive/quorum/archive_mesh_capability_sets.test.js": "9107bc2a1ce9f87e",
         "test/unit/anchor/publisher/archive/quorum/archive_snapshot_wants_parity.test.js": "433414aee0336f17",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_completeness.test.js": "d0fecb90a8e3248a",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",

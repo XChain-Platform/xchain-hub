@@ -80,7 +80,33 @@ function seedNodeDb(opts, identities, n, recordNetwork) {
 
 // The hub a mesh node's publisher is built on: its DB, config, capability set,
 // gossip endpoint, identity and reward tracker.
-function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
+function makeNodeHub(self, db, opts, identity, validators, n, peerManager, bus) {
+    let capabilitySnapshot = { async getSnapshot() { return { validators: validators.slice(0, n) }; } };
+    if (opts.capabilitySets != null) {
+        const members = (capability) => {
+            const indexes = Object.prototype.hasOwnProperty.call(opts.capabilitySets, capability)
+                ? opts.capabilitySets[capability]
+                : validators.map((_, i) => i);
+            return indexes.map(i => ({ validator: validators[i], i })).filter(entry => entry.validator);
+        };
+        capabilitySnapshot = {
+            async getSnapshot(capability, block) {
+                bus.snapshotReads.push([capability, Number(block)]);
+                return { validators: members(capability).map(entry => ({
+                    pubkey: entry.validator.pubkey,
+                    amount: '1'
+                })) };
+            },
+            async getWeightSnapshot(capability, block) {
+                bus.snapshotReads.push([capability, Number(block)]);
+                return { validators: members(capability).map(entry => ({
+                    pubkey: entry.validator.pubkey,
+                    weight: '1',
+                    source: 'wsrc' + entry.i
+                })) };
+            }
+        };
+    }
     let hub = {
         db,
         // DOGE_INDEXER_URL wired so verifyAnchorOnChain runs its real gate;
@@ -89,7 +115,7 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager) {
         // honest case (the on-chain anchor byte-matches the local checkpoint
         // at full depth). Adversarial receiver-path tests override the stub.
         p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000', DOGE_INDEXER_URL: 'http://doge-indexer.test' }, opts.cfg || {}),
-        capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
+        capabilitySnapshot,
         // Populated oracle_publish registry: the BUNDLE_DONE/FINALIZED handlers resolve
         // the membership set via getActiveOraclePublishPubkeys(null), which now falls
         // through to the registry. Mirrors a live hub (registry populated post-startup);
@@ -189,6 +215,10 @@ function miningBroadcastHook(self, bus) {
 // exactly with the 2f+1 count these tests assert (3-of-4), so the quorum-size
 // assertions are unchanged - only the tally MECHANISM the fix now selects differs.
 function applyStakeWeights(bus, recordNetwork) {
+    if (bus.snapshotReads) {
+        for (const nd of bus.nodes) nd.pub.network = recordNetwork;
+        return;
+    }
     let weightSet = bus.nodes.map((nd, i) => ({ pubkey: nd.pubkey, weight: '1', source: 'wsrc' + i }));
     for (let nd of bus.nodes) {
         nd.pub.network = recordNetwork;
@@ -213,6 +243,7 @@ function armCommitmentFloor(bus) {
 function buildMesh(n, opts) {
     opts = opts || {};
     let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors (existence gate)
+    if (opts.capabilitySets != null) bus.snapshotReads = [];
     // txid -> the ANCHOR version that txid really carries on-chain. A receiver asking
     // for no EXACT version (the #4180 archive-head gate sends a version SET, and
     // rejectVersions is a client-side check the indexer never sees) must get the real
@@ -243,7 +274,7 @@ function buildMesh(n, opts) {
         let peerManager = makePeerManager(self, bus);
         let db = seedNodeDb(opts, identities, n, recordNetwork);
         if (opts.mutate) opts.mutate(self, db);
-        let hub = makeNodeHub(self, db, opts, identity, validators, n, peerManager);
+        let hub = makeNodeHub(self, db, opts, identity, validators, n, peerManager, bus);
         self.db  = db;
         self.pub = new StateAnchorPublisher(hub);
         // start() arms the spend guard's durable window, so point it
