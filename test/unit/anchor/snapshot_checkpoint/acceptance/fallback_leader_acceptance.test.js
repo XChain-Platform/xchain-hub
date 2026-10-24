@@ -63,18 +63,19 @@ let info;
 async function rankOneLeadsAtFallbackStep() {
     const mesh = await startMesh();
     const blockIndex = snapshotCheckpointBlock(SNAPSHOT_BLOCK, mesh.network);
+    const dueHeight = blockIndex + mesh.confirmations;
     const rank0 = nodeAtRank(mesh, blockIndex, 0);
     const rank1 = nodeAtRank(mesh, blockIndex, 1);
     sinon.stub(rank0.engine, 'checkpointNextDue').resolves(false);
 
     try {
-        for (const tip of [blockIndex, blockIndex + STEP - 1]) {
-            mesh.setTip(tip);
+        for (const chainHeight of [dueHeight, dueHeight + STEP - 1]) {
+            mesh.setHeights(dueHeight, chainHeight);
             await tickAll(mesh);
         }
         expect(mesh.sent.filter(row => row.type === 'XSNP_SIGN_REQ')).to.deep.equal([]);
 
-        mesh.setTip(blockIndex + STEP);
+        mesh.setHeights(dueHeight, dueHeight + STEP);
         await tickAll(mesh);
 
         const senders = mesh.sent
@@ -132,11 +133,13 @@ const checkpointSkipCases = [
         return node;
     }],
     [SNAPSHOT_LEADER_SKIP.MISSING_DEPTH, (mesh, blockIndex) => {
-        mesh.setTip(blockIndex + 0.5);
+        const dueHeight = blockIndex + mesh.confirmations;
+        mesh.setHeights(dueHeight, dueHeight + 0.5);
         return nodeAtRank(mesh, blockIndex, 1);
     }],
     [SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT, (mesh, blockIndex) => {
-        mesh.setTip(blockIndex + STEP - 1);
+        const dueHeight = blockIndex + mesh.confirmations;
+        mesh.setHeights(dueHeight, dueHeight + STEP - 1);
         return nodeAtRank(mesh, blockIndex, 1);
     }],
 ];

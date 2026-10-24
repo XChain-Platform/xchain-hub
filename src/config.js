@@ -58,6 +58,7 @@ const config = {
     get ANCHOR_ANNOUNCE_QUEUE_MAX() { return process.env.ANCHOR_ANNOUNCE_QUEUE_MAX; },
     get ANCHOR_ANNOUNCE_RETRY_MS() { return process.env.ANCHOR_ANNOUNCE_RETRY_MS; },
     get ANCHOR_ANNOUNCE_RETRY_TTL_MS() { return process.env.ANCHOR_ANNOUNCE_RETRY_TTL_MS; },
+    get ANCHOR_ARCHIVE_NEXT_SEQ_OVERRIDE() { return process.env.ANCHOR_ARCHIVE_NEXT_SEQ_OVERRIDE; },
     get ANCHOR_CHECKPOINT_EVERY_N() { return process.env.ANCHOR_CHECKPOINT_EVERY_N; },
     get ANCHOR_CHUNK_MAX_BYTES() { return process.env.ANCHOR_CHUNK_MAX_BYTES; },
     get ANCHOR_CHUNK_RETRY_MS() { return process.env.ANCHOR_CHUNK_RETRY_MS; },

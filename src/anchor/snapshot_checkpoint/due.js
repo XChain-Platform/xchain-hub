@@ -47,9 +47,14 @@ function pickDueSnapshot(snapshotBlocks, view) {
     const blockIndex = view.blockOf(snapshotBlock);
     if (!Number.isSafeInteger(blockIndex) || blockIndex < 0) return null;
 
-    const btcTip = asFiniteNumber(view.btcTip);
+    const committedHeight = asFiniteNumber(view.committedHeight);
+    const chainHeight = asFiniteNumber(view.chainHeight);
     const confirmations = asFiniteNumber(view.confirmations);
-    if (btcTip === null || confirmations === null || btcTip < blockIndex + confirmations) return null;
+    // Due-ness keeps the committed burial depth; the chain height only counts
+    // fallback depth, so a frozen committed tip cannot stall a fallback round.
+    if (committedHeight === null || confirmations === null ||
+        committedHeight < blockIndex + confirmations ||
+        chainHeight === null || chainHeight < blockIndex + confirmations) return null;
 
     return { snapshot_block: snapshotBlock, block_index: blockIndex };
 }

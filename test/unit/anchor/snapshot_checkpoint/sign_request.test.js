@@ -84,7 +84,8 @@ describe('snapshot sign request builders', function () {
             network: 'testnet',
             gateActive: true,
             expectedBlock: 100,
-            btcTip: 106,
+            committedHeight: 106,
+            chainHeight: 106,
             confirmations: 6,
             local: {
                 block_hash: hash('a'),

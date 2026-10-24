@@ -33,7 +33,7 @@ describe('snapshot checkpoint federation mesh', function () {
             expect(node.stateCheckpoints.roundTimeoutMs).to.equal(27);
             expect(node.hub.p2pConfig).to.deep.equal({
                 CHECKPOINT_CHAINS: 'BTC',
-                CHECKPOINT_CONFIRMATIONS: '0',
+                CHECKPOINT_CONFIRMATIONS: '6',
                 CHECKPOINT_ROUND_TIMEOUT_MS: '27'
             });
         }
@@ -154,7 +154,7 @@ describe('snapshot checkpoint federation mesh', function () {
 
         bus.setTip(140);
         expect(await bus.nodes[2].hub.resolveBtcLatestBlock()).to.equal(140);
-        bus.nodes[2].btcTip = 120;
+        bus.nodes[2].committedTip = 120;
         expect(await bus.nodes[1].hub.resolveBtcLatestBlock()).to.equal(140);
         expect(await bus.nodes[2].hub.resolveBtcLatestBlock()).to.equal(120);
 

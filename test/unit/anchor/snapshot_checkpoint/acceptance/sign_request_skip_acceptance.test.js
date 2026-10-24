@@ -56,7 +56,8 @@ async function malformedRequest(mesh, blockIndex) {
 }
 
 async function nonLeaderRequest(mesh, blockIndex) {
-    mesh.setTip(blockIndex);
+    const dueHeight = blockIndex + mesh.confirmations;
+    mesh.setHeights(dueHeight, dueHeight);
     const testCase = await requestAt(mesh, blockIndex, 1);
     testCase.target = targetFor(mesh, testCase.sender);
     return testCase;
@@ -83,7 +84,8 @@ async function wrongBlockRequest(mesh, blockIndex) {
 }
 
 async function shallowRequest(mesh, blockIndex) {
-    mesh.setTip(blockIndex - 1);
+    const dueHeight = blockIndex + mesh.confirmations;
+    mesh.setHeights(dueHeight - 1, dueHeight + 100);
     const testCase = await requestAt(mesh, blockIndex);
     testCase.target = targetFor(mesh, testCase.sender);
     return testCase;

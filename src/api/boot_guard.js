@@ -23,6 +23,7 @@
 
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('../secret_env');
 const { evaluateAuthPosture } = require('./auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
+const { resolveArchiveNextSeqOverride } = require('../anchor/publisher/archive/seq_override.js');
 
 // Returns the database secret, exiting the process when it cannot be resolved or
 // is unset under both of its names.
@@ -103,6 +104,19 @@ function refuseInvalidNetwork({ logger, hubConfig, P2P_VALIDATOR_ADDR, HUB_NETWO
         logger.error('Invalid optional environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for ingest activation gating on a standalone hub; leave it unset for a hub that judges no network-keyed content)');
         process.exit(1);
     }
+    // The pinned archive seq is a setting that only regtest may carry.
+    refuseArchiveSeqOverride({ logger, HUB_NETWORK });
 }
 
-module.exports = { requireDbSecret, refuseUnsafeAuthPosture, refuseInvalidNetwork };
+// The pinned archive seq is a regtest drill lever (anchor/publisher/archive/seq_override.js):
+// set on any other network, or to anything but a whole number, the hub does not start.
+function refuseArchiveSeqOverride({ logger, HUB_NETWORK }) {
+    try {
+        resolveArchiveNextSeqOverride(HUB_NETWORK);
+    } catch (e) {
+        logger.error(e.name + ': ' + e.message);
+        process.exit(1);
+    }
+}
+
+module.exports = { requireDbSecret, refuseUnsafeAuthPosture, refuseInvalidNetwork, refuseArchiveSeqOverride };
