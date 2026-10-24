@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-17T19:56:00.338Z",
+  "generated_at": "2026-10-24T13:02:12.131Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -65,7 +65,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 1000,
         "triggerAmountSats": 25000
@@ -75,6 +74,12 @@
       "platformListOwners": [],
       "icon": "bitcoin-mainnet-icon-20.png",
       "wifVersionByte": 128,
+      "adsDonationAddresses": {
+        "DONATE1": "1Donate1GERVKPW6GFQcnGeTa8dgL6Abyp",
+        "DONATE2": "1Donate2LkbBrsanwCVRPWZCXAqQcvcqGz",
+        "EXPLORER": "1Donate3GBGSZzzrS9U9gUgURYKscAE6Yn"
+      },
+      "adsDonationAddress": "1Donate1GERVKPW6GFQcnGeTa8dgL6Abyp",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -151,7 +156,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 1000,
         "triggerAmountSats": 25000
@@ -161,6 +165,12 @@
       "platformListOwners": [],
       "icon": "bitcoin-testnet-icon-20.png",
       "wifVersionByte": 239,
+      "adsDonationAddresses": {
+        "DONATE1": "mfztXKX1HeVdCQf6pDCZFEzo5i5wYNHAM6",
+        "DONATE2": "myBbbZ4t7BPoyNcT4sHtFwZDuiyYGDXLQM",
+        "EXPLORER": "n1jbLKMrhvFae7NwTj37ZtkN4uPy29o9aM"
+      },
+      "adsDonationAddress": "mfztXKX1HeVdCQf6pDCZFEzo5i5wYNHAM6",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -233,7 +243,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "bitcoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 1000,
         "triggerAmountSats": 25000
@@ -243,6 +252,12 @@
       "platformListOwners": [],
       "icon": "bitcoin-regtest-icon-20.png",
       "wifVersionByte": 239,
+      "adsDonationAddresses": {
+        "DONATE1": "muYHF9MMnK6Nmd5zx7EBtqEYZdaf2Xy8JX",
+        "DONATE2": "mkQd27aJSqsQ666z1Q4MLFmd3Ybqzy3TNw",
+        "EXPLORER": "mrDH7rA2ZmGoh4Qx5guhDBJbZotUd6XyVH"
+      },
+      "adsDonationAddress": "muYHF9MMnK6Nmd5zx7EBtqEYZdaf2Xy8JX",
       "explorer": {
         "defaultUrl": "http://localhost",
         "defaultPort": 18080
@@ -312,7 +327,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 5000000,
         "triggerAmountSats": 125000000
@@ -322,6 +336,12 @@
       "platformListOwners": [],
       "icon": "dogecoin-mainnet-icon-20.png",
       "wifVersionByte": 158,
+      "adsDonationAddresses": {
+        "DONATE1": "DDonate1RBcwGnCRNnVtwuCmQyWW1Gn25f",
+        "DONATE2": "DDonate2o3Sg4phybp92oFpkmv8S9ZhGSV",
+        "EXPLORER": "DDonate3FCoUgi1bxW5r9c2p75uKTLw9qE"
+      },
+      "adsDonationAddress": "DDonate1RBcwGnCRNnVtwuCmQyWW1Gn25f",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -391,7 +411,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 5000000,
         "triggerAmountSats": 125000000
@@ -401,6 +420,12 @@
       "platformListOwners": [],
       "icon": "dogecoin-testnet-icon-20.png",
       "wifVersionByte": 241,
+      "adsDonationAddresses": {
+        "DONATE1": "ndonate1dE87UXUFf4gjyhPg7hfQRJXVXr",
+        "DONATE2": "ndonate2wev8vKDgvd1DHhtJtvkRbn2usJ",
+        "EXPLORER": "ndonate3xHD56SnmmSxbjX7UMSPfN7XmVA"
+      },
+      "adsDonationAddress": "ndonate1dE87UXUFf4gjyhPg7hfQRJXVXr",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -466,7 +491,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "dogecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 5000000,
         "triggerAmountSats": 125000000
@@ -476,6 +500,12 @@
       "platformListOwners": [],
       "icon": "dogecoin-regtest-icon-20.png",
       "wifVersionByte": 239,
+      "adsDonationAddresses": {
+        "DONATE1": "mzdg8wGxgP3Jk45FuZPspumCL3Ruup37ob",
+        "DONATE2": "mmXU8RU7q3BUsyT66rtw1H6P7B2ZZd9c5Y",
+        "EXPLORER": "n1AvTJLLSA1NHamHd5KFj9mRn6BEcwnVbf"
+      },
+      "adsDonationAddress": "mzdg8wGxgP3Jk45FuZPspumCL3Ruup37ob",
       "explorer": {
         "defaultUrl": "http://localhost",
         "defaultPort": 18080
@@ -549,7 +579,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "litecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 100000,
         "triggerAmountSats": 2500000
@@ -559,6 +588,12 @@
       "platformListOwners": [],
       "icon": "litecoin-mainnet-icon-20.png",
       "wifVersionByte": 176,
+      "adsDonationAddresses": {
+        "DONATE1": "Ldonate18tNZcVThKm5MX33EjvhaanJ6Mg",
+        "DONATE2": "Ldonate2io846q2e7q8dUArh3TNnaq9ENb",
+        "EXPLORER": "Ldonate3FfyqbYQAYxo3qjFLcu28oUdAfn"
+      },
+      "adsDonationAddress": "Ldonate18tNZcVThKm5MX33EjvhaanJ6Mg",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -632,7 +667,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "litecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 100000,
         "triggerAmountSats": 2500000
@@ -642,6 +676,12 @@
       "platformListOwners": [],
       "icon": "litecoin-testnet-icon-20.png",
       "wifVersionByte": 239,
+      "adsDonationAddresses": {
+        "DONATE1": "mybp5CceJvVV5tNCCiF7oBiZWko2fNkmnT",
+        "DONATE2": "muKEjejjXQvLY7Lp7Ecpn29gM2TCb5BLTF",
+        "EXPLORER": "mzCXcxcECbY5aNSXsfWjzKQN1YwoefEcG8"
+      },
+      "adsDonationAddress": "mybp5CceJvVV5tNCCiF7oBiZWko2fNkmnT",
       "explorer": {
         "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
@@ -711,7 +751,6 @@
         "XBRIDGE"
       ],
       "uriScheme": "litecoin",
-      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
       "adsDefaults": {
         "perTxAmountSats": 100000,
         "triggerAmountSats": 2500000
@@ -721,6 +760,12 @@
       "platformListOwners": [],
       "icon": "litecoin-regtest-icon-20.png",
       "wifVersionByte": 239,
+      "adsDonationAddresses": {
+        "DONATE1": "mgNY2ZXbnNEkRT5ZRF8yGamivrSX2QH97h",
+        "DONATE2": "n2DLJPppXUi8jC6fLiSkthZi2sc9UKiZHd",
+        "EXPLORER": "myL7sZGPEG3LhFXn7RFCZ321r8bxgmgDBz"
+      },
+      "adsDonationAddress": "mgNY2ZXbnNEkRT5ZRF8yGamivrSX2QH97h",
       "explorer": {
         "defaultUrl": "http://localhost",
         "defaultPort": 18080
