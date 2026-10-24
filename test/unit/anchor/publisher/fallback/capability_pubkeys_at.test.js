@@ -19,6 +19,7 @@ const { DB_METHODS } = require('../../../../helpers/mockHub.js');
 
 const KEY_A = 'aa'.repeat(33);
 const KEY_B = 'bb'.repeat(33);
+let warn;
 
 function buildPublisher(opts) {
     let queried = { count: 0, params: null };
@@ -45,13 +46,7 @@ function validators() {
     ] };
 }
 
-describe('StateAnchorPublisher capabilityPubkeysAt', () => {
-
-    let warn;
-
-    beforeEach(() => { warn = sinon.stub(console, 'warn'); });
-    afterEach(() => { sinon.restore(); });
-
+function registerSnapshotReadCase() {
     it('reads cross_chain from the gate-selected snapshot and normalizes its pubkeys', async () => {
         let weighted = {
             getWeightSnapshot: sinon.stub().resolves(validators()),
@@ -74,7 +69,9 @@ describe('StateAnchorPublisher capabilityPubkeysAt', () => {
         expect(count.getWeightSnapshot.called).to.equal(false);
         expect(warn.called).to.equal(false);
     });
+}
 
+function registerFallbackCases() {
     it('uses cross_chain local rows on regtest when the snapshot is unavailable', async () => {
         let capabilitySnapshot = {
             getWeightSnapshot: sinon.stub().resolves(null),
@@ -112,7 +109,9 @@ describe('StateAnchorPublisher capabilityPubkeysAt', () => {
         expect(warn.calledOnce).to.equal(true);
         expect(warn.firstCall.args[0]).to.match(/cross_chain membership unresolved at block 100/);
     });
+}
 
+function registerOracleRoutingCase() {
     it('routes pinned getActiveOraclePublishPubkeys through oracle_publish capability lookup', async () => {
         let { publisher } = buildPublisher({ network: 'regtest', capabilitySnapshot: null });
         let expected = [KEY_A];
@@ -123,4 +122,13 @@ describe('StateAnchorPublisher capabilityPubkeysAt', () => {
         expect(actual).to.equal(expected);
         expect(publisher.capabilityPubkeysAt.calledOnceWithExactly('oracle_publish', 100)).to.equal(true);
     });
+}
+
+describe('StateAnchorPublisher capabilityPubkeysAt', () => {
+    beforeEach(() => { warn = sinon.stub(console, 'warn'); });
+    afterEach(() => { sinon.restore(); });
+
+    registerSnapshotReadCase();
+    registerFallbackCases();
+    registerOracleRoutingCase();
 });
