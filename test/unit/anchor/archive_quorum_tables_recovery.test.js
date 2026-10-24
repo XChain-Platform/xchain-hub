@@ -25,7 +25,7 @@ if(INDEXER_ROOT) Object.assign(process.env, { INDEXER_COIN: 'DOGE', INDEXER_NETW
 const [AnchorRecovery, indexerFixture, recoveryStubs, indexerBridge, indexerEd25519, indexerPrices] = ['bin/recovery.js',
     'test/fixtures/anchor-archive.js', 'test/helpers/recovery_stubs.js', 'src/consensus/bridge_settle.js',
     'src/consensus/ed25519.js', 'bin/recovery/checkpoint_price.js'].map(indexerModule);
-const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK;
+const WRAPPER_BLOCK = indexerFixture.SNAPSHOT_BLOCK, PRE_GATE_WRAPPER_BLOCK = -1;
 const TXID = 'ab'.repeat(32), PRICE_TOMBSTONE_KEYS = ['round_number', 'coin_pair'];
 const copy = value => JSON.parse(JSON.stringify(value));
 function sourceFor(key){ return 'src_' + key.pubkey.slice(0, 16); }
@@ -128,26 +128,37 @@ function archiveRows(inputs){
     };
 }
 async function buildArchive(publisher, inputs){
-    return publisher.buildArchive(
-        inputs.network, inputs.batch_seq, inputs.matches || [], WRAPPER_BLOCK,
+    const wrapperBlock = inputs.wrapper_block ?? WRAPPER_BLOCK;
+    const result = await publisher.buildArchive(
+        inputs.network, inputs.batch_seq, inputs.matches || [], wrapperBlock,
         inputs.calls || [], inputs.rewards || [], archiveRows(inputs));
+    if(wrapperBlock === WRAPPER_BLOCK){
+        const archive = JSON.parse(result.json);
+        const publishRows = archive.capability_snapshots
+            .filter(row => row.capability === 'oracle_publish' &&
+                Number(row.snapshot_block) === wrapperBlock)
+            .map(row => Object.assign({}, row, { capability: 'archive_publish' }));
+        archive.capability_snapshots.push(...publishRows);
+        result.json = JSON.stringify(archive);
+    }
+    return result;
 }
-function headAndChunks(publisher, json, batchSeq, matchCount, oracleKeys){
+function headAndChunks(publisher, json, batchSeq, matchCount, wrapperKeys, wrapperBlock){
     const b64 = zlib.gzipSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
     const chunks = [];
     const chunkSize = Math.max(1, Math.ceil(b64.length / 3));
     for(let offset = 0; offset < b64.length; offset += chunkSize)
         chunks.push(b64.slice(offset, offset + chunkSize));
     const crc = publisher.crc32Hex(json);
-    const cp = Object.assign({}, indexerFixture.CP, { snapshot_block: WRAPPER_BLOCK });
+    const cp = Object.assign({}, indexerFixture.CP, { snapshot_block: wrapperBlock });
     const canonical = publisher.archiveCanonical(cp, batchSeq, matchCount, crc, chunks.length);
     const v1 = Object.assign({}, cp, {
         version: 1, action_index: batchSeq * 10 + 1,
-        snapshot_block: WRAPPER_BLOCK,
+        snapshot_block: wrapperBlock,
         match_batch_seq: batchSeq, match_count: matchCount,
         batch_crc32: crc, total_chunks: chunks.length,
         archive_b64: chunks[0],
-        validator_signatures: signatures(oracleKeys, canonical)
+        validator_signatures: signatures(wrapperKeys, canonical)
     });
     const v2s = chunks.slice(1).map((archiveB64, index) => ({
         version: 2, action_index: batchSeq * 10 + index + 2,
@@ -202,8 +213,10 @@ async function finalize(publisher, inputs){
     (inputs.rewards || []).map(entry => entry.row), quorumRows);
 }
 async function recover(publisher, result, inputs, oracleKeys){
+    const wrapperBlock = inputs.wrapper_block ?? WRAPPER_BLOCK;
     const wire = headAndChunks(
-        publisher, result.json, inputs.batch_seq, (inputs.matches || []).length, oracleKeys);
+        publisher, result.json, inputs.batch_seq, (inputs.matches || []).length,
+        oracleKeys, wrapperBlock);
     const db = recoveryStubs.memDb([wire.v1], wire.v2s);
     const tombstones = [];
     const doQuery = db.doQuery.bind(db);
@@ -254,8 +267,9 @@ function signedPriceInputs(oracleKeys){
 }
 function setsFor(oracleKeys, crossKeys){
     const sets = {};
-    for(const block of [70, 80, 90, WRAPPER_BLOCK])
+    for(const block of [PRE_GATE_WRAPPER_BLOCK, 70, 80, 90, WRAPPER_BLOCK])
         sets['oracle_publish@' + block] = capabilitySet(oracleKeys);
+    sets['archive_publish@' + WRAPPER_BLOCK] = capabilitySet(oracleKeys);
     sets['cross_chain@100'] = capabilitySet(crossKeys);
     sets['price@111'] = capabilitySet(oracleKeys);
     return sets;
@@ -382,6 +396,20 @@ function registerFixtureBytesTest(){
         expectBytes(fixtureP.price_tombstones, expectedP.price_tombstones);
     });
 }
+function registerWrapperGateTest(state){
+    it('recovers a pre-gate wrapper against oracle_publish', async function(){
+        const inputs = {
+            network: 'regtest', batch_seq: 10, wrapper_block: PRE_GATE_WRAPPER_BLOCK
+        };
+        const publisher = buildPublisher(rowDb(), state.sets);
+        const result = await buildArchive(publisher, inputs);
+        const archive = JSON.parse(result.json);
+        expect(setFor(archive, 'oracle_publish', PRE_GATE_WRAPPER_BLOCK)).to.have.length(4);
+        expect(setFor(archive, 'archive_publish', PRE_GATE_WRAPPER_BLOCK)).to.be.empty;
+        const recovered = await recover(publisher, result, inputs, state.oracleKeys);
+        expect(recovered.archive.batch_seq).to.equal(inputs.batch_seq);
+    });
+}
 describe('archive quorum table recovery round trip', function(){
     const state = {};
     before(function(){
@@ -396,5 +424,6 @@ describe('archive quorum table recovery round trip', function(){
     registerBridgePolicyTest(state);
     registerCheckpointTest(state);
     registerPriceTest(state);
+    registerWrapperGateTest(state);
     registerFixtureBytesTest();
 });
