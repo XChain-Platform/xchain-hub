@@ -15,6 +15,15 @@ const { ARCHIVE_MAX_LIST_ROWS, LIST_SNAPSHOT_KEYS, XANC_FINALIZED } =
 const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
 
+// Vectors L and B were recorded with the wrapper group on oracle_publish. Regtest arms the
+// archive_publish gate at 0, so these byte checks pin the wrapper capability below the gate.
+const capabilityWants = require('../../../../../../src/anchor/publisher/archive/capability_wants.js');
+async function belowArchivePublishGate(body){
+    const keep = capabilityWants.archiveWrapperCapability;
+    capabilityWants.archiveWrapperCapability = () => 'oracle_publish';
+    try { return await body(); } finally { capabilityWants.archiveWrapperCapability = keep; }
+}
+
 function buildPub(db, sets, broadcast){
     const identity = new ValidatorIdentity('11'.repeat(32));
     const pub = new StateAnchorPublisher({
@@ -68,7 +77,7 @@ function emptySelectionDb(overrides){
 }
 
 describe('archive list snapshot build', function () {
-    it('keeps existing archive vector bytes unchanged without list rows', async function () {
+    it('keeps existing archive vector bytes unchanged without list rows', () => belowArchivePublishGate(async function () {
         const { inputs, json, crc32 } = vectors.L;
         const { pub } = buildPub({}, inputs.capability_sets);
 
@@ -81,7 +90,7 @@ describe('archive list snapshot build', function () {
         expect(empty.json).to.equal(json);
         expect(pub.crc32Hex(empty.json)).to.equal(crc32);
         expect(empty.json).to.not.contain('list_snapshots');
-    });
+    }));
 
     it('sorts list rows after price tombstones and resolves their capability blocks', async function () {
         const { inputs } = vectors.L;

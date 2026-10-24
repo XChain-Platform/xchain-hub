@@ -63,8 +63,10 @@ function restoreArchiveWrapperCapability(){
     capabilityWants.archiveWrapperCapability = ORIGINAL_ARCHIVE_WRAPPER_CAPABILITY;
 }
 
+// Regtest arms the archive_publish gate at 0; testnet and mainnet have not armed it.
 function defaultsToOraclePublish(){
-    for(const network of ['regtest', 'testnet', 'mainnet'])
+    expect(capabilityWants.archiveWrapperCapability({ network: 'regtest' }, WRAPPER_BLOCK)).to.equal('archive_publish');
+    for(const network of ['testnet', 'mainnet'])
         expect(capabilityWants.archiveWrapperCapability({ network }, WRAPPER_BLOCK)).to.equal('oracle_publish');
 
     expect(capabilityWants.archiveCapabilityWants(
@@ -138,7 +140,7 @@ function skipsSeamWithoutWrapperBlock(){
 
 describe('archive wrapper capability seam', function () {
     afterEach(restoreArchiveWrapperCapability);
-    it('defaults every network and every archive kind to oracle_publish with the wrapper last', defaultsToOraclePublish);
+    it('keeps oracle_publish below the archive_publish gate for every archive kind, with the wrapper last', defaultsToOraclePublish);
     it('routes only the wrapper group through the replaceable capability seam', routesOnlyWrapperGroup);
     it('does not consult the wrapper seam when there is no wrapper block', skipsSeamWithoutWrapperBlock);
 });

@@ -98,7 +98,8 @@ describe('archive capability groups: builder and follower agree per kind', funct
         const pub = buildPub();
         const archive = await buildAllKinds(pub);
         const expected = Object.values(ARCHIVE_KEYS).filter(Boolean).map(([block, cap]) => block + '|' + cap)
-            .concat([WRAPPER_BLOCK + '|oracle_publish']).sort();
+            // Regtest arms the archive_publish gate at 0, so the wrapper group moves to that set
+            .concat([WRAPPER_BLOCK + '|archive_publish']).sort();
         const seeded = new Map();
 
         expect(pub.seedRequiredSnapshotGroups(seeded, archive, WRAPPER_BLOCK)).to.equal(true);

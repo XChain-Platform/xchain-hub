@@ -23,6 +23,15 @@ const { BRIDGE_KEYS, POLICY_KEYS, ARCHIVE_MAX_POLICY_ROWS, ARCHIVE_MAX_JSON_BYTE
 const { DB_METHODS }       = require('../../../../../helpers/mockHub.js');
 const vectors              = require('../../../../../fixtures/anchor_archive_vectors.json');
 
+// Vectors L and B were recorded with the wrapper group on oracle_publish. Regtest arms the
+// archive_publish gate at 0, so these byte checks pin the wrapper capability below the gate.
+const capabilityWants = require('../../../../../../src/anchor/publisher/archive/capability_wants.js');
+async function belowArchivePublishGate(body){
+    const keep = capabilityWants.archiveWrapperCapability;
+    capabilityWants.archiveWrapperCapability = () => 'oracle_publish';
+    try { return await body(); } finally { capabilityWants.archiveWrapperCapability = keep; }
+}
+
 function buildPub(sets) {
     let identity = new ValidatorIdentity('11'.repeat(32));
     let pub = new StateAnchorPublisher({
@@ -45,7 +54,7 @@ describe('archive bridge and policy build', () => {
         expect(ARCHIVE_MAX_JSON_BYTES).to.equal(8 * 1024 * 1024);
     });
 
-    it('vector L: no new rows leaves the bytes and crc32 unchanged', async () => {
+    it('vector L: no new rows leaves the bytes and crc32 unchanged', () => belowArchivePublishGate(async () => {
         let { inputs, json, crc32 } = vectors.L;
         let pub = buildPub(inputs.capability_sets);
         let r = await build(pub, inputs);
@@ -54,9 +63,9 @@ describe('archive bridge and policy build', () => {
         let empty = await build(pub, inputs, { bridges: [], policies: [] });
         expect(empty.json).to.equal(json);
         expect(r.json).to.not.contain('bridge_transfers').and.not.contain('policy_snapshots');
-    });
+    }));
 
-    it('vector B: exact bytes and crc32, keys after rewards and before capability_snapshots', async () => {
+    it('vector B: exact bytes and crc32, keys after rewards and before capability_snapshots', () => belowArchivePublishGate(async () => {
         let { inputs, json, crc32 } = vectors.B;
         let pub = buildPub(inputs.capability_sets);
         let r = await build(pub, inputs, { bridges: inputs.bridges, policies: inputs.policies });
@@ -70,7 +79,7 @@ describe('archive bridge and policy build', () => {
         expect(o.bridge_transfers.map(t => Object.keys(t))).to.deep.equal([BRIDGE_KEYS, BRIDGE_KEYS]);
         expect(Object.keys(o.policy_snapshots[0])).to.deep.equal(POLICY_KEYS);
         expect(r.count).to.equal(1);
-    });
+    }));
 });
 
 describe('archive bridge and policy build: rows and serialization', () => {

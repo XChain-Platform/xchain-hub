@@ -22,15 +22,18 @@
 
 'use strict';
 
+const archivePublishGate = require('../../archive_publish_gate.js');
+
 // The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock.
 function archiveWrapperCapability(archive, wrapperSnapshotBlock){
-    return 'oracle_publish';
+    return archivePublishGate.isArchivePublishActive(wrapperSnapshotBlock, archive.network)
+        ? 'archive_publish' : 'oracle_publish';
 }
 
 // List every capability group the archive's rows oblige, with each block as archived (unsorted, may repeat).
 // A batch-proofed price round carries no signatures to check, so only signature-proofed rounds oblige one.
 function archiveCapabilityWants(archive, wrapperSnapshotBlock, isSignatureProofedPrice){
-    let wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
+    const wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
         .concat((archive.calls || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.bridge_transfers || []).map(b => ({ block: b.snapshot_block, capability: 'cross_chain' })))
         .concat((archive.policy_snapshots || []).map(p => ({ block: p.snapshot_block, capability: 'cross_chain' })))
@@ -40,7 +43,7 @@ function archiveCapabilityWants(archive, wrapperSnapshotBlock, isSignatureProofe
             .map(p => ({ block: p.reference_block, capability: 'price' })))
         // Verifiers (and recovery) check each rewarded pubkey was an eligible publisher at its earn block
         .concat((archive.rewards || []).map(r => ({ block: r.block_index, capability: 'oracle_publish' })));
-    // The wrapper checkpoint's own signatures are re-verified against the oracle_publish set at its block
+    // The wrapper checkpoint's own signatures are re-verified against its gated publisher set at its block
     if(wrapperSnapshotBlock != null)
         wants.push({ block: wrapperSnapshotBlock,
                      capability: module.exports.archiveWrapperCapability(archive, wrapperSnapshotBlock) });

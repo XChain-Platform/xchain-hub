@@ -37,7 +37,8 @@ describe('archive coverage selector scope', function () {
 
         await pub.buildArchive('regtest', 1, [], 50, [], [], quorumRows);
 
-        expect(consulted).to.have.members(['cross_chain|100', 'oracle_publish|50']);
+        // The regtest wrapper at 50 is above the archive_publish gate, which regtest arms at 0
+        expect(consulted).to.have.members(['cross_chain|100', 'archive_publish|50']);
         expect(mirrorReads).to.deep.equal([]);
     });
 
