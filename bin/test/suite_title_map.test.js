@@ -154,6 +154,22 @@ describe('bin/suite-title-map.js', function () {
             }]);
         });
 
+        it('accepts an exact declared title rewrite without hiding other drops', () => {
+            const fresh = {
+                titleSets: { bbb: ['suite one, retitled'] },
+                scripts: { test: { files: { 'test/unit/old_name.test.js': 'bbb' } } },
+            };
+            const renames = { titles: { 'test/unit/old_name.test.js': {
+                'suite one': 'suite one, retitled',
+            } } };
+            assert.deepStrictEqual(titles.compare(PIN, fresh, renames), [{
+                script: 'test',
+                kind: 'title_dropped',
+                file: 'test/unit/old_name.test.js',
+                title: 'suite two',
+            }]);
+        });
+
     });
 });
 
@@ -182,6 +198,17 @@ describe('bin/suite-title-map.js', function () {
             assert.strictEqual(differences[0].title, titles.titleDigest('suite two'));
             assert.strictEqual(differences[1].title, 'suite two, retitled',
                 'a title the tree still carries prints as text');
+        });
+
+        it('applies a declared title rewrite to a digested pin', () => {
+            const fresh = {
+                titleSets: { bbb: ['suite one, retitled', 'suite two'] },
+                scripts: { test: { files: { 'test/unit/old_name.test.js': 'bbb' } } },
+            };
+            const renames = { titles: { 'test/unit/old_name.test.js': {
+                'suite one': 'suite one, retitled',
+            } } };
+            assert.deepStrictEqual(titles.compare(titles.toPin(PIN), fresh, renames), []);
         });
     });
 
