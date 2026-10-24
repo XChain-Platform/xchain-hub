@@ -23,6 +23,7 @@
 
 const crypto = require('crypto');
 const { listIdsOf } = require('./list/list_rows_select.js');
+const archivePublishGate = require('../../archive_publish_gate.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -35,7 +36,7 @@ module.exports = {
     // The leader's archive election reads its set here; network is the network
     // on which that set is judged.
     archiveElectionPubkeys(blockIndex, network){
-        return this.getActiveOraclePublishPubkeys(blockIndex);
+        return this.getArchivePublishPubkeys(blockIndex, network);
     },
 
     // Archive round (v1/v2).
@@ -231,7 +232,10 @@ module.exports = {
     // The wrapper signing set takes its capability here and is judged at
     // cp.snapshot_block on the record network.
     archiveSigningCapability(cp){
-        return 'oracle_publish';
+        const network = resolveQuorumNetwork(cp, this.network);
+        return archivePublishGate.isArchivePublishActive(Number(cp.snapshot_block), network)
+            ? 'archive_publish'
+            : 'oracle_publish';
     },
 
     // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block.

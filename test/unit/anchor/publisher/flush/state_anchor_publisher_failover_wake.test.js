@@ -90,6 +90,7 @@ function archiveRound(wantLeader) {
     expect(peer, 'a peer producing the requested rank must exist').to.not.equal(null);
     let published = [];
     pub.getActiveOraclePublishPubkeys = async () => [me, peer];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.resolveCapabilitySet          = async () => [{ pubkey: me, amount: '1', source: '' }];
     pub.getNextBatchSeq               = async () => BATCH_SEQ;
     pub.publishArchive                = async (round) => { published.push(round); };

@@ -69,30 +69,36 @@ function singleMemberRound(cpRow){
     const me = identity.getPubkeyHex().toLowerCase();
     const published = [];
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.resolveCapabilitySet = async () => [{ pubkey: me, amount: '1', source: '' }];
     pub.getNextBatchSeq = async () => 7;
     pub.publishArchive = async round => { published.push(round); };
     return { pub, me, published };
 }
 
+// Regtest arms the archive_publish gate at 0; testnet and mainnet have not armed it.
+async function keepsOracleSetBelowGate(){
+    const { pub } = buildPub();
+    const expected = ['aa', 'bb'];
+    const blocks = [];
+    pub.getActiveOraclePublishPubkeys = async block => {
+        blocks.push(block);
+        return expected;
+    };
+
+    expect(await pub.archiveElectionPubkeys(77, 'testnet')).to.equal(expected);
+    expect(blocks).to.deep.equal([77]);
+    expect(pub.archiveSigningCapability({ network: 'regtest', snapshot_block: BLOCK }))
+        .to.equal('archive_publish');
+    for(const network of ['testnet', 'mainnet']){
+        expect(pub.archiveSigningCapability({ network, snapshot_block: BLOCK }))
+            .to.equal('oracle_publish');
+    }
+}
+
 describe('archive round set seams', function(){
 
-    it('defaults to the active oracle_publish set and capability on every network', async function(){
-        const { pub } = buildPub();
-        const expected = ['aa', 'bb'];
-        const blocks = [];
-        pub.getActiveOraclePublishPubkeys = async block => {
-            blocks.push(block);
-            return expected;
-        };
-
-        expect(await pub.archiveElectionPubkeys(77, 'testnet')).to.equal(expected);
-        expect(blocks).to.deep.equal([77]);
-        for(const network of ['regtest', 'testnet', 'mainnet']){
-            expect(pub.archiveSigningCapability({ network, snapshot_block: BLOCK }))
-                .to.equal('oracle_publish');
-        }
-    });
+    it('keeps the oracle_publish set and capability below the archive_publish gate', keepsOracleSetBelowGate);
 
     it('asks the election seam for the election block and hub network', async function(){
         const { pub, identity } = buildPub();

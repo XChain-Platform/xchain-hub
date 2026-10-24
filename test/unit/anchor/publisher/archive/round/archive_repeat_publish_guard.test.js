@@ -34,6 +34,7 @@ function leader(pending, opts){
         identity: { getPubkeyHex: () => 'aa', sign: () => 'sig' },
         network: 'regtest',
         getActiveOraclePublishPubkeys: async () => ['aa'],
+        getArchivePublishPubkeys: async () => ['aa'],   // regtest elects on archive_publish
         gatherArchiveRows: async () => {
             const rows = emptyRows();
             for(const key of Object.keys(pending)) rows[key] = pending[key].map(r => Object.assign({}, r));

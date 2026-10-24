@@ -102,6 +102,7 @@ describe('StateAnchorPublisher #4183 empty signing set is not a quorum of one', 
         let me = identity.getPubkeyHex().toLowerCase();
         let published = [];
         pub.getActiveOraclePublishPubkeys = async () => [me];    // election set resolves: this hub leads
+        pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
         pub.resolveCapabilitySet          = async () => signingSetFor(me);
         pub.getNextBatchSeq               = async () => 7;
         pub.publishArchive                = async (round) => { published.push(round); };
@@ -196,6 +197,7 @@ function finalized(txid, status, onChain) {
     let asked   = [];
 
     pub.getActiveOraclePublishPubkeys = async () => [sender];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.isObservedArchiveLeader       = () => true;
     pub.verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
     pub.backfillBatch                 = async (...a) => { stamped.push(a); };

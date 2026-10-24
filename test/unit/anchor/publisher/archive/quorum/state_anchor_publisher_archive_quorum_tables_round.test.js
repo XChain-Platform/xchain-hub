@@ -171,6 +171,7 @@ describe('archive quorum-table round', function () {
         const published = [];
         pub.gatherArchiveRows = async () => rows;
         pub.getActiveOraclePublishPubkeys = async () => [me];
+        pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
         pub.latestArchiveWrapperRows = async () => [CP_ROW];
         pub.getLiveArchiveIntent = async () => null;
         pub.getNextBatchSeq = async () => 7;

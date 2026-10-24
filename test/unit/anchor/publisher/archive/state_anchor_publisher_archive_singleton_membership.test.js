@@ -91,6 +91,7 @@ function archiveRound(signingSetFor) {
     let me = identity.getPubkeyHex().toLowerCase();
     let published = [];
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.resolveCapabilitySet          = async () => signingSetFor(me);
     pub.getNextBatchSeq               = async () => 7;
     pub.publishArchive                = async (round) => { published.push(round); };

@@ -22,6 +22,7 @@
 'use strict';
 
 const swq = require('../../consensus/stake_weighted_quorum.js');
+const archivePublishGate = require('../archive_publish_gate.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -44,6 +45,13 @@ module.exports = {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
             return pubkeys.map(p => String(p).toLowerCase()).sort();
         } catch(e){ return []; }
+    },
+
+    async getArchivePublishPubkeys(blockIndex, network){
+        const net = network != null ? network : this.network;
+        if(!archivePublishGate.isArchivePublishActive(blockIndex, net))
+            return this.getActiveOraclePublishPubkeys(blockIndex);
+        return this.capabilityPubkeysAt('archive_publish', blockIndex);
     },
 
     async capabilityPubkeysAt(capability, blockIndex){
