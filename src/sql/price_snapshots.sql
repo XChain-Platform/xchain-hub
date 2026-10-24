@@ -53,6 +53,10 @@ CREATE TABLE price_snapshots (
     KEY idx_status_block_round (status, reference_block, round_number),
     KEY idx_status_timestamp_round (status, block_timestamp, round_number),
     KEY idx_status_created (status, created_at),
+    -- The newest finalized round of one pair (getLatestFinalizedPriceBelowRound and
+    -- getFinalizedPriceSnapshotByCoinPair) pins status and coin_pair and walks
+    -- round_number down; without this key the read wades through other pairs and statuses.
+    KEY idx_status_pair_round (status, coin_pair, round_number),
     KEY idx_source_chain (source_chain),
     -- The landing stamp is written by round_number and read by (coin_pair, landing
     -- clock, round_number) on the indexer side; keep the hub copy indexed the same way
