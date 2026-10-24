@@ -52,7 +52,10 @@ module.exports = {
             // round. The subquery picks the max finalized round per pair, then the
             // join reads that round's price for the pair. round_number rides along so
             // the entry can be stamped and the merge below can stay monotonic.
-            let rows = await this.db.findLatestPriceSnapshotPerPair();
+            let belowRound = opts && opts.belowRound;
+            let rows = Number.isInteger(belowRound)
+                ? await this.db.findLatestPriceSnapshotPerPairBelowRound(belowRound)
+                : await this.db.findLatestPriceSnapshotPerPair();
             let seeded = 0;
             for (let r of (rows || [])) {
                 if (r.coin_pair && r.price !== null && r.price !== undefined) {

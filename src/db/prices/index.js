@@ -38,6 +38,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
         return this.doQuery(`SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number FROM price_snapshots p JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots       WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m   ON p.coin_pair = m.coin_pair AND p.round_number = m.mx WHERE p.status = 'finalized' AND p.price IS NOT NULL`);
     },
 
+    // Keeps the bound inside MAX so a future row cannot hide historical data.
+    async findLatestPriceSnapshotPerPairBelowRound(round) { return this.doQuery(`SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number FROM price_snapshots p JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots       WHERE status = 'finalized' AND price IS NOT NULL AND round_number < ? GROUP BY coin_pair) m   ON p.coin_pair = m.coin_pair AND p.round_number = m.mx WHERE p.status = 'finalized' AND p.price IS NOT NULL`, [round]); },
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/round.js:506.
     async findPriceSnapshotRoundsAfter(max) {

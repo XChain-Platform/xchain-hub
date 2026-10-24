@@ -110,6 +110,26 @@ function registerOracleConsensusClampReferenceWritersItemSuite1Part2() {
     });
   });
 }
+function registerOracleConsensusClampReferenceWritersItemSuite1FutureGuard() {
+  it('refuses direct and ingested cache writes far beyond the schedule round', function () {
+    // Mid-round 10 on a 10 minute schedule; the tick-held round stays at 0.
+    oracleConsensusClampReferenceWritersItemSuite1Oc.oracleRound.roundInterval = 600000;
+    oracleConsensusClampReferenceWritersItemSuite1Oc.oracleRound.epochStart = Date.now() - 10.5 * 600000;
+    oracleConsensusClampReferenceWritersItemSuite1Oc.oracleRound.getCurrentRound = sinon.stub().returns(0);
+    expect(oracleConsensusClampReferenceWritersItemSuite1Oc.noteFinalizedPrice(
+      'BTC/USD', '900.00000000', 1000
+    )).to.equal(false);
+    expect(oracleConsensusClampReferenceWritersItemSuite1Oc.noteIngestedPriceRow(
+      oracleConsensusClampReferenceWritersItemSuite1FinalizedRow(1000, 'BTC/USD', '900.00000000')
+    )).to.equal(false);
+    expect(oracleConsensusClampReferenceWritersItemSuite1Oc.getLastFinalizedPrice('BTC/USD')).to.equal(null);
+    // Inside the band the write lands although the tick still reads 0.
+    expect(oracleConsensusClampReferenceWritersItemSuite1Oc.noteIngestedPriceRow(
+      oracleConsensusClampReferenceWritersItemSuite1FinalizedRow(12, 'BTC/USD', '101.00000000')
+    )).to.equal(true);
+    expect(oracleConsensusClampReferenceWritersItemSuite1Oc.getLastFinalizedPrice('BTC/USD')).to.equal('101.00000000');
+  });
+}
 function registerOracleConsensusClampReferenceWritersItemSuite1Part3() {
   describe('storeSnapshot monotonicity', function () {
     it('a late store for an older round leaves the newer reference in place', async function () {
@@ -190,6 +210,7 @@ function registerOracleConsensusClampReferenceWritersItemSuite1Part4() {
 describe('OracleConsensus clamp-reference writers (item 5834)', function () {
   registerOracleConsensusClampReferenceWritersItemSuite1Part1.call(this);
   registerOracleConsensusClampReferenceWritersItemSuite1Part2.call(this);
+  registerOracleConsensusClampReferenceWritersItemSuite1FutureGuard.call(this);
   registerOracleConsensusClampReferenceWritersItemSuite1Part3.call(this);
   registerOracleConsensusClampReferenceWritersItemSuite1Part4.call(this);
 });
