@@ -67,11 +67,12 @@ module.exports = {
     // history, so they fold the identical min_stake into the cache key and request
     // the identical qualifying set (#3703).
     resolveMinStake(capability, blockIndex) {
+        const thresholdCapability = capability === 'archive_publish' ? 'oracle_publish' : capability;
         let reg = this.hub.capabilityRegistry;
         if (!reg || typeof reg.getMinStake !== 'function') return null;
-        let v = reg.getMinStake(capability, blockIndex);
+        let v = reg.getMinStake(thresholdCapability, blockIndex);
         if (v !== null && v !== undefined) return String(v);
-        return this.feedMinStake(capability);
+        return this.feedMinStake(thresholdCapability);
     },
 
     // Second and last place a threshold can come from: the hub's stake-weight feed.
