@@ -24,6 +24,7 @@
 const canonicalForms    = require('./canonical_forms.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
+const archivePublishGate = require('../archive_publish_gate.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -117,6 +118,14 @@ module.exports = {
         if(this.reportSeqConflict(seated, cp, sigs)) return;
 
         await this.persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
+        if(archivePublishGate.isArchivePublishActive(cp.snapshot_block, cp.network)){
+            try {
+                await this.persistCapabilitySnapshot('archive_publish', Number(cp.snapshot_block));
+            } catch(e){
+                logger.warn('StateCheckpointEngine: archive_publish snapshot persist failed at block ' +
+                    cp.snapshot_block + '; checkpoint persistence continues (' + (e && e.message) + ')');
+            }
+        }
         let inserted = await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
         // Re-check the fence when the INSERT seated nothing: two different payloads at one
         // sequence can both pass the read above before either row commits, and the loser
