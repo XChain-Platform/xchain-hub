@@ -4102,6 +4102,18 @@
     "4e17a99f84750a5f": [
       "4e17a99f84750a5fbb9d202ab1e3fc446f1e534c7f2f0b3e0c7eee57ea9e121d"
     ],
+    "4e51597a78b8838c": [
+      "acfb85f73c6a2b244cc51ed1daf80692762df82d4d2972c23f2f7db6e63ac5c9",
+      "c5c5e35b501643178a45303d6c34debc99769f5c668855213fe2f536c1068b99",
+      "26016e44dc560ccc04b0697af620fd0dfc70b969bb61d75eb4e70838f68099bd",
+      "a97f1c4620339661b8d8491e702bab6b50e24273e6591663f043ee6a18e82b71",
+      "359b055d2aae76fd937b7ace4a597ea2c121d96c3013876406a22a14df7f7c4c",
+      "9a12629aa228e7d97684d1da0f0ee3eb68bed9a9207f7625954da74c07300ede",
+      "113fd515559fcfc8dad80e5c170c97eca00f3285da0a120892de9efa03b2dc31",
+      "cdc8ad13d8df16d8b79fbf12a10ba52f758614c5b42b7750bdf902ac6be2a85e",
+      "ae48dbeec9a55c4a5182ffaee8854e2a4b780584d732819e084f99bdb648b763",
+      "fa1246a0840e43cad56b2b88188eecb879929df4b1ad77323afa066dd306ad73"
+    ],
     "4e781ca51420a48a": [
       "4e781ca51420a48a27d6bb765bfafecd90edf6b2db91c96715157420d457b992"
     ],
@@ -12853,8 +12865,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1037,
-      "titleCount": 9368,
+      "fileCount": 1038,
+      "titleCount": 9378,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12942,6 +12954,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_bundle_amount.test.js": "42563ea34d726605",
@@ -13949,8 +13962,8 @@
       }
     },
     "test": {
-      "fileCount": 1037,
-      "titleCount": 9368,
+      "fileCount": 1038,
+      "titleCount": 9378,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14038,6 +14051,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_bundle_amount.test.js": "42563ea34d726605",
@@ -14992,8 +15006,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1121,
-      "titleCount": 10237,
+      "fileCount": 1122,
+      "titleCount": 10247,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15165,6 +15179,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_bundle_amount.test.js": "42563ea34d726605",

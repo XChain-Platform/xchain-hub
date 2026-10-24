@@ -33,6 +33,8 @@ const gateRegistry = require('../../../consensus/gate_registry');
 const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const nodeUtil = require('node:util');
 const { readArchiveSeqFloor } = require('./seq_floor_seed.js');
+const { resolveArchiveNextSeqOverride } = require('./seq_override.js');
+const hubConfig = require('../../../config');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -182,9 +184,18 @@ module.exports = {
         await this.backfillListRows(batchSeq, txid, listIds);
     },
 
+    // The regtest-only pinned seq (seq_override.js), or null. Throws a named error when the
+    // override is set off regtest, so a misconfigured hub cannot draw from it.
+    archiveNextSeqOverride(){
+        return resolveArchiveNextSeqOverride(this.network || hubConfig.HUB_NETWORK);
+    },
+
     // `leaderMin` is passed only by the v1 leader draw (leaderBatchSeqAboveOwn); the
     // follower refusal and the fold co-sign equality call this with no argument.
     async getNextBatchSeq(leaderMin){
+        // A pinned regtest seq wins over the rows and every floor below, by design.
+        let pinned = this.archiveNextSeqOverride();
+        if(pinned !== null) return pinned;
         // Spans every batch_seq-bearing table (listed in db.getNextAnchorBatchSeq) so a
         // fresh seq is unique across all of them (consensus-uniform: all hubs compute the
         // same next seq from quorum-agreed rows).
@@ -245,6 +256,8 @@ module.exports = {
     // (own author history, so no jump cap). Followers never read this floor: chunk sets bind
     // per (seq, author), so co-signing another author's head under our spent seq reuses nothing.
     async leaderBatchSeqAboveOwn(drawn){
+        // The pinned seq exists to reuse a seq this address spent; the redraw would undo it.
+        if(this.archiveNextSeqOverride() !== null) return drawn;
         await this.refreshOwnArchiveSeqFloor();
         let ownSpent = this.ownArchiveSeqFloor();
         if(ownSpent < 0 || drawn > ownSpent) return drawn;
