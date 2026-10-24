@@ -1,5 +1,6 @@
 'use strict';
 
+// GENERATED
 // Copyright © 2025-2026 Dankest, LLC
 // Based on XChain Platform by Dankest, LLC - https://dankest.llc
 //
@@ -17,6 +18,7 @@ const vectors = require('../../../../fixtures/anchor_archive_vectors.json');
 const WRAPPER_BLOCK = 1010;
 const SENTINEL_CAPABILITY = 'wrapper_sentinel';
 const SET = [{ pubkey: 'aa'.repeat(32), amount: '1', source: '' }];
+const ORIGINAL_ARCHIVE_WRAPPER_CAPABILITY = capabilityWants.archiveWrapperCapability;
 
 function copy(value){
     return JSON.parse(JSON.stringify(value));
@@ -57,83 +59,86 @@ function kindsForBuild(){
     return { reward, checkpoint };
 }
 
+function restoreArchiveWrapperCapability(){
+    capabilityWants.archiveWrapperCapability = ORIGINAL_ARCHIVE_WRAPPER_CAPABILITY;
+}
+
+function defaultsToOraclePublish(){
+    for(const network of ['regtest', 'testnet', 'mainnet'])
+        expect(capabilityWants.archiveWrapperCapability({ network }, WRAPPER_BLOCK)).to.equal('oracle_publish');
+
+    expect(capabilityWants.archiveCapabilityWants(
+        everyKindArchive('mainnet'), WRAPPER_BLOCK, row => row.signature_proofed
+    )).to.deep.equal([
+        { block: 1001, capability: 'cross_chain' },
+        { block: 1002, capability: 'cross_chain' },
+        { block: 1003, capability: 'cross_chain' },
+        { block: 1004, capability: 'cross_chain' },
+        { block: 1005, capability: 'cross_chain' },
+        { block: 1006, capability: 'oracle_publish' },
+        { block: 1007, capability: 'price' },
+        { block: 1009, capability: 'oracle_publish' },
+        { block: WRAPPER_BLOCK, capability: 'oracle_publish' }
+    ]);
+}
+
+async function routesOnlyWrapperGroup(){
+    const seen = [];
+    capabilityWants.archiveWrapperCapability = (archive, wrapperSnapshotBlock) => {
+        seen.push([archive.network, wrapperSnapshotBlock]);
+        return SENTINEL_CAPABILITY;
+    };
+    const pub = buildPub();
+    const { reward, checkpoint } = kindsForBuild();
+    const result = await pub.buildArchive('mainnet', 7, [], WRAPPER_BLOCK, [], [reward], {
+        checkpoints: [checkpoint]
+    });
+    const archive = JSON.parse(result.json);
+    const built = archive.capability_snapshots.map(row => row.snapshot_block + '|' + row.capability);
+
+    expect(built).to.deep.equal([
+        '1006|oracle_publish',
+        '1009|oracle_publish',
+        WRAPPER_BLOCK + '|' + SENTINEL_CAPABILITY
+    ]);
+    const seeded = new Map();
+    expect(pub.seedRequiredSnapshotGroups(seeded, archive, WRAPPER_BLOCK)).to.equal(true);
+    expect([...seeded.keys()]).to.deep.equal([
+        '1006|oracle_publish',
+        '1009|oracle_publish',
+        WRAPPER_BLOCK + '|' + SENTINEL_CAPABILITY
+    ]);
+    expect(seen).to.deep.equal([
+        ['mainnet', WRAPPER_BLOCK],
+        ['mainnet', WRAPPER_BLOCK]
+    ]);
+}
+
+function skipsSeamWithoutWrapperBlock(){
+    let calls = 0;
+    capabilityWants.archiveWrapperCapability = () => {
+        calls += 1;
+        return SENTINEL_CAPABILITY;
+    };
+
+    expect(capabilityWants.archiveCapabilityWants(
+        everyKindArchive('regtest'), null, row => row.signature_proofed
+    )).to.deep.equal([
+        { block: 1001, capability: 'cross_chain' },
+        { block: 1002, capability: 'cross_chain' },
+        { block: 1003, capability: 'cross_chain' },
+        { block: 1004, capability: 'cross_chain' },
+        { block: 1005, capability: 'cross_chain' },
+        { block: 1006, capability: 'oracle_publish' },
+        { block: 1007, capability: 'price' },
+        { block: 1009, capability: 'oracle_publish' }
+    ]);
+    expect(calls).to.equal(0);
+}
+
 describe('archive wrapper capability seam', function () {
-    const originalArchiveWrapperCapability = capabilityWants.archiveWrapperCapability;
-
-    afterEach(function () {
-        capabilityWants.archiveWrapperCapability = originalArchiveWrapperCapability;
-    });
-
-    it('defaults every network and every archive kind to oracle_publish with the wrapper last', function () {
-        for(const network of ['regtest', 'testnet', 'mainnet'])
-            expect(capabilityWants.archiveWrapperCapability({ network }, WRAPPER_BLOCK)).to.equal('oracle_publish');
-
-        expect(capabilityWants.archiveCapabilityWants(
-            everyKindArchive('mainnet'), WRAPPER_BLOCK, row => row.signature_proofed
-        )).to.deep.equal([
-            { block: 1001, capability: 'cross_chain' },
-            { block: 1002, capability: 'cross_chain' },
-            { block: 1003, capability: 'cross_chain' },
-            { block: 1004, capability: 'cross_chain' },
-            { block: 1005, capability: 'cross_chain' },
-            { block: 1006, capability: 'oracle_publish' },
-            { block: 1007, capability: 'price' },
-            { block: 1009, capability: 'oracle_publish' },
-            { block: WRAPPER_BLOCK, capability: 'oracle_publish' }
-        ]);
-    });
-
-    it('routes only the wrapper group through the replaceable capability seam', async function () {
-        const seen = [];
-        capabilityWants.archiveWrapperCapability = (archive, wrapperSnapshotBlock) => {
-            seen.push([archive.network, wrapperSnapshotBlock]);
-            return SENTINEL_CAPABILITY;
-        };
-        const pub = buildPub();
-        const { reward, checkpoint } = kindsForBuild();
-        const result = await pub.buildArchive('mainnet', 7, [], WRAPPER_BLOCK, [], [reward], {
-            checkpoints: [checkpoint]
-        });
-        const archive = JSON.parse(result.json);
-        const built = archive.capability_snapshots.map(row => row.snapshot_block + '|' + row.capability);
-
-        expect(built).to.deep.equal([
-            '1006|oracle_publish',
-            '1009|oracle_publish',
-            WRAPPER_BLOCK + '|' + SENTINEL_CAPABILITY
-        ]);
-        const seeded = new Map();
-        expect(pub.seedRequiredSnapshotGroups(seeded, archive, WRAPPER_BLOCK)).to.equal(true);
-        expect([...seeded.keys()]).to.deep.equal([
-            '1006|oracle_publish',
-            '1009|oracle_publish',
-            WRAPPER_BLOCK + '|' + SENTINEL_CAPABILITY
-        ]);
-        expect(seen).to.deep.equal([
-            ['mainnet', WRAPPER_BLOCK],
-            ['mainnet', WRAPPER_BLOCK]
-        ]);
-    });
-
-    it('does not consult the wrapper seam when there is no wrapper block', function () {
-        let calls = 0;
-        capabilityWants.archiveWrapperCapability = () => {
-            calls += 1;
-            return SENTINEL_CAPABILITY;
-        };
-
-        expect(capabilityWants.archiveCapabilityWants(
-            everyKindArchive('regtest'), null, row => row.signature_proofed
-        )).to.deep.equal([
-            { block: 1001, capability: 'cross_chain' },
-            { block: 1002, capability: 'cross_chain' },
-            { block: 1003, capability: 'cross_chain' },
-            { block: 1004, capability: 'cross_chain' },
-            { block: 1005, capability: 'cross_chain' },
-            { block: 1006, capability: 'oracle_publish' },
-            { block: 1007, capability: 'price' },
-            { block: 1009, capability: 'oracle_publish' }
-        ]);
-        expect(calls).to.equal(0);
-    });
+    afterEach(restoreArchiveWrapperCapability);
+    it('defaults every network and every archive kind to oracle_publish with the wrapper last', defaultsToOraclePublish);
+    it('routes only the wrapper group through the replaceable capability seam', routesOnlyWrapperGroup);
+    it('does not consult the wrapper seam when there is no wrapper block', skipsSeamWithoutWrapperBlock);
 });
