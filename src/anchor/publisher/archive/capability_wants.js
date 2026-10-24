@@ -22,6 +22,11 @@
 
 'use strict';
 
+// The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock.
+function archiveWrapperCapability(archive, wrapperSnapshotBlock){
+    return 'oracle_publish';
+}
+
 // List every capability group the archive's rows oblige, with each block as archived (unsorted, may repeat).
 // A batch-proofed price round carries no signatures to check, so only signature-proofed rounds oblige one.
 function archiveCapabilityWants(archive, wrapperSnapshotBlock, isSignatureProofedPrice){
@@ -37,8 +42,9 @@ function archiveCapabilityWants(archive, wrapperSnapshotBlock, isSignatureProofe
         .concat((archive.rewards || []).map(r => ({ block: r.block_index, capability: 'oracle_publish' })));
     // The wrapper checkpoint's own signatures are re-verified against the oracle_publish set at its block
     if(wrapperSnapshotBlock != null)
-        wants.push({ block: wrapperSnapshotBlock, capability: 'oracle_publish' });
+        wants.push({ block: wrapperSnapshotBlock,
+                     capability: module.exports.archiveWrapperCapability(archive, wrapperSnapshotBlock) });
     return wants;
 }
 
-module.exports = { archiveCapabilityWants };
+module.exports = { archiveWrapperCapability, archiveCapabilityWants };
