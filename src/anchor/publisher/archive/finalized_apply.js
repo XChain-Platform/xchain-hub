@@ -50,12 +50,14 @@ module.exports = {
         let partial = (d.matches || []).some(m => m && m.status === '__partial__') ||
                       calls.some(c => c && c.status === '__partial__');
         if(d.txid && !partial && Number.isFinite(Number(d.snapshot_block))){
+            let cpId  = this.observedArchiveCheckpoint(Number(d.batch_seq));
+            let cpNet = cpId ? String(cpId.network) : this.network;
             // d.snapshot_block is an unsigned wire field used as the mirrored
             // reward's block-scoped source-resolution key. Bound it by the same
             // re-derivation verifyArchiveAgainstLocal applies to archived reward
             // rows: the credited pubkey must hold oracle_publish AT that block
             // (a fabricated block index fails the membership resolution).
-            let setAtSnap = await this.getActiveOraclePublishPubkeys(Number(d.snapshot_block));
+            let setAtSnap = await this.archiveFollowerPubkeys(Number(d.snapshot_block), cpNet);
             if(!setAtSnap.includes(sender)){
                 logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') sender not in the ' +
                              'oracle_publish set at announced snapshot_block ' + d.snapshot_block +
@@ -86,8 +88,6 @@ module.exports = {
                 // COLLECT-spendable rail live-vs-recovered. When no local identity is
                 // stashed, verifyArchiveCheckpointOnChain returns 'no-checkpoint-id'
                 // and nothing is recorded, so the fallback only feeds the flag-day gate.
-                let cpId  = this.observedArchiveCheckpoint(Number(d.batch_seq));
-                let cpNet = cpId ? String(cpId.network) : this.network;
                 let archiveVerified = ar.isArchiveRewardActive(Number(d.snapshot_block), cpNet)
                     ? 'flag-day-derived (mirror retired)'
                     : await this.verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid));

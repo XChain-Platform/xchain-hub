@@ -24,6 +24,7 @@
 const zlib = require('zlib');
 const ValidatorIdentity = require('../../../validators/identity.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
+const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { XANC_SIGN } = require('../constants.js');
 const { getLogger } = require('../../../observability');
@@ -32,6 +33,12 @@ const logger = getLogger();
 const SIGN_REQ_REFUSAL_LOG_MS = 60000;
 
 module.exports = {
+
+    // Every follower check of an archive round reads its set here; network is
+    // the record's quorum network on which that set is judged.
+    async archiveFollowerPubkeys(blockIndex, network){
+        return this.getActiveOraclePublishPubkeys(blockIndex);
+    },
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
     async handleSignReq(envelope){
@@ -54,7 +61,8 @@ module.exports = {
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks)
             return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
                 'election_block=' + electionBlock + ' local_tip=' + myBtc);
-        let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
+        let cpNet = resolveQuorumNetwork(cp, this.network);
+        let electionPubkeys = await this.archiveFollowerPubkeys(electionBlock, cpNet);
         if(!electionPubkeys.includes(sender)) return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null) return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
@@ -74,7 +82,7 @@ module.exports = {
         // signer holds oracle_publish AT snapshot_block, so a follower present only
         // in the current election set would contribute a signature that is dropped
         // on-chain and could drag an otherwise-valid archive below quorum.
-        let signingPubkeys = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        let signingPubkeys = await this.archiveFollowerPubkeys(Number(cp.snapshot_block), cpNet);
         if(!signingPubkeys.includes(myPubkey)) return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
@@ -280,7 +288,8 @@ module.exports = {
         // anything, so a member cannot walk our numbering backwards or forwards at will.
         if(d.consumed_seq !== undefined && d.consumed_seq !== null){
             if(Number(d.consumed_seq) < round.batchSeq) return;
-            let electionPubkeys = await this.getActiveOraclePublishPubkeys(round.electionBlock);
+            let electionPubkeys = await this.archiveFollowerPubkeys(
+                round.electionBlock, resolveQuorumNetwork(round.cp, this.network));
             if(!electionPubkeys.includes(pubkey)) return;
             if(!ValidatorIdentity.verify(this.seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;
