@@ -158,12 +158,20 @@ class SnapshotCheckpointEngine {
             SNAPSHOT_CHECKPOINT_ACTIVATION, this.network, 'BTC', snapshotBlock, 0);
     }
 
-    async btcTip() {
-        if (this.source && typeof this.source.resolveSnapshotBlock === 'function')
-            return this.source.resolveSnapshotBlock();
-        if (this.hub && typeof this.hub.resolveBtcLatestBlock === 'function')
-            return this.hub.resolveBtcLatestBlock();
-        return null;
+    async btcHeights() {
+        if (this.source && typeof this.source.resolveSnapshotCheckpointHeights === 'function')
+            return this.source.resolveSnapshotCheckpointHeights();
+        if (this.hub && typeof this.hub.resolveBtcCheckpointHeights === 'function')
+            return this.hub.resolveBtcCheckpointHeights();
+        const height = this.source && typeof this.source.resolveSnapshotBlock === 'function'
+            ? await this.source.resolveSnapshotBlock()
+            : this.hub && typeof this.hub.resolveBtcLatestBlock === 'function'
+                ? await this.hub.resolveBtcLatestBlock()
+                : null;
+        return height === null ? null : {
+            committedHeight: height,
+            chainHeight: height,
+        };
     }
 
     async indexerCall(method, params) {
@@ -265,19 +273,20 @@ class SnapshotCheckpointEngine {
     async checkpointNextDue() {
         const rows = await this.db.listUncheckpointedSnapshotBlocks(
             this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
-        const btcTip = await this.btcTip();
+        const heights = await this.btcHeights() || {};
         const due = pickDueSnapshot(snapshotBlocks(rows), {
             inFlight: this.snapshotRounds.size > 0,
             gateActive: block => this.gateActive(block),
             blockOf: block => snapshotCheckpointBlock(block, this.network),
-            btcTip,
+            committedHeight: heights.committedHeight,
+            chainHeight: heights.chainHeight,
             confirmations: this.confirmations,
         });
         if (!due) return false;
 
         const validators = await this.resolveValidators(due.snapshot_block);
         const myPubkey = this.localPubkey();
-        const overdue = Number(btcTip) - due.block_index - this.confirmations;
+        const overdue = Number(heights.chainHeight) - due.block_index - this.confirmations;
         const decision = snapshotLeaderDecision(
             due.block_index, validators, myPubkey, overdue);
         if (!decision.leads) {

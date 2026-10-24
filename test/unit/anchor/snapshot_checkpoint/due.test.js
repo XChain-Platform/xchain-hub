@@ -13,7 +13,8 @@ function view(overrides = {}) {
         inFlight: false,
         gateActive: snapshotBlock => snapshotBlock >= 100,
         blockOf: snapshotBlock => snapshotBlock - 6,
-        btcTip: 1000,
+        committedHeight: 1000,
+        chainHeight: 1000,
         confirmations: 6,
         ...overrides
     };
@@ -55,23 +56,39 @@ describe('snapshot checkpoint due selection', function () {
     });
 
     it('accepts a tip exactly at the block plus confirmations', function () {
-        expect(pickDueSnapshot([110], view({ btcTip: 110 }))).to.deep.equal(due(110));
+        expect(pickDueSnapshot([110], view({ chainHeight: 110 }))).to.deep.equal(due(110));
     });
 
     it('coerces a string tip', function () {
-        expect(pickDueSnapshot([110], view({ btcTip: '110' }))).to.deep.equal(due(110));
+        expect(pickDueSnapshot([110], view({ chainHeight: '110' }))).to.deep.equal(due(110));
     });
 
     it('waits when the oldest block has a shallow tip', function () {
-        expect(pickDueSnapshot([110, 120], view({ btcTip: 109 }))).to.equal(null);
+        expect(pickDueSnapshot([110, 120], view({ chainHeight: 109 }))).to.equal(null);
     });
 
     it('returns null for an unusable block index', function () {
         expect(pickDueSnapshot([110], view({ blockOf: () => -1 }))).to.equal(null);
         expect(pickDueSnapshot([110], view({ blockOf: () => 1.5 }))).to.equal(null);
     });
+});
 
-    it('returns null when the tip is missing', function () {
-        expect(pickDueSnapshot([110], view({ btcTip: undefined }))).to.equal(null);
+describe('snapshot checkpoint height guards', function () {
+    it('returns null when the chain height is missing', function () {
+        expect(pickDueSnapshot([110], view({ chainHeight: undefined }))).to.equal(null);
+    });
+
+    it('returns null one block below committed confirmation depth at a high chain height', function () {
+        expect(pickDueSnapshot([110], view({
+            committedHeight: 109,
+            chainHeight: 1000,
+        }))).to.equal(null);
+    });
+
+    it('is due when committed height reaches confirmation depth', function () {
+        expect(pickDueSnapshot([110], view({
+            committedHeight: 110,
+            chainHeight: 110,
+        }))).to.deep.equal(due(110));
     });
 });

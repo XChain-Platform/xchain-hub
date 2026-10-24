@@ -13,6 +13,7 @@ const SNAPSHOT_DB_METHODS = require('../../../../../src/db/snapshots/snapshot_ch
 
 const NETWORK = 'regtest';
 const DEFAULT_TIMEOUT_MS = 30;
+const DEFAULT_CONFIRMATIONS = 6;
 const COLUMNS = [
     'chain', 'network', 'block_index', 'block_hash', 'state_root',
     'state_root_version', 'validator_signatures'
@@ -81,7 +82,8 @@ function makeNode(bus, index, identity, timeoutMs) {
         index,
         identity,
         pubkey: identity.getPubkeyHex().toLowerCase(),
-        btcTip: bus.chainTip,
+        committedTip: bus.chainTip,
+        chainTip: bus.chainTip,
         indexerDown: false,
         engine: null
     };
@@ -117,7 +119,7 @@ function makeNode(bus, index, identity, timeoutMs) {
         network: NETWORK,
         p2pConfig: {
             CHECKPOINT_CHAINS: 'BTC',
-            CHECKPOINT_CONFIRMATIONS: '0',
+            CHECKPOINT_CONFIRMATIONS: String(bus.confirmations),
             CHECKPOINT_ROUND_TIMEOUT_MS: String(timeoutMs)
         },
         capabilitySnapshot: {
@@ -130,7 +132,11 @@ function makeNode(bus, index, identity, timeoutMs) {
         },
         getPeerManager: () => peerManager,
         getIdentity: () => identity,
-        resolveBtcLatestBlock: async () => node.btcTip
+        resolveBtcLatestBlock: async () => node.committedTip,
+        resolveBtcCheckpointHeights: async () => ({
+            committedHeight: node.committedTip,
+            chainHeight: node.chainTip,
+        })
     };
     node.stateCheckpoints = {
         hub: node.hub,
@@ -154,13 +160,17 @@ function makeNode(bus, index, identity, timeoutMs) {
 function buildSnapshotMesh(options = {}) {
     const n = options.n == null ? 3 : options.n;
     const timeoutMs = options.timeoutMs == null ? DEFAULT_TIMEOUT_MS : options.timeoutMs;
+    const confirmations = options.confirmations == null
+        ? DEFAULT_CONFIRMATIONS
+        : options.confirmations;
     const bus = {
         network: NETWORK,
         nodes: [],
         validators: [],
         sent: [],
         drop: null,
-        chainTip: 500
+        chainTip: 500,
+        confirmations,
     };
     const identities = Array.from({ length: n }, (_, index) => new ValidatorIdentity(
         crypto.createHash('sha256').update('snapshot-hub-' + index).digest('hex')));
@@ -172,7 +182,16 @@ function buildSnapshotMesh(options = {}) {
     }));
     bus.nodes = identities.map((identity, index) => makeNode(bus, index, identity, timeoutMs));
     bus.setTip = blockIndex => {
-        for (const node of bus.nodes) node.btcTip = blockIndex;
+        for (const node of bus.nodes) {
+            node.committedTip = blockIndex;
+            node.chainTip = blockIndex;
+        }
+    };
+    bus.setHeights = (committedHeight, chainHeight) => {
+        for (const node of bus.nodes) {
+            node.committedTip = committedHeight;
+            node.chainTip = chainHeight;
+        }
     };
     bus.leaderAt = blockIndex => bus.nodes.find(node =>
         leadsSnapshotSlot(blockIndex, bus.validators, node.pubkey));

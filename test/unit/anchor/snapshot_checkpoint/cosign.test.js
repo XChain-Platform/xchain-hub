@@ -141,7 +141,7 @@ describe('snapshot checkpoint co-sign refusals', function () {
             const leader = mesh.leaderAt(cp.block_index);
             const target = mesh.nodes.find(node => node !== leader);
             target.engine.confirmations = 6;
-            target.btcTip = cp.block_index + 5;
+            target.chainTip = cp.block_index + 5;
             leader.hub.getPeerManager().broadcast(
                 'XSNP_SIGN_REQ', buildSnapshotSignRequest(
                     leader.identity, SNAPSHOT_BLOCK, cp));

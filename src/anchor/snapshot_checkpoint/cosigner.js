@@ -19,11 +19,11 @@ function canSign(identity) {
         typeof identity.getPubkeyHex === 'function';
 }
 
-// How many BTC blocks this co-signer's own tip sits past the request's due height, which
-// decides whether a fallback leader has waited long enough. Null when the view lacks it.
+// How many BTC blocks this co-signer's chain height sits past the request's due height,
+// which decides whether a fallback leader has waited long enough. Null when absent.
 function overdueBlocks(req, view) {
-    if(view === null || typeof view !== 'object' || view.btcTip === null) return null;
-    const overdue = Number(view.btcTip) - req.cp.block_index - Number(view.confirmations);
+    if(view === null || typeof view !== 'object' || view.chainHeight === null) return null;
+    const overdue = Number(view.chainHeight) - req.cp.block_index - Number(view.confirmations);
     return Number.isSafeInteger(overdue) ? overdue : null;
 }
 

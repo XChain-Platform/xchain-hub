@@ -30,7 +30,8 @@ async function buildSnapshotCosignView(req, ctx) {
             network: ctx.network,
             gateActive: ctx.gateActive === true,
             expectedBlock: ctx.expectedBlock,
-            btcTip: null,
+            committedHeight: null,
+            chainHeight: null,
             confirmations: Number(ctx.confirmations),
             local: null,
             stored: null,
@@ -43,15 +44,20 @@ async function buildSnapshotCosignView(req, ctx) {
         }
 
         try {
-            const hub = ctx.stateCheckpoints.hub;
-            const tip = hub && typeof hub.resolveBtcLatestBlock === 'function'
-                ? await hub.resolveBtcLatestBlock()
-                : null;
-            view.btcTip = blockHeight(tip);
+            const source = ctx.stateCheckpoints;
+            const hub = source.hub;
+            const heights = typeof source.resolveSnapshotCheckpointHeights === 'function'
+                ? await source.resolveSnapshotCheckpointHeights()
+                : hub && typeof hub.resolveBtcCheckpointHeights === 'function'
+                    ? await hub.resolveBtcCheckpointHeights()
+                    : null;
+            view.committedHeight = blockHeight(heights && heights.committedHeight);
+            view.chainHeight = blockHeight(heights && heights.chainHeight);
         } catch(error) {
             return view;
         }
-        if(!(view.btcTip >= blockIndex + view.confirmations)) return view;
+        if(!(view.committedHeight >= blockIndex + view.confirmations) ||
+            !(view.chainHeight >= blockIndex + view.confirmations)) return view;
 
         try {
             const blockHashes = await ctx.stateCheckpoints.indexerCall(

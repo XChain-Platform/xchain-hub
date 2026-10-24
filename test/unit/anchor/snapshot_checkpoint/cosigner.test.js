@@ -16,6 +16,7 @@ const {
 } = require('../../../../src/anchor/snapshot_checkpoint/signed_record.js');
 const {
     SNAPSHOT_FALLBACK_STEP_BLOCKS: STEP,
+    snapshotLeaderDecision,
 } = require('../../../../src/anchor/snapshot_checkpoint/leader.js');
 
 const hash = character => character.repeat(64);
@@ -57,7 +58,8 @@ function view(changes = {}) {
         network: 'testnet',
         gateActive: true,
         expectedBlock: 100,
-        btcTip: 106,
+        committedHeight: 106,
+        chainHeight: 106,
         confirmations: 6,
         local: {
             block_hash: hash('a'),
@@ -129,13 +131,33 @@ describe('answerSnapshotSignRequest request refusal', function () {
         });
         const fallback = request(checkpoint({ block_index: 100 }), third);
         expect(answerSnapshotSignRequest(fallback, Object.assign({}, ctx, {
-            view: view({ btcTip: 106 + STEP - 1 }),
+            view: view({ chainHeight: 106 + STEP - 1 }),
         }))).to.deep.equal(refusal('not_leader'));
         const result = answerSnapshotSignRequest(fallback, Object.assign({}, ctx, {
-            view: view({ btcTip: 106 + STEP }),
+            view: view({ chainHeight: 106 + STEP }),
         }));
         expect(result.refusal).to.equal(null);
         expect(result.reply).to.include({ block_index: 100, pubkey: LEADER });
+    });
+
+    it('agrees with leader selection immediately below and at every fallback rank boundary', function () {
+        const set = [1, 2, 3, 4, 5].map(digit => ({ pubkey: hash(String(digit)) }));
+        const dueHeight = checkpoint().block_index + 6;
+        for (let rank = 1; rank < set.length; rank++) {
+            const signer = set[rank].pubkey;
+            const req = request(checkpoint(), signer);
+            for (const delta of [rank * STEP - 1, rank * STEP]) {
+                const decision = snapshotLeaderDecision(
+                    checkpoint().block_index, set, signer, delta);
+                const result = answerSnapshotSignRequest(req, context(
+                    createSnapshotSignedRecord(), {
+                        validators: set,
+                        view: view({ chainHeight: dueHeight + delta }),
+                    }));
+                expect(result.refusal === null, 'rank ' + rank + ', delta ' + delta)
+                    .to.equal(decision.leads);
+            }
+        }
     });
 
     it('refuses a forged leader signature with bad_leader_signature', function () {
@@ -152,7 +174,7 @@ describe('answerSnapshotSignRequest co-sign refusal', function () {
     const cases = [
         ['gate_inactive', { gateActive: false }],
         ['wrong_block', { expectedBlock: 99 }],
-        ['shallow', { btcTip: 105 }],
+        ['shallow', { chainHeight: 105 }],
         ['local_mismatch', {
             local: { block_hash: hash('a'), state_root: hash('c'), state_root_version: 2 },
         }],
@@ -175,7 +197,21 @@ describe('answerSnapshotSignRequest co-sign refusal', function () {
             expect(signs).to.equal(0);
         });
     }
+});
 
+describe('answerSnapshotSignRequest committed height refusal', function () {
+    it('refuses committed height one block below required depth at a high chain height', function () {
+        const record = createSnapshotSignedRecord();
+        const ctx = context(record, {
+            view: view({ committedHeight: 105, chainHeight: 1000 }),
+        });
+        expect(answerSnapshotSignRequest(request(), ctx))
+            .to.deep.equal(refusal('shallow'));
+        expect(record.size()).to.equal(0);
+    });
+});
+
+describe('answerSnapshotSignRequest co-sign refusal', function () {
     it('uses record.held as the signed view and keeps a different first payload', function () {
         const record = createSnapshotSignedRecord();
         record.claim(checkpoint({ state_root: hash('c') }));

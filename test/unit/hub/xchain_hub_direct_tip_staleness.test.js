@@ -92,6 +92,17 @@ function registerDirectTipHealthTests() {
         expect(await hub.resolveBtcLatestBlock()).to.equal(null);
     });
 
+    it('keeps the frozen-tip gate on the general tip but not checkpoint chain depth', async function () {
+        const result = { block_index: HEIGHT, decoder_block: HEIGHT + 20, lag: 20 };
+        const hub = hubWith(tipAged(HEIGHT, 10800), result);
+
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        expect(await hub.resolveBtcCheckpointHeights()).to.deep.equal({
+            committedHeight: HEIGHT,
+            chainHeight: HEIGHT + 20,
+        });
+    });
+
     it('serves a direct height on a healthy chain whose newest block is merely slow', async function () {
         // 1500s past the pushed-tip bound is an ordinary mainnet gap, not a halt.
         const hub = hubWith(tipAged(HEIGHT, 1500), { block_index: HEIGHT, lag: 0 });
