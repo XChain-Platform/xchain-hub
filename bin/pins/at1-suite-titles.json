@@ -4758,6 +4758,12 @@
       "d720371fcee690a6e48f9f5a4a6a41398319364c97ab74292f628c8467554e8d",
       "f316400bc3e09934b036da1b2e8980f6d5802d74bb259ea4daa8f25de8749a3d"
     ],
+    "57aadfe4c6603643": [
+      "c0e467a47001c528ed8971dd9767bd05770ec2f06dea796de036efb32cf9dde6",
+      "d24502094fc3bca98951a93e478b0150adceeaf4f1ca14db48f4ee48c21f2af8",
+      "53cd568442e4ad7a6782f351a868b60cfd4c5a0a9aee3d226488e0206e6f50f4",
+      "8c736129f6a50c2b90d4ad18cd4f37242de118a520479c3576b7f6ecd738dea6"
+    ],
     "5808e353254c7d9f": [
       "38e4fc8b880909b405e1989a8bf7a39989b4a682fe33397ee63f490e94ccec53",
       "1c36a5ae0bc05185ca8a71d2ca4f82cc78290c8217d258a0463ae606b8dc65fc",
@@ -10664,6 +10670,11 @@
     "ccdc27b762996a2a": [
       "ccdc27b762996a2a89c465bf904b0839e1439276b1178464058978e31d8560be"
     ],
+    "cd01e79da9c4cf0c": [
+      "90145dbd06d65bdaa14e1a9ceb8662c9fb23afbeef82bbe4a43cd0aa3df733f9",
+      "5dfbcba2446d9506263a7b3006d35fd97fe3760c4f5bf918b6da97a048ddb7da",
+      "0acea66a2e9ea83322865c78326a89f7b69d078f3bccf9bec1b6af5b44752e3c"
+    ],
     "cd6fc21361cc1abb": [
       "a43a0644891b289556d99fdbfacb5c93b8d1ccfbd753a8b38e65fbad386ba6ed",
       "845e51af815562ffaf731691c745fed01a69dac170ff80f52952ec213b5edaf5",
@@ -11429,6 +11440,12 @@
       "9790f938a7c441aa1921f508be556cd409a88a0a44975122f2eea2b1c47cfaeb",
       "e5a8f2e1e9b96420fa501abb2acbeb17c8f7e3cfad148df7477a77f67867ff98",
       "8ca5897c7850f2e57f5e909fa74903f9cdf70f53558dbfd50a08ea4a295efe8a"
+    ],
+    "e106f55cd3316675": [
+      "87b1a582d8c537ca9abf8ceaf6b5d6cd9bc75c5ccc2117d36073024fa2938981",
+      "6972d9c825ad913d107459f683a4540046df0cdfceb8960ffa3c46c925d6b709",
+      "d334f1395a07972037d87089f5b3b6d401c44fcc62a20fbbb93ad5140884aa5e",
+      "f593d18a282a1f1916922b5d593dce33cc31e4f04d3dbd16665611920b58ecc7"
     ],
     "e134fd4216f851a3": [
       "62e4848bb1949bf797666e3a79427bb51615c730b4fe7bcbc394ab21ac75ea10",
@@ -12773,6 +12790,12 @@
       "951b697f5a48c6751d7ab0f52945166d1ff8bfecdc679823ecb8a85d4ae08fd8",
       "f4e5314ae803edcf6c1647f5b4bbceab5ad35c12dabac6b485257698ffa94ba1"
     ],
+    "fc9b4e3518071c69": [
+      "3e4954c4e38cce03a46f6b14bfbcac9e7200572fa733fff5c6af52aa92d6e987",
+      "959bce7cc360c4809584a25ac40c48c7b32818ec120e3dc679888a30867768ad",
+      "74e69b2ab5689f211ba25541c712c132a5b37379f2925d2f10199338d51589b4",
+      "4d828d28502c87be3371663dd8381b2af99d7d724afeca437951827a67e513af"
+    ],
     "fd3949c42579edbb": [
       "6da5843560be48fb17c635ef5b32fa7372a23a9c6d1901141fc427a1ca723f9d",
       "685816d9e91f40ae91968c9960f02a89b6503b18ecf898006b72b33587467b47",
@@ -12891,8 +12914,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1040,
-      "titleCount": 9398,
+      "fileCount": 1044,
+      "titleCount": 9413,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12911,6 +12934,7 @@
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
+        "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
@@ -12950,6 +12974,7 @@
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
         "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "93e1ecb312e06aec",
+        "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "cd01e79da9c4cf0c",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
         "test/unit/anchor/publisher/archive/failover/v0_bundle_signerless_leader_failover.test.js": "0f5b30a4dc8dab54",
@@ -12981,6 +13006,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
@@ -13006,6 +13032,7 @@
         "test/unit/anchor/publisher/deferred_drain/reward_drain_archive_term.test.js": "4273c614b54c8ae5",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_legacy_pin.test.js": "a74585d7773f39fb",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_paging.test.js": "c16bf226ddb18c87",
+        "test/unit/anchor/publisher/fallback/capability_pubkeys_at.test.js": "57aadfe4c6603643",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_capability_fallback.test.js": "b7b2fd45bbf7373f",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_oracle_set_fallback.test.js": "ab893eaf8838c83f",
         "test/unit/anchor/publisher/flush/state_anchor_publisher_failover_wake.test.js": "6db3e2d3196706a9",
@@ -13990,8 +14017,8 @@
       }
     },
     "test": {
-      "fileCount": 1040,
-      "titleCount": 9398,
+      "fileCount": 1044,
+      "titleCount": 9413,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14010,6 +14037,7 @@
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
+        "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
@@ -14049,6 +14077,7 @@
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
         "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "93e1ecb312e06aec",
+        "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "cd01e79da9c4cf0c",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
         "test/unit/anchor/publisher/archive/failover/v0_bundle_signerless_leader_failover.test.js": "0f5b30a4dc8dab54",
@@ -14080,6 +14109,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
@@ -14105,6 +14135,7 @@
         "test/unit/anchor/publisher/deferred_drain/reward_drain_archive_term.test.js": "4273c614b54c8ae5",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_legacy_pin.test.js": "a74585d7773f39fb",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_paging.test.js": "c16bf226ddb18c87",
+        "test/unit/anchor/publisher/fallback/capability_pubkeys_at.test.js": "57aadfe4c6603643",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_capability_fallback.test.js": "b7b2fd45bbf7373f",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_oracle_set_fallback.test.js": "ab893eaf8838c83f",
         "test/unit/anchor/publisher/flush/state_anchor_publisher_failover_wake.test.js": "6db3e2d3196706a9",
@@ -15036,8 +15067,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1124,
-      "titleCount": 10267,
+      "fileCount": 1128,
+      "titleCount": 10282,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15140,6 +15171,7 @@
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
+        "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
         "test/unit/anchor/checkpoint_engine/checkpoint_confirmations_floor.test.js": "53e2c78ca96006c8",
         "test/unit/anchor/checkpoint_engine/liveness/failed_round_retry.test.js": "e916c870a667780d",
@@ -15179,6 +15211,7 @@
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
         "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "93e1ecb312e06aec",
+        "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "cd01e79da9c4cf0c",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
         "test/unit/anchor/publisher/archive/failover/v0_bundle_signerless_leader_failover.test.js": "0f5b30a4dc8dab54",
@@ -15210,6 +15243,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
@@ -15235,6 +15269,7 @@
         "test/unit/anchor/publisher/deferred_drain/reward_drain_archive_term.test.js": "4273c614b54c8ae5",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_legacy_pin.test.js": "a74585d7773f39fb",
         "test/unit/anchor/publisher/deferred_drain/reward_drain_paging.test.js": "c16bf226ddb18c87",
+        "test/unit/anchor/publisher/fallback/capability_pubkeys_at.test.js": "57aadfe4c6603643",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_capability_fallback.test.js": "b7b2fd45bbf7373f",
         "test/unit/anchor/publisher/fallback/state_anchor_publisher_oracle_set_fallback.test.js": "ab893eaf8838c83f",
         "test/unit/anchor/publisher/flush/state_anchor_publisher_failover_wake.test.js": "6db3e2d3196706a9",

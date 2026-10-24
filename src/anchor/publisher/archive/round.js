@@ -32,6 +32,12 @@ const logger = getLogger();
 
 module.exports = {
 
+    // The leader's archive election reads its set here; network is the network
+    // on which that set is judged.
+    archiveElectionPubkeys(blockIndex, network){
+        return this.getActiveOraclePublishPubkeys(blockIndex);
+    },
+
     // Archive round (v1/v2).
     // Leader = hash-order rank 0 over the oracle_publish set, with the same
     // failover ladder as the checkpoint leg: the election key and ladder age use the
@@ -54,7 +60,7 @@ module.exports = {
         // wrapper checkpoint's snapshot_block is hours old). This set decides only
         // WHO drives the round + pays the DOGE; it does NOT gate which signatures
         // count on-chain (that is the snapshot_block signing set resolved below).
-        let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
+        let electionPubkeys = await this.archiveElectionPubkeys(electionBlock, this.network);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return 'none';
 
@@ -222,6 +228,12 @@ module.exports = {
     },
 
 
+    // The wrapper signing set takes its capability here and is judged at
+    // cp.snapshot_block on the record network.
+    archiveSigningCapability(cp){
+        return 'oracle_publish';
+    },
+
     // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block.
     // The block the published v1 declares on the wire is the block the indexer
     // (anchor.js) + full-parse recovery verify the wrapper signatures against
@@ -240,7 +252,7 @@ module.exports = {
     // must use this set, not getActiveOraclePublishPubkeys.
     // Hands back the resolver's own promise, so the round awaits the read it awaited inline.
     archiveSigningSet(cp){
-        return this.resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        return this.resolveCapabilitySet(this.archiveSigningCapability(cp), Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
     },
 
     // An UNRESOLVED (empty) signing set is not a quorum of one: defer the round,
