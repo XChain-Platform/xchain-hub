@@ -204,6 +204,15 @@ function titleIndex(map, titles) {
     return new Map(titles.map((t) => [hashed ? t : titleDigest(t), t]));
 }
 
+/** Apply exact declared title rewrites to one expanded pin entry. */
+function applyTitleRenames(index, renames, rel) {
+    const declared = renames.titles && renames.titles[rel];
+    if (!declared) return index;
+    const byDigest = new Map(Object.entries(declared)
+        .map(([before, after]) => [titleDigest(before), titleDigest(after)]));
+    return new Map([...index].map(([digest, title]) => [byDigest.get(digest) || digest, title]));
+}
+
 /** The flat {file: [titles]} view of one script in a map, pin or fresh. */
 function expand(map, scriptName) {
     const s = map.scripts[scriptName];
@@ -242,7 +251,7 @@ function compare(pin, fresh, renames, only) {
             if (!after[rel]) { differences.push({ script: name, kind: 'file_dropped', file: rel }); continue; }
             // Keyed by digest on both sides: a pin stores digests and a fresh
             // collection stores text, and the invariant is the same set either way.
-            const beforeIndex = titleIndex(pin, mapped[rel]);
+            const beforeIndex = applyTitleRenames(titleIndex(pin, mapped[rel]), renames, rel);
             const afterIndex = titleIndex(fresh, after[rel]);
             const gone = [...beforeIndex].filter(([d]) => !afterIndex.has(d)).map(([, t]) => t);
             const added = [...afterIndex].filter(([d]) => !beforeIndex.has(d)).map(([, t]) => t);
