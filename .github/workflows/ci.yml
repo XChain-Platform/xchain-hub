@@ -364,7 +364,7 @@ jobs:
       - name: Check out the re-taken hub suite-title pin
         uses: actions/checkout@v4
         with:
-          ref: ff71c546b04db23a0df4111a8db99f40b722956c
+          ref: 1e18572a95a27a8d14f9bd1b1cb2b92796a4b14f
           path: suite-title-pins/hub/xchain-hub
 
       - name: Check out the re-taken SDK suite-title pin
