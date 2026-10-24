@@ -4,7 +4,6 @@
 // Based on XChain Platform by Dankest, LLC – https://dankest.llc
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// GENERATED from the archive follower-set seam scenarios in this file.
 //
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md. A commercial
@@ -16,7 +15,7 @@
 const { expect } = require('chai');
 const {
     CP_ROW, buildMesh, registerMeshHooks
-} = require('../../../../helpers/anchor_mesh.js');
+} = require('../../../../../helpers/anchor_mesh.js');
 
 function checkpoint(overrides){
     return Object.assign({}, CP_ROW, overrides || {});
@@ -117,28 +116,42 @@ async function authenticatesConsumedSeqRefusalMembership(){
     const outsider = bus.nodes[1];
     const calls = [];
     const learned = [];
-    Reflect.set(leader.pub, '_archiveRound', {
+    const round = {
         batchSeq: 7,
         done: false,
         electionBlock: 500,
         cp: checkpoint({ network: 'roundnet' })
-    });
+    };
+    Reflect.set(leader.pub, '_archiveRound', round);
+    let followerSet = [leader.pubkey];
     leader.pub.archiveFollowerPubkeys = async (block, network) => {
         calls.push([block, network]);
-        return [leader.pubkey];
+        return followerSet;
     };
     leader.pub.noteConsumedBatchSeq = (seq) => learned.push(seq);
 
-    await leader.pub.handleSign({ data: {
+    // The refusal is signed correctly by its own key, so the signature check
+    // passes and only follower-set membership can turn it away.
+    const refusal = { data: {
         batch_seq: 7,
         sig_pubkey: outsider.pubkey,
+        sig: '',
         consumed_seq: 7,
-        refusal_sig: 'not-reached'
-    }});
+        refusal_sig: outsider.identity.sign(leader.pub.seqRefusalCanonical(7, 7))
+    }};
+    await leader.pub.handleSign(refusal);
 
     expect(calls).to.deep.equal([[500, 'roundnet']]);
-    expect(learned).to.deep.equal([]);
-    expect(Reflect.get(leader.pub, '_archiveRound').done).to.equal(false);
+    expect(learned, 'a validly signed refusal from outside the set moves no seq').to.deep.equal([]);
+    expect(Reflect.get(leader.pub, '_archiveRound')).to.equal(round);
+    expect(round.done).to.equal(false);
+
+    // Positive control: the same refusal abandons the round once its key is in
+    // the answer, so the refusal above was turned away for membership alone.
+    followerSet = [leader.pubkey, outsider.pubkey];
+    await leader.pub.handleSign(refusal);
+    expect(learned).to.deep.equal([7]);
+    expect(round.done).to.equal(true);
 }
 
 async function checksFinalizedRewardMirrorMembership(){
@@ -150,13 +163,16 @@ async function checksFinalizedRewardMirrorMembership(){
     follower.pub.finalizedPricesWithLocalProof = async () => [];
     follower.pub.backfillBatch = async () => {};
     follower.pub.observedArchiveCheckpoint = () => checkpoint({ network: 'observednet' });
+    // The archive verifies on-chain, so only follower-set membership stands
+    // between this FINALIZED and a mirrored reward.
+    follower.pub.verifyArchiveCheckpointOnChain = async () => 'verified';
+    let followerSet = [follower.pubkey];
     follower.pub.archiveFollowerPubkeys = async (block, network) => {
         calls.push([block, network]);
-        return [follower.pubkey];
+        return followerSet;
     };
     follower.pub.recordReward = (...args) => rewards.push(args);
-
-    await follower.pub.applyFinalized({
+    const finalized = () => follower.pub.applyFinalized({
         batch_seq: 7,
         txid: 'archive-txid',
         snapshot_block: 123,
@@ -165,8 +181,15 @@ async function checksFinalizedRewardMirrorMembership(){
         bridges: [], policies: [], checkpoints: [], prices: [], tombstones: [], lists: []
     });
 
+    await finalized();
     expect(calls).to.deep.equal([[123, 'observednet']]);
     expect(rewards, 'sender outside the follower set records no anchor_archive reward').to.deep.equal([]);
+
+    // Positive control: the same FINALIZED mirrors the reward once the sender
+    // is in the answer.
+    followerSet = [follower.pubkey, sender];
+    await finalized();
+    expect(rewards).to.deep.equal([['anchor_archive', 7, sender, 123, 'observednet']]);
 }
 
 async function delegatesToActiveOraclePublishPubkeys(){
