@@ -513,12 +513,6 @@
       "fd73214259a1f1e5e48082b8fe6e456ae46183dbe73fe7f0af248840fb8672ce",
       "f5e6d3f187e6efd1b7f59f458829dba9b81e496d3fffdf398ea4dbe63701d699"
     ],
-    "0abed87d210860ee": [
-      "d0e6677445fe299bf563182cbc2a7033208e93f96bd422ac35a5730547395a4f",
-      "182028c01888cb1403009e60eb208d6d3db1476eb802d3a1807beb6761d085ba",
-      "c3411b4ad9f41a53cf012cd6821b7b826b864d2f231be66d939a2fa2b42030fd",
-      "4eab7b86bb798f2469a9a32dc51025ed89c06ca2c3235364c9a04342c0057b31"
-    ],
     "0ac5be97bc41674f": [
       "18a768bc8b999cfb7396f4b1436d711afa42a1350c46dab63d64881a15d833d7",
       "a874b428546a96f2329894d5ebc781b43d5cbfee721af67f5f18789d31d6a3a7",
@@ -11894,6 +11888,13 @@
       "78e90db9d2c02cf4581f8e10636dbbb2640e13346b500e7f18f940c7ab2eb066",
       "40184e4b1de306db9780371e100ba89843cb0efd0c94a1050377f9bf0c388fc7"
     ],
+    "ea7e5d0a570b1949": [
+      "d0e6677445fe299bf563182cbc2a7033208e93f96bd422ac35a5730547395a4f",
+      "874e90f74da2c76d8e78230176e0f706131aeab6d449a51d7031c1933746d73b",
+      "182028c01888cb1403009e60eb208d6d3db1476eb802d3a1807beb6761d085ba",
+      "c3411b4ad9f41a53cf012cd6821b7b826b864d2f231be66d939a2fa2b42030fd",
+      "4eab7b86bb798f2469a9a32dc51025ed89c06ca2c3235364c9a04342c0057b31"
+    ],
     "eaabfd52fa05c9ba": [
       "d2a1dafb2c6173e903c78b45415c711b287266d6f88bc60d7efb8026ad3eeb23",
       "df7393dc5001874c0bb805d4676b10af3bd1d723678ab95f6688fec9c7c17f27",
@@ -12915,7 +12916,7 @@
         "ci:regression"
       ],
       "fileCount": 1044,
-      "titleCount": 9413,
+      "titleCount": 9414,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12932,7 +12933,7 @@
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
-        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
@@ -14018,7 +14019,7 @@
     },
     "test": {
       "fileCount": 1044,
-      "titleCount": 9413,
+      "titleCount": 9414,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14035,7 +14036,7 @@
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
-        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
@@ -15068,7 +15069,7 @@
     },
     "test:all": {
       "fileCount": 1128,
-      "titleCount": 10282,
+      "titleCount": 10283,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15169,7 +15170,7 @@
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
         "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
-        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "0abed87d210860ee",
+        "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
         "test/unit/anchor/checkpoint_engine/checkpoint_cadence_config.test.js": "8f0da8b2bd663e32",
