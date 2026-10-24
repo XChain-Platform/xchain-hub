@@ -64,8 +64,7 @@ module.exports = {
             return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
                 'election_block=' + electionBlock + ' local_tip=' + myBtc);
         let cpNet = resolveQuorumNetwork(cp, this.network);
-        let electionPubkeys = await this.archiveFollowerPubkeys(
-            electionBlock, cpNet, 'archive_publish');
+        let electionPubkeys = await this.archiveFollowerPubkeys(electionBlock, cpNet, 'archive_publish');
         if(!electionPubkeys.includes(sender)) return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
         if(canonical === null) return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
@@ -85,8 +84,7 @@ module.exports = {
         // signer holds the gated archive capability AT snapshot_block, so a follower
         // present only in the current election set would contribute a signature that
         // is dropped on-chain and could drag an otherwise-valid archive below quorum.
-        let signingPubkeys = await this.archiveFollowerPubkeys(
-            Number(cp.snapshot_block), cpNet, 'archive_publish');
+        let signingPubkeys = await this.archiveFollowerPubkeys(Number(cp.snapshot_block), cpNet, 'archive_publish');
         if(!signingPubkeys.includes(myPubkey)) return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
@@ -279,17 +277,8 @@ module.exports = {
         let round = this._archiveRound;
         if(!round || round.done || Number(d.batch_seq) !== round.batchSeq) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
-        // Stale-seq convergence, the proposing half. A follower that already holds this
-        // round's seq as consumed answers with a stale-seq refusal instead of a
-        // signature. Learn the floor from it and ABANDON the round: rebuilding the same
-        // batch under the same stale seq every flush is what left the federation stuck
-        // (hub0 batch 38 / hub1 batch 39, neither publishing). Rows stay pending and the
-        // next flush draws above the floor.
-        //
-        // Authenticated against the archive publisher set at THIS round's own election
-        // block (the same population that elected the round) plus a signature over the
-        // refusal canonical, and only a refusal naming a seq at or above ours can move
-        // anything, so a member cannot walk our numbering backwards or forwards at will.
+        // Accept only signed refusals from archive publishers elected for this round.
+        // A refusal can advance the consumed sequence floor, never lower it.
         if(d.consumed_seq !== undefined && d.consumed_seq !== null){
             if(Number(d.consumed_seq) < round.batchSeq) return;
             let electionPubkeys = await this.archiveFollowerPubkeys(
