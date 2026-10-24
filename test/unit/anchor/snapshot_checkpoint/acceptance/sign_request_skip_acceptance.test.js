@@ -5,17 +5,17 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { getLogger } = require('../../observability');
+const { getLogger } = require('../../../../../src/observability');
 const { snapshotCheckpointBlock } = require(
-    '../../consensus/snapshot_checkpoint/canonical.js');
-const { XSNP_SIGN_REQ } = require('./constants.js');
-const SnapshotCheckpointEngine = require('./engine.js');
-const { snapshotLeaderRank } = require('./leader.js');
-const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
-const snapshotRound = require('./round.js');
-const { buildSnapshotSignRequest } = require('./sign_request.js');
+    '../../../../../src/consensus/snapshot_checkpoint/canonical.js');
+const { XSNP_SIGN_REQ } = require('../../../../../src/anchor/snapshot_checkpoint/constants.js');
+const SnapshotCheckpointEngine = require('../../../../../src/anchor/snapshot_checkpoint/engine.js');
+const { snapshotLeaderRank } = require('../../../../../src/anchor/snapshot_checkpoint/leader.js');
+const { snapshotCheckpointFromBlockHashes } = require('../../../../../src/anchor/snapshot_checkpoint/payload.js');
+const snapshotRound = require('../../../../../src/anchor/snapshot_checkpoint/round.js');
+const { buildSnapshotSignRequest } = require('../../../../../src/anchor/snapshot_checkpoint/sign_request.js');
 const { buildSnapshotMesh } = require(
-    '../../../test/unit/anchor/snapshot_checkpoint/support/snapshot_mesh.js');
+    '../support/snapshot_mesh.js');
 
 const SNAPSHOT_BLOCK = 406;
 const hash = character => character.repeat(64);

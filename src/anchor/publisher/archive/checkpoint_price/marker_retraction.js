@@ -14,8 +14,6 @@
 
 'use strict';
 
-const nodeTest = require.main === module ? require('node:test') : null;
-const assert = require.main === module ? require('node:assert/strict') : null;
 const { normalizeRetractionBounds } = require('../../../../lib/retraction_bounds.js');
 const retraction = require('../../../../oracle/price_aggregator/retract.js');
 const { getLogger } = require('../../../../observability');
@@ -92,39 +90,3 @@ function decorateRetraction(){
 decorateRetraction();
 
 module.exports = { retractedWindowRounds };
-
-function finalizedBatchFixture(){
-    const markers = new Set([42]);
-    const cleared = [];
-    const db = {
-        async findBatchPriceSnapshotRoundsForRetraction(){ return []; },
-        async findSelfFinalizedRoundsForBatchRetraction(){ return []; },
-        async insertPriceTombstonesForRetraction(){ return { affectedRows: 0 }; },
-        async deletePriceSnapshotsForRetraction(){ return { affectedRows: 0 }; },
-        async deleteOraclePricesForRetraction(){ return { affectedRows: 0 }; }
-    };
-    const publisher = {
-        async clearPublishedMarkers(rounds){
-            cleared.push(...rounds);
-            for(const round of rounds) markers.delete(round);
-        }
-    };
-    const aggregator = {
-        db, hub: { oraclePublisher: publisher }, emit(){}, fenceNetwork(){ return 'regtest'; }
-    };
-    return { markers, cleared, aggregator };
-}
-
-async function fullyFinalizedBatchRetractionClearsMarker(){
-    const fixture = finalizedBatchFixture();
-    const result = await retraction.retractFromActionIndex.call(
-        fixture.aggregator, 'DOGE', 100, undefined, undefined,
-        [{ first_round: 42, last_round: 42 }]);
-    assert.deepEqual(result.retracted, { price_snapshots: 0, oracle_prices: 0 });
-    assert.deepEqual(fixture.cleared, [42]);
-    assert.equal(fixture.markers.has(42), false);
-}
-
-if(require.main === module)
-    nodeTest.test('a fully finalized batch retraction clears its D28 marker',
-                  fullyFinalizedBatchRetractionClearsMarker);

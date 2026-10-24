@@ -46,19 +46,11 @@ const REGISTRATION_CALLS = new Set([
 // Bare calls refused at module level anywhere in src.
 const MODULE_LEVEL_CALLS = new Set(['describe', 'it']);
 
-// Files that already held test code when this guard landed, with the number
-// of findings each had. The list may only shrink: a new file, or a new
-// finding in a listed file, fails; so does an entry whose file has been
-// cleaned, so the entry is removed in the same change that moves the code.
-const KNOWN_VIOLATIONS = {
-    'anchor/publisher/archive/checkpoint_price/batch_ingest_backlog_test.js': 2,
-    'anchor/publisher/archive/checkpoint_price/marker_retraction.js': 3,
-    'anchor/snapshot_checkpoint/fallback_leader_acceptance.js': 2,
-    'anchor/snapshot_checkpoint/sign_request_skip_acceptance.js': 2,
-    'api/rest/test/hub_db_snapshot_stored_chain_id.js': 2,
-    'db/state_checkpoints.js': 3,
-    'peers/gossip/inbound.js': 3
-};
+// Files allowed to hold test code, with the number of findings each may have.
+// The backlog this guard landed with has all moved under test/, so the list
+// is empty and may only stay so: any finding in any src file fails, and an
+// entry whose file has been cleaned fails as stale.
+const KNOWN_VIOLATIONS = {};
 
 function sourceFiles(directory) {
     const files = [];

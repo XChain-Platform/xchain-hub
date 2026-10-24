@@ -6,7 +6,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('node:assert/strict');
-const { mountSnapshotRoutes } = require('../hub_db_snapshot');
+const { mountSnapshotRoutes } = require('../../../src/api/rest/hub_db_snapshot');
 
 const STORED_CHAIN_ID = 'a'.repeat(64);
 const SNAPSHOT_TABLES = [

@@ -5,17 +5,17 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { getLogger } = require('../../observability');
+const { getLogger } = require('../../../../../src/observability');
 const { snapshotCheckpointBlock } = require(
-    '../../consensus/snapshot_checkpoint/canonical.js');
-const SnapshotCheckpointEngine = require('./engine.js');
+    '../../../../../src/consensus/snapshot_checkpoint/canonical.js');
+const SnapshotCheckpointEngine = require('../../../../../src/anchor/snapshot_checkpoint/engine.js');
 const {
     SNAPSHOT_FALLBACK_STEP_BLOCKS: STEP,
     SNAPSHOT_LEADER_SKIP,
     snapshotLeaderRank,
-} = require('./leader.js');
+} = require('../../../../../src/anchor/snapshot_checkpoint/leader.js');
 const { buildSnapshotMesh } = require(
-    '../../../test/unit/anchor/snapshot_checkpoint/support/snapshot_mesh.js');
+    '../support/snapshot_mesh.js');
 
 const SNAPSHOT_BLOCK = 406;
 const key = digit => String(digit).repeat(64);
