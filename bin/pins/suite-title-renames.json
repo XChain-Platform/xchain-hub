@@ -44,6 +44,12 @@
     },
     "test/unit/rollcall/rollcall_status_rpc.test.js": {
       "capabilities/oracle_publish broadcast presence check leaves the no-signer-module posture unchanged": "capabilities/oracle_publish broadcast presence check fails when no signer module is configured"
+    },
+    "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": {
+      "buildSnapshotCosignView accepted requests normalizes a string tip to a number": "buildSnapshotCosignView accepted requests normalizes string checkpoint heights to numbers"
+    },
+    "test/unit/anchor/snapshot_checkpoint/due.test.js": {
+      "snapshot checkpoint due selection returns null when the tip is missing": "snapshot checkpoint height guards returns null when the chain height is missing"
     }
   }
 }
