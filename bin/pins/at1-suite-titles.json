@@ -12766,6 +12766,12 @@
       "951b697f5a48c6751d7ab0f52945166d1ff8bfecdc679823ecb8a85d4ae08fd8",
       "f4e5314ae803edcf6c1647f5b4bbceab5ad35c12dabac6b485257698ffa94ba1"
     ],
+    "fc9b4e3518071c69": [
+      "3e4954c4e38cce03a46f6b14bfbcac9e7200572fa733fff5c6af52aa92d6e987",
+      "959bce7cc360c4809584a25ac40c48c7b32818ec120e3dc679888a30867768ad",
+      "74e69b2ab5689f211ba25541c712c132a5b37379f2925d2f10199338d51589b4",
+      "4d828d28502c87be3371663dd8381b2af99d7d724afeca437951827a67e513af"
+    ],
     "fd3949c42579edbb": [
       "6da5843560be48fb17c635ef5b32fa7372a23a9c6d1901141fc427a1ca723f9d",
       "685816d9e91f40ae91968c9960f02a89b6503b18ecf898006b72b33587467b47",
@@ -12973,6 +12979,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
@@ -14071,6 +14078,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
@@ -15200,6 +15208,7 @@
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_finalized.test.js": "081af5e1094ee417",
         "test/unit/anchor/publisher/archive/quorum/state_anchor_publisher_archive_quorum_tables_round.test.js": "c05b07d883350fee",
         "test/unit/anchor/publisher/archive/round/archive_repeat_publish_guard.test.js": "97a4a8b017e84f3e",
+        "test/unit/anchor/publisher/archive/round/archive_round_set_seam.test.js": "fc9b4e3518071c69",
         "test/unit/anchor/publisher/archive/seq/archive_next_seq_override.test.js": "4e51597a78b8838c",
         "test/unit/anchor/publisher/archive/sizing/archive_wire_budget.test.js": "f626743077987d92",
         "test/unit/anchor/publisher/archive/state_anchor_publisher_archive_attestation.test.js": "8f2f40418e228d6d",
