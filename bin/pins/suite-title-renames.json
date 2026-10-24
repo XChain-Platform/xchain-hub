@@ -28,6 +28,9 @@
       "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 33 entries, and contains the gates the last three trains append": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 43 entries, and contains the gates the last trains append",
       "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) digests to the pinned value, which moved when the admission encoder was registered": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut, and again when LTC:testnet mirror admission shipped null under dq4 (a))"
     },
+    "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": {
+      "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 47 entries, and contains the gates the last trains append": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 48 entries, and contains the gates the last trains append"
+    },
     "test/unit/cross_chain/bridge/cross_chain_bridge_activation_resolve.test.js": {
       "cross-chain bridge engine activation resolution names all three gates by their registry keys, and each has a row": "cross-chain bridge engine activation resolution names all four gates by their registry keys, and each has a row",
       "cross-chain bridge engine activation resolution holds every mainnet and testnet slot of all three gates unarmed": "cross-chain bridge engine activation resolution holds every mainnet slot of all four gates unarmed, and the cut's bridge, token and list share testnet heights"
