@@ -30,9 +30,7 @@ function weightValidators(bus, indexes) {
     return indexes.map(i => ({ pubkey: bus.nodes[i].pubkey, weight: '1', source: 'wsrc' + i }));
 }
 
-describe('anchor mesh capability sets', () => {
-    registerMeshHooks();
-
+function registerCountSnapshotTests() {
     it('keeps the default mesh snapshot shared and untracked', async () => {
         const bus = buildMesh(4);
         const snapshot = bus.nodes[0].pub.hub.capabilitySnapshot;
@@ -65,7 +63,9 @@ describe('anchor mesh capability sets', () => {
             ['oracle_publish', CP_ROW.snapshot_block]
         ]);
     });
+}
 
+function registerWeightedAndFollowerTests() {
     it('keeps capability-specific weight answers when stakeWeighted is set', async () => {
         const bus = buildMesh(4, {
             capabilitySets: { archive_publish: [0, 1, 2] },
@@ -109,4 +109,10 @@ describe('anchor mesh capability sets', () => {
         expect(await pub.archiveFollowerPubkeys(CP_ROW.snapshot_block, 'regtest'))
             .to.deep.equal(sortedPubkeys(bus));
     });
+}
+
+describe('anchor mesh capability sets', () => {
+    registerMeshHooks();
+    registerCountSnapshotTests();
+    registerWeightedAndFollowerTests();
 });
