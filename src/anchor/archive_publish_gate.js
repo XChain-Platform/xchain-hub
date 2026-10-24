@@ -18,15 +18,15 @@
 
 'use strict';
 
-const gateRegistry = require('../consensus/gate_registry.js');
-const swq          = require('../consensus/stake_weighted_quorum.js');
+const consensusRules = require('../consensus_rules_digest.js');
+const swq            = require('../consensus/stake_weighted_quorum.js');
 
 const ARCHIVE_ROLLCALL_PRESENCE_KEY =
     'archive_rollcall_presence_activation.ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION';
 
 function isArchivePublishActive(snapshotBlock, network){
     return swq.isStakeWeightedQuorumActive(snapshotBlock, network) &&
-        gateRegistry.activeAt(ARCHIVE_ROLLCALL_PRESENCE_KEY, network, 'BTC', snapshotBlock, null);
+        consensusRules.activeGatesAt(snapshotBlock, network, 'BTC').includes(ARCHIVE_ROLLCALL_PRESENCE_KEY);
 }
 
 module.exports = {
