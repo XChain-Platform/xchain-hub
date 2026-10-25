@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
+const { supersedeCosignDecline } = require('./replay_hold.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { XCHK_SIGN, ALLOWED_CHAINS } = require('./constants.js');
 const { getLogger } = require('../../observability');
@@ -84,11 +85,11 @@ module.exports = {
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
         if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
 
-        // Independent confirmation from our own indexer/replica.
         let bh = null;
         try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
         catch(e){ return this.noteCosignDecline('indexer_read_failed', cp, String(e && e.message).slice(0, 200)); }   // can't confirm -> don't sign
         if(!bh) return this.noteCosignDecline('indexer_no_block', cp);
+        const replayDecline = supersedeCosignDecline(cp, bh.rules); if(replayDecline) return this.noteCosignDecline(replayDecline, cp);
         this.coSignAgainstOwnBlock(cp, canonical, bh, myPubkey);
     },
 
@@ -152,7 +153,9 @@ module.exports = {
             state_root:           bh.state_root           != null ? String(bh.state_root).toLowerCase()        : null,
             state_root_version:   bh.state_root_version   != null ? Number(bh.state_root_version)   : null,
             block_merkle_root:    bh.block_merkle_root    != null ? String(bh.block_merkle_root).toLowerCase() : null,
-            block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null
+            block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null,
+            supersedes_from:      cp.supersedes_from,
+            rules_digest:         cp.rules_digest
         });
         if(mine !== canonical){
             logger.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index + ' diverges from our indexer, NOT signing');
@@ -204,7 +207,9 @@ module.exports = {
             state_root:           raw.state_root           != null ? String(raw.state_root).toLowerCase()        : null,
             state_root_version:   raw.state_root_version   != null ? Number(raw.state_root_version)   : null,
             block_merkle_root:    raw.block_merkle_root    != null ? String(raw.block_merkle_root).toLowerCase() : null,
-            block_merkle_version: raw.block_merkle_version != null ? Number(raw.block_merkle_version) : null
+            block_merkle_version: raw.block_merkle_version != null ? Number(raw.block_merkle_version) : null,
+            supersedes_from:      raw.supersedes_from      != null ? Number(raw.supersedes_from) : null,
+            rules_digest:         raw.rules_digest         != null ? String(raw.rules_digest).toLowerCase() : null
         };
     },
 
