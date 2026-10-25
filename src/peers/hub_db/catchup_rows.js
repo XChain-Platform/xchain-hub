@@ -5,7 +5,7 @@
 
 // How catch-up asks whether the hub already holds a peer row, and how it stores one it verified.
 
-const { storePriceSnapshot } = require('./price_round_groups.js');
+const { priceSnapshotAlreadyHeld, storePriceSnapshot } = require('./price_round_groups.js');
 
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
@@ -19,7 +19,7 @@ async function hasRows(promise) {
 const CONTENT_KEY_READERS = Object.freeze({
     price_snapshots: async (db, row) => {
         const rows = await db.findPriceSnapshotsForRound(row.round_number);
-        return Array.isArray(rows) && rows.some(held => held && held.coin_pair === row.coin_pair);
+        return priceSnapshotAlreadyHeld(rows, row);
     },
     oracle_prices: (db, r) => hasRows(db.getOraclePrice(r.source_address, r.source_chain, r.action_index)),
     cross_chain_matches: (db, r) => hasRows(db.getCrossChainMatchByMatchId(r.match_id)),

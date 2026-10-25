@@ -103,6 +103,12 @@ function admissionBlocks(row) {
         admit_block_doge: row.admit_block_doge };
 }
 
+function priceSnapshotAlreadyHeld(rows, row) {
+    const held = Array.isArray(rows) && rows.find(candidate =>
+        candidate && candidate.coin_pair === row.coin_pair);
+    return Boolean(held) && !(held.status === 'skipped' && row.status === 'finalized');
+}
+
 function storePriceSnapshot(db, row) {
     const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
     if (row.status === 'skipped') {
@@ -125,5 +131,6 @@ function storePriceSnapshot(db, row) {
 
 module.exports = {
     priceRoundKey, splitRoundGroups, sameSignedRoundFields,
-    advanceCursor, storePriceSnapshot, isProducerRoundRow, groupKey, indexGroups, holdTrailingGroup
+    advanceCursor, storePriceSnapshot, priceSnapshotAlreadyHeld,
+    isProducerRoundRow, groupKey, indexGroups, holdTrailingGroup
 };
