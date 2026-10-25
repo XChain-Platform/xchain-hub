@@ -25,7 +25,10 @@ const { supersedeFieldsFor, supersedeGateRefusal } =
 const DIGEST = 'AB'.repeat(32);
 
 function replayRules(state, target = '40') {
-    return { digest: DIGEST, replay: { state, target, replay_to: 50 } };
+    return {
+        digest: DIGEST,
+        replay: { state, target, replay_to: 50, witness: 'passed', changed: true },
+    };
 }
 
 describe('checkpoint supersede fill rules @regression', function () {
@@ -57,7 +60,7 @@ describe('checkpoint supersede fill rules @regression', function () {
     it('returns null for a malformed digest or replay target', function () {
         expect(supersedeFieldsFor({
             digest: 'ab',
-            replay: { state: 'replayed', target: 40, replay_to: 50 },
+            replay: { state: 'replayed', target: 40, replay_to: 50, witness: 'passed', changed: true },
         }, [])).to.equal(null);
 
         for (const target of [null, true, '', -1, 1.5, Number.MAX_SAFE_INTEGER + 1, 'not-a-number'])

@@ -22,14 +22,13 @@
 
 const { hasSupersedeFields } = require('./supersede_suffix.js');
 
-function replayWindowFor(rules, requireWitness = true) {
+// Only a replay the indexer witnessed and found changed may supersede. An
+// indexer that predates the witness omits both fields, and that fails closed.
+function replayWindowFor(rules) {
     if(!rules || !rules.replay || rules.replay.state !== 'replayed') return null;
 
     const replay = rules.replay;
-    const hasWitnessFields = Object.prototype.hasOwnProperty.call(replay, 'witness') ||
-        Object.prototype.hasOwnProperty.call(replay, 'changed');
-    if((requireWitness || hasWitnessFields) &&
-       (replay.witness !== 'passed' || replay.changed !== true)) return null;
+    if(replay.witness !== 'passed' || replay.changed !== true) return null;
 
     const rawTarget = replay.target;
     if(typeof rawTarget !== 'number' && typeof rawTarget !== 'string') return null;
@@ -48,7 +47,7 @@ function replayWindowFor(rules, requireWitness = true) {
 }
 
 function supersedeFieldsFor(rules, finalizedRows) {
-    const replayWindow = replayWindowFor(rules, false);
+    const replayWindow = replayWindowFor(rules);
     if(!replayWindow || !Array.isArray(finalizedRows)) return null;
 
     const disagrees = finalizedRows.some((row) => {

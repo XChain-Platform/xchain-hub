@@ -21,6 +21,8 @@
 const { expect } = require('chai');
 const roundMethods = require('../../../../src/anchor/checkpoint_engine/round.js');
 const stateCheckpointMethods = require('../../../../src/db/state_checkpoints.js');
+const { supersedeFieldsFor } =
+    require('../../../../src/anchor/checkpoint_engine/supersede_fill.js');
 
 const A = 'aa'.repeat(32);
 const B = 'bb'.repeat(32);
@@ -37,6 +39,19 @@ function rules(digest, overrides) {
         }, overrides),
     };
 }
+
+// Deletes the keys outright: an own property holding undefined is not absent.
+function rulesWithout(digest, keys) {
+    const stripped = rules(digest);
+    for (const key of keys) delete stripped.replay[key];
+    return stripped;
+}
+
+const ABSENT_CASES = [
+    ['witness absent', ['witness']],
+    ['changed absent', ['changed']],
+    ['witness and changed both absent', ['witness', 'changed']],
+];
 
 function engineWithRows(rows) {
     const calls = [];
@@ -103,6 +118,36 @@ function registerWitnessGateTests() {
     });
 }
 
+function registerAbsentWitnessTests() {
+    const disagreeing = [{ checkpoint_seq: 10, effective_rules_digest: B }];
+
+    it('fills fields for a witnessed changed replay over a disagreeing row', function () {
+        expect(supersedeFieldsFor(rules(A), disagreeing))
+            .to.deep.equal({ supersedes_from: 40, rules_digest: A });
+    });
+
+    for (const [name, keys] of ABSENT_CASES) {
+        it(`does not fill supersede fields with ${name}`, function () {
+            const absent = rulesWithout(A, keys);
+            for (const key of keys) expect(absent.replay).to.not.have.property(key);
+            expect(supersedeFieldsFor(absent, disagreeing)).to.equal(null);
+        });
+
+        it(`does not supersede a round with ${name}`, async function () {
+            const fixture = engineWithRows(disagreeing);
+            const fields = await fixture.engine.supersedeFieldsForRound(
+                'BTC', 'regtest', { rules: rulesWithout(A, keys) });
+            expect(fields).to.equal(null);
+            expect(fixture.calls).to.deep.equal([]);
+        });
+    }
+
+    it('does not fill supersede fields unless the witness passed and found a change', function () {
+        for (const overrides of [{ witness: null }, { witness: 'running' }, { changed: false }])
+            expect(supersedeFieldsFor(rules(A, overrides), disagreeing)).to.equal(null);
+    });
+}
+
 function registerAgreementTest() {
     it('does not supersede again after the surviving window agrees', async function () {
         const fixture = engineWithRows([
@@ -144,6 +189,7 @@ function registerReplayWindowQueryTest() {
 describe('checkpoint supersede on witnessed disagreement @regression', function () {
     registerDigestReuseTest();
     registerWitnessGateTests();
+    registerAbsentWitnessTests();
     registerAgreementTest();
     registerReplayWindowQueryTest();
 });
