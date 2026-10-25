@@ -55,12 +55,13 @@ module.exports = {
             // d.snapshot_block is an unsigned wire field used as the mirrored
             // reward's block-scoped source-resolution key. Bound it by the same
             // re-derivation verifyArchiveAgainstLocal applies to archived reward
-            // rows: the credited pubkey must hold oracle_publish AT that block
-            // (a fabricated block index fails the membership resolution).
-            let setAtSnap = await this.archiveFollowerPubkeys(Number(d.snapshot_block), cpNet);
+            // rows: the credited pubkey must hold the gated archive capability AT that
+            // block (a fabricated block index fails the membership resolution).
+            let setAtSnap = await this.archiveFollowerPubkeys(
+                Number(d.snapshot_block), cpNet, 'archive_publish');
             if(!setAtSnap.includes(sender)){
                 logger.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') sender not in the ' +
-                             'oracle_publish set at announced snapshot_block ' + d.snapshot_block +
+                             'archive publisher set at announced snapshot_block ' + d.snapshot_block +
                              '; NOT mirroring the archive reward');
             } else {
                 // XANC-REWARD-THEFT-1 (archive half): below the archive-reward flag-day
