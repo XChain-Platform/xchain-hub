@@ -174,7 +174,6 @@ module.exports = {
             if(this.signedRoundConflict(btcBlock) != null) return;
             // A new interval supersedes any timed-out round still waiting for a retry.
             if(this._roundRetries) this._roundRetries.clear();
-
             let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
             await this.leadCadenceRound(btcBlock, validators);
@@ -187,12 +186,8 @@ module.exports = {
             if(!this.indexers[chain] || !this.indexers[chain].url) continue;
             try {
                 const bh = await this.indexerCall(chain, 'getblockhashes', {});
-                if(indexerReplayOpen(bh && bh.rules)){
-                    this.noteCadenceStall(btcBlock, 'indexer_replaying');
-                    return true;
-                }
-            }
-            catch(_e){}
+                if(indexerReplayOpen(bh && bh.rules)){ this.noteCadenceStall(btcBlock, 'indexer_replaying'); return true; }
+            } catch(_e){}
         }
         return false;
     },
@@ -201,7 +196,6 @@ module.exports = {
         let last = this._lastCheckpointBtcBlock;
         return last != null && btcBlock < Number(last) + this.intervalBlocks;
     },
-
     // We are the cadence leader (or a single-node set): one round per chain.
     async leadCadenceRound(btcBlock, validators){
         if(await this.leaderReplayHeld(btcBlock)) return;
@@ -230,7 +224,6 @@ module.exports = {
             }
         }
     },
-
     // The interval rule every signature this hub gives obeys, as leader or co-signer. A
     // round at `snap` may not start inside the interval after the last FINALIZED
     // checkpoint (a snapshot EQUAL to it is the same round, one SIGN_REQ per chain, and
