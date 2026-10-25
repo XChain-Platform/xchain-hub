@@ -1870,6 +1870,15 @@
       "3bd547d41df080f111fdcbd439c7b008b97cb7e0a9a6d9e03b70819963b030b1",
       "16feca75825e58551d7a44cf0ee692238d1abe8cc82fada756ec8c7666407436"
     ],
+    "245b90efa02e575c": [
+      "090d795c00718b127ae6a50f4a945bfcade2262124e855a31191620a58f2faba",
+      "4790385b95cfac23b18177ab0e6e6cb1680c42573659b8a6857fcb79d0365d8c",
+      "d6f126a21e9120afba23b823ef004748c8357d14be14f0172b8f5457a700c0cb",
+      "20297f4da32071e3ab7770dca8e5cb898d5528d055686ed454c1232f9fe32618",
+      "e99e91fc423c8479702f20fb8835e59d245243841fd150ae92500c4489ccfd91",
+      "1f21e13c69558284d90c3f6f21d2572d015d154254f020bb805c7ef5375def0b",
+      "bc4ca878d226cb82ba6da8a680fca16b83030a74b53967a4506938fd3485c0cf"
+    ],
     "249c372dfd6c1afa": [
       "4b5f50dde99dd8bf1324885d218bb69d4d39593511770ba30efecf09a0b67127",
       "9cea0705321a76c30729f4fb78d359acafa1311597964b27c384d06f6d35ba5e",
@@ -3616,15 +3625,6 @@
     ],
     "44149c03a88d9344": [
       "44149c03a88d934487792c9d48e5e466d810884754e451502342f0e4bf50cb4f"
-    ],
-    "448bd815e5559cb7": [
-      "b097fb6c07b98a070c20e769da1508cd4d823aaefc4db41787aac28480c725b0",
-      "3c96fcbbf021fa2b5a8d0b59e3f6976376b945197da2c64e138044602a6c5838",
-      "a93887d381e31a67a826dce673ca9f9525319839caf4866514f7f8d3d77d337c",
-      "f7f6df6f2887977f360f69627c920c1b211e0e377d9d7278eede818f89b5626d",
-      "6b1353f65b32ab2d60bd7211766f3341e6432a82bdb47f8244c94d044983e420",
-      "7ed0369673ba531719bd8ffffb28ede2a461de3cd0ff74fe1ab2f6ecc59c552f",
-      "223d7b48ded3df6b5e97e016caaeebcfbd8aaf143e256b4d3ee44a2a7690251c"
     ],
     "4487667e518de742": [
       "7c7d1a2d56ddfac6efa6a52b8ae2c81fb6c9cbe9e42d039e608593405be6caab",
@@ -12948,8 +12948,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1049,
-      "titleCount": 9437,
+      "fileCount": 1048,
+      "titleCount": 9430,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -12992,7 +12992,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
-        "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
@@ -14056,8 +14056,8 @@
       }
     },
     "test": {
-      "fileCount": 1049,
-      "titleCount": 9437,
+      "fileCount": 1048,
+      "titleCount": 9430,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14100,7 +14100,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
-        "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
@@ -15111,8 +15111,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1133,
-      "titleCount": 10306,
+      "fileCount": 1132,
+      "titleCount": 10299,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15239,7 +15239,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
-        "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
