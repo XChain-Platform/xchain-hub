@@ -27,6 +27,26 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// Production always supplies OracleRound.canonicalPairs. The one-pair fallback keeps
+// a partially constructed engine fail-soft while still making an indexed read.
+function lastFinalizedSeedPairs(engine) {
+    const canonical = engine.oracleRound && engine.oracleRound.canonicalPairs;
+    if (canonical && canonical.size) {
+        const pairs = [...canonical].filter(pair =>
+            typeof pair === 'string' && /^[A-Z0-9]+\/[A-Z0-9]+$/.test(pair));
+        if (pairs.length) return pairs;
+    }
+    return ['BTC/USD'];
+}
+
+function lastFinalizedSeedSql(pairs, bounded) {
+    return pairs.map(pair => `(SELECT coin_pair, price, round_number
+              FROM price_snapshots FORCE INDEX (idx_status_pair_round)
+             WHERE status = 'finalized' AND coin_pair = '${pair}' AND price IS NOT NULL${
+                 bounded ? ' AND round_number < ?' : ''}
+             ORDER BY round_number DESC LIMIT 1)`).join('\nUNION ALL\n');
+}
+
 module.exports = {
 
     // Canonicalize the set's ORDER on the way in, so getLeader's
@@ -48,16 +68,16 @@ module.exports = {
     async seedLastFinalizedPrices(opts) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         try {
-            // One row per coin_pair: the price from that pair's highest finalized
-            // round. The subquery picks the max finalized round per pair, then the
-            // join reads that round's price for the pair. round_number rides along so
-            // the entry can be stamped and the merge below can stay monotonic.
-            let belowRound = opts && opts.belowRound;
-            let rows = Number.isInteger(belowRound)
-                ? await this.db.findLatestPriceSnapshotPerPairBelowRound(belowRound)
-                : await this.db.findLatestPriceSnapshotPerPair();
+            const belowRound = opts && opts.belowRound;
+            const bounded = Number.isInteger(belowRound);
+            // Pin status and coin_pair, then walk idx_status_pair_round backward to
+            // the first usable row. Each pair costs one bounded index lookup instead
+            // of grouping the full price_snapshots history every reseed interval.
+            const pairs = lastFinalizedSeedPairs(this);
+            const rows = await this.db.doQuery(lastFinalizedSeedSql(pairs, bounded),
+                bounded ? pairs.map(() => belowRound) : []);
             let seeded = 0;
-            for (let r of (rows || [])) {
+            for (const r of (rows || [])) {
                 if (r.coin_pair && r.price !== null && r.price !== undefined) {
                     // Merge, never replace the map: a truncated or partial read must not
                     // drop a pair's reference, since an absent reference means NO clamp
