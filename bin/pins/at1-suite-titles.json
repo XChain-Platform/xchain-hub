@@ -3376,6 +3376,21 @@
       "f23894db53117c473fb2a87b4d8160559f9710cd90e11e1073c5973e395f7e7b",
       "0ae5f10556e5bcc625af352b16c33138ab8b37f050c17ca5b3594ba88235bc91"
     ],
+    "40018fc5f4d50b4c": [
+      "15f2e18903a3d149d60b26ec50576f42998cdc70ed7fa9aa89130cf494c27bb6",
+      "1cbd2284c3e29095d345399e9bc041873c4598098c85efdc345a09c4338f1194",
+      "b2116939498cf594a45ce109204805d576c44819ba423555b210ce4f43f0d229",
+      "c8026fb4880d136511dc285c400cd98315e6f7ccca006e1a2b85151192cbbc49",
+      "9953147dae200168e9f1033440e5ca9d09f1a540e30d42828776384c933fce3f",
+      "aede1a725560de3aec6ef20593a946424986262dded22434dcf78cd613fce991",
+      "a977ad3c6c7c2ff66baafe6d6fe23fce406e42109a856e0eb050265de948b548",
+      "bd4a923e952b87a0fbb52335e2614df8e8e98fd02c0a6ad93b7f93bff848f619",
+      "c1c64b1845f92e1f2029dfa96e880787a6942e29e196274bb7c231ce981c4499",
+      "cbe1fe20d7dbc3740b56bca2d3018dbda5547bf5977afbea84b22ee32f9a31f4",
+      "43633f5e0625fc7f90807d506a81ba661e2af1889b5e7f0e7591acda95db18fd",
+      "4541dd644d8dd60185854d6dc01be8b1e26a4ac3c1418f3adaca37f25459abbf",
+      "68b9e4fb48481501f41d5521de9014705ce06d47c8cb547bb36731970da9b3d2"
+    ],
     "40337fe6b96ca648": [
       "7f0f5e7f0f70a5f96ee9a03be571c3e7e6dce59db287aeb996c410ccb4412999",
       "ff0e76a0f8a50dd080e6c82bbaaa4c56383bb92afb2a72a8b0ff1f614ed36c2f",
@@ -13017,8 +13032,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1058,
-      "titleCount": 9488,
+      "fileCount": 1059,
+      "titleCount": 9501,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13065,6 +13080,7 @@
         "test/unit/anchor/checkpoint_supersede/replay_hold_reason.test.js": "e02199c48104fdc4",
         "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/checkpoint_supersede/supersede_fill_rules.test.js": "f52bcacd3c63dc52",
+        "test/unit/anchor/checkpoint_supersede/supersede_on_disagreement.test.js": "40018fc5f4d50b4c",
         "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
         "test/unit/anchor/checkpoint_supersede/superseded_rule.test.js": "b88e7689c8f7a3fb",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
@@ -14134,8 +14150,8 @@
       }
     },
     "test": {
-      "fileCount": 1058,
-      "titleCount": 9488,
+      "fileCount": 1059,
+      "titleCount": 9501,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14182,6 +14198,7 @@
         "test/unit/anchor/checkpoint_supersede/replay_hold_reason.test.js": "e02199c48104fdc4",
         "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/checkpoint_supersede/supersede_fill_rules.test.js": "f52bcacd3c63dc52",
+        "test/unit/anchor/checkpoint_supersede/supersede_on_disagreement.test.js": "40018fc5f4d50b4c",
         "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
         "test/unit/anchor/checkpoint_supersede/superseded_rule.test.js": "b88e7689c8f7a3fb",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
@@ -15198,8 +15215,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1142,
-      "titleCount": 10357,
+      "fileCount": 1143,
+      "titleCount": 10370,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15330,6 +15347,7 @@
         "test/unit/anchor/checkpoint_supersede/replay_hold_reason.test.js": "e02199c48104fdc4",
         "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/checkpoint_supersede/supersede_fill_rules.test.js": "f52bcacd3c63dc52",
+        "test/unit/anchor/checkpoint_supersede/supersede_on_disagreement.test.js": "40018fc5f4d50b4c",
         "test/unit/anchor/checkpoint_supersede/supersede_suffix.test.js": "448bd815e5559cb7",
         "test/unit/anchor/checkpoint_supersede/superseded_rule.test.js": "b88e7689c8f7a3fb",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
