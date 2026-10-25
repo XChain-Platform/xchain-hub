@@ -155,6 +155,7 @@ module.exports = {
         this._ticking = true;
         try {
             await this.retryFailedSelfAccepts();
+            if(await this.leaderReplayHeld()) return;
             let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this.finalizedLatchHolds(btcBlock)){
@@ -173,7 +174,6 @@ module.exports = {
             if(this.signedRoundConflict(btcBlock) != null) return;
             // A new interval supersedes any timed-out round still waiting for a retry.
             if(this._roundRetries) this._roundRetries.clear();
-
             let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
             await this.leadCadenceRound(btcBlock, validators);
@@ -181,11 +181,13 @@ module.exports = {
             this._ticking = false;
         }
     },
-    async leaderReplayHeld(){
+    async leaderReplayHeld(btcBlock){
         for(const chain of this.chains){
             if(!this.indexers[chain] || !this.indexers[chain].url) continue;
-            try { const bh = await this.indexerCall(chain, 'getblockhashes', {}); if(indexerReplayOpen(bh && bh.rules)) return true; }
-            catch(_e){}
+            try {
+                const bh = await this.indexerCall(chain, 'getblockhashes', {});
+                if(indexerReplayOpen(bh && bh.rules)){ this.noteCadenceStall(btcBlock, 'indexer_replaying'); return true; }
+            } catch(_e){}
         }
         return false;
     },
@@ -194,10 +196,9 @@ module.exports = {
         let last = this._lastCheckpointBtcBlock;
         return last != null && btcBlock < Number(last) + this.intervalBlocks;
     },
-
     // We are the cadence leader (or a single-node set): one round per chain.
     async leadCadenceRound(btcBlock, validators){
-        if(await this.leaderReplayHeld()) return;
+        if(await this.leaderReplayHeld(btcBlock)) return;
         // Mirror the capability snapshot BEFORE the attempt is recorded. This call sits
         // outside the per-chain guard below, so a throw here aborts every chain's round;
         // recorded first, the whole interval was dropped and getcheckpointstats still
@@ -223,7 +224,6 @@ module.exports = {
             }
         }
     },
-
     // The interval rule every signature this hub gives obeys, as leader or co-signer. A
     // round at `snap` may not start inside the interval after the last FINALIZED
     // checkpoint (a snapshot EQUAL to it is the same round, one SIGN_REQ per chain, and
