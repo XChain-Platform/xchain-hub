@@ -39,55 +39,48 @@ module.exports = {
         return this.getArchivePublishPubkeys(blockIndex, network);
     },
 
-    // Archive round (v1/v2).
-    // Leader = hash-order rank 0 over the oracle_publish set, with the same
-    // failover ladder as the checkpoint leg: the election key and ladder age use the
-    // oldest block-bearing row in the archive. That row stays pending while newer state
-    // checkpoints arrive, so the ladder cannot reset on the checkpoint cadence. The
-    // hub-local batch seq is never part of the key (see archiveElectionKey in build.js).
-    // Each further rank unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS. Without
-    // the ladder a signer-less elected
-    // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could
-    // publish; on a static regtest tip the same leader won forever). Returns
-    // the flush summary's archive status.
+    // Leader = hash-order rank 0 over oracle_publish, with the checkpoint leg's
+    // failover ladder. Its key and age use the oldest block-bearing archive row,
+    // which stays pending as newer checkpoints arrive, so checkpoint cadence cannot
+    // reset the ladder. The hub-local batch seq is not part of the election key.
+    // Each further rank unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS.
+    // Returns the flush summary's archive status.
     async startArchiveRound(signer, electionBlock, failoverOnly){
-        // One at a time across BOTH phases: a round collecting signatures, and a round
-        // whose publish is already in flight (see _archivePublishing).
-        if(this._archiveRound || this._archivePublishing) return 'round_pending';
-        if(this.archiveTipUnresolved(electionBlock)) return 'none';
+        // One at a time across signature collection and an in-flight publish.
+        if(this._archiveRound || this._archivePublishing) return this.archiveFlushStatus('round_pending', 'round_or_publish_pending');
+        if(this.archiveTipUnresolved(electionBlock)) return this.archiveFlushStatus('none', 'tip_unresolved');
 
-        // Leader ELECTION runs over the set at the current BTC block (liveness: a
-        // freshly-joined validator can take over a stalled publish even when the
-        // wrapper checkpoint's snapshot_block is hours old). This set decides only
-        // WHO drives the round + pays the DOGE; it does NOT gate which signatures
-        // count on-chain (that is the snapshot_block signing set resolved below).
+        // Election uses the current BTC block so a new validator can take over a
+        // stalled publish. This set chooses the driver; the snapshot-block set below
+        // still decides which signatures count on-chain.
         let electionPubkeys = await this.archiveElectionPubkeys(electionBlock, this.network);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-        if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return 'none';
+        if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return this.archiveFlushStatus('none', 'election_not_admitted');
 
         let rows = await this.gatherUnpublishedArchiveRows();
-        if(!rows) return 'none';
+        if(!rows) return this.archiveFlushStatus('none', 'no_pending_rows');
 
         let cps = await this.latestArchiveWrapperRows();
         if(!cps || cps.length === 0){
             logger.info('StateAnchorPublisher: no state checkpoint yet; archive deferred');
-            return 'none';
+            return this.archiveFlushStatus('none', 'no_wrapper_checkpoint');
         }
         let cp = this.cpFromRow(cps[0]);
         let network  = String(cps[0].network);
 
         let liveIntent = await this.getLiveArchiveIntent(network);
-        if(this.archiveRoundIntentHeld(liveIntent, network)) return 'intent_held';
+        if(this.archiveRoundIntentHeld(liveIntent, network)) return this.archiveFlushStatus('intent_held', 'live_intent_held');
 
         let batchSeq = await this.getNextBatchSeq();
         // Lead only above the seqs our own DOGE address already spent
         batchSeq = await this.leaderBatchSeqAboveOwn(batchSeq);
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
-        if(this.archiveEmptyAfterResolution(rows, rewardRows)) return 'none';
+        if(this.archiveEmptyAfterResolution(rows, rewardRows)) return this.archiveFlushStatus('none', 'empty_after_reward_resolution');
 
         const archive  = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
+        this.archiveRankLockReason = null;
         if(this.archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq,
-                                  failoverOnly, JSON.parse(archive.json))) return 'none';
+                                  failoverOnly, JSON.parse(archive.json))) return this.archiveFlushStatus('none', this.archiveRankLockReason || 'rank_locked');
         let wire      = this.archiveWire(archive.json);
 
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
@@ -96,19 +89,25 @@ module.exports = {
         let mySig    = this.identity.sign(canonical);
 
         let signingSet = await this.archiveSigningSet(cp);
-        if(this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return 'none';
+        if(this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return this.archiveFlushStatus('none', 'signing_set_unresolved');
         let round = this.openArchiveRound({ cp, batchSeq, wire, canonical, signer, electionBlock, archive, rows, rewardRows, signingSet, myPubkey, mySig });
         if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
 
         if(signingSet.length <= 1){                                          // single-node: self-sign suffices
-            if(this.singleMemberCannotSelfSign(round, cp, batchSeq)) return 'none';
-            return this.publishSingleMemberArchive(round);
+            if(this.singleMemberCannotSelfSign(round, cp, batchSeq)) return this.archiveFlushStatus('none', 'single_member_cannot_self_sign');
+            const status = await this.publishSingleMemberArchive(round);
+            return this.archiveFlushStatus(status, status === 'intent_held' ? 'publish_intent_held' : 'single_member_published');
         }
 
         this.armArchiveRound(round, batchSeq);
         this.broadcastArchiveSignReq(cp, batchSeq, archive, wire, electionBlock, myPubkey, mySig);
         await this.checkArchiveQuorum();
-        return 'round_started';
+        return this.archiveFlushStatus('round_started', 'signature_round_started');
+    },
+
+    archiveFlushStatus(status, reason){
+        logger.info('StateAnchorPublisher: archive flush summary: status=' + status + ' reason=' + reason);
+        return status;
     },
 
     // Fail closed on an unresolved BTC tip. flush() passes whatever
@@ -154,27 +153,27 @@ module.exports = {
 
     // True when the failover ladder says this hub does not publish this batch now.
     archiveRankLocked(cp, electionPubkeys, me, electionBlock, batchSeq, failoverOnly, archive){
+        this.archiveRankLockReason = null;
         {
-            // Unconditional (all set sizes): the membership check above already
-            // pins the size-1 identity, and a single-member ladder resolves to
-            // rank 0 (always unlocked), so this is uniform, not a behavior change.
+            // Membership already pins size 1, whose ladder resolves to rank 0,
+            // so this decision applies uniformly to all set sizes.
             const decision = this.archiveElectionDecision(cp, archive, electionPubkeys, me, electionBlock);
             const order = decision.order;
-            // Same backup-only rule as the v0 path. A leader driving its
-            // own batch on the wake cadence would archive whatever few rows are
-            // pending every 15 minutes instead of accumulating them to the interval
-            // or the size trigger, which is the over-anchoring this mode exists to
-            // avoid. Backups are exactly who the wake is for.
-            if(failoverOnly && this.isRankZero(order)) return true;
+            // Same backup-only rule as v0: letting a leader drive on every wake
+            // would over-anchor instead of accumulating rows to the interval or size trigger.
+            if(failoverOnly && this.isRankZero(order)){
+                this.archiveRankLockReason = 'rank_zero_on_failover_wake';
+                return true;
+            }
             if(!decision.unlocked){
-                // Operator visibility: a hub that never wins the archive
-                // election (e.g. signer-less peers keep ranking first) is
-                // indistinguishable from a broken publisher without this.
+                // Without this, a hub that never wins the election is
+                // indistinguishable from a broken publisher.
                 logger.info('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
                             ': rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
                             order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
                             this.electionToleranceBlocks + ' blocks from content block ' +
                             String(decision.anchor && decision.anchor.block) + '), not publishing');
+                this.archiveRankLockReason = 'rank_not_unlocked';
                 return true;                                               // not unlocked on the failover ladder
             }
         }
