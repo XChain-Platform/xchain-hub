@@ -54,7 +54,7 @@ function engineWithRows(rows) {
     };
 }
 
-describe('checkpoint supersede on witnessed disagreement @regression', function () {
+function registerDigestReuseTest() {
     it('supersedes an A to B to A replay even though digest A was used before', async function () {
         const rows = [
             { checkpoint_seq: 10, effective_rules_digest: A },
@@ -75,7 +75,9 @@ describe('checkpoint supersede on witnessed disagreement @regression', function 
             ['BTC', 'regtest', 40, 80],
         ]);
     });
+}
 
+function registerWitnessGateTests() {
     it('does not supersede a pre-witness replay', async function () {
         const fixture = engineWithRows([
             { checkpoint_seq: 10, effective_rules_digest: B },
@@ -99,7 +101,9 @@ describe('checkpoint supersede on witnessed disagreement @regression', function 
         expect(fields).to.equal(null);
         expect(fixture.calls).to.deep.equal([]);
     });
+}
 
+function registerAgreementTest() {
     it('does not supersede again after the surviving window agrees', async function () {
         const fixture = engineWithRows([
             { checkpoint_seq: 30, effective_rules_digest: A },
@@ -112,7 +116,9 @@ describe('checkpoint supersede on witnessed disagreement @regression', function 
         expect(fields).to.equal(null);
         expect(fixture.calls).to.deep.equal([['BTC', 'regtest', 40, 80]]);
     });
+}
 
+function registerReplayWindowQueryTest() {
     it('reads only effective finalized rows in the inclusive replay window', async function () {
         const calls = [];
         const resultRows = [{ checkpoint_seq: 20, effective_rules_digest: B }];
@@ -133,4 +139,11 @@ describe('checkpoint supersede on witnessed disagreement @regression', function 
         expect(calls[0].sql).to.include('epoch.supersedes_from <= sc.block_index');
         expect(calls[0].sql).to.include('AS effective_rules_digest');
     });
+}
+
+describe('checkpoint supersede on witnessed disagreement @regression', function () {
+    registerDigestReuseTest();
+    registerWitnessGateTests();
+    registerAgreementTest();
+    registerReplayWindowQueryTest();
 });
