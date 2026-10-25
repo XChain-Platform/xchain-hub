@@ -23,6 +23,7 @@
 
 const canonicalForms    = require('./canonical_forms.js');
 const { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal } = require('./supersede_fill.js');
+const { checkpointProposalDecline } = require('./replay_hold.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
@@ -64,6 +65,15 @@ module.exports = {
         // snapshot_block, so a shared seq implies a shared snapshot_block implies one
         // payload. Followers re-derive and refuse a mismatch (handleSignReq).
         let cp = await this.checkpointForRound(chain, network, bh, snapshotBlock);
+        let expectedSupersede;
+        if(cp.supersedes_from != null || cp.rules_digest != null)
+            expectedSupersede = await this.supersedeFieldsForRound(chain, network, bh);
+        const proposalDecline = checkpointProposalDecline(
+            cp, bh, expectedSupersede);
+        if(proposalDecline){
+            this.noteCheckpointDecline(proposalDecline, cp, 'open leader round');
+            return;
+        }
         // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
         // (empty-root) canonical if the indexer hasn't produced them yet (operator must
         // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
