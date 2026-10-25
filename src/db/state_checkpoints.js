@@ -70,6 +70,15 @@ module.exports = {
         return this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, supersedes_from, rules_digest, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
+    async findStateCheckpointsByRulesDigest(chain, network, rulesDigest) {
+        if (typeof rulesDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(rulesDigest)) {
+            throw new TypeError('rulesDigest must be a 64-character hexadecimal string');
+        }
+        return this.doQuery(
+            'SELECT checkpoint_seq, block_index, supersedes_from, rules_digest FROM state_checkpoints WHERE chain = ? AND network = ? AND rules_digest = ? ORDER BY checkpoint_seq ASC',
+            [chain, network, rulesDigest.toLowerCase()]);
+    },
+
     // Reads rows from state_checkpoints.
     // Moved here from src/anchor/checkpoint_engine.js:370.
     async findStateCheckpointsByNetwork(network) {
