@@ -22,6 +22,8 @@ const path       = require('path');
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const StateAnchorPublisher = require('../../../../src/anchor/publisher');
+const { ARCHIVE_MAX_PRICE_ROUNDS } = require('../../../../src/anchor/publisher/constants.js');
 
 const SRC_DIR = path.join(__dirname, '..', '..', '..', '..', 'src');
 
@@ -153,6 +155,61 @@ describe('price_snapshots pending predicate', function () {
         const db = stubbedDb();
         expect(await db.findPriceSnapshotsForArchiveRounds([])).to.deep.equal([]);
         expect(db.doQuery.called).to.equal(false);
+    });
+});
+
+describe('folded archive pending-price budget', function () {
+    it('keeps a seeded maximum price page that resolves after the old one-second fallback', async function () {
+        const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            const seededRounds = Array.from({ length: ARCHIVE_MAX_PRICE_ROUNDS + 1 },
+                (_, i) => ({ round_number: i + 1 }));
+            const seededPrices = seededRounds.flatMap(({ round_number }) => [
+                { round_number, coin_pair: 'BTC/USD' },
+                { round_number, coin_pair: 'DOGE/USD' }
+            ]);
+            const empty = async () => [];
+            const pub = Object.create(StateAnchorPublisher.prototype);
+            pub.maxBatch = 1000;
+            pub.roundTimeoutMs = 60000;
+            pub.priceArchiveFloor = () => 0;
+            pub.priceRoundsAboveCommonFloor = async rows => rows;
+            pub.pendingArchiveRewards = empty;
+            pub.db = {
+                findCrossChainMatchesByBatchSeq: empty,
+                findCrossChainCallsByBatchSeq: empty,
+                findBridgeTransfersByBatchSeq: empty,
+                findPolicySnapshotsByBatchSeq: empty,
+                findStateCheckpointsByBatchSeq: empty,
+                findPriceSnapshotRoundsByBatchSeq: async limit => {
+                    expect(limit).to.equal(ARCHIVE_MAX_PRICE_ROUNDS + 1);
+                    await new Promise(resolve => setTimeout(resolve, 1250));
+                    return seededRounds;
+                },
+                findPriceSnapshotsForArchiveRounds: async rounds =>
+                    seededPrices.filter(row => rounds.includes(row.round_number)),
+                findPriceTombstonesByBatchSeq: empty
+            };
+            pub.buildFoldArchiveSection = async () => pub.gatherArchiveRows();
+
+            let settled = false;
+            const folded = pub.collectFoldArchive([], 'regtest').then(result => {
+                settled = true;
+                return result;
+            });
+
+            expect(pub.archiveFoldSubdeadlineMs).to.equal(30000);
+            await clock.tickAsync(1000);
+            expect(settled).to.equal(false);
+            await clock.tickAsync(250);
+
+            const rows = await folded;
+            expect(rows.prices).to.have.length(ARCHIVE_MAX_PRICE_ROUNDS * 2);
+            expect(rows.cappedOrTrimmed).to.equal(true);
+            expect(clock.countTimers()).to.equal(0);
+        } finally {
+            clock.restore();
+        }
     });
 });
 
