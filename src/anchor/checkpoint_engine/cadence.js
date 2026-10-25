@@ -155,6 +155,7 @@ module.exports = {
         this._ticking = true;
         try {
             await this.retryFailedSelfAccepts();
+            if(await this.leaderReplayHeld()) return;
             let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this.finalizedLatchHolds(btcBlock)){
@@ -181,10 +182,16 @@ module.exports = {
             this._ticking = false;
         }
     },
-    async leaderReplayHeld(){
+    async leaderReplayHeld(btcBlock){
         for(const chain of this.chains){
             if(!this.indexers[chain] || !this.indexers[chain].url) continue;
-            try { const bh = await this.indexerCall(chain, 'getblockhashes', {}); if(indexerReplayOpen(bh && bh.rules)) return true; }
+            try {
+                const bh = await this.indexerCall(chain, 'getblockhashes', {});
+                if(indexerReplayOpen(bh && bh.rules)){
+                    this.noteCadenceStall(btcBlock, 'indexer_replaying');
+                    return true;
+                }
+            }
             catch(_e){}
         }
         return false;
@@ -197,7 +204,7 @@ module.exports = {
 
     // We are the cadence leader (or a single-node set): one round per chain.
     async leadCadenceRound(btcBlock, validators){
-        if(await this.leaderReplayHeld()) return;
+        if(await this.leaderReplayHeld(btcBlock)) return;
         // Mirror the capability snapshot BEFORE the attempt is recorded. This call sits
         // outside the per-chain guard below, so a throw here aborts every chain's round;
         // recorded first, the whole interval was dropped and getcheckpointstats still
