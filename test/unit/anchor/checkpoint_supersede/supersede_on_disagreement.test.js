@@ -107,7 +107,7 @@ function registerAgreementTest() {
     it('does not supersede again after the surviving window agrees', async function () {
         const fixture = engineWithRows([
             { checkpoint_seq: 30, effective_rules_digest: A },
-            { checkpoint_seq: 31, rules_digest: null, effective_rules_digest: A },
+            { checkpoint_seq: 31, rules_digest: A, effective_rules_digest: null },
         ]);
 
         const fields = await fixture.engine.supersedeFieldsForRound(

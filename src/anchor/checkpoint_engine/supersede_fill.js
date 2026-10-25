@@ -53,7 +53,7 @@ function supersedeFieldsFor(rules, finalizedRows) {
 
     const disagrees = finalizedRows.some((row) => {
         if(!row) return false;
-        const rawDigest = Object.prototype.hasOwnProperty.call(row, 'effective_rules_digest')
+        const rawDigest = row.effective_rules_digest != null
             ? row.effective_rules_digest : row.rules_digest;
         return typeof rawDigest !== 'string' ||
             rawDigest.toLowerCase() !== replayWindow.rules_digest;
