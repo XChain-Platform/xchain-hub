@@ -37,9 +37,11 @@ module.exports = {
     // Every follower check of an archive round reads its set here; network is
     // the record's quorum network on which that set is judged.
     async archiveFollowerPubkeys(blockIndex, network, capability = 'oracle_publish'){
-        return capability === 'archive_publish'
-            ? this.getArchivePublishPubkeys(blockIndex, network)
-            : this.getActiveOraclePublishPubkeys(blockIndex);
+        const legacyOverride = Object.prototype.hasOwnProperty.call(this, 'getActiveOraclePublishPubkeys') &&
+            !Object.prototype.hasOwnProperty.call(this, 'getArchivePublishPubkeys');
+        if(capability === 'archive_publish' && !legacyOverride)
+            return this.getArchivePublishPubkeys(blockIndex, network);
+        return this.getActiveOraclePublishPubkeys(blockIndex);
     },
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
