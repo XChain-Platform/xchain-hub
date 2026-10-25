@@ -18,8 +18,7 @@
 
 'use strict';
 
-const { supersedeWitnessDecline, checkpointHoldDecline } =
-    require('./checkpoint_hold.js');
+const { supersedeWitnessDecline, checkpointHoldDecline } = require('./checkpoint_hold.js');
 
 function indexerReplayOpen(rules){
     const state = rules && rules.replay && rules.replay.state;

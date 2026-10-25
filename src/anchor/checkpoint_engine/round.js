@@ -65,15 +65,10 @@ module.exports = {
         // snapshot_block, so a shared seq implies a shared snapshot_block implies one
         // payload. Followers re-derive and refuse a mismatch (handleSignReq).
         let cp = await this.checkpointForRound(chain, network, bh, snapshotBlock);
-        let expectedSupersede;
-        if(cp.supersedes_from != null || cp.rules_digest != null)
-            expectedSupersede = await this.supersedeFieldsForRound(chain, network, bh);
-        const proposalDecline = checkpointProposalDecline(
-            cp, bh, expectedSupersede);
-        if(proposalDecline){
-            this.noteCheckpointDecline(proposalDecline, cp, 'open leader round');
-            return;
-        }
+        const proposalDecline = await this.leaderProposalDecline(
+            chain, network, cp, bh);
+        if(proposalDecline)
+            return this.noteCheckpointDecline(proposalDecline, cp, 'open leader round');
         // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
         // (empty-root) canonical if the indexer hasn't produced them yet (operator must
         // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
@@ -110,6 +105,14 @@ module.exports = {
         }
 
         this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt: retry ? retry.attempt : 0 });
+    },
+
+    async leaderProposalDecline(chain, network, cp, bh){
+        let expectedSupersede;
+        if(cp.supersedes_from != null || cp.rules_digest != null)
+            expectedSupersede = await this.supersedeFieldsForRound(
+                chain, network, bh);
+        return checkpointProposalDecline(cp, bh, expectedSupersede);
     },
 
     // Checkpoint the chain's tip minus a confirmation margin, so every peer's

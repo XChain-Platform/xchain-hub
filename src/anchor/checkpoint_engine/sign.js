@@ -89,6 +89,10 @@ module.exports = {
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
         if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
 
+        await this.coSignConfirmedCheckpoint(cp, canonical, myPubkey);
+    },
+
+    async coSignConfirmedCheckpoint(cp, canonical, myPubkey){
         let bh = null;
         try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
         catch(e){ return this.noteCosignDecline('indexer_read_failed', cp, String(e && e.message).slice(0, 200)); }   // can't confirm -> don't sign
