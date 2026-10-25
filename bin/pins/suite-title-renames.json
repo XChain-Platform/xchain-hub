@@ -35,6 +35,12 @@
       "cross-chain bridge engine activation resolution names all three gates by their registry keys, and each has a row": "cross-chain bridge engine activation resolution names all four gates by their registry keys, and each has a row",
       "cross-chain bridge engine activation resolution holds every mainnet and testnet slot of all three gates unarmed": "cross-chain bridge engine activation resolution holds every mainnet slot of all four gates unarmed, and the cut's bridge, token and list share testnet heights"
     },
+    "test/unit/db/archive/db_archive_checkpoint_price_columns.test.js": {
+      "price_snapshots pending predicate re-pends a stamped row on: archived_status <> status": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: archived_batch_block_time <> batch_block_time": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: archived_proof_sha <> SHA2(consensus_proof, 256)": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: batch_seq IS NULL": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read"
+    },
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
     },
