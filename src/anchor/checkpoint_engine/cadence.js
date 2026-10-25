@@ -21,6 +21,7 @@
 
 'use strict';
 
+const { indexerReplayOpen } = require('./replay_hold.js');
 const { noteCheckpointStalled } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -180,7 +181,14 @@ module.exports = {
             this._ticking = false;
         }
     },
-
+    async leaderReplayHeld(){
+        for(const chain of this.chains){
+            if(!this.indexers[chain] || !this.indexers[chain].url) continue;
+            try { const bh = await this.indexerCall(chain, 'getblockhashes', {}); if(indexerReplayOpen(bh && bh.rules)) return true; }
+            catch(_e){}
+        }
+        return false;
+    },
     // True while `btcBlock` is inside the interval after the last FINALIZED checkpoint.
     finalizedLatchHolds(btcBlock){
         let last = this._lastCheckpointBtcBlock;
@@ -189,6 +197,7 @@ module.exports = {
 
     // We are the cadence leader (or a single-node set): one round per chain.
     async leadCadenceRound(btcBlock, validators){
+        if(await this.leaderReplayHeld()) return;
         // Mirror the capability snapshot BEFORE the attempt is recorded. This call sits
         // outside the per-chain guard below, so a throw here aborts every chain's round;
         // recorded first, the whole interval was dropped and getcheckpointstats still
@@ -314,6 +323,7 @@ module.exports = {
     // retry that times out again re-queues itself up to the round's retry cap.
     async retryTimedOutRounds(){
         if(!this._roundRetries || this._roundRetries.size === 0) return;
+        if(await this.leaderReplayHeld()) return;
         let retries = [...this._roundRetries];
         this._roundRetries.clear();
         for(let [chain, retry] of retries){
