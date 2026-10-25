@@ -168,6 +168,7 @@ describe('folded archive pending-price budget', function () {
                 { round_number, coin_pair: 'BTC/USD' },
                 { round_number, coin_pair: 'DOGE/USD' }
             ]);
+            let releasePriceRounds;
             const empty = async () => [];
             const pub = Object.create(StateAnchorPublisher.prototype);
             pub.maxBatch = 1000;
@@ -183,7 +184,9 @@ describe('folded archive pending-price budget', function () {
                 findStateCheckpointsByBatchSeq: empty,
                 findPriceSnapshotRoundsByBatchSeq: async limit => {
                     expect(limit).to.equal(ARCHIVE_MAX_PRICE_ROUNDS + 1);
-                    await new Promise(resolve => setTimeout(resolve, 1250));
+                    await new Promise(resolve => {
+                        releasePriceRounds = resolve;
+                    });
                     return seededRounds;
                 },
                 findPriceSnapshotsForArchiveRounds: async rounds =>
@@ -202,6 +205,7 @@ describe('folded archive pending-price budget', function () {
             await clock.tickAsync(1000);
             expect(settled).to.equal(false);
             await clock.tickAsync(250);
+            releasePriceRounds();
 
             const rows = await folded;
             expect(rows.prices).to.have.length(ARCHIVE_MAX_PRICE_ROUNDS * 2);
