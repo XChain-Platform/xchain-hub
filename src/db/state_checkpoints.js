@@ -24,7 +24,9 @@
  *
  ********************************************************************/
 
-// The newest anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
+const { markSuperseded } = require('../anchor/checkpoint_engine/superseded_rule.js');
+
+// The newest plain, anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
 // checkpoint ORDINAL (seq divided by the cadence step) is divisible by the anchor stride.
 // Moved here from src/anchor/publisher.js:1065.
 //
@@ -35,7 +37,7 @@
 const PENDING_ANCHOR_CHECKPOINTS_SQL =
     'SELECT sc.* FROM state_checkpoints sc JOIN (' +
     '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
-    '  WHERE MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
+    '  WHERE supersedes_from IS NULL AND MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
     ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
     'WHERE sc.anchor_txid IS NULL';
 
@@ -67,7 +69,8 @@ module.exports = {
     // Reads rows from state_checkpoints.
     // Moved here from src/api.js:2174.
     async findStateCheckpointsById(since, limit) {
-        return this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, supersedes_from, rules_digest, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        const rows = await this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, supersedes_from, rules_digest, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        return markSuperseded(rows || []);
     },
 
     async findStateCheckpointsByRulesDigest(chain, network, rulesDigest) {

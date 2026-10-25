@@ -70,9 +70,13 @@ async function verifyStateCheckpointCatchupRow(row, context){
         const engine = checkpointEngine(context);
         const normalize = engine && typeof engine.normalizeCheckpoint === 'function'
             ? engine.normalizeCheckpoint : checkpointMethods.normalizeCheckpoint;
-        const checkpoint = normalize.call(engine || {}, row);
+        const normalized = normalize.call(engine || {}, row);
         const signatures = parseSignatures(row.validator_signatures);
-        if(!checkpoint || !signatures) return false;
+        if(!normalized || !signatures) return false;
+        const checkpoint = Object.assign({}, normalized, {
+            supersedes_from: row.supersedes_from == null ? null : Number(row.supersedes_from),
+            rules_digest: row.rules_digest == null ? null : String(row.rules_digest).toLowerCase()
+        });
         if(engine && typeof engine.assertCheckpointNetwork === 'function')
             engine.assertCheckpointNetwork(checkpoint, 'catch-up');
         if(Number(checkpoint.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(checkpoint.snapshot_block)) return false;
