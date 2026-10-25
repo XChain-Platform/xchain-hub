@@ -14,8 +14,8 @@
  *
  * XChain Hub - ANCHOR archive bookkeeping queries for the price tables.
  *
- * Owns src/sql/archive_price_tombstones.sql and the batch_seq, archived_status,
- * archived_batch_block_time and archived_proof_sha columns of src/sql/price_snapshots.sql.
+ * Owns src/sql/archive_price_tombstones.sql and the archive bookkeeping columns
+ * on price_snapshots, including archive_pending from the dated migration.
  * src/db/index.js installs every method below on Database.prototype, so callers keep
  * writing db.<method>().
  *
@@ -26,9 +26,11 @@
  *
  ********************************************************************/
 
-const PENDING_PRICE_PREDICATE =
+const PENDING_PRICE_READ_PREDICATE = 'archive_pending = 1';
+const PENDING_PRICE_STAMP_PREDICATE =
     '(batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time ' +
     'OR archived_proof_sha <> SHA2(consensus_proof, 256))';
+const PENDING_PRICE_INDEX = 'idx_archive_pending_round';
 
 const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'status <> \'skipped\' AND consensus_proof NOT LIKE \'["%\'';
 
@@ -41,7 +43,8 @@ module.exports = {
     // The lowest pending round numbers, a round pending when any one of its pairs is.
     async findPriceSnapshotRoundsByBatchSeq(limit) {
         return this.doQuery(
-            'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + PENDING_PRICE_PREDICATE +
+            'SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (' + PENDING_PRICE_INDEX + ') WHERE ' +
+            PENDING_PRICE_READ_PREDICATE +
             ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' ORDER BY round_number ASC LIMIT ?', [limit]);
     },
 
@@ -49,7 +52,8 @@ module.exports = {
     // the federation's common floor do not hold the page's head forever.
     async findPriceSnapshotRoundsByBatchSeqFromRound(minRound, limit) {
         return this.doQuery(
-            'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + PENDING_PRICE_PREDICATE +
+            'SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (' + PENDING_PRICE_INDEX + ') WHERE ' +
+            PENDING_PRICE_READ_PREDICATE +
             ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' AND round_number >= ? ORDER BY round_number ASC LIMIT ?',
             [minRound, limit]);
     },
@@ -70,7 +74,7 @@ module.exports = {
         return this.doQuery(
             'UPDATE price_snapshots SET batch_seq = ?, archived_status = ?, archived_batch_block_time = ?, archived_proof_sha = ? ' +
             'WHERE round_number = ? AND coin_pair = ? AND status = ? AND batch_block_time = ? ' +
-            'AND SHA2(consensus_proof, 256) = ? AND ' + PENDING_PRICE_PREDICATE,
+            'AND SHA2(consensus_proof, 256) = ? AND ' + PENDING_PRICE_STAMP_PREDICATE,
             [batchSeq, status, batchBlockTime, proofSha, roundNumber, coinPair, status, batchBlockTime, proofSha]);
     },
 

@@ -108,17 +108,37 @@ describe('state_checkpoints archive selectors and stamp', function () {
 });
 
 describe('price_snapshots pending predicate', function () {
-    for (let col of ['archived_status <> status', 'archived_batch_block_time <> batch_block_time',
-        'archived_proof_sha <> SHA2(consensus_proof, 256)', 'batch_seq IS NULL']) {
-        it('re-pends a stamped row on: ' + col, async function () {
-            const db = stubbedDb();
-            await db.findPriceSnapshotRoundsByBatchSeq(288);
-            let { sql, args } = lastCall(db);
-            expect(sql).to.include(col);
-            expect(sql).to.match(/^SELECT DISTINCT round_number FROM price_snapshots WHERE .* ORDER BY round_number ASC LIMIT \?$/);
-            expect(args).to.deep.equal([288]);
-        });
-    }
+    it('uses the archive-pending round index without hashing proofs in the read', async function () {
+        const db = stubbedDb();
+        await db.findPriceSnapshotRoundsByBatchSeq(288);
+        const { sql, args } = lastCall(db);
+        expect(sql).to.match(/^SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX \(idx_archive_pending_round\) WHERE archive_pending = 1 .* ORDER BY round_number ASC LIMIT \?$/);
+        expect(sql).to.not.include('SHA2');
+        expect(sql).to.not.include('archived_batch_block_time <> batch_block_time');
+        expect(args).to.deep.equal([288]);
+    });
+
+    it('uses the same indexed predicate when reading from the common floor', async function () {
+        const db = stubbedDb();
+        await db.findPriceSnapshotRoundsByBatchSeqFromRound(42, 288);
+        const { sql, args } = lastCall(db);
+        expect(sql).to.include('FORCE INDEX (idx_archive_pending_round) WHERE archive_pending = 1');
+        expect(sql).to.include('AND round_number >= ? ORDER BY round_number ASC LIMIT ?');
+        expect(sql).to.not.include('SHA2');
+        expect(args).to.deep.equal([42, 288]);
+    });
+
+    it('materializes every mutable pending condition behind the indexed read', function () {
+        const migration = fs.readFileSync(path.join(SRC_DIR, 'sql', 'migrations',
+            '2026-10-24-z-price-snapshots-archive-pending-index.sql'), 'utf8');
+        expect(migration).to.include('GENERATED ALWAYS AS');
+        for (const condition of ['batch_seq IS NULL', 'archived_status <> status',
+            'archived_batch_block_time <> batch_block_time',
+            'archived_proof_sha <> SHA2(consensus_proof, 256)']) {
+            expect(migration).to.include(condition);
+        }
+        expect(migration).to.include('idx_archive_pending_round` (`archive_pending`, `round_number`)');
+    });
 
     it('reads every row of the chosen rounds, pending or not', async function () {
         const db = stubbedDb();
@@ -144,6 +164,8 @@ describe('price_snapshots stamp', function () {
         expect(sql).to.match(/SET batch_seq = \?, archived_status = \?, archived_batch_block_time = \?, archived_proof_sha = \?/);
         expect(sql).to.match(/WHERE round_number = \? AND coin_pair = \? AND status = \? AND batch_block_time = \? AND SHA2\(consensus_proof, 256\) = \?/);
         expect(sql).to.include('(batch_seq IS NULL OR archived_status <> status');
+        expect(sql).to.include('archived_batch_block_time <> batch_block_time');
+        expect(sql).to.include('archived_proof_sha <> SHA2(consensus_proof, 256)');
         expect(args).to.deep.equal([3, 'finalized', 1700, 'ab'.repeat(32), 11, 'BTC/USD', 'finalized', 1700, 'ab'.repeat(32)]);
     });
 

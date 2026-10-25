@@ -30,8 +30,11 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
 const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
+const ARCHIVE_FOLD_SUBDEADLINE_MS = 30000;
 
 module.exports = {
+
+    archiveFoldSubdeadlineMs: ARCHIVE_FOLD_SUBDEADLINE_MS,
 
     // Archive transport for the anchor_% reward rails. Read this before touching
     // recovery dedup: the "indexer can never re-derive these" invariant is NOT
