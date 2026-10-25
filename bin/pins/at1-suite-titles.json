@@ -1870,6 +1870,15 @@
       "3bd547d41df080f111fdcbd439c7b008b97cb7e0a9a6d9e03b70819963b030b1",
       "16feca75825e58551d7a44cf0ee692238d1abe8cc82fada756ec8c7666407436"
     ],
+    "245b90efa02e575c": [
+      "090d795c00718b127ae6a50f4a945bfcade2262124e855a31191620a58f2faba",
+      "4790385b95cfac23b18177ab0e6e6cb1680c42573659b8a6857fcb79d0365d8c",
+      "d6f126a21e9120afba23b823ef004748c8357d14be14f0172b8f5457a700c0cb",
+      "20297f4da32071e3ab7770dca8e5cb898d5528d055686ed454c1232f9fe32618",
+      "e99e91fc423c8479702f20fb8835e59d245243841fd150ae92500c4489ccfd91",
+      "1f21e13c69558284d90c3f6f21d2572d015d154254f020bb805c7ef5375def0b",
+      "bc4ca878d226cb82ba6da8a680fca16b83030a74b53967a4506938fd3485c0cf"
+    ],
     "249c372dfd6c1afa": [
       "4b5f50dde99dd8bf1324885d218bb69d4d39593511770ba30efecf09a0b67127",
       "9cea0705321a76c30729f4fb78d359acafa1311597964b27c384d06f6d35ba5e",
@@ -12983,6 +12992,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
@@ -14090,6 +14100,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
@@ -15228,6 +15239,7 @@
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_seq_double_sign.test.js": "7a4359f463e01cfc",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_sequence_fence.test.js": "240a7228c749aa7f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_truncated_snapshot.test.js": "ef567d8ba15a9039",
+        "test/unit/anchor/checkpoint_supersede/replay_hold_rules.test.js": "245b90efa02e575c",
         "test/unit/anchor/equiv_checkpoint_canonical.test.js": "f5f59ccb7949bca3",
         "test/unit/anchor/oracle_round_reward_advisory.test.js": "4790e9c89b4a47d4",
         "test/unit/anchor/prototype_parts/anchor_install_parts.test.js": "60a1529a2763b077",
