@@ -22,7 +22,7 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
-const { supersedeFieldsFor, supersedeGateRefusal } = require('./supersede_fill.js');
+const { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal } = require('./supersede_fill.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
@@ -155,10 +155,11 @@ module.exports = {
     },
 
     async supersedeFieldsForRound(chain, network, bh){
-        const candidate = supersedeFieldsFor(bh && bh.rules, []);
-        if(!candidate) return null;
-        const finalizedRows = await this.db.findStateCheckpointsByRulesDigest(
-            chain, network, candidate.rules_digest);
+        const rules = bh && bh.rules;
+        const replayWindow = replayWindowFor(rules);
+        if(!replayWindow) return null;
+        const finalizedRows = await this.db.findUnsupersededStateCheckpointsInReplayWindow(
+            chain, network, replayWindow.target, replayWindow.replay_to);
         return supersedeFieldsFor(bh.rules, finalizedRows);
     },
 

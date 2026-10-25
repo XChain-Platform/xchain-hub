@@ -22,27 +22,52 @@
 
 const { hasSupersedeFields } = require('./supersede_suffix.js');
 
-function supersedeFieldsFor(rules, finalizedRows) {
+function replayWindowFor(rules, requireWitness = true) {
     if(!rules || !rules.replay || rules.replay.state !== 'replayed') return null;
 
-    const rawTarget = rules.replay.target;
+    const replay = rules.replay;
+    const hasWitnessFields = Object.prototype.hasOwnProperty.call(replay, 'witness') ||
+        Object.prototype.hasOwnProperty.call(replay, 'changed');
+    if((requireWitness || hasWitnessFields) &&
+       (replay.witness !== 'passed' || replay.changed !== true)) return null;
+
+    const rawTarget = replay.target;
     if(typeof rawTarget !== 'number' && typeof rawTarget !== 'string') return null;
     if(typeof rawTarget === 'string' && rawTarget.trim() === '') return null;
 
     const target = Number(rawTarget);
     if(!Number.isSafeInteger(target) || target < 0) return null;
+    const rawReplayTo = replay.replay_to;
+    if(typeof rawReplayTo !== 'number' && typeof rawReplayTo !== 'string') return null;
+    if(typeof rawReplayTo === 'string' && rawReplayTo.trim() === '') return null;
+    const replayTo = Number(rawReplayTo);
+    if(!Number.isSafeInteger(replayTo) || replayTo < target) return null;
     if(typeof rules.digest !== 'string' || !/^[0-9a-f]{64}$/i.test(rules.digest)) return null;
 
-    const digest = rules.digest.toLowerCase();
-    const alreadyUsed = Array.isArray(finalizedRows) && finalizedRows.some((row) =>
-        row && typeof row.rules_digest === 'string' && row.rules_digest.toLowerCase() === digest);
-    if(alreadyUsed) return null;
+    return { target, replay_to: replayTo, rules_digest: rules.digest.toLowerCase() };
+}
 
-    return { supersedes_from: target, rules_digest: digest };
+function supersedeFieldsFor(rules, finalizedRows) {
+    const replayWindow = replayWindowFor(rules, false);
+    if(!replayWindow || !Array.isArray(finalizedRows)) return null;
+
+    const disagrees = finalizedRows.some((row) => {
+        if(!row) return false;
+        const rawDigest = row.effective_rules_digest != null
+            ? row.effective_rules_digest : row.rules_digest;
+        return typeof rawDigest !== 'string' ||
+            rawDigest.toLowerCase() !== replayWindow.rules_digest;
+    });
+    if(!disagrees) return null;
+
+    return {
+        supersedes_from: replayWindow.target,
+        rules_digest: replayWindow.rules_digest,
+    };
 }
 
 function supersedeGateRefusal(cp, gateActive) {
     return hasSupersedeFields(cp) && gateActive !== true ? 'supersede_below_gate' : null;
 }
 
-module.exports = { supersedeFieldsFor, supersedeGateRefusal };
+module.exports = { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal };
