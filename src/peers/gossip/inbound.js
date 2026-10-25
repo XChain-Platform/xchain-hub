@@ -233,7 +233,7 @@ class PeerInbound {
 
         if (knownAddr === null && ws._peerAddr === null) {
             ws._peerAddr = connectionEnvelope.sender;
-            this.registerInboundPeer(ws, connectionEnvelope.sender);
+            this.registerInboundPeer(ws, connectionEnvelope.sender, connectionEnvelope);
         }
 
         const peerAddr = knownAddr || ws._peerAddr;
@@ -283,7 +283,7 @@ class PeerInbound {
         ws.close(1000, 'local listener');
     }
 
-    registerInboundPeer(ws, addr) {
+    registerInboundPeer(ws, addr, envelope) {
         let existing = this.peers.get(addr);
 
         // If we already have an outbound connection to this peer, keep the outbound
@@ -294,7 +294,7 @@ class PeerInbound {
             return;
         }
 
-        this.peers.set(addr, {
+        const peer = {
             ws:             ws,
             state:          'open',
             lastSeen:       Date.now(),
@@ -303,7 +303,9 @@ class PeerInbound {
             inbound:        true,
             feedUrl:        this.validatorFeedUrls.get(addr) || null,
             validatorAddr:  addr
-        });
+        };
+        this.peers.set(addr, peer);
+        if (envelope) recordDirectHubAdvertisement(peer, addr, envelope);
 
         this.emit('peer:connect', addr);
         logger.info('Inbound peer connected: ' + addr);

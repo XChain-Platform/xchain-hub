@@ -47,6 +47,14 @@ function peerFeedUrl(peerAddr, table, cursor, limit) {
     return url;
 }
 
+function dialableAnnouncedFeedUrl(value) {
+    if (typeof value !== 'string' || !/^(?:wss?|https?):\/\//i.test(value)) return null;
+    try {
+        const url = new URL(value);
+        return url.hostname && !url.username && !url.password ? value : null;
+    } catch (e) { return null; }
+}
+
 // Keeps the status and Retry-After so the caller can back off a refusing peer.
 function refusedRequestError(res) {
     const err = new Error('Snapshot request returned HTTP ' + res.statusCode);
@@ -103,7 +111,7 @@ function connectedSignerPeers(peerManager) {
         if (!inSignerSet && !inRegistry) continue;
         const feedUrl = peer.feedUrl ||
             (peerManager.validatorFeedUrls && peerManager.validatorFeedUrls.get(identity)) ||
-            (peer.inbound ? null : addr);
+            (peer.inbound ? dialableAnnouncedFeedUrl(identity) : addr);
         peers.push({ addr, identity, feedUrl });
     }
     return peers;
