@@ -22,7 +22,11 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
-const { supersedeCosignDecline } = require('./replay_hold.js');
+const {
+    hasSupersedeFields,
+    supersedeCosignDecline,
+    checkpointProposalDecline,
+} = require('./replay_hold.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { XCHK_SIGN, ALLOWED_CHAINS } = require('./constants.js');
 const { getLogger } = require('../../observability');
@@ -85,28 +89,46 @@ module.exports = {
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
         if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
 
+        await this.coSignConfirmedCheckpoint(cp, canonical, myPubkey);
+    },
+
+    async coSignConfirmedCheckpoint(cp, canonical, myPubkey){
         let bh = null;
         try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
         catch(e){ return this.noteCosignDecline('indexer_read_failed', cp, String(e && e.message).slice(0, 200)); }   // can't confirm -> don't sign
         if(!bh) return this.noteCosignDecline('indexer_no_block', cp);
-        const replayDecline = supersedeCosignDecline(cp, bh.rules); if(replayDecline) return this.noteCosignDecline(replayDecline, cp);
+        let proposalDecline = supersedeCosignDecline(cp, bh.rules);
+        let expectedSupersede;
+        if(!proposalDecline && hasSupersedeFields(cp))
+            expectedSupersede = await this.supersedeFieldsForRound(
+                cp.chain, cp.network, bh);
+        if(!proposalDecline)
+            proposalDecline = checkpointProposalDecline(
+                cp, bh, expectedSupersede);
+        if(proposalDecline) return this.noteCosignDecline(proposalDecline, cp);
         this.coSignAgainstOwnBlock(cp, canonical, bh, myPubkey);
     },
 
     // Count a follower's refusal to co-sign and name it. Declining is the fail-closed answer;
     // a silent one lets a member drop out of every quorum with no trace while the rest still
-    // sign. Every decline is counted; the warning is throttled per reason.
+    // sign. Every decline is counted; repeated delivery logs once for each reason and seq.
     noteCosignDecline(reason, cp, detail){
-        let declines = this._cosignDeclines || (this._cosignDeclines = {});
+        const declines = this._cosignDeclines || (this._cosignDeclines = {});
         declines[reason] = (declines[reason] || 0) + 1;
         this._lastCosignDeclineReason = reason;
-        let loggedAt = this._cosignDeclineLoggedAt || (this._cosignDeclineLoggedAt = {});
-        let now = Date.now();
-        if(loggedAt[reason] && now - loggedAt[reason] < this._cadenceStallLogMs) return;
-        loggedAt[reason] = now;
-        logger.warn('StateCheckpointEngine: declining to co-sign ' + cp.chain + '@' + cp.block_index +
+        this.noteCheckpointDecline(reason, cp, 'co-sign', detail);
+    },
+
+    noteCheckpointDecline(reason, cp, action, detail){
+        const logged = this._cosignDeclineLogged || (this._cosignDeclineLogged = new Set());
+        const key = reason + '|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq;
+        if(logged.has(key)) return;
+        logged.add(key);
+        while(logged.size > 512) logged.delete(logged.values().next().value);
+        const count = this._cosignDeclines && this._cosignDeclines[reason];
+        logger.warn('StateCheckpointEngine: declining to ' + action + ' ' + cp.chain + '@' + cp.block_index +
             ' seq ' + cp.checkpoint_seq + ': ' + reason + (detail ? ' (' + detail + ')' : '') +
-            ' (declines for this reason so far: ' + declines[reason] + ')');
+            (count ? ' (declines for this reason so far: ' + count + ')' : ''));
     },
 
     // Refuse a round that starts less than intervalBlocks after our last FINALIZED
