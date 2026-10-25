@@ -23,10 +23,12 @@
 'use strict';
 
 const eq   = require('../../consensus/equivocation_header.js');
+const { hasSupersedeFields, supersedeSuffix } = require('./supersede_suffix.js');
 // The checkpoint-commitment flag day is a registry row read by literal key (W5),
 // on the checkpoint's BTC-anchored snapshot block.
 const gateRegistry = require('../../consensus/gate_registry');
 const CHECKPOINT_COMMITMENT_KEY = 'checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION';
+const CHECKPOINT_SUPERSEDE_KEY = 'checkpoint_supersede_activation.CHECKPOINT_SUPERSEDE_ACTIVATION';
 
 const forms = {
 
@@ -69,6 +71,19 @@ const forms = {
                       String(cp.block_merkle_root).toLowerCase(), String(cp.block_merkle_version)].join('|');
     },
 
+    isCheckpointSupersedeActive(cp){
+        return gateRegistry.activeAt(CHECKPOINT_SUPERSEDE_KEY, cp.network, 'BTC', cp.snapshot_block, null);
+    },
+
+    checkpointSupersedeSuffix(cp){
+        if(!forms.isCheckpointSupersedeActive(cp)){
+            if(hasSupersedeFields(cp))
+                throw new Error('checkpoint supersession fields are not active for snapshot_block ' + cp.snapshot_block);
+            return '';
+        }
+        return supersedeSuffix(cp);
+    },
+
     // Byte-identical to the indexer ANCHOR verifier + SDK CheckpointVerifier. At/above
     // the EQUIV flag-day (gated on the BTC snapshot_block + network) the v0 canonical is
     // wrapped in the uniform signed header (TAG=XCHECKPOINT, ROUND_ID=v0 round id,
@@ -77,7 +92,8 @@ const forms = {
         // Checkpoint family (v0/v3): the bare canonical PLUS the SPV root suffix
         // (post-flag-day), appended to the RAW string BEFORE the EQUIV wrap. The v1
         // archive uses archiveCanonical (rootless) instead, so archives are untouched.
-        let raw = forms.rawCanonicalCheckpoint(cp) + forms.checkpointRootSuffix(cp);
+        let raw = forms.rawCanonicalCheckpoint(cp) + forms.checkpointRootSuffix(cp) +
+                  forms.checkpointSupersedeSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
@@ -123,9 +139,9 @@ const forms = {
     },
 
     // Does a seated row name a DIFFERENT payload than `cp`? Identity is block_index plus
-    // the four chained hashes, which every checkpoint version carries; the light-client
-    // roots are derived from that same block and are deliberately left out, so a NULL/''
-    // normalization difference can never read a re-delivery as an equivocation. Hashes
+    // the four chained hashes and the supersession marker. The light-client roots are
+    // derived from that same block and are deliberately left out, so a NULL/'' normalization
+    // difference can never read a re-delivery as an equivocation. Hashes and rules digests
     // compare case-insensitively (the driver's serialization need not match ours).
     checkpointRowDiffers(row, cp){
         // Not comparable is not a conflict. Every identity column is NOT NULL in
@@ -133,11 +149,15 @@ const forms = {
         // its absence as an equivocation would refuse a legitimate checkpoint.
         if(!row || row.block_index == null || row.block_hash == null) return false;
         let hx = (a, b) => String(a == null ? '' : a).toLowerCase() !== String(b == null ? '' : b).toLowerCase();
+        const fromDiffers = (row.supersedes_from == null) !== (cp.supersedes_from == null) ||
+                            (row.supersedes_from != null &&
+                             Number(row.supersedes_from) !== Number(cp.supersedes_from));
         return Number(row.block_index) !== Number(cp.block_index) ||
                hx(row.block_hash,    cp.block_hash)    ||
                hx(row.ledger_hash,   cp.ledger_hash)   ||
                hx(row.actions_hash,  cp.actions_hash)  ||
-               hx(row.contract_hash, cp.contract_hash);
+               hx(row.contract_hash, cp.contract_hash) ||
+               fromDiffers || hx(row.rules_digest, cp.rules_digest);
     }
 
 };

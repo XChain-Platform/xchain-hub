@@ -22,6 +22,7 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
+const { supersedeGateRefusal } = require('./supersede_fill.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const archivePublishGate = require('../archive_publish_gate.js');
@@ -35,12 +36,13 @@ module.exports = {
     // streams from each hub to ITS OWN indexer subscribers, so everyone writes).
     async handleFinalized(envelope){
         let d  = envelope.data;
-        let cp = this.normalizeCheckpoint(d.checkpoint);
+        let cp = this.normalizeFinalizedCheckpoint(d.checkpoint);
         if(!cp || !Array.isArray(d.signatures)){
             this._malformedFinalized++;
             logger.warn('StateCheckpointEngine: dropped malformed FINALIZED broadcast (missing checkpoint or signatures array)');
             return;
         }
+        this.refuseSupersedeBelowGate(cp);
 
         // A finalized checkpoint whose seq is not the value derived from its
         // snapshot_block is malformed (the signers would not have co-signed it); refuse
@@ -90,6 +92,16 @@ module.exports = {
         await this.acceptFinalized(cp, sigs, quorum, false);
     },
 
+    normalizeFinalizedCheckpoint(raw){
+        const cp = this.normalizeCheckpoint(raw);
+        if(!cp) return cp;
+        cp.supersedes_from = raw.supersedes_from != null
+            ? Number(raw.supersedes_from) : null;
+        cp.rules_digest = typeof raw.rules_digest === 'string'
+            ? raw.rules_digest.toLowerCase() : (raw.rules_digest != null ? raw.rules_digest : null);
+        return cp;
+    },
+
     // Write the checkpoint row (append-only INSERT IGNORE: a reorged height is
     // superseded by a NEW row with a higher checkpoint_seq, never an UPDATE, so
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
@@ -113,6 +125,7 @@ module.exports = {
         // callers log the accept error; a peer can be re-sent the FINALIZED broadcast,
         // and the leader's own accept is re-run each tick (queueSelfAccept).
         this.refuseRootlessPersist(cp);
+        this.refuseSupersedeBelowGate(cp);
 
         let seated = await this.seatedCheckpointAtSeq(cp);
         if(this.reportSeqConflict(seated, cp, sigs)) return;
@@ -126,7 +139,7 @@ module.exports = {
                     cp.snapshot_block + '; checkpoint persistence continues (' + (e && e.message) + ')');
             }
         }
-        let inserted = await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs));
+        let inserted = await this.db.createStateCheckpoint(cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash, cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null, cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null, JSON.stringify(sigs), cp.supersedes_from != null ? cp.supersedes_from : null, cp.rules_digest || null);
         // Re-check the fence when the INSERT seated nothing: two different payloads at one
         // sequence can both pass the read above before either row commits, and the loser
         // must be reported here rather than streamed and emitted as if it were held.
@@ -156,6 +169,12 @@ module.exports = {
             throw new Error('refusing to persist rootless checkpoint ' + cp.chain + '@' + cp.block_index +
                 ': checkpoint-commitment is active for snapshot_block ' + cp.snapshot_block +
                 ' but the light-client roots are absent');
+    },
+
+    refuseSupersedeBelowGate(cp){
+        if(supersedeGateRefusal(cp, canonicalForms.isCheckpointSupersedeActive(cp)))
+            throw new Error('refusing checkpoint supersession fields below the activation gate at snapshot_block ' +
+                            cp.snapshot_block);
     },
 
     // Same-seq conflict fence. uq_chain_seq admits exactly ONE row per
