@@ -18,6 +18,10 @@
 const Database = require('../src/db');
 const seed = require('../src/attestation/response_mirror/seed_undelivered.js');
 
+const SEED_PROVIDER_ID = 'seed_probe';
+const SEED_RESPONSE_PAYLOAD = JSON.stringify({ seeded: true });
+const SEED_META = JSON.stringify({ seeded: 'hub-seed-undelivered' });
+
 class CliUsageError extends Error {
     constructor(message){
         super(message);
@@ -25,11 +29,23 @@ class CliUsageError extends Error {
     }
 }
 
+class SeedRemovalError extends Error {
+    constructor(requestId){
+        super('Refusing to remove an attestation response not seeded by this tool for request_id ' + requestId);
+        this.name = 'SeedRemovalError';
+    }
+}
+
 function parseArgs(argv){
-    const out = { apply: false, network: undefined, help: false };
+    const out = { apply: false, remove: undefined, network: undefined, help: false };
     for(let i = 0; i < argv.length; i++){
         const arg = argv[i];
         if(arg === '--apply') out.apply = true;
+        else if(arg === '--remove'){
+            if(out.remove !== undefined) throw new CliUsageError('--remove may be given only once');
+            out.remove = argv[++i];
+            if(out.remove === undefined) throw new CliUsageError('Missing value for --remove');
+        }
         else if(arg === '--help' || arg === '-h') out.help = true;
         else if(arg === '--network'){
             if(out.network !== undefined) throw new CliUsageError('--network may be given only once');
@@ -37,6 +53,10 @@ function parseArgs(argv){
             if(out.network === undefined) throw new CliUsageError('Missing value for --network');
         } else throw new CliUsageError('Unknown argument: ' + arg);
     }
+    if(out.apply && out.remove !== undefined)
+        throw new CliUsageError('--apply and --remove are mutually exclusive');
+    if(out.remove !== undefined && !/^[0-9a-f]{64}$/.test(out.remove))
+        throw new CliUsageError('--remove requires a 64-character lower-case hex request_id');
     return out;
 }
 
@@ -46,9 +66,20 @@ function usage(){
         '',
         '  --network <network>  Optional cross-check against HUB_NETWORK.',
         '  --apply              Insert the row. The default is a dry run.',
+        '  --remove <request_id> Delete a row previously inserted by this tool.',
         '',
         'Connection: HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, HUB_DB_USER, HUB_DB_SECRET.'
     ].join('\n'));
+}
+
+async function removeSeededResponse(db, network, requestId){
+    seed.assertSeedableNetwork(network);
+    const result = await db.doQuery(
+        'DELETE FROM attestation_responses ' +
+        'WHERE network = ? AND request_id = ? AND provider_id = ? ' +
+        'AND response_payload = ? AND meta = ? LIMIT 1',
+        [network, requestId, SEED_PROVIDER_ID, SEED_RESPONSE_PAYLOAD, SEED_META]);
+    if(!result || result.affectedRows !== 1) throw new SeedRemovalError(requestId);
 }
 
 function connectionOptions(){
@@ -78,6 +109,12 @@ async function main(){
     const options = connectionOptions();
     const db = new Database(options.host, options.port, options.name, options.user, options.secret);
     try {
+        if(args.remove !== undefined){
+            await removeSeededResponse(db, network, args.remove);
+            console.log('request_id: ' + args.remove);
+            console.log('mode: REMOVE');
+            return 0;
+        }
         const row = await seed.seedUndeliveredResponse(db, { network, apply: args.apply });
         console.log('request_id: ' + row.request_id);
         console.log('dashboard_rule_key: attestation-mirror:undelivered:' + network + ':' + row.request_id);
@@ -88,10 +125,21 @@ async function main(){
     return 0;
 }
 
-main().then(code => process.exit(code)).catch(err => {
-    console.error('seed-undelivered-attestation-response: ' +
-        (err && err.message ? err.message : err));
-    const refused = err && (err.name === 'SeedNetworkError' ||
-        err.name === 'SeedCollisionError' || err.name === 'CliUsageError');
-    process.exit(refused ? 2 : 1);
-});
+if(require.main === module){
+    main().then(code => process.exit(code)).catch(err => {
+        console.error('seed-undelivered-attestation-response: ' +
+            (err && err.message ? err.message : err));
+        const refused = err && (err.name === 'SeedNetworkError' ||
+            err.name === 'SeedCollisionError' || err.name === 'SeedRemovalError' ||
+            err.name === 'CliUsageError');
+        process.exit(refused ? 2 : 1);
+    });
+}
+
+module.exports = {
+    CliUsageError,
+    SeedRemovalError,
+    main,
+    parseArgs,
+    removeSeededResponse
+};
