@@ -170,7 +170,9 @@ module.exports = {
         // cannot confirm checkpoints stops co-signing, and while the rest still reach quorum
         // nothing else shows the margin shrinking. Zero-filled so the stats shape is fixed.
         this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, off_cadence: 0,
-                                 indexer_read_failed: 0, indexer_no_block: 0 };
+                                 indexer_read_failed: 0, indexer_no_block: 0, indexer_replaying: 0,
+                                 supersede_no_replay: 0, supersede_target_mismatch: 0,
+                                 supersede_digest_mismatch: 0 };
         this._lastCosignDeclineReason = null;
         this._cosignDeclineLoggedAt   = {};   // per-reason warn throttle, on the cadence-stall window
         // Leader self-accepts that failed after quorum (queueSelfAccept): Map<roundId, held>,

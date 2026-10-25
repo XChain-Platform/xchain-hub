@@ -108,7 +108,8 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
         expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
-            'indexer_read_failed', 'indexer_no_block');
+            'indexer_read_failed', 'indexer_no_block', 'indexer_replaying', 'supersede_no_replay',
+            'supersede_target_mismatch', 'supersede_digest_mismatch');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();
