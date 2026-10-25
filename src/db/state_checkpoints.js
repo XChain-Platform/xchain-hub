@@ -70,7 +70,11 @@ module.exports = {
     // Moved here from src/api.js:2174.
     async findStateCheckpointsById(since, limit) {
         const rows = await this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, supersedes_from, rules_digest, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
-        return markSuperseded(rows || []);
+        return markSuperseded(rows || []).map((row) => {
+            if (row.superseded_by_seq != null) return row;
+            const { superseded_by_seq: _supersededBySeq, ...plainRow } = row;
+            return plainRow;
+        });
     },
 
     async findStateCheckpointsByRulesDigest(chain, network, rulesDigest) {
