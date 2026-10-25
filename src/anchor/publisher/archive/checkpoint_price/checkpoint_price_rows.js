@@ -21,12 +21,13 @@
 const StateCheckpointEngine = require('../../../checkpoint_engine.js');
 const OracleConsensus = require('../../../../oracle/consensus.js');
 const admissionHeight = require('../../../../lib/admission_height.js');
-const { CHECKPOINT_KEYS, PRICE_KEYS } = require('../../constants.js');
+const { hasSupersedeFields } = require('../../../checkpoint_engine/supersede_suffix.js');
+const { CHECKPOINT_KEYS, CHECKPOINT_SUPERSEDE_KEYS, PRICE_KEYS } = require('../../constants.js');
 
 const INTEGER_KEYS = new Set(['id', 'block_index', 'checkpoint_seq', 'snapshot_block',
     'round_number', 'reference_block', 'block_timestamp', 'validator_count',
     'consensus_round', 'batch_block_time']);
-const NULLABLE_INTS = new Set(['state_root_version', 'block_merkle_version',
+const NULLABLE_INTS = new Set(['state_root_version', 'block_merkle_version', 'supersedes_from',
     'source_action_index', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge']);
 const NULLABLE_TEXT = new Set(['state_root', 'block_merkle_root', 'price']);
 
@@ -34,6 +35,8 @@ function archivedValue(key, value){
     if(INTEGER_KEYS.has(key)) return Number(value);
     if(NULLABLE_INTS.has(key)) return value == null ? null : Number(value);
     if(NULLABLE_TEXT.has(key)) return value == null ? null : String(value);
+    // Lowercase, as the canonical signs it and the indexer recovery reader requires it.
+    if(key === 'rules_digest') return value == null ? null : String(value).toLowerCase();
     if(key === 'validator_signatures' || key === 'consensus_proof') return value;
     return String(value == null ? '' : value);
 }
@@ -59,7 +62,12 @@ function compareInteger(a, b){
 module.exports = {
 
     serializeStateCheckpoint(row){
-        return serializeByKeys(CHECKPOINT_KEYS, row);
+        const out = serializeByKeys(CHECKPOINT_KEYS, row);
+        // A superseding checkpoint signs both fields, so a co-signer needs them to rebuild
+        // its canonical. A plain one never carries the keys and archives unchanged.
+        if(hasSupersedeFields(row))
+            for(const key of CHECKPOINT_SUPERSEDE_KEYS) out[key] = archivedValue(key, row[key]);
+        return out;
     },
 
     serializePriceSnapshot(row){
