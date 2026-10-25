@@ -86,6 +86,32 @@ module.exports = {
             [chain, network, rulesDigest.toLowerCase()]);
     },
 
+    async findUnsupersededStateCheckpointsInReplayWindow(chain, network, target, replayTo) {
+        target = Number(target);
+        replayTo = Number(replayTo);
+        if (!Number.isSafeInteger(target) || target < 0 ||
+            !Number.isSafeInteger(replayTo) || replayTo < target) {
+            throw new TypeError('replay window must contain non-negative safe integers');
+        }
+        return this.doQuery(
+            'SELECT sc.checkpoint_seq, sc.block_index, sc.supersedes_from, sc.rules_digest, (' +
+            '  SELECT epoch.rules_digest FROM state_checkpoints epoch' +
+            '  WHERE epoch.chain = sc.chain AND epoch.network = sc.network' +
+            '  AND epoch.checkpoint_seq <= sc.checkpoint_seq AND epoch.rules_digest IS NOT NULL' +
+            '  AND epoch.supersedes_from <= sc.block_index' +
+            '  ORDER BY epoch.checkpoint_seq DESC LIMIT 1' +
+            ') AS effective_rules_digest FROM state_checkpoints sc ' +
+            'WHERE sc.chain = ? AND sc.network = ? AND sc.block_index BETWEEN ? AND ? ' +
+            'AND NOT EXISTS (' +
+            '  SELECT 1 FROM state_checkpoints superseder' +
+            '  WHERE superseder.chain = sc.chain AND superseder.network = sc.network' +
+            '  AND superseder.checkpoint_seq > sc.checkpoint_seq' +
+            '  AND superseder.supersedes_from IS NOT NULL' +
+            '  AND superseder.supersedes_from <= sc.block_index' +
+            ') ORDER BY sc.checkpoint_seq ASC',
+            [chain, network, target, replayTo]);
+    },
+
     // Reads rows from state_checkpoints.
     // Moved here from src/anchor/checkpoint_engine.js:370.
     async findStateCheckpointsByNetwork(network) {
