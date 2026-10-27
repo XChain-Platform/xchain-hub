@@ -6549,26 +6549,6 @@
       "c71e6f4dfb18800dfa76aa7b51638780bed1e2e342e12530cb312e5b7c4db806",
       "04ff585fb3619090351fa39d3b62d5ef2d92566117a4607edd049f4aabf994a2"
     ],
-    "7488bc6798bfb1c9": [
-      "7567d88487f3384fd731643a6cf518e7d3c96f59433e8af30f91960105a9c4dc",
-      "441ea99e0d46a57d5f2c37de9d020a7d52a0404ceb3e143333047bc1b3bdb4f5",
-      "eee20424abbccb5b685efe5fc9b557cf3d98ab63b58bcedc4431366f7257327f",
-      "e78e7345a81d8420729ee2b78ec9c7a96c2d8d394819c3769e8f71a05f0c19bd",
-      "4d06a890b381662d18244f0ebbc1c69e221598988a65feb2a8ca4a2e76750d5f",
-      "ca92b9097dbda2eeb2113a8f9916a6de17fad2a8a2b7d3ef96c12224a5d0f6da",
-      "9afbaf7194d88159b2ccd2b363c095fabeea2e758d043bde9b8742306733be6b",
-      "2ae81648bd98b6a98e739f44fba002692dc75b871a2adde83c4050324de18ffe",
-      "8aba51ea5863148d3a0e8f225ca1bafa99f3086a8694a4c0ebebefd1c3152c5d",
-      "804b8a9dd15a0eed14abb4cfda931df161f8ba4520fbf757e9696cc05a35b635",
-      "73f2e278bfc28c1a7681357d27655ebf59941f628dff24696144178016906420",
-      "078cb4e784dca57606261f15621e0cfde486c23ab9e9ab1f8ec502448967716a",
-      "c5e7ae426001e5bcc33f2a8c31841661120a4f5bc9ea9fb91276bf50e58dd762",
-      "b7db554dd8d43f91109275a8f10b221733e709b0fb5983a1a084738c3b814af0",
-      "d58365d5a48398d1804e4935ad5285cf0cc216d68759d1f5a09693ec58428e25",
-      "3c5ee21bb4d102bb97223059965204f047a75d40a0cb465a35b842732845daf7",
-      "97b76e231f4c415f5eeb16ff3e0753d011e7970c719eb1c4d0ee7dd5a331ce05",
-      "19a3533e2e69f348dfb72081806f2ef28a61b0cdf2ea5d972e82c920abceb642"
-    ],
     "748c70db62bd43c9": [
       "181716936436fac3b52e47cd244d2b9d36e461588d98efa6e164a8be729e5033",
       "d518368a442190bf3435b4f3f82390f2fce8aa60e45f585a060c72ae62390ac1",
@@ -12777,6 +12757,30 @@
       "e6c8e51bfa101c1cd9c57c362d13cd6723b54bfa719c3e631e8c5d9c73641d83",
       "d48b9e767e5ea66e01d8c6859cc0c2422ea7f9bfe91661e8285b6811347492c0"
     ],
+    "f8e9a22d20d29183": [
+      "dda60890b48714ebb44a58e4d60298bc7017acd10bb390403b29db1e6a793346",
+      "7567d88487f3384fd731643a6cf518e7d3c96f59433e8af30f91960105a9c4dc",
+      "441ea99e0d46a57d5f2c37de9d020a7d52a0404ceb3e143333047bc1b3bdb4f5",
+      "e78e7345a81d8420729ee2b78ec9c7a96c2d8d394819c3769e8f71a05f0c19bd",
+      "4d06a890b381662d18244f0ebbc1c69e221598988a65feb2a8ca4a2e76750d5f",
+      "ca92b9097dbda2eeb2113a8f9916a6de17fad2a8a2b7d3ef96c12224a5d0f6da",
+      "9afbaf7194d88159b2ccd2b363c095fabeea2e758d043bde9b8742306733be6b",
+      "2ae81648bd98b6a98e739f44fba002692dc75b871a2adde83c4050324de18ffe",
+      "8aba51ea5863148d3a0e8f225ca1bafa99f3086a8694a4c0ebebefd1c3152c5d",
+      "50a18cdd25cecc9831a58aed7fe6dd1063189b57ecc4b2b7577a02536ba662d6",
+      "4760f5e075380438f3001ede22264ead9239c23797fb9aa2c1dfddaaf632cf1b",
+      "804b8a9dd15a0eed14abb4cfda931df161f8ba4520fbf757e9696cc05a35b635",
+      "73f2e278bfc28c1a7681357d27655ebf59941f628dff24696144178016906420",
+      "078cb4e784dca57606261f15621e0cfde486c23ab9e9ab1f8ec502448967716a",
+      "52867e43f2ee2816af196a02a9f5ff8b22ad275b4217f86a6aed1e688ed18733",
+      "b933486384fe2c355b08c03a2a0ec82fd2fbd6d34a20646c2be8e8c5d1f7435a",
+      "c5e7ae426001e5bcc33f2a8c31841661120a4f5bc9ea9fb91276bf50e58dd762",
+      "b7db554dd8d43f91109275a8f10b221733e709b0fb5983a1a084738c3b814af0",
+      "d58365d5a48398d1804e4935ad5285cf0cc216d68759d1f5a09693ec58428e25",
+      "3c5ee21bb4d102bb97223059965204f047a75d40a0cb465a35b842732845daf7",
+      "97b76e231f4c415f5eeb16ff3e0753d011e7970c719eb1c4d0ee7dd5a331ce05",
+      "19a3533e2e69f348dfb72081806f2ef28a61b0cdf2ea5d972e82c920abceb642"
+    ],
     "f9086e2569cf683f": [
       "c96202c68d956d122e16a45e50908d9f4fd4ec37e44ab5902889bd2597a28bfb",
       "8344c0eaa004d5c0d872d59448c9e090343ae12c86782eccace83ccfe8ef5297",
@@ -13070,7 +13074,7 @@
         "ci:regression"
       ],
       "fileCount": 1064,
-      "titleCount": 9528,
+      "titleCount": 9532,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13958,7 +13962,7 @@
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
-        "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
+        "test/unit/oracle/xchain_price_source.test.js": "f8e9a22d20d29183",
         "test/unit/oracle/xchain_price_source/derivation_params.test.js": "7ca7452c1704879e",
         "test/unit/oracle/xchain_price_source/pairs.test.js": "7eae67a7bfd57d14",
         "test/unit/oracle/xchain_price_source_overrides.test.js": "95c89eefc49d0b9e",
@@ -14193,7 +14197,7 @@
     },
     "test": {
       "fileCount": 1064,
-      "titleCount": 9528,
+      "titleCount": 9532,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15081,7 +15085,7 @@
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
-        "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
+        "test/unit/oracle/xchain_price_source.test.js": "f8e9a22d20d29183",
         "test/unit/oracle/xchain_price_source/derivation_params.test.js": "7ca7452c1704879e",
         "test/unit/oracle/xchain_price_source/pairs.test.js": "7eae67a7bfd57d14",
         "test/unit/oracle/xchain_price_source_overrides.test.js": "95c89eefc49d0b9e",
@@ -15263,7 +15267,7 @@
     },
     "test:all": {
       "fileCount": 1148,
-      "titleCount": 10397,
+      "titleCount": 10401,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16235,7 +16239,7 @@
         "test/unit/oracle/submissions_info_disputed.test.js": "eeedc84cb270e8b7",
         "test/unit/oracle/window_plan_math.test.js": "275fc94e4b4087e4",
         "test/unit/oracle/xchain_price_batched_fill_shape.test.js": "99e43b63c10886e0",
-        "test/unit/oracle/xchain_price_source.test.js": "7488bc6798bfb1c9",
+        "test/unit/oracle/xchain_price_source.test.js": "f8e9a22d20d29183",
         "test/unit/oracle/xchain_price_source/derivation_params.test.js": "7ca7452c1704879e",
         "test/unit/oracle/xchain_price_source/pairs.test.js": "7eae67a7bfd57d14",
         "test/unit/oracle/xchain_price_source_overrides.test.js": "95c89eefc49d0b9e",
