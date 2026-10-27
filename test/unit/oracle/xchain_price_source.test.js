@@ -151,9 +151,11 @@ xchainPriceSourceTests('abstention (LOCAL failures) - the pair is omitted entire
         expect(await src.derive(CTX)).to.equal(null);
     });
 
-    it('abstains when the XCHAIN ticker cannot be resolved', async function () {
-        const { src } = makeSource({ tick: [] }, {});
-        expect(await src.derive(CTX)).to.equal(null);
+    it('abstains when an identity lookup is malformed or ambiguous', async function () {
+        expect(await makeSource({ coin: null }, FINALIZED_BTC).src.derive(CTX)).to.equal(null);
+        expect(await makeSource({ tick: [{ id: 'bad', tick: 'XCHAIN' }] }, FINALIZED_BTC).src.derive(CTX)).to.equal(null);
+        expect(await makeSource({ coin: [{ id: 1, coin: 'BTC' }, { id: 2, coin: 'BTC' }] }, FINALIZED_BTC)
+            .src.derive(CTX)).to.equal(null);
     });
 
     it('abstains when the reference height or round is malformed', async function () {
@@ -187,7 +189,7 @@ xchainPriceSourceTests('abstention (LOCAL failures) - the pair is omitted entire
     });
 
     it('never throws, so an abstention cannot take the 36 API pairs with it', async function () {
-        const { src } = makeSource({ throwOn: (sql) => sql === COIN_ID_SQL }, {});
+        const { src } = makeSource({ throwOn: (sql) => sql === COIN_ID_SQL }, FINALIZED_BTC);
         let out;
         try { out = await src.derive(CTX); } catch (e) { expect.fail('derive() threw: ' + e.message); }
         expect(out).to.equal(null);
@@ -197,6 +199,21 @@ xchainPriceSourceTests('abstention (LOCAL failures) - the pair is omitted entire
 
 
 xchainPriceSourceTests('carry-forward (publication is unconditional)', function () {
+    it('publishes the bootstrap when a caught-up indexer has no coin identity row', async function () {
+        const { src } = makeSource({ coin: [] }, FINALIZED_BTC);
+        const out = await src.derive(CTX);
+        expect(out).to.not.equal(null);
+        expect(out.price).to.equal(BOOTSTRAP_AT_100K);
+        expect(out.meta).to.include({ derived: false, carriedFrom: 'bootstrap', fillCount: 0 });
+    });
+
+    it('abstains when the XCHAIN ticker cannot be resolved', async function () {
+        // XCHAIN_PRICE_DERIVATION_SPEC: anything but exactly one ticker row is a
+        // local failure. Finalized BTC/USD is present so the lookup is reached.
+        const { src } = makeSource({ tick: [] }, FINALIZED_BTC);
+        expect(await src.derive(CTX)).to.equal(null);
+    });
+
     it('publishes the bootstrap when the window is empty and nothing has finalized', async function () {
         // Pre-market: no fills, no history. Suppressing the pair here would age it
         // past the 1800s staleness bound within a few rounds.
@@ -240,6 +257,19 @@ xchainPriceSourceTests('indexer tip gate - a lagging indexer abstains instead of
         expect(await src.derive(CTX)).to.equal(null);
     });
 
+    it('abstains before identity lookup when a lagging indexer has no coin row', async function () {
+        const probe = makeSource({}, FINALIZED_BTC).src;
+        const log = [];
+        const { src } = makeSource({
+            tip: [{ tip: windowTop(probe) - 1 }],
+            coin: [],
+            log,
+        }, FINALIZED_BTC);
+        expect(await src.derive(CTX)).to.equal(null);
+        expect(log).to.include(INDEXER_TIP_SQL);
+        expect(log).to.not.include(COIN_ID_SQL);
+    });
+
     it('abstains on a partial window, even with fills present', async function () {
         const probe = makeSource({}, FINALIZED_BTC).src;
         const { src } = makeSource({ tip: [{ tip: windowTop(probe) - 1 }], dispenses: [DISPENSE_ROW] }, FINALIZED_BTC);
@@ -273,5 +303,20 @@ xchainPriceSourceTests('indexer tip gate - a lagging indexer abstains instead of
         const out = await src.derive({ ...CTX, referenceHeight: src.confirmationBuffer });
         expect(out).to.not.equal(null);
         expect(log).to.not.include(INDEXER_TIP_SQL);
+    });
+});
+
+xchainPriceSourceTests('derived price compatibility', function () {
+    it('preserves the derived price when identity rows and fills exist', async function () {
+        const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED_BTC, DERIVING_CONFIG);
+        const out = await src.derive(CTX);
+        expect(out).to.not.equal(null);
+        expect(out.price).to.equal('2.00000000');
+        expect(out.meta).to.include({
+            derived: true,
+            usedFills: 1,
+            clampedFills: 1,
+            rawXchainBtc: '0.00220000',
+        });
     });
 });

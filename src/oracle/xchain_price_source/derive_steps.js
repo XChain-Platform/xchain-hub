@@ -24,7 +24,12 @@
 
 const bcmath = require('../../bcmath.js');
 const { deriveXchainRate, toUsd } = require('../../xchainPrice.js');
-const { getWindowFills, computeWindowBounds } = require('../../xchainPriceQuery.js');
+const {
+    getWindowFills,
+    computeWindowBounds,
+    COIN_ID_SQL,
+    XCHAIN_TICK_SQL,
+} = require('../../xchainPriceQuery.js');
 const { INDEXER_TIP_SQL } = require('../../db/price/indexer_tip_sql.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -45,15 +50,15 @@ const deriveSteps = {
                 ' - BTC chain-tip fallback active, reference height is not a real height');
             return null;
         }
-        let referenceHeight = Number(ctx.referenceHeight);
+        const referenceHeight = Number(ctx.referenceHeight);
         if (!Number.isInteger(referenceHeight) || referenceHeight < 0) return null;
 
-        let round = Number(ctx.round);
+        const round = Number(ctx.round);
         if (!Number.isInteger(round) || round < 0) return null;
 
         // This round's own BTC/USD converts the on-chain rate into USD. Without it
         // there is nothing to multiply by, so abstain rather than invent one.
-        let btcUsd = ctx.btcUsdPrice ? String(ctx.btcUsdPrice) : null;
+        const btcUsd = ctx.btcUsdPrice ? String(ctx.btcUsdPrice) : null;
         if (!btcUsd || !bcmath.bcgt(btcUsd, '0')) {
             logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - no local ' + BTC_PAIR + ' this round');
             return null;
@@ -100,11 +105,22 @@ const deriveSteps = {
     // Selects the round's fill window from the indexer. Returns the selection, or
     // null to abstain.
     async findWindowFills(referenceHeight) {
-        let indexerDb = this.openIndexerDb();
-        let window = computeWindowBounds(referenceHeight, this.confirmationBuffer, this.windowBlocks);
+        const indexerDb = this.openIndexerDb();
+        const window = computeWindowBounds(referenceHeight, this.confirmationBuffer, this.windowBlocks);
         // Read the tip BEFORE the fills, so a tip that advances mid-read cannot vouch for rows already read.
         if (!window.empty && !(await this.indexerReachedWindowTop(indexerDb, window))) return null;
-        let selection = await getWindowFills(indexerDb, {
+
+        // Preserve the raw identity lookup shapes while the vendored selector applies
+        // its strict validation, so only a real zero-row result can mean no fills.
+        const identityRows = new Map();
+        const selectionDb = {
+            doQuery: async (sql, args) => {
+                const rows = await indexerDb.doQuery(sql, args);
+                if (sql === COIN_ID_SQL || sql === XCHAIN_TICK_SQL) identityRows.set(sql, rows);
+                return rows;
+            },
+        };
+        const selection = await getWindowFills(selectionDb, {
             referenceHeight:    referenceHeight,
             confirmationBuffer: this.confirmationBuffer,
             windowLength:       this.windowBlocks,
@@ -112,9 +128,22 @@ const deriveSteps = {
             coin:               this.coin,
         });
 
-        // A selection failure is LOCAL (unreachable DB, unresolvable ticker or
-        // coin). Abstain: publishing carry-forward here would assert "I looked and
-        // the market was quiet" when in fact this hub could not look at all.
+        // A caught-up indexer cannot have fills for a coin it has never created: the
+        // coin row is created on first use inside block processing and never purged,
+        // so on a fresh chain no coin row means an empty window and the bootstrap
+        // carries forward. Only a real zero-row result counts. A missing XCHAIN ticker
+        // still abstains, as XCHAIN_PRICE_DERIVATION_SPEC requires.
+        const coinRows = identityRows.get(COIN_ID_SQL);
+        if (!selection.ok && Array.isArray(coinRows) && coinRows.length === 0) {
+            logger.warn('XchainPriceSource: no ' + this.coin + ' coin row in the indexer yet; ' +
+                XCHAIN_PAIR + ' carries forward over an empty window');
+            return { ok: true, fills: [], window: selection.window, tickId: null, coinId: null };
+        }
+
+        // Any other selection failure is LOCAL (unreachable DB, an unresolvable
+        // ticker, a malformed or ambiguous identity row). Abstain: publishing
+        // carry-forward here would assert "I looked and the market was quiet" when
+        // in fact this hub could not look at all.
         if (!selection.ok) {
             logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' + selection.error);
             return null;
@@ -127,9 +156,9 @@ const deriveSteps = {
     // quiet market, so it is the same "could not look" LOCAL failure as an unreachable
     // DB: warn and return false, and the pair abstains for the round.
     async indexerReachedWindowTop(indexerDb, window) {
-        let rows = await indexerDb.doQuery(INDEXER_TIP_SQL);
-        let raw = rows && rows[0] ? rows[0].tip : null;
-        let tip = raw == null ? NaN : Number(raw);
+        const rows = await indexerDb.doQuery(INDEXER_TIP_SQL);
+        const raw = rows && rows[0] ? rows[0].tip : null;
+        const tip = raw == null ? NaN : Number(raw);
         if (Number.isInteger(tip) && tip >= window.toBlockInclusive) return true;
         logger.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - indexer tip ' + raw +
             ' has not reached the window top ' + window.toBlockInclusive);
@@ -139,7 +168,7 @@ const deriveSteps = {
     // Turns a successful selection into the entry to publish. `basis` carries
     // carryForward, lastXchainUsd, refRate and btcUsd from derive.
     entryFromWindow(selection, basis) {
-        let meta = {
+        const meta = {
             window:      selection.window,
             fillCount:   selection.fills.length,
             carriedFrom: basis.lastXchainUsd ? 'last-finalized' : 'bootstrap',
@@ -148,7 +177,7 @@ const deriveSteps = {
         // An EMPTY window is a defined state, not a failure: publish carry-forward
         // (§7). Suppressing the pair on a quiet market would age it past the 1800s
         // staleness bound and re-brick LTC/DOGE fees within a few rounds.
-        let derived = selection.fills.length ? deriveXchainRate(bcmath, selection.fills, basis.refRate) : null;
+        const derived = selection.fills.length ? deriveXchainRate(bcmath, selection.fills, basis.refRate) : null;
         if (!derived) {
             return this.entry(basis.carryForward, Object.assign(meta, { derived: false }));
         }
@@ -183,7 +212,7 @@ const deriveSteps = {
     // Publishes the derived rate in USD, or the carry-forward when the USD leg
     // cannot be computed.
     entryFromDerived(derived, basis, meta) {
-        let usd = toUsd(bcmath, derived.rate, basis.btcUsd);
+        const usd = toUsd(bcmath, derived.rate, basis.btcUsd);
         if (!usd) return this.entry(basis.carryForward, Object.assign(meta, { derived: false, reason: 'usd leg unusable' }));
 
         // §10 step 6: everything needed to re-derive and audit this print after the
