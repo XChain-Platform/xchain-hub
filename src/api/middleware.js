@@ -47,6 +47,20 @@ function installMiddleware(app, ctx) {
     return observability;
 }
 
+// NODE_ENV is unset in a deployed hub, so Express finalhandler would render a body-parser
+// failure as an HTML page carrying err.stack (install path, dependency file:line). Placed
+// directly after express.json() it sees only parser errors: later route errors never reach
+// it. A parser error carries a client 4xx status and a string type; anything else passes on.
+function bodyParserErrorHandler(err, req, res, next) {
+    const status = err && err.status;
+    const clientError = Number.isInteger(status) && status > 399 && status < 500;
+    if(res.headersSent || typeof err.type !== 'string' || !clientError) return next(err);
+    const message = status === 413 ? 'request entity too large'
+                  : err.type === 'entity.parse.failed' ? 'invalid JSON body'
+                  : 'invalid request body';
+    res.status(status).json({ error: message });
+}
+
 function installTransportMiddleware(app, ctx) {
     const { hubConfig, express, helmet, cors, CORS_ORIGIN } = ctx;
     // A deployed hub usually sits behind a reverse proxy on the same host, and
@@ -74,6 +88,7 @@ function installTransportMiddleware(app, ctx) {
 
     app.use(helmet());
     app.use(express.json());
+    app.use(bodyParserErrorHandler);
     app.use(cors({ origin: CORS_ORIGIN }));
     installRateLimits(app, ctx);
 }
@@ -192,4 +207,4 @@ function installMetrics(app, ctx) {
     return observability;
 }
 
-module.exports = { installMiddleware, installRateLimits };
+module.exports = { installMiddleware, installRateLimits, installTransportMiddleware, bodyParserErrorHandler };
