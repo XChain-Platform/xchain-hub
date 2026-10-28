@@ -86,7 +86,7 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
-const { isPoolSaturation } = require('./pool_saturation.js');
+const { isPoolSaturation } = require('./schema/pool_saturation.js');
 
 // The DDL lives at src/sql/, one level above this db home. Resolved here, against
 // THIS file, because schema/bootstrap.js sits one directory deeper and a path built
