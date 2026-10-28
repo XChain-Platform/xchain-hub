@@ -86,15 +86,7 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
-
-// The driver's queued-acquire timeout: every pooled connection is busy, MariaDB is
-// up, so it is saturation, not the unreachable database the breaker is for. Its
-// other ER_GET_CONNECTION_TIMEOUT ("pool failed to retrieve": no live connection
-// and none creatable) is a real connect failure, so the message tells them apart.
-function isPoolSaturation(e){
-    return !!e && (e.code === 'ER_GET_CONNECTION_TIMEOUT' || e.errno === 45028)
-        && String(e.sqlMessage || e.message || '').includes('pool timeout: failed to retrieve');
-}
+const { isPoolSaturation } = require('./pool_saturation.js');
 
 // The DDL lives at src/sql/, one level above this db home. Resolved here, against
 // THIS file, because schema/bootstrap.js sits one directory deeper and a path built
