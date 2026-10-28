@@ -81,12 +81,16 @@ module.exports = {
     // Records the (round, pair) keys a retraction is about to delete, restricted to rows
     // an archive already carried: only those need a tombstone. Same WHERE tail as
     // deletePriceSnapshotsForRetraction, and called immediately before it.
-    async insertPriceTombstonesForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+    async insertPriceTombstonesForRetraction(sourceChain, from, to, gen, bounded, fenced, keepRounds) {
         let col = 'source_action_index';
         let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
         let args = [sourceChain, from];
         if (bounded) args.push(to);
         if (fenced) args.push(gen);
+        if (Array.isArray(keepRounds) && keepRounds.length > 0) {
+            where += ' AND round_number NOT IN (' + keepRounds.map(() => '?').join(',') + ')';
+            args.push(...keepRounds);
+        }
         return this.doQuery(
             'INSERT INTO archive_price_tombstones (round_number, coin_pair) ' +
             'SELECT round_number, coin_pair FROM price_snapshots WHERE ' + where + ' AND batch_seq IS NOT NULL ' +

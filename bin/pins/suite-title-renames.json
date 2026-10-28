@@ -62,6 +62,9 @@
     },
     "test/chaos/database/db_pool_exhaustion.test.js": {
       "Chaos: DB Pool Exhaustion (DB-3) pool timeout errors count toward circuit breaker": "Chaos: DB Pool Exhaustion (DB-3) pool acquire timeouts do not count toward circuit breaker"
+    },
+    "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": {
+      "PriceAggregator.retractFromActionIndex() batch marker clear (D28) records tombstones then deletes, with no marker query, when no publisher is wired": "PriceAggregator.retractFromActionIndex() batch marker clear (D28) checks active-chain retention, records tombstones and deletes when no publisher is wired"
     }
   }
 }

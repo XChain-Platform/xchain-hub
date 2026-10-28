@@ -40,13 +40,24 @@ function batchFenceInputs(batchData) {
     return { sourceActionIndex, pushGeneration, batchActionIndex };
 }
 
-// PER-ROUND dedupe (D13). A non-'skipped' row for this round_number means the
-// round is already finalized, from a v0 push, an earlier overlapping batch or a
-// failover double-publish; that round is a duplicate and the REST of the batch
-// still lands. 'skipped' placeholder rows are not duplicates and are overwritten
-// by the upsert below, exactly as on the v0 path.
-function duplicateBatchRoundRead(round) {
-    return this.db.getPriceSnapshotByRoundNumber(round);
+// Read every candidate round with one bulk query. Repair may supply the result
+// from its pass-wide presence read so the verified ingest adds no second read.
+async function batchPresenceRows(rounds, supplied) {
+    if (Array.isArray(supplied)) return supplied;
+    let numbers = rounds.map(r => r.round);
+    let rows = await this.db.findPriceSnapshotRowsForRounds(numbers);
+    return Array.isArray(rows) ? rows : [];
+}
+
+function rowsByRound(rows) {
+    let grouped = new Map();
+    for (let row of (Array.isArray(rows) ? rows : [])) {
+        let round = Number(row && row.round_number);
+        if (!Number.isSafeInteger(round)) continue;
+        if (!grouped.has(round)) grouped.set(round, []);
+        grouped.get(round).push(row);
+    }
+    return grouped;
 }
 
 // Column semantics pinned so a v2-sourced row is indistinguishable from a
@@ -119,10 +130,8 @@ function batchRoundInsert(r, sourceChain, head, verified, fence, createdAt, admi
 // (D25) always carries a higher action index and keeps the plain dedupe, so a round
 // an untouched earlier batch still carries is never re-attributed to a newer one.
 // Self-finalized rows (no action index, bare-array proof) never match.
-async function orphanedBatchLandingOf(sourceChain, round, fence) {
+async function orphanedBatchLandingOf(sourceChain, rows, fence) {
     if (!sourceChain || !Number.isFinite(fence.batchActionIndex)) return false;
-    if (typeof this.db.findPriceSnapshotsForRound !== 'function') return false;
-    let rows = await this.db.findPriceSnapshotsForRound(round);
     if (!Array.isArray(rows)) return false;
     for (let row of rows) {
         if (!row || row.status === 'skipped' || row.source_chain !== sourceChain) continue;
@@ -155,34 +164,50 @@ async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, 
         '; its rolled-back batch row is moved onto the canonical landing');
 }
 
+async function handleDuplicateBatchRound(sourceChain, r, head, verified, fence, createdAt,
+                                         existing, targetRounds) {
+    if (existing.length === 0) return false;
+    // Repair validates the whole signed batch but only mutates rounds its one
+    // bulk presence read selected. A present target was retained across a late
+    // retraction and must move onto the active batch just like a same-position
+    // re-land, including its action index, generation, proof and landing clock.
+    if (targetRounds && !targetRounds.has(r.round)) return true;
+    try {
+        let relanded = !!targetRounds ||
+            await orphanedBatchLandingOf.call(this, sourceChain, existing, fence);
+        if (relanded)
+            await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt);
+    } catch (err) {
+        // The round is still finalized here; a failed move leaves it on the old
+        // landing, which is what the dedupe did before, so it is never a reject.
+        logger.error(nodeUtil.format('PriceAggregator: could not move re-landed round ' + r.round +
+            ' onto its canonical batch:', err));
+    }
+    // The batch is how the round reached the chain even when this hub finalized
+    // it first, so stamp the landing clock on every ordinary duplicate.
+    await this.stampBatchLanding(r.round, head.blockTime);
+    return true;
+}
+
 // Store every round of a verified batch that is not already finalized here, and
 // stamp the landing clock on the ones that are. Async because the dedupe read, the
 // insert and the stamp are its own awaits, in the order the single pass made them;
 // the caller only logs and returns after it.
-async function storeBatchRounds(sourceChain, head, rounds, verified, fence) {
+async function storeBatchRounds(sourceChain, head, rounds, verified, fence, options) {
     let createdAt = new Date();
     let stored = 0, duplicates = 0;
+    let grouped = rowsByRound(await batchPresenceRows.call(this, rounds, options && options.existingRows));
+    let targetRounds = options && options.targetRounds instanceof Set ? options.targetRounds : null;
     for (let r of rounds) {
-        let existing = await duplicateBatchRoundRead.call(this, r.round);
-        if (existing && existing.length > 0) {
+        let existing = (grouped.get(r.round) || []).filter(row => row && row.status !== 'skipped');
+        if (await handleDuplicateBatchRound.call(this, sourceChain, r, head, verified, fence,
+            createdAt, existing, targetRounds)) {
             duplicates++;
-            let relanded = false;
-            try {
-                relanded = await orphanedBatchLandingOf.call(this, sourceChain, r.round, fence);
-                if (relanded) await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt);
-            } catch (err) {
-                // The round is still finalized here; a failed move leaves it on the old
-                // landing, which is what the dedupe did before, so it is never a reject.
-                logger.error(nodeUtil.format('PriceAggregator: could not move re-landed round ' + r.round +
-                    ' onto its canonical batch:', err));
-            }
-            // The round is already finalized HERE, but this batch is how the round
-            // reached the CHAIN, and the landing clock is what fee pricing bounds
-            // itself on once that gate is armed. On a validator every round of its
-            // own batch takes this branch (it finalized them all itself), so
-            // stamping only the stored rows would leave the one node kind that
-            // produces rounds unable to tell a landed round from an unlanded one.
-            await this.stampBatchLanding(r.round, head.blockTime);
+            continue;
+        }
+
+        if (targetRounds && !targetRounds.has(r.round)) {
+            duplicates++;
             continue;
         }
 
@@ -291,7 +316,7 @@ module.exports = {
     //
     // Returns { accepted, stored, duplicates, rejected } (D13). `accepted` is true iff
     // every round either stored or deduped; `reason` names the cause when it is not.
-    async receiveValidatedBatch(sourceChain, batchData) {
+    async receiveValidatedBatch(sourceChain, batchData, options) {
         let roundCount = (batchData && Array.isArray(batchData.rounds)) ? batchData.rounds.length : 0;
         // Whole-batch rejection: nothing stored, nothing deduped, every round refused.
         let refuse = (reason) => ({ accepted: false, stored: 0, duplicates: 0, rejected: roundCount, reason });
@@ -323,7 +348,7 @@ module.exports = {
         let verified = await verifyBatchQuorum.call(this, structural.sigs, head, parsed.rounds);
         if (verified.reason) return refuse(verified.reason);
 
-        let result = await storeBatchRounds.call(this, sourceChain, head, parsed.rounds, verified, fence);
+        let result = await storeBatchRounds.call(this, sourceChain, head, parsed.rounds, verified, fence, options);
         if (result.reason) return result;
 
         logger.info('PriceAggregator: accepted batch [' + head.firstRound + '..' + head.lastRound + '] from '

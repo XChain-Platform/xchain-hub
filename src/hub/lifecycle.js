@@ -64,6 +64,7 @@ class Lifecycle {
         // writer already owns those rows; see PriceAggregator.runsOracleConsensus for
         // why that decision is deferred to the first pass rather than taken here.
         this.priceAggregator.startPriceCapabilityDerivation();
+        this.priceAggregator.startPriceChainRestore();
         logger.info('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
@@ -245,7 +246,10 @@ class Lifecycle {
         // Disarmed with the other timers, and for the same reason the attestation batch
         // publisher is: its pass ends in a DB write, so leaving it armed past db.close()
         // would run one against a dead pool.
-        if(this.priceAggregator) this.priceAggregator.stopPriceCapabilityDerivation();
+        if(this.priceAggregator) {
+            this.priceAggregator.stopPriceCapabilityDerivation();
+            this.priceAggregator.stopPriceChainRestore();
+        }
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();

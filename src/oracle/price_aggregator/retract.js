@@ -24,14 +24,14 @@ const { normalizeRetractionBounds, parseIndex } = require('../../lib/retraction_
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+const PRICE_KEEP_CHECK_TIMEOUT_MS = 3000;
 
 // D28: the rounds a retracted BATCH carried, read BEFORE the DELETE because
 // afterwards there is nothing left to read them off. Batch-sourced rows are the
 // ones whose consensus_proof is the {"batch":...} object of D23; a v0-sourced
 // row's proof is a bare signature ARRAY, so the prefix is an exact discriminator
-// and v0 retraction behaviour is untouched. Only worth a query when a publisher
-// exposing the clear seam is actually wired: on a mirror hub the answer has no
-// consumer, so the retraction path stays a two-statement path there.
+// and v0 retraction behaviour is untouched. The active-chain retention check uses
+// these rows on every hub; publisher wiring additionally clears durable markers.
 function publishedMarkerSeam() {
     let publisher = this.hub && this.hub.oraclePublisher;
     let canClearMarkers = !!(publisher && typeof publisher.clearPublishedMarkers === 'function');
@@ -77,9 +77,11 @@ async function persistIngestFence(sourceChain, bounds) {
 // action-index column, so each named method owns its own column: price_snapshots
 // tracks the PRICE v0 round action via source_action_index, oracle_prices the
 // PRICE v1 action via action_index.
-async function snapshotRetractionDelete(sourceChain, b) {
-    await this.db.insertPriceTombstonesForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
-    return this.db.deletePriceSnapshotsForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+async function snapshotRetractionDelete(sourceChain, b, keepRounds) {
+    await this.db.insertPriceTombstonesForRetraction(
+        sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced, keepRounds);
+    return this.db.deletePriceSnapshotsForRetraction(
+        sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced, keepRounds);
 }
 
 // oracle_prices tracks the PRICE v1 oracle action via action_index
@@ -103,6 +105,18 @@ function emitRetractionDeletes(sourceChain, b, snapDeleted, oracleDeleted) {
         if (b.bounded) evt.to_action_index = b.to;
         if (b.fenced) evt.retraction_generation = b.gen;
         this.emit('row:deleted', evt);
+    }
+}
+
+// A range deletion reaches mirrors before these unchanged rows. Re-emitting them
+// immediately makes a connected mirror upsert the rounds this hub retained, while
+// reconnecting mirrors re-page price_snapshots from zero and reach the same result.
+function emitRetainedRows(rows, keepRounds) {
+    if (!keepRounds.length) return;
+    let kept = new Set(keepRounds);
+    for (let row of rows) {
+        if (kept.has(Number(row.round_number)))
+            this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
     }
 }
 
@@ -203,9 +217,12 @@ function retractedWindowRounds(windows) {
 
 // One marker clear, guarded because a publisher failure must never turn a completed
 // retraction into an error return: the rows are already gone.
-async function clearMarkersLogged(publisher, rounds, what) {
+async function clearMarkersLogged(publisher, rounds, what, knownCarried) {
     try {
-        await publisher.clearPublishedMarkers(rounds);
+        if (knownCarried instanceof Set)
+            await publisher.clearPublishedMarkers(rounds, knownCarried);
+        else
+            await publisher.clearPublishedMarkers(rounds);
     } catch (e) {
         logger.error(nodeUtil.format('PriceAggregator: clearing published markers for retracted batch '
             + what + ' ' + rounds.join(',') + ' failed:', e && e.message));
@@ -220,26 +237,55 @@ async function clearMarkersLogged(publisher, rounds, what) {
 // finalized carries no batch row, yet the retracted batch published it, so every round
 // the retracted windows name that no batch row covered is cleared as well (all of them
 // when nothing was deleted).
-async function clearRetractedMarkers(publisher, batchRounds, windows, snapDeleted) {
-    if (snapDeleted > 0 && batchRounds.length > 0) await clearMarkersLogged(publisher, batchRounds, 'rounds');
+async function clearRetractedMarkers(publisher, batchRounds, windows, snapDeleted, carriedRounds) {
+    let knownCarried = Array.isArray(carriedRounds) ? new Set(carriedRounds) : null;
+    if (snapDeleted > 0 && batchRounds.length > 0)
+        await clearMarkersLogged(publisher, batchRounds, 'rounds', knownCarried);
     const ranged = retractedWindowRounds(windows);
     const stored = new Set(batchRounds);
     const missing = snapDeleted === 0 ? ranged : ranged.filter(round => !stored.has(round));
-    if (missing.length > 0) await clearMarkersLogged(publisher, missing, 'ranges');
+    if (missing.length > 0) await clearMarkersLogged(publisher, missing, 'ranges', knownCarried);
 }
 
-async function readRetractedBatchRounds(sourceChain, b) {
-    let batchRounds = [];
+async function readRetractedBatchRows(sourceChain, b) {
+    let rows = [];
     try {
-        let rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
-        for (let row of (rows || [])) {
-            let n = parseInt(row.round_number);
-            if (Number.isFinite(n)) batchRounds.push(n);
+        if (typeof this.db.findBatchPriceSnapshotsForRetraction === 'function') {
+            rows = await this.db.findBatchPriceSnapshotsForRetraction(
+                sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
+        } else if (typeof this.db.findBatchPriceSnapshotRoundsForRetraction === 'function') {
+            rows = await this.db.findBatchPriceSnapshotRoundsForRetraction(
+                sourceChain, b.from, b.to, b.gen, b.bounded, b.fenced);
         }
     } catch (e) {
         logger.error(nodeUtil.format('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message));
     }
-    return batchRounds;
+    let safeRows = Array.isArray(rows) ? rows : [];
+    let rounds = [...new Set(safeRows.map(row => parseInt(row.round_number))
+        .filter(Number.isFinite))];
+    return { rows: safeRows, rounds };
+}
+
+async function roundsStillCarried(rounds) {
+    if (rounds.length === 0) return [];
+    if (typeof this.priceRoundsCarriedByChain !== 'function') return null;
+    let timeout;
+    try {
+        let carried = await Promise.race([
+            this.priceRoundsCarriedByChain(rounds),
+            new Promise((resolve, reject) => {
+                timeout = setTimeout(() => reject(new Error('active-chain keep check timed out')),
+                    PRICE_KEEP_CHECK_TIMEOUT_MS);
+            })
+        ]);
+        return rounds.filter(round => carried instanceof Set && carried.has(round));
+    } catch (e) {
+        logger.warn(nodeUtil.format('PriceAggregator: could not check retracted PRICE rounds against the active chain:',
+            e && e.message));
+        return null;
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
 }
 
 module.exports = {
@@ -277,16 +323,21 @@ module.exports = {
         let { from, to, gen, bounded, fenced } = bounds;
 
         let seam = publishedMarkerSeam.call(this);
-        let batchRounds = seam.canClearMarkers ? await readRetractedBatchRounds.call(this, sourceChain, bounds) : [];
+        let canCheckChain = typeof this.priceRoundsCarriedByChain === 'function';
+        let batchRead = (canCheckChain || seam.canClearMarkers)
+            ? await readRetractedBatchRows.call(this, sourceChain, bounds)
+            : { rows: [], rounds: [] };
+        let batchRounds = batchRead.rounds;
+        let chainCheckRounds = [...new Set(batchRounds.concat(retractedWindowRounds(windows)))];
+        let carriedRounds = await roundsStillCarried.call(this, chainCheckRounds);
+        let carried = new Set(Array.isArray(carriedRounds) ? carriedRounds : []);
+        let keepRounds = batchRounds.filter(round => carried.has(round));
 
         // Awaited only when there is a fence to write, so an unfenced retraction issues
         // its DELETE without yielding first, in the same tick the unsplit method did.
         let fenceError = bounds.fenced ? await persistIngestFence.call(this, sourceChain, bounds) : null;
         if (fenceError) return fenceError;
 
-        // Runs on every retraction, publisher or not: a hub whose publisher cannot
-        // clear markers still stamped self-finalized rows from the orphaned landing,
-        // and leaving that stamp makes its archive diverge from a hub that never saw it.
         try {
             await resetOrphanedLandingBlockTimes.call(this, sourceChain, bounds);
         } catch (e) {
@@ -295,19 +346,27 @@ module.exports = {
                 + ' (' + ((e && e.message) || 'unknown error') + ')' };
         }
 
-        let snapResult = await snapshotRetractionDelete.call(this, sourceChain, bounds);
+        let snapResult = await snapshotRetractionDelete.call(this, sourceChain, bounds, keepRounds);
         let oracleResult = await oraclePriceRetractionDelete.call(this, sourceChain, bounds);
 
         let snapDeleted   = (snapResult   && snapResult.affectedRows   !== undefined) ? Number(snapResult.affectedRows)   : 0;
         let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;
 
         emitRetractionDeletes.call(this, sourceChain, bounds, snapDeleted, oracleDeleted);
+        emitRetainedRows.call(this, batchRead.rows, keepRounds);
 
         // After the deletes, so the batch's own rows are gone and only surviving rows are reset.
         let windowError = await resetRetractedBatchWindowsOrError.call(this, sourceChain, windows);
         if (windowError) return windowError;
 
-        if (seam.canClearMarkers) await clearRetractedMarkers(seam.publisher, batchRounds, windows, snapDeleted);
+        if (seam.canClearMarkers)
+            await clearRetractedMarkers(seam.publisher, batchRounds, windows, snapDeleted, carriedRounds);
+
+        // Restore any older hole in this retracted window through the same verified
+        // batch ingest path. Failure is best-effort here: the completed retraction must
+        // still acknowledge so its durable outbox can settle.
+        if (windows.length > 0 && typeof this.schedulePriceChainRestore === 'function')
+            this.schedulePriceChainRestore(windows, keepRounds);
 
         logger.info('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };

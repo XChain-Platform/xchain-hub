@@ -49,7 +49,7 @@ function makeValidator() {
     // proof is a bare signature array, which is what the LIKE prefix separates.
     function stubDb(batchRoundRows) {
         hub.db.doQuery.callsFake(async (sql) => {
-            if (/^SELECT DISTINCT round_number/.test(sql)) return batchRoundRows;
+            if (/^SELECT \* FROM price_snapshots/.test(sql)) return batchRoundRows;
             return { affectedRows: batchRoundRows.length ? 4 : 2 };
         });
     }
@@ -78,11 +78,11 @@ function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Tests1() 
 
         // The rounds are read BEFORE the DELETE, bounded and fenced exactly as the
         // DELETE is, so a row outside the retraction never clears a live marker.
-        let select = hub.db.doQuery.getCalls().find(c => /^SELECT DISTINCT round_number/.test(c.args[0]));
+        let select = hub.db.doQuery.getCalls().find(c => /^SELECT \* FROM price_snapshots/.test(c.args[0]));
         expect(select, 'batch-round lookup issued').to.exist;
         expect(select.args[0]).to.match(/consensus_proof LIKE '\{"batch":%'/);
         expect(select.args[1]).to.deep.equal(['BTC', 500, 600, 3]);
-        expect(hub.db.doQuery.firstCall.args[0]).to.match(/^SELECT DISTINCT round_number/);
+        expect(hub.db.doQuery.firstCall.args[0]).to.match(/^SELECT \* FROM price_snapshots/);
 
         expect(publisher.clearPublishedMarkers.calledOnce).to.equal(true);
         expect(publisher.clearPublishedMarkers.firstCall.args[0]).to.deep.equal([100, 101, 102]);
@@ -107,17 +107,19 @@ function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Tests1() 
         expect(console.error.calledOnce).to.equal(true);
     });
 
-    it('records tombstones then deletes, with no marker query, when no publisher is wired', async function () {
+    it('checks active-chain retention, records tombstones and deletes when no publisher is wired', async function () {
         delete hub.oraclePublisher;
-        hub.db.doQuery.resolves({ affectedRows: 1 });
+        hub.db.doQuery.callsFake(async sql =>
+            /^SELECT \* FROM price_snapshots/.test(sql) ? [] : { affectedRows: 1 });
 
         await agg.retractFromActionIndex('LTC', 10);
 
         let calls = hub.db.doQuery.getCalls();
         // The orphaned-landing reset lookup runs with or without a publisher.
-        expect(calls.length).to.equal(4);
-        expect(calls[0].args[0]).to.match(/^SELECT DISTINCT batch_block_time, .* FROM price_snapshots WHERE source_chain = \?/);
-        expect(calls.slice(2).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
+        expect(calls.length).to.equal(5);
+        expect(calls[0].args[0]).to.match(/^SELECT \* FROM price_snapshots/);
+        expect(calls[1].args[0]).to.match(/^SELECT DISTINCT batch_block_time, .* FROM price_snapshots WHERE source_chain = \?/);
+        expect(calls.slice(3).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
     });
 }
 

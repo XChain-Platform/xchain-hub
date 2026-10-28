@@ -28,10 +28,11 @@
 const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 const batchLandingReset     = require('./batch_landing_reset.js');
 const zeroStampRounds       = require('./zero_stamp_rounds.js');
+const chainRestore          = require('./chain_restore.js');
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so this
 // module still exports ONE price-family mixin that src/db/index.js installs unchanged.
-module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zeroStampRounds, {
+module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zeroStampRounds, chainRestore, {
 
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/consensus.js:374.
@@ -375,12 +376,16 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // range at `to` so a row re-published inside the original open-ended range survives a
     // deferred retraction; `fenced` limits the delete to rows stamped at or below generation
     // `gen`. The caller normalizes and validates the bounds; this only binds them.
-    async deletePriceSnapshotsForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+    async deletePriceSnapshotsForRetraction(sourceChain, from, to, gen, bounded, fenced, keepRounds) {
         let col = 'source_action_index';
         let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
         let args = [sourceChain, from];
         if (bounded) args.push(to);
         if (fenced) args.push(gen);
+        if (Array.isArray(keepRounds) && keepRounds.length > 0) {
+            where += ' AND round_number NOT IN (' + keepRounds.map(() => '?').join(',') + ')';
+            args.push(...keepRounds);
+        }
         return this.doQuery('DELETE FROM price_snapshots WHERE ' + where, args);
     }
 });

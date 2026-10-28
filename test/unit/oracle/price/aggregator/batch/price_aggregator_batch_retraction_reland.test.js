@@ -90,6 +90,21 @@ function inRetraction(r, chain, from, to, gen, bounded, fenced) {
     return true;
 }
 
+function installRetractionBatchReads(db) {
+    db.findBatchPriceSnapshotRoundsForRetraction = async (...q) =>
+        [...new Set(table.filter(r => isBatchRow(r) && inRetraction(r, ...q)).map(r => r.round_number))]
+            .map(round_number => ({ round_number }));
+    db.findBatchPriceSnapshotsForRetraction = async (...q) =>
+        table.filter(r => isBatchRow(r) && inRetraction(r, ...q)).map(r => Object.assign({}, r));
+}
+
+function installBatchPresenceRead(db) {
+    db.findPriceSnapshotRowsForRounds = async (rounds) => {
+        let wanted = new Set(rounds);
+        return table.filter(r => wanted.has(r.round_number)).map(r => Object.assign({}, r));
+    };
+}
+
 // An in-memory price_snapshots behind the named DB methods both paths call, with the
 // SQL semantics the paths rely on: the per-round upsert keyed on (round, pair) that
 // keeps the EARLIER landing clock, the fenced delete, and the landing-clock resets.
@@ -104,6 +119,7 @@ function installFakeDb() {
     };
     db.getPriceSnapshotByRoundNumber = async (round) =>
         table.filter(r => r.round_number === round && live(r)).slice(0, 1).map(r => ({ id: r.id }));
+    installBatchPresenceRead(db);
     db.findPriceSnapshotsForRound = async (round) =>
         table.filter(r => r.round_number === round).map(r => Object.assign({}, r));
     db.setBatchPriceSnapshotRound = async (round, pairs, referenceBlock, referenceChain, timestamp,
@@ -132,15 +148,14 @@ function installFakeDb() {
     };
     db.findPriceSnapshotsByRoundNumberAndBatchBlockTime = async (round, landed) =>
         table.filter(r => r.round_number === round && r.batch_block_time === landed).map(r => Object.assign({}, r));
-    db.findBatchPriceSnapshotRoundsForRetraction = async (...q) =>
-        [...new Set(table.filter(r => isBatchRow(r) && inRetraction(r, ...q)).map(r => r.round_number))]
-            .map(round_number => ({ round_number }));
+    installRetractionBatchReads(db);
     db.findSelfFinalizedRoundsForBatchRetraction = async () => [];
     db.resetSelfFinalizedBatchBlockTimeForRetraction = async () => ({ affectedRows: 0 });
     db.insertPriceTombstonesForRetraction = async () => ({});
     db.deletePriceSnapshotsForRetraction = async (...q) => {
         let before = table.length;
-        table = table.filter(r => !inRetraction(r, ...q));
+        let keep = new Set(Array.isArray(q[6]) ? q[6] : []);
+        table = table.filter(r => keep.has(r.round_number) || !inRetraction(r, ...q.slice(0, 6)));
         return { affectedRows: before - table.length };
     };
     db.deleteOraclePricesForRetraction = async () => ({ affectedRows: 0 });
@@ -170,6 +185,12 @@ function installPublisher(carried) {
     hub.oraclePublisher = publisher;
 }
 
+function installRepairPayload(payload) {
+    publisher.fetchLandedBatches = async () => ({ batches: [{ first_round: BATCH_ROUND,
+        last_round: SELF_ROUND, action_index: payload.action_index }], truncated: false });
+    publisher.fetchLandedBatchPayload = async () => ({ payload: Object.assign({ source_chain: CHAIN }, payload) });
+}
+
 function rowsOf(round) {
     return table.filter(r => r.round_number === round && r.status === 'finalized');
 }
@@ -183,24 +204,49 @@ async function aReMinedBatchKeepsItsBatchSourcedRound() {
     expect(rowsOf(BATCH_ROUND).map(r => r.push_generation)).to.deep.equal([3, 3]);
 
     // The rollback bumps the generation to 5 and retracts at 4; the re-mined batch
-    // re-pushes at 5 and reaches the hub before the retraction does.
-    let again = await agg.receiveValidatedBatch(CHAIN,
-        makeBatch({ push_generation: 5, block_time: NEW_TIME, block_index: NEW_BLOCK }));
+    // lands at a HIGHER action index and reaches the hub before the retraction does.
+    let active = makeBatch({ push_generation: 5, block_time: NEW_TIME, block_index: NEW_BLOCK,
+        action_index: ACTION_INDEX + 4 });
+    let again = await agg.receiveValidatedBatch(CHAIN, active);
     expect(again.accepted).to.equal(true);
+    installRepairPayload(active);
 
     let res = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX, ACTION_INDEX + 1, 4,
         [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
     expect(res.error).to.equal(undefined);
+    await agg._lastPriceRestoreSchedule;
 
-    // The canonical batch still carries the round, so the hub still serves it.
+    // The canonical batch now owns the row and restores its landing clock.
     let kept = rowsOf(BATCH_ROUND);
     expect(kept.length).to.equal(2);
-    expect(kept.every(r => r.push_generation === 5 && r.source_action_index === ACTION_INDEX)).to.equal(true);
+    expect(kept.every(r => r.push_generation === 5 &&
+        r.source_action_index === ACTION_INDEX + 4 && r.batch_block_time === NEW_TIME)).to.equal(true);
     expect(rowsOf(SELF_ROUND).length).to.equal(2);
 
     // And its publish marker stands: re-arming it would put a duplicate wire on chain.
     expect(markerDeletes).to.deep.equal([]);
     expect(publisher._publishedRounds.has(BATCH_ROUND)).to.equal(true);
+
+    // A later rollback of the batch that owns the repaired row removes it.
+    publisher.roundsCarriedByChain = async () => new Set();
+    let removed = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX + 4,
+        ACTION_INDEX + 4, 5);
+    expect(removed.retracted.price_snapshots).to.equal(2);
+    expect(rowsOf(BATCH_ROUND)).to.deep.equal([]);
+}
+
+async function aSamePositionReMineMovesToTheNewGeneration() {
+    installPublisher([BATCH_ROUND, SELF_ROUND]);
+    await agg.receiveValidatedBatch(CHAIN, makeBatch());
+
+    let again = await agg.receiveValidatedBatch(CHAIN,
+        makeBatch({ push_generation: 5, block_time: NEW_TIME, block_index: NEW_BLOCK }));
+
+    expect(again).to.deep.equal({ accepted: true, stored: 0, duplicates: 2, rejected: 0 });
+    let moved = rowsOf(BATCH_ROUND);
+    expect(moved.length).to.equal(2);
+    expect(moved.every(row => row.push_generation === 5 &&
+        row.source_action_index === ACTION_INDEX)).to.equal(true);
 }
 
 async function aPlainDuplicateDeliveryStillRetracts() {
@@ -238,6 +284,79 @@ async function aLaterOverlappingBatchNeverTakesOverTheRound() {
     expect(kept.every(r => r.push_generation === 3 && r.source_action_index === ACTION_INDEX)).to.equal(true);
 }
 
+async function aDeletedRoundReturnsThroughImmediateRepair() {
+    installPublisher([]);
+    publisher.roundsCarriedByChain = async () => { throw new Error('indexer unavailable'); };
+    await agg.receiveValidatedBatch(CHAIN, makeBatch());
+    const active = makeBatch({ push_generation: 5, action_index: ACTION_INDEX + 4,
+        block_time: NEW_TIME, block_index: NEW_BLOCK });
+    installRepairPayload(active);
+
+    const result = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX, ACTION_INDEX, 4,
+        [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
+
+    expect(result.error).to.equal(undefined);
+    await agg._lastPriceRestoreSchedule;
+    const restored = rowsOf(BATCH_ROUND);
+    expect(restored.length).to.equal(2);
+    expect(restored.every(row => row.push_generation === 5 &&
+        row.source_action_index === ACTION_INDEX + 4)).to.equal(true);
+}
+
+async function aLaggingIndexerCannotKeepARefusedOrphan() {
+    installPublisher([BATCH_ROUND, SELF_ROUND]);
+    const stale = makeBatch();
+    await agg.receiveValidatedBatch(CHAIN, stale);
+    installRepairPayload(stale);
+
+    const result = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX, ACTION_INDEX, 4,
+        [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
+    expect(result.error).to.equal(undefined);
+    await agg._lastPriceRestoreSchedule;
+
+    expect(rowsOf(BATCH_ROUND)).to.deep.equal([]);
+    expect(rowsOf(SELF_ROUND).length).to.equal(2);
+}
+
+async function aSlowKeepCheckFallsBackToMarkerChecks() {
+    this.timeout(5000);
+    installPublisher([]);
+    await agg.receiveValidatedBatch(CHAIN, makeBatch());
+    let checks = 0;
+    publisher.roundsCarriedByChain = async () => {
+        checks++;
+        if (checks === 1) return new Promise(() => {});
+        return new Set([BATCH_ROUND, SELF_ROUND]);
+    };
+    let started = Date.now();
+    let result = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX,
+        ACTION_INDEX, 3, [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
+
+    expect(Date.now() - started).to.be.lessThan(5000);
+    expect(result.retracted.price_snapshots).to.equal(2);
+    expect(checks).to.equal(3);
+    expect(markerDeletes).to.deep.equal([]);
+    expect(agg._lastPriceRestoreSchedule).to.be.an.instanceOf(Promise);
+    agg.stopPriceChainRestore();
+}
+
+async function acknowledgesBeforeSlowRepairFinishes() {
+    installPublisher([]);
+    await agg.receiveValidatedBatch(CHAIN, makeBatch());
+    let started = false;
+    sinon.stub(agg, 'runPriceChainRestorePass').callsFake(async () => {
+        started = true;
+        return new Promise(() => {});
+    });
+
+    let result = await agg.retractFromActionIndex(CHAIN, ACTION_INDEX,
+        ACTION_INDEX, 3, [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(result.retracted.price_snapshots).to.equal(2);
+    expect(started).to.equal(true);
+}
+
 describe('PriceAggregator batch re-landed after a reorg survives the late retraction', function () {
     beforeEach(function () {
         hub = createMockHub({ network: 'mainnet' });
@@ -258,6 +377,11 @@ describe('PriceAggregator batch re-landed after a reorg survives the late retrac
     });
 
     it('keeps the batch-sourced round of a re-mined batch and its publish marker', aReMinedBatchKeepsItsBatchSourcedRound);
+    it('moves a same-action-index re-mine onto the new generation', aSamePositionReMineMovesToTheNewGeneration);
+    it('restores a round deleted when the keep check could not answer', aDeletedRoundReturnsThroughImmediateRepair);
+    it('deletes a kept orphan when the generation fence refuses its rewrite', aLaggingIndexerCannotKeepARefusedOrphan);
     it('still deletes the round and clears the marker on a plain duplicate delivery', aPlainDuplicateDeliveryStillRetracts);
     it('never moves a round onto a later overlapping batch', aLaterOverlappingBatchNeverTakesOverTheRound);
+    it('bounds a slow active-chain keep check below the live-push timeout', aSlowKeepCheckFallsBackToMarkerChecks);
+    it('acknowledges before a slow post-retraction repair finishes', acknowledgesBeforeSlowRepairFinishes);
 });

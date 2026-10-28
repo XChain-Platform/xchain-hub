@@ -154,14 +154,16 @@ module.exports = {
     // What the indexer cannot see is a retracted batch still sitting in a mempool, so
     // a re-mine that lands after this read can still race the recovery re-publish;
     // assembleWindow asks the chain once more for every window flagged here.
-    async clearPublishedMarkers(rounds) {
+    async clearPublishedMarkers(rounds, knownCarried = null) {
         let list = (Array.isArray(rounds) ? rounds : [rounds])
             .map(r => parseInt(r)).filter(r => Number.isFinite(r));
         if (list.length === 0) return 0;
 
-        let carried = new Set();
-        try { carried = await this.roundsCarriedByChain(list); }
-        catch (e) { logger.warn(nodeUtil.format('OraclePublisher: cannot ask the chain whether retracted rounds re-landed:', e && e.message)); }
+        let carried = knownCarried instanceof Set ? knownCarried : new Set();
+        if (!(knownCarried instanceof Set)) {
+            try { carried = await this.roundsCarriedByChain(list); }
+            catch (e) { logger.warn(nodeUtil.format('OraclePublisher: cannot ask the chain whether retracted rounds re-landed:', e && e.message)); }
+        }
         if (carried.size > 0) {
             for (let r of carried) this.markRoundLanded(r);
             logger.info('OraclePublisher: retracted round(s) ' + Array.from(carried).join(', ') + ' are already ' +

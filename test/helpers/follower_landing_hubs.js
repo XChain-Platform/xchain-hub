@@ -98,6 +98,10 @@ function priceTable(rows) {
 // The ingest, stamp and archive-verify statements.
 function ingestQueries(rows) {
     return {
+        async findPriceSnapshotRowsForRounds(rounds) {
+            let wanted = new Set(rounds);
+            return copy(rows.filter(r => wanted.has(r.round_number)));
+        },
         async getPriceSnapshotByRoundNumber(round) {
             return rows.filter(r => r.round_number === round && r.status !== 'skipped').slice(0, 1).map(r => ({ id: r.id }));
         },

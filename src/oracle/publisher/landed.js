@@ -163,7 +163,7 @@ module.exports = {
     // configs table via XChainHub.resolveIndexerUrl); the key is the same per-coin
     // x-api-key the anchor publisher attaches, because getpricebatches is a
     // federation read on the indexer.
-    async fetchLandedBatches(first, last) {
+    async fetchLandedBatches(first, last, pageSize) {
         let url = null;
         try {
             if (this.hub && typeof this.hub.resolveIndexerUrl === 'function') {
@@ -180,10 +180,13 @@ module.exports = {
             PRICE_LANDING_COIN + '_INDEXER_API_URL)');
         let cfg = (this.hub && this.hub.p2pConfig) || {};
         let key = hubConfig.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
+        this._lastLandingIndexer = { url: url, key: key };
         let result;
         try {
+            let limit = Number.isSafeInteger(pageSize) && pageSize > 0
+                ? Math.min(pageSize, LANDED_BATCH_PAGE) : LANDED_BATCH_PAGE;
             result = await this.indexerRpc(url, key, 'getpricebatches',
-                { first_round: first, last_round: last, limit: LANDED_BATCH_PAGE });
+                { first_round: first, last_round: last, limit: limit });
         } catch (e) {
             return this.chainReconcileFailed('getpricebatches on ' + url + ' failed: ' + (e && e.message));
         }
@@ -194,10 +197,33 @@ module.exports = {
         let batches = [];
         for (let b of result.batches) {
             let f = parseInt(b && b.first_round), l = parseInt(b && b.last_round);
-            if (Number.isFinite(f) && Number.isFinite(l) && l >= f) batches.push({ first_round: f, last_round: l });
+            let action = parseInt(b && b.action_index);
+            if (Number.isFinite(f) && Number.isFinite(l) && l >= f)
+                batches.push({ first_round: f, last_round: l,
+                    action_index: Number.isSafeInteger(action) ? action : null,
+                    round_count: Number(b.round_count), block_index: Number(b.block_index),
+                    block_time: Number(b.block_time) });
         }
         this._chainReconcileWarned = null;   // healthy again: the next failure logs again
         return { batches: batches, truncated: !!result.truncated };
+    },
+
+    // Fetch one committed batch's exact pushpricebatch body after a metadata read
+    // selected it. A method-not-found answer marks this indexer as old so the repair
+    // pass can disarm without logging on every tick.
+    async fetchLandedBatchPayload(actionIndex) {
+        let target = this._lastLandingIndexer;
+        if (!target) return { error: 'landing indexer is unresolved' };
+        try {
+            let payload = await this.indexerRpc(target.url, target.key, 'getpricebatchpayload',
+                { action_index: actionIndex });
+            if (!payload || typeof payload !== 'object' || !Array.isArray(payload.rounds) ||
+                !Array.isArray(payload.sigs)) return { error: 'invalid price batch payload response' };
+            return { payload: payload };
+        } catch (e) {
+            if (e && e.rpcCode === -32601) return { unsupported: true };
+            return { error: e && e.message ? e.message : 'price batch payload read failed' };
+        }
     },
 
     chainReconcileFailed(reason) {
@@ -216,7 +242,11 @@ module.exports = {
         if (key) headers['x-api-key'] = key;
         let resp = await axios.post(url, { jsonrpc: '2.0', method: method, params: params || {}, id: 1 },
             { headers: headers, timeout: 15000 });
-        if (resp && resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
+        if (resp && resp.data && resp.data.error) {
+            let err = new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
+            err.rpcCode = resp.data.error.code;
+            throw err;
+        }
         return resp && resp.data ? resp.data.result : null;
     },
 
