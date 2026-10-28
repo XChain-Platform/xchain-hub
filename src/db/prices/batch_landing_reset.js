@@ -15,22 +15,45 @@
  * XChain Hub - price_snapshots landing-clock resets for a PRICE batch reorg.
  *
  * The statements a price_retraction runs to clear the batch_block_time a retracted
- * batch landing stamped: by the batch row the hub stored (the join), and by the round
+ * batch landing stamped: by the batch row the hub stored (its windows), and by the round
  * window the indexer names (every round inside it, whatever path stored it).
  * prices/index.js spreads these methods into the mixin it exports, so src/db/index.js
  * installs them on Database.prototype and every caller keeps writing db.<method>().
  *
  ********************************************************************/
 
-// Self-finalized rows (no source_action_index) a retracted PRICE batch landing stamped: same
-// batch_block_time, round inside the landing's first_round..last_round.
-function orphanedLandingQuery(head, set, sourceChain, from, to, gen, bounded, fenced) {
+const BATCH_ROUND = path => `CAST(JSON_UNQUOTE(JSON_EXTRACT(consensus_proof, '$.batch.${path}')) AS UNSIGNED)`;
+const WINDOWS_PER_STATEMENT = 500;
+
+// The distinct (landing clock, first_round, last_round) of every retracted PRICE batch row.
+// Two statements with literal bounds, never a self-join: a join ON computed per row from
+// JSON cannot use an index, so it read the table squared and hit the statement limit.
+// This read ranges idx_source_chain_action; a zero clock stamped nothing, so it is skipped.
+async function retractedLandingWindows(db, sourceChain, from, to, gen, bounded, fenced) {
     const args = [sourceChain, from];
     if (bounded) args.push(to);
     if (fenced) args.push(gen);
-    const range = bounded ? ' >= ? AND batch_landed.source_action_index <= ?' : ' >= ?';
-    const sql = `${head} price_snapshots AS self_finalized JOIN price_snapshots AS batch_landed ON self_finalized.batch_block_time = batch_landed.batch_block_time AND self_finalized.round_number BETWEEN CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.first_round')) AS UNSIGNED) AND CAST(JSON_UNQUOTE(JSON_EXTRACT(batch_landed.consensus_proof, '$.batch.last_round')) AS UNSIGNED) ${set} WHERE self_finalized.source_action_index IS NULL AND self_finalized.consensus_proof NOT LIKE '{"batch":%' AND self_finalized.batch_block_time > 0 AND batch_landed.source_chain = ? AND batch_landed.source_action_index${range}${fenced ? ' AND batch_landed.push_generation <= ?' : ''} AND batch_landed.consensus_proof LIKE '{"batch":%'`;
-    return [sql, args];
+    const rows = await db.doQuery(`SELECT DISTINCT batch_block_time, ${BATCH_ROUND('first_round')} AS first_round, ${BATCH_ROUND('last_round')} AS last_round FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ?${bounded ? ' AND source_action_index <= ?' : ''}${fenced ? ' AND push_generation <= ?' : ''} AND consensus_proof LIKE '{"batch":%' AND batch_block_time > 0`, args);
+    const seen = new Map();
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+        const w = [row.first_round, row.last_round, row.batch_block_time].map(v => (v === null || v === undefined) ? NaN : Number(v));
+        if (w.every(Number.isSafeInteger) && w[2] > 0 && w[0] <= w[1]) seen.set(w.join(':'), w);
+    }
+    return [...seen.values()];
+}
+
+// Self-finalized rows (no source_action_index) a retracted landing stamped: same clock,
+// round inside that landing's window. Each window is a round_number range idx_round_pair
+// serves; one statement per WINDOWS_PER_STATEMENT windows keeps the text bounded.
+async function eachOrphanedLandingStatement(db, head, query) {
+    const windows = await retractedLandingWindows(db, ...query);
+    const results = [];
+    for (let i = 0; i < windows.length; i += WINDOWS_PER_STATEMENT) {
+        const chunk = windows.slice(i, i + WINDOWS_PER_STATEMENT);
+        const groups = chunk.map(() => '(round_number BETWEEN ? AND ? AND batch_block_time = ?)').join(' OR ');
+        results.push(await db.doQuery(`${head} WHERE source_action_index IS NULL AND consensus_proof NOT LIKE '{"batch":%' AND (${groups})`, chunk.flat()));
+    }
+    return results;
 }
 
 module.exports = {
@@ -47,11 +70,15 @@ module.exports = {
     },
 
     async findSelfFinalizedRoundsForBatchRetraction(...query) {
-        return this.doQuery(...orphanedLandingQuery('SELECT DISTINCT self_finalized.round_number FROM', '', ...query));
+        const results = await eachOrphanedLandingStatement(this, 'SELECT DISTINCT round_number FROM price_snapshots', query);
+        const rounds = new Set();
+        for (const rows of results) for (const row of (Array.isArray(rows) ? rows : [])) rounds.add(Number(row.round_number));
+        return [...rounds].map(round_number => ({ round_number }));
     },
 
     async resetSelfFinalizedBatchBlockTimeForRetraction(...query) {
-        return this.doQuery(...orphanedLandingQuery('UPDATE', 'SET self_finalized.batch_block_time = 0', ...query));
+        const results = await eachOrphanedLandingStatement(this, 'UPDATE price_snapshots SET batch_block_time = 0', query);
+        return { affectedRows: results.reduce((sum, r) => sum + Number((r && r.affectedRows) || 0), 0) };
     },
 
 };

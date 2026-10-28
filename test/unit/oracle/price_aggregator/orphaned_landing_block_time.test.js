@@ -5,25 +5,35 @@ const { expect } = require('chai');
 const prices = require('../../../../src/db/prices/index.js');
 const { retractFromActionIndex } = require('../../../../src/oracle/price_aggregator/retract.js');
 
+// The landing windows come from one source-chain range read; the self-finalized rows are then
+// matched by literal round bounds and clock, so no statement joins price_snapshots to itself.
 async function selectsThroughSourceActionIndex() {
-    const doQuery = sinon.stub().resolves([]);
-    await prices.findSelfFinalizedRoundsForBatchRetraction.call(
+    const doQuery = sinon.stub();
+    doQuery.onCall(0).resolves([{ batch_block_time: 1700000000, first_round: 100, last_round: 105 }]);
+    doQuery.onCall(1).resolves([{ round_number: 101 }]);
+    doQuery.onCall(2).resolves([{ batch_block_time: 1700000000, first_round: 100, last_round: 105 }]);
+    doQuery.onCall(3).resolves({ affectedRows: 1 });
+    const found = await prices.findSelfFinalizedRoundsForBatchRetraction.call(
         { doQuery }, 'BTC', 40, 50, 7, true, true);
-    await prices.resetSelfFinalizedBatchBlockTimeForRetraction.call(
+    const reset = await prices.resetSelfFinalizedBatchBlockTimeForRetraction.call(
         { doQuery }, 'BTC', 40, 50, 7, true, true);
 
-    const [sql, args] = doQuery.firstCall.args;
-    const [resetSql, resetArgs] = doQuery.secondCall.args;
-    expect(sql).to.include('self_finalized.source_action_index IS NULL');
-    expect(sql).to.include('self_finalized.batch_block_time = batch_landed.batch_block_time');
-    expect(sql).to.include('batch_landed.source_action_index >= ? AND batch_landed.source_action_index <= ?');
-    expect(sql).to.include('batch_landed.push_generation <= ?');
-    expect(sql).to.include("'$.batch.first_round'");
-    expect(sql).to.include("'$.batch.last_round'");
-    expect(args).to.deep.equal(['BTC', 40, 50, 7]);
-    expect(resetSql).to.include('SET self_finalized.batch_block_time = 0');
-    expect(resetSql).to.include('batch_landed.source_chain = ?');
+    const [landingSql, landingArgs] = doQuery.firstCall.args;
+    expect(landingSql).to.include('source_chain = ? AND source_action_index >= ? AND source_action_index <= ?');
+    expect(landingSql).to.include('push_generation <= ?');
+    expect(landingSql).to.include("'$.batch.first_round'");
+    expect(landingArgs).to.deep.equal(['BTC', 40, 50, 7]);
+    const [sql, args] = doQuery.secondCall.args;
+    expect(sql).to.include('source_action_index IS NULL');
+    expect(sql).to.include('round_number BETWEEN ? AND ? AND batch_block_time = ?');
+    expect(args).to.deep.equal([100, 105, 1700000000]);
+    const [resetSql, resetArgs] = doQuery.getCall(3).args;
+    expect(resetSql).to.match(/^UPDATE price_snapshots SET batch_block_time = 0 WHERE /);
     expect(resetArgs).to.deep.equal(args);
+    for (const call of doQuery.getCalls())
+        expect(call.args[0], call.args[0]).not.to.match(/JOIN|AS self_finalized|AS batch_landed/);
+    expect(found).to.deep.equal([{ round_number: 101 }]);
+    expect(reset).to.deep.equal({ affectedRows: 1 });
 }
 
 async function resetsBeforeDelete() {
