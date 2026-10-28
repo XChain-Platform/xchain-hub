@@ -166,6 +166,8 @@ class Database {
         this.user   = user;
         this.pass   = pass;
 
+        const queryTimeout = parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000;
+
         this.connectionPoolParams = {
             host:               this.host,
             user:               this.user,
@@ -195,7 +197,13 @@ class Database {
             // session's UTC pin makes the two agree.
             timezone:           'Z',
             minDelayValidation: 3000,
-            queryTimeout:       parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000
+            queryTimeout:       queryTimeout,
+            // queryTimeout is enforced by the SERVER (SET STATEMENT max_statement_time),
+            // so a frozen or partitioned server leaves an in-flight query with no
+            // client-side bound: it holds its pool slot and HTTP request until the
+            // server returns. socketTimeout cuts the dead socket client-side. It sits
+            // above queryTimeout so a healthy server's own limit always fires first.
+            socketTimeout:      parseInt(hubConfig.DB_SOCKET_TIMEOUT) || (queryTimeout + 15000)
         };
 
         this.pool = mariadb.createPool(this.connectionPoolParams);
