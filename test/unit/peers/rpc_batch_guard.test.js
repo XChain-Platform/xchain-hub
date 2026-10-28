@@ -146,6 +146,39 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         }
     };
 
+    const rejectsEmptyAndMethodlessBatches = async () => {
+        const bodies = [
+            [],
+            [{}],
+            [{ jsonrpc: '2.0', method: 'getprice', id: 1 }, {}],
+            [{ jsonrpc: '2.0', id: 1 }],
+            [{ jsonrpc: '2.0', method: 5, id: 1 }]
+        ];
+        for (const b of bodies) {
+            const label = JSON.stringify(b);
+            let nextCalled = false;
+            let status = null;
+            let payload = null;
+            const res = {
+                status(s) { status = s; return this; },
+                json(p) { payload = p; return this; }
+            };
+            makeRpcBatchGuard(CAP)({ body: b }, res, () => { nextCalled = true; });
+            assert.strictEqual(nextCalled, false, label);
+            assert.strictEqual(status, 400, label);
+            assert.deepStrictEqual(payload, {
+                jsonrpc: '2.0', id: null,
+                error: { code: -32600, message: 'Invalid Request' }
+            }, label);
+        }
+        // Valid batch and single call object still pass.
+        for (const ok of [[{ jsonrpc: '2.0', method: 'ping', id: 1 }], { jsonrpc: '2.0', method: 'ping', id: 1 }]) {
+            let nextCalled = false;
+            makeRpcBatchGuard(CAP)({ body: ok }, { status() { throw new Error('refused'); } }, () => { nextCalled = true; });
+            assert.strictEqual(nextCalled, true);
+        }
+    };
+
     let registerresolvemaxbatch7;
 
     {
@@ -185,7 +218,8 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         it('rejects an over-cap batch with 400 / -32600 and dispatches nothing', rejectsAnOverCapBatchWithTest3);
         it('passes an at-cap batch through to the dispatcher', passesAnAtCapBatchThroughTest4);
         it('answers a batch with a null or non-object element with a clean JSON 400 / -32600', rejectsNonObjectElementsCleanly);
-        it('leaves a single (non-array) call untouched', leavesASingleNonArrayCallTest5);
+        it('answers an empty batch or a method-less member with 400 / -32600 and calls next() for valid input', rejectsEmptyAndMethodlessBatches);
+        it('leaves a single (non-array) call untouched',leavesASingleNonArrayCallTest5);
         it('leaves a bodiless GET to the req.body shim (no 500, no 400)', leavesABodilessGetToTheTest6);
         registerresolvemaxbatch7();
         it('src/api.js mounts the guard before the jsonRouter mount', srcApiJsMountsTheGuardTest11);
