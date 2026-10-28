@@ -8294,6 +8294,9 @@
       "bc667b629ef5f826b31f4ff50f48051a0817e5b95ac79fd6741c7c6d5731831b",
       "9bf4c8514e726728b584ae9238bd28de2574587d94bfd8653968e48aae6b826a"
     ],
+    "974ebb179283fd25": [
+      "974ebb179283fd25e760201165a4d266e5cabc6a38ca71b80db7834ec740894f"
+    ],
     "97894ed9b8143d04": [
       "cc27b0035d0b70cdc45fefb69a3ac13663129a6f92009a913aa918218ba178b6",
       "92c8a0569191b83befe5e4c8c5c78588103d6fb9516b6cb5ecc2de014fa0bada",
@@ -12515,6 +12518,13 @@
       "276b3be84c5740265b80fe6860ef45218f49a6c5630f17f7c1acf717231d784f",
       "72ecee9ca6e387d231782c8efe16c016b9dcce7dfeba32540f27c8f9d4cb05c8"
     ],
+    "f3dc382138829f96": [
+      "5361f27adcce571c85e586c062f91016f8315f5f931e8834a5fa50b343cb0094",
+      "46afd977b6e4795c2595399d28ce726feccd3864e1eb23fd4a8bec4e3082620b",
+      "4cfc2f65b4bd1e366432efaccd2e8960347a8626b243761be1944b24888377dc",
+      "8bf5347fd5fc3bb4d6579c682b1755711c4232fac1c892c3df9d0abfa568563a",
+      "561f92257d5cfc1be2bff8bb5bed86bf84c7e9efc33acdcaf1ef252a22f85151"
+    ],
     "f43efa06d2c465fe": [
       "2db8780ea2cb09f60c836a1933173b56eed23575a3b36a8b96ab17aa92514ce7",
       "7f66d008978208e50018f6fb6013660c4ac2ac6d40754c9e4ce8ff82c572c80f",
@@ -13166,8 +13176,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1076,
-      "titleCount": 9593,
+      "fileCount": 1078,
+      "titleCount": 9599,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14206,6 +14216,8 @@
         "test/unit/shared/spend/spend_guard_unwritable_store.test.js": "20203e28d0465675",
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
+        "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",
@@ -14301,8 +14313,8 @@
       }
     },
     "test": {
-      "fileCount": 1076,
-      "titleCount": 9593,
+      "fileCount": 1078,
+      "titleCount": 9599,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15341,6 +15353,8 @@
         "test/unit/shared/spend/spend_guard_unwritable_store.test.js": "20203e28d0465675",
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
+        "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",
@@ -15383,8 +15397,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1161,
-      "titleCount": 10468,
+      "fileCount": 1163,
+      "titleCount": 10474,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16508,6 +16522,8 @@
         "test/unit/shared/spend/spend_guard_unwritable_store.test.js": "20203e28d0465675",
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
+        "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",

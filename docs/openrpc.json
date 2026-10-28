@@ -233,7 +233,7 @@
                       "object",
                       "null"
                     ],
-                    "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.",
+                    "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized, its historical validator snapshot is unavailable, or its anchor falls beyond the first 16 distinct anchors in the response.",
                     "properties": {
                       "mode": {
                         "type": "string",
@@ -326,7 +326,7 @@
                           "object",
                           "null"
                         ],
-                        "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.",
+                        "description": "Present when with_quorum_margin is truthy. Null when the row is not finalized, its historical validator snapshot is unavailable, or its anchor falls beyond the first 16 distinct anchors in the response.",
                         "properties": {
                           "mode": {
                             "type": "string",

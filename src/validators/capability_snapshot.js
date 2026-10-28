@@ -48,7 +48,7 @@ const fetchGuardMethods  = require('./capability_snapshot/fetch_guards.js');
 const minStakeMethods    = require('./capability_snapshot/min_stake.js');
 const quorumMethods      = require('./capability_snapshot/quorum.js');
 const bootSettingMethods = require('./capability_snapshot/boot_settings.js');
-
+const singleFlightMethods = require('./capability_snapshot/single_flight.js');
 // Operator-facing detail lines for the non-transport failure classes. Held as
 // constants because each is raised from all four fetchers and must read the
 // same way in a log no matter which one tripped.
@@ -59,7 +59,6 @@ const MALFORMED_DETAIL  = 'The response carried no `validators` array. Refusing 
 const WEIGHTLESS_DETAIL = 'A row in the source-keyed weight snapshot carried no usable `weight`. Refusing the whole ' +
     'snapshot: a missing weight read as 0 keeps the source in the dedupe map with no stake, shrinking the ' +
     'denominator S and LOWERING the two-thirds bar it is measured against.';
-
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the
 // two cases happened (no result at all vs. an explicit error).
@@ -68,7 +67,6 @@ function rpcErrorDetail(result) {
     let msg = result.error && (result.error.message || result.error);
     return 'The indexer returned a JSON-RPC error: ' + String(msg).slice(0, 200) + '.';
 }
-
 async function postWith429Retry(url, body, config) {
     for (let attempt = 0; attempt < 3; attempt++) {
         try { return await axios.post(url, body, config); }
@@ -78,7 +76,6 @@ async function postWith429Retry(url, body, config) {
         }
     }
 }
-
 class CapabilitySnapshot {
     constructor(hub) {
         this.hub = hub;
@@ -145,44 +142,45 @@ class CapabilitySnapshot {
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
+        return this.singleFlight(key, async () => {
+            if (this.monitor.inBackoff()) return null;
+            let url = await this.hub.resolveBtcIndexerUrl();
+            if (!url) return this.fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
-        if (this.monitor.inBackoff()) return null;
-        let url = await this.hub.resolveBtcIndexerUrl();
-        if (!url) return this.fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+            let params = { capability: capability, block_index: blockIndex };
+            if (minStake !== null) params.min_stake = minStake;
 
-        let params = { capability: capability, block_index: blockIndex };
-        if (minStake !== null) params.min_stake = minStake;
-
-        try {
-            let res = await postWith429Retry(url, {
-                jsonrpc: '2.0',
-                id:      now,
-                method:  'getcapabilityvalidators',
-                params:  params
-            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
-            let result = res && res.data && res.data.result;
-            if (!result || result.error) return this.fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this.coerceValidators(result);
-            if (validators === null) return this.fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
-            if (!this.blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
-            if (!this.capabilityEchoOk('getcapabilityvalidators', result, capability)) return null;
-            this.monitor.recordSuccess('getcapabilityvalidators');
-            let snapshot = {
-                capability:  result.capability,
-                blockIndex:  result.block_index,
-                count:       result.count,
-                truncated:   result.truncated === true,
-                validators:  validators,
-                expiresAt:   now + this.cacheTtlMs
-            };
-            this.cache.set(key, snapshot);
-            this.prune(now);
-            return snapshot;
-        } catch (err) {
-            // Return null on indexer down or 401/403 (onFetchError surfaces an auth misconfig):
-            // federated round callers fail closed on it; only single-node / regtest hubs use the live set.
-            return this.onFetchError('getcapabilityvalidators', err);
-        }
+            try {
+                let res = await postWith429Retry(url, {
+                    jsonrpc: '2.0',
+                    id:      now,
+                    method:  'getcapabilityvalidators',
+                    params:  params
+                }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
+                let result = res && res.data && res.data.result;
+                if (!result || result.error) return this.fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
+                let validators = this.coerceValidators(result);
+                if (validators === null) return this.fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
+                if (!this.blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
+                if (!this.capabilityEchoOk('getcapabilityvalidators', result, capability)) return null;
+                this.monitor.recordSuccess('getcapabilityvalidators');
+                let snapshot = {
+                    capability:  result.capability,
+                    blockIndex:  result.block_index,
+                    count:       result.count,
+                    truncated:   result.truncated === true,
+                    validators:  validators,
+                    expiresAt:   now + this.cacheTtlMs
+                };
+                this.cache.set(key, snapshot);
+                this.prune(now);
+                return snapshot;
+            } catch (err) {
+                // Return null on indexer down or 401/403 (onFetchError surfaces an auth misconfig):
+                // federated round callers fail closed on it; only single-node / regtest hubs use the live set.
+                return this.onFetchError('getcapabilityvalidators', err);
+            }
+        });
     }
 
     // Source-keyed weight snapshot for STAKE_WEIGHTED_QUORUM. Like getSnapshot but
@@ -204,44 +202,45 @@ class CapabilitySnapshot {
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
+        return this.singleFlight(key, async () => {
+            if (this.monitor.inBackoff()) return null;
+            let url = await this.hub.resolveBtcIndexerUrl();
+            if (!url) return this.fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
-        if (this.monitor.inBackoff()) return null;
-        let url = await this.hub.resolveBtcIndexerUrl();
-        if (!url) return this.fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+            let params = { capability: capability, block_index: blockIndex };
+            if (minStake !== null) params.min_stake = minStake;
 
-        let params = { capability: capability, block_index: blockIndex };
-        if (minStake !== null) params.min_stake = minStake;
-
-        try {
-            let res = await postWith429Retry(url, {
-                jsonrpc: '2.0',
-                id:      now,
-                method:  'getstakeweightsbycapability',
-                params:  params
-            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
-            let result = res && res.data && res.data.result;
-            if (!result || result.error) return this.fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this.coerceValidators(result, { requireWeight: true });
-            if (validators === null) return this.fail('getstakeweightsbycapability', REASONS.MALFORMED,
-                Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
-            if (!this.blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
-            if (!this.capabilityEchoOk('getstakeweightsbycapability', result, capability)) return null;
-            this.monitor.recordSuccess('getstakeweightsbycapability');
-            let snapshot = {
-                capability:  result.capability,
-                blockIndex:  result.block_index,
-                count:       result.count,
-                truncated:   result.truncated === true,
-                sourceCount: result.source_count,
-                validators:  validators,                   // [{pubkey, source, weight}]
-                expiresAt:   now + this.cacheTtlMs
-            };
-            this.cache.set(key, snapshot);
-            this.prune(now);
-            return snapshot;
-        } catch (err) {
-            return this.onFetchError('getstakeweightsbycapability', err);
-        }
+            try {
+                let res = await postWith429Retry(url, {
+                    jsonrpc: '2.0',
+                    id:      now,
+                    method:  'getstakeweightsbycapability',
+                    params:  params
+                }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
+                let result = res && res.data && res.data.result;
+                if (!result || result.error) return this.fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
+                let validators = this.coerceValidators(result, { requireWeight: true });
+                if (validators === null) return this.fail('getstakeweightsbycapability', REASONS.MALFORMED,
+                    Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
+                if (!this.blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
+                if (!this.capabilityEchoOk('getstakeweightsbycapability', result, capability)) return null;
+                this.monitor.recordSuccess('getstakeweightsbycapability');
+                let snapshot = {
+                    capability:  result.capability,
+                    blockIndex:  result.block_index,
+                    count:       result.count,
+                    truncated:   result.truncated === true,
+                    sourceCount: result.source_count,
+                    validators:  validators,                   // [{pubkey, source, weight}]
+                    expiresAt:   now + this.cacheTtlMs
+                };
+                this.cache.set(key, snapshot);
+                this.prune(now);
+                return snapshot;
+            } catch (err) {
+                return this.onFetchError('getstakeweightsbycapability', err);
+            }
+        });
     }
 
     // Whole-federation snapshot: every pubkey with ANY active stake at the
@@ -395,6 +394,7 @@ function installParts(target, parts) {
     }
 }
 
-installParts(CapabilitySnapshot.prototype, [fetchGuardMethods, minStakeMethods, quorumMethods, bootSettingMethods]);
+installParts(CapabilitySnapshot.prototype,
+    [fetchGuardMethods, minStakeMethods, quorumMethods, bootSettingMethods, singleFlightMethods]);
 
 module.exports = CapabilitySnapshot;

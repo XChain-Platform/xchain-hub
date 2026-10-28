@@ -38,7 +38,7 @@ const SNAPSHOTS_ARRAY = {
             status:          { type: 'string', enum: ['finalized', 'skipped', 'disputed'] },
             quorum_margin: {
                 type: ['object', 'null'],
-                description: 'Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.',
+                description: 'Present when with_quorum_margin is truthy. Null when the row is not finalized, its historical validator snapshot is unavailable, or its anchor falls beyond the first 16 distinct anchors in the response.',
                 properties: {
                     mode:             { type: 'string', enum: ['count', 'stake'] },
                     met:              { type: 'boolean' },
