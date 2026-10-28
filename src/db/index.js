@@ -247,7 +247,7 @@ class Database {
         while(connection == null){
             try {
                 connection = await this.pool.getConnection();
-                if(this.circuitState === 'half-open'){
+                if(this.circuitState === 'half-open' || this.circuitState === 'open'){
                     this.circuitState = 'closed';
                     this.circuitFailures = 0;
                     logger.info('Circuit breaker closed: database connection restored');
@@ -262,8 +262,8 @@ class Database {
                 if(!saturated)
                     this.circuitFailures = (this.circuitFailures || 0) + 1;
                 if(!saturated && this.circuitFailures >= this.circuitThreshold){
+                    if(this.circuitState !== 'open') this.circuitOpenUntil = Date.now() + this.circuitCooldown; // stragglers must not re-arm
                     this.circuitState = 'open';
-                    this.circuitOpenUntil = Date.now() + this.circuitCooldown;
                     throw new Error('Circuit breaker opened after ' + this.circuitFailures + ' consecutive failures');
                 }
                 if(attempts >= maxAttempts)
