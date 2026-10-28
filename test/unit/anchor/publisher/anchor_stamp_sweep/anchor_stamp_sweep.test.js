@@ -13,6 +13,7 @@
 const { expect } = require('chai');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const stateCheckpointQueries = require('../../../../../src/db/state_checkpoints');
+const { waitUntil } = require('../../../../helpers/waitUntil');
 
 const OWN_TXID = 'ab'.repeat(32);
 const PEER_TXID = 'cd'.repeat(32);
@@ -154,7 +155,12 @@ describe('StateAnchorPublisher anchor stamp sweep bounds', function () {
         const { pub, calls } = buildPublisher({ rows: stampRows(40), status: 'mempool' });
         pub.encoder.getTxStatus = async (txid) => {
             calls.statuses.push(txid);
-            await new Promise(resolve => setTimeout(resolve, 20));
+            const readyAt = Date.now() + 20;
+            await waitUntil(() => Date.now() >= readyAt, {
+                intervalMs: 2,
+                timeoutMs: 100,
+                label: 'slow encoder response'
+            });
             return { status: 'mempool' };
         };
         pub.anchorStampSweepBudgetMs = 100;

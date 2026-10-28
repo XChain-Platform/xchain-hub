@@ -186,40 +186,40 @@ describe('OracleRound stale pushed tip reference block', function () {
 // A skipped-row write rejected by a DB outage (the circuit breaker open) must be
 // re-attempted: nothing else ever writes that round's row, so a single rejection
 // would leave it a permanent hole in the presence record on the hub and its mirrors.
-describe('OracleRound scheduleFinalization: skipped-row write retry', function () {
-    const SKIP_REASON = 'chain-tip fallback active, anchor unreliable';
-    const ROUND = 136952;
-    let clock, roundLost;
+const SKIP_REASON = 'chain-tip fallback active, anchor unreliable';
+const RETRY_ROUND = 136952;
+let retryClock, roundLost;
 
-    function breakerOpen() { return new Error('Circuit breaker open: database connections rejected until cooldown expires'); }
+function breakerOpen() { return new Error('Circuit breaker open: database connections rejected until cooldown expires'); }
 
-    // Calls to storeSkippedRound made by the finalization path, not by stop().
-    function skipCalls(consensus) {
-        return consensus.storeSkippedRound.getCalls().filter(c => c.args[3] === SKIP_REASON);
-    }
+// Calls to storeSkippedRound made by the finalization path, not by stop().
+function skipCalls(consensus) {
+    return consensus.storeSkippedRound.getCalls().filter(c => c.args[3] === SKIP_REASON);
+}
 
-    function lostCauses() {
-        return roundLost.getCalls().map(c => c.args[0].cause);
-    }
+function lostCauses() {
+    return roundLost.getCalls().map(c => c.args[0].cause);
+}
 
-    // Arm the chain-tip-fallback skip path: fallback active for longer than one
-    // round interval, so the timer stores a skipped row instead of finalizing.
-    function armSkip(rejections) {
-        or.submissionWindow = 10;
-        or.roundInterval    = 60000;
-        or.chainTipFallbackActive = true;
-        or.lastSuccessfulChainTipFetchAt = Date.now() - 2 * or.roundInterval;
-        or.currentBtcBlockHeight = 900123;
-        let store = sinon.stub();
-        for (let i = 0; i < rejections; i++) store.onCall(i).rejects(breakerOpen());
-        store.resolves();
-        let consensus = { finalizeRound: sinon.stub().resolves(), storeSkippedRound: store, getQuorum: () => 0 };
-        or.oracleConsensus = consensus;
-        return consensus;
-    }
+// Arm the chain-tip-fallback skip path: fallback active for longer than one
+// round interval, so the timer stores a skipped row instead of finalizing.
+function armSkip(rejections) {
+    or.submissionWindow = 10;
+    or.roundInterval    = 60000;
+    or.chainTipFallbackActive = true;
+    or.lastSuccessfulChainTipFetchAt = Date.now() - 2 * or.roundInterval;
+    or.currentBtcBlockHeight = 900123;
+    let store = sinon.stub();
+    for (let i = 0; i < rejections; i++) store.onCall(i).rejects(breakerOpen());
+    store.resolves();
+    let consensus = { finalizeRound: sinon.stub().resolves(), storeSkippedRound: store, getQuorum: () => 0 };
+    or.oracleConsensus = consensus;
+    return consensus;
+}
 
+function registerSkipRetryHooks() {
     beforeEach(function () {
-        clock = sinon.useFakeTimers({ now: Date.now(), toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        retryClock = sinon.useFakeTimers({ now: Date.now(), toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         roundLost = sinon.spy();
         const finalization = proxyquire('../../../../src/oracle/round/finalization.js', {
             '../../consensus/diagnostics': { noteRoundLost: roundLost }
@@ -236,60 +236,70 @@ describe('OracleRound scheduleFinalization: skipped-row write retry', function (
     afterEach(function () {
         for (let t of or.finalizationTimers.values()) clearTimeout(t);
         or.finalizationTimers.clear();
-        clock.restore();
+        retryClock.restore();
         sinon.restore();
     });
+}
 
+function registerSkipRetryRecoveryCases() {
     it('stores the skipped row once the DB recovers after the first writes reject', async function () {
         let consensus = armSkip(2);
-        or.scheduleFinalization(ROUND);
-        await clock.tickAsync(10);
+        or.scheduleFinalization(RETRY_ROUND);
+        await retryClock.tickAsync(10);
         expect(skipCalls(consensus)).to.have.length(1);
-        await clock.tickAsync(30 * 60 * 1000);
+        await retryClock.tickAsync(30 * 60 * 1000);
         let calls = skipCalls(consensus);
         expect(calls).to.have.length(3);
-        for (let c of calls) expect(c.args.slice(0, 2)).to.deep.equal([ROUND, 900123]);
+        for (let c of calls) expect(c.args.slice(0, 2)).to.deep.equal([RETRY_ROUND, 900123]);
         expect(calls[2].args).to.deep.equal(calls[0].args);
         expect(consensus.finalizeRound.called).to.equal(false);
         expect(lostCauses()).to.deep.equal(['skip_store_rejected', 'skip_store_rejected']);
-        expect(or.finalizationTimers.has(ROUND)).to.equal(false);
+        expect(or.finalizationTimers.has(RETRY_ROUND)).to.equal(false);
     });
 
     it('stops re-attempting at the retry budget', async function () {
         let consensus = armSkip(1000);
-        or.scheduleFinalization(ROUND);
-        await clock.tickAsync(3 * 60 * 60 * 1000);
+        or.scheduleFinalization(RETRY_ROUND);
+        await retryClock.tickAsync(3 * 60 * 60 * 1000);
         let made = skipCalls(consensus).length;
         expect(made).to.be.greaterThan(2);
         expect(made).to.be.lessThan(20);
         expect(lostCauses()).to.have.length(made);
-        expect(or.finalizationTimers.has(ROUND)).to.equal(false);
-        await clock.tickAsync(3 * 60 * 60 * 1000);
+        expect(or.finalizationTimers.has(RETRY_ROUND)).to.equal(false);
+        await retryClock.tickAsync(3 * 60 * 60 * 1000);
         expect(skipCalls(consensus)).to.have.length(made);
     });
+}
 
+function registerSkipRetryStopCases() {
     it('stops re-attempting once a federation PROPOSE finalized the round', async function () {
         let consensus = armSkip(1);
         consensus.finalized = new Set();
-        or.scheduleFinalization(ROUND);
-        await clock.tickAsync(10);
-        consensus.finalized.add(ROUND);
-        await clock.tickAsync(30 * 60 * 1000);
+        or.scheduleFinalization(RETRY_ROUND);
+        await retryClock.tickAsync(10);
+        consensus.finalized.add(RETRY_ROUND);
+        await retryClock.tickAsync(30 * 60 * 1000);
         expect(skipCalls(consensus)).to.have.length(1);
-        expect(or.finalizationTimers.has(ROUND)).to.equal(false);
+        expect(or.finalizationTimers.has(RETRY_ROUND)).to.equal(false);
     });
 
     it('clears a pending re-attempt at stop and writes the row once more there', async function () {
         let consensus = armSkip(1);
-        or.scheduleFinalization(ROUND);
-        await clock.tickAsync(10);
-        expect(or.finalizationTimers.has(ROUND)).to.equal(true);
+        or.scheduleFinalization(RETRY_ROUND);
+        await retryClock.tickAsync(10);
+        expect(or.finalizationTimers.has(RETRY_ROUND)).to.equal(true);
         await or.stop();
         expect(or.finalizationTimers.size).to.equal(0);
         let atStop = consensus.storeSkippedRound.getCalls().filter(c => c.args[3] === 'hub stopped before finalization');
         expect(atStop).to.have.length(1);
-        expect(atStop[0].args[0]).to.equal(ROUND);
-        await clock.tickAsync(30 * 60 * 1000);
+        expect(atStop[0].args[0]).to.equal(RETRY_ROUND);
+        await retryClock.tickAsync(30 * 60 * 1000);
         expect(skipCalls(consensus)).to.have.length(1);
     });
+}
+
+describe('OracleRound scheduleFinalization: skipped-row write retry', function () {
+    registerSkipRetryHooks();
+    registerSkipRetryRecoveryCases();
+    registerSkipRetryStopCases();
 });

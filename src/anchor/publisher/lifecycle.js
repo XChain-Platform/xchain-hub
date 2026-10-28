@@ -26,71 +26,11 @@ const { summarizeUtxoConfirmations } = require('../../lib/utxo_balance.js');
 const { mainnetWritesOpen } = require('../../lib/mainnet_write_window.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { getAnchorStats } = require('./lifecycle/stats.js');
 const logger = getLogger();
 
 module.exports = {
-
-    // Operator-facing stats. Exposed here so callers (hub RPC, status routes)
-    // can surface cumulative archive health without grepping logs.
-    getAnchorStats(){
-        return {
-            enabled:            this.enabled,
-            anchorsPublished:   this._anchorsPublished,
-            // Chains carried by those bundles, and bundles refused for exceeding the
-            // 8189-byte budget. sectionsAnchored climbing at the same rate as
-            // anchorsPublished means the federation is anchoring ONE chain per cycle,
-            // not a bundle; bundlesOversize non-zero means a checkpoint is not on chain
-            // at all and the signer count or the section width has to come down.
-            sectionsAnchored:   this._sectionsAnchored,
-            bundlesOversize:    this._bundlesOversize,
-            // Leader-vs-failover split of anchorsPublished plus the last anchor's
-            // rank posture. anchorsAsBackup climbing (or lastAnchorRank.isLeader
-            // false) is the only signal that the elected rank-0 publisher is dead
-            // and the ladder is absorbing its work.
-            anchorsAsLeader:    this._anchorsAsLeader,
-            anchorsAsBackup:    this._anchorsAsBackup,
-            // Stamped without paying. Holds anchorsAsLeader + anchorsAsBackup ==
-            // anchorsPublished; lastAnchorRank.adopted names the most recent one.
-            anchorsAdopted:     this._anchorsAdopted,
-            lastAnchorRank:     this._lastAnchorRank,
-            skippedNotOurElection: this._skippedNotOurElection,
-            skippedLeaderOnWake:   this._skippedLeaderOnWake,
-            startupFlushMs:        this.startupFlushMs,
-            // Landing health. unconfirmedPublishes with an oldestUnconfirmedAgeMs in
-            // the hours is a stuck anchor; noConfirmedUtxoDeferrals climbing while
-            // unconfirmedUtxos is non-zero is the wallet trapped behind it.
-            allowUnconfirmedInputs:   this.allowUnconfirmedInputs,
-            leaderRetryDue:           this._leaderRetryDue,
-            noConfirmedUtxoDeferrals: this.noConfirmedUtxoDeferrals,
-            lastNoConfirmedUtxoAt:    this.lastNoConfirmedUtxoAt,
-            unattestedDeferrals:      this.unattestedDeferrals,
-            lastUnattestedDeferralAt: this.lastUnattestedDeferralAt,
-            confirmedUtxos:           this.lastUtxoReserve ? this.lastUtxoReserve.confirmed   : null,
-            unconfirmedUtxos:         this.lastUtxoReserve ? this.lastUtxoReserve.unconfirmed : null,
-            unconfirmedPublishes:     this._pendingConfirmations.size,
-            oldestUnconfirmedPublish: this.oldestUnconfirmedPublish(),
-            confirmedPublishes:       this.confirmedPublishes,
-            confirmationCheckFailures: this.confirmationCheckFailures,
-            lastConfirmationCheckAt:  this.lastConfirmationCheckAt,
-            flushesSkippedInFlight:   this.flushesSkippedInFlight || 0,
-            // A flush holding the mutex since flushStartedAt; a stalled sweep shows as a
-            // flushInFlight that never clears while flushesSkippedInFlight climbs.
-            flushInFlight:            !!this._flushing,
-            flushStartedAt:           this._flushStartedAt || null,
-            lastFlushSkippedAt:       this.lastFlushSkippedAt || null,
-            archiveChunkLosses: this._archiveChunkLosses,
-            anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
-            anchorMarkersPruned:     this.anchorMarkersPruned,
-            // Publisher-wallet runway: last-observed DOGE balance, its age, and the
-            // low-balance threshold the publisher already warns at. dogeBalance is
-            // null until the first flush reads it (or when no DOGE pipeline is set).
-            dogeAddress:        this.dogeAddress || null,
-            dogeBalance:        this._lastBalance,
-            dogeBalanceAt:      this._lastBalanceAt,
-            lowBalanceThreshold: this.lowBalanceThreshold,
-            spendGuard:         this.spendGuard.stats()
-        };
-    },
+    getAnchorStats,
 
     // Fill any indexer URL left empty at construction (configs-table-
     // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
