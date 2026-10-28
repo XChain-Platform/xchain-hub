@@ -72,6 +72,7 @@ module.exports = {
             confirmedPublishes:       this.confirmedPublishes,
             confirmationCheckFailures: this.confirmationCheckFailures,
             lastConfirmationCheckAt:  this.lastConfirmationCheckAt,
+            flushesSkippedInFlight:   this.flushesSkippedInFlight || 0,
             archiveChunkLosses: this._archiveChunkLosses,
             anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
             anchorMarkersPruned:     this.anchorMarkersPruned,
@@ -357,10 +358,11 @@ module.exports = {
 
     async flush(opts){
         let failoverOnly = !!(opts && opts.failoverOnly);
-        if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
+        if(this._flushing) return this.noteFlushSkippedInFlight();
         // Mainnet writes are shut until the window opens: skip the whole cycle, rows stay pending.
         if(!mainnetWritesOpen(this.network, this.nowSeconds())) return { anchored: [], archive: 'none', skipped: 'mainnet_window_closed' };
         this._flushing = true;
+        this._flushStartedAt = Date.now();
         // A normal flush is the retry a deferral was waiting for; it re-arms below
         // only if it defers again.
         if(!failoverOnly) this._leaderRetryDue = false;
@@ -385,6 +387,7 @@ module.exports = {
             return { anchored: [], archive: 'none', error: e && e.message };
         } finally {
             this._flushing = false;
+            this._flushStartedAt = null;
         }
     }
 

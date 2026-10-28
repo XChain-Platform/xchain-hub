@@ -121,3 +121,94 @@ describe('StateAnchorPublisher anchor stamp sweep', function () {
         }]);
     });
 });
+
+// One stamp row per txid, numbered so their order is easy to read back.
+function stampRows(count, sectionsPerTxid){
+    const rows = [];
+    for(let i = 0; i < count; i++){
+        const txid = String(i).padStart(2, '0').repeat(32);
+        for(let s = 0; s < (sectionsPerTxid || 1); s++){
+            rows.push({ chain: 'BTC', network: 'regtest', block_index: 900 + s,
+                        checkpoint_seq: 100 + i * 10 + s, txid, sent_doge_height: 100 });
+        }
+    }
+    return rows;
+}
+
+describe('StateAnchorPublisher anchor stamp sweep bounds', function () {
+    this.timeout(5000);
+
+    it('a hung encoder cannot hold the sweep past its time budget', async function () {
+        const { pub, calls } = buildPublisher({ rows: stampRows(40), status: 'mempool' });
+        pub.encoder.getTxStatus = async (txid) => { calls.statuses.push(txid); return new Promise(() => {}); };
+        pub.anchorStampSweepBudgetMs = 50;
+
+        const started = Date.now();
+        expect(await pub.sweepAnchorStamps()).to.equal(0);
+        expect(Date.now() - started, 'sweep returned within its budget').to.be.below(1000);
+        expect(calls.statuses).to.have.length(1);
+        expect(calls.clears).to.deep.equal([]);
+    });
+
+    it('a slow encoder stops the sweep at its budget instead of walking every row', async function () {
+        const { pub, calls } = buildPublisher({ rows: stampRows(40), status: 'mempool' });
+        pub.encoder.getTxStatus = async (txid) => {
+            calls.statuses.push(txid);
+            await new Promise(resolve => setTimeout(resolve, 20));
+            return { status: 'mempool' };
+        };
+        pub.anchorStampSweepBudgetMs = 100;
+        pub.anchorStampSweepMaxLookups = 1000;
+
+        const started = Date.now();
+        await pub.sweepAnchorStamps();
+        expect(Date.now() - started).to.be.below(1000);
+        expect(calls.statuses.length).to.be.below(40);
+    });
+
+    it('caps the lookups per sweep and later sweeps cover the remaining transactions', async function () {
+        const rows = stampRows(5);
+        const { pub, calls } = buildPublisher({ rows, status: 'mempool' });
+        pub.anchorStampSweepMaxLookups = 2;
+        const txids = rows.map(r => r.txid);
+
+        await pub.sweepAnchorStamps();
+        expect(calls.statuses).to.deep.equal([txids[0], txids[1]]);
+        await pub.sweepAnchorStamps();
+        expect(calls.statuses.slice(2)).to.deep.equal([txids[2], txids[3]]);
+        await pub.sweepAnchorStamps();
+        expect(calls.statuses.slice(4)).to.deep.equal([txids[4], txids[0]]);
+    });
+
+    it('looks a bundle txid up once and clears every section it stamps', async function () {
+        const { pub, calls } = buildPublisher({ rows: stampRows(1, 3) });
+
+        await pub.sweepAnchorStamps();
+        expect(calls.statuses).to.have.length(1);
+        expect(calls.clears.map(c => c.checkpointSeq)).to.deep.equal([100, 101, 102]);
+    });
+});
+
+describe('StateAnchorPublisher flush latch under a slow anchor stamp sweep', function () {
+    this.timeout(5000);
+
+    it('a hung encoder does not hold the flush latch, and a skipped tick is counted', async function () {
+        const { pub, calls } = buildPublisher({ rows: stampRows(40) });
+        pub.encoder.getTxStatus = async (txid) => { calls.statuses.push(txid); return new Promise(() => {}); };
+        pub.anchorStampSweepBudgetMs = 50;
+        pub.network = 'regtest';
+        pub.drainDeferredAnnouncements = async () => {};
+        pub.flushRefusal = async () => ({ anchored: [], archive: 'none', skipped: 'test_stop' });
+
+        const first = pub.flush();
+        const second = await pub.flush();
+        expect(second.skipped).to.equal('already_flushing');
+        expect(pub.getAnchorStats().flushesSkippedInFlight).to.equal(1);
+
+        const started = Date.now();
+        expect((await first).skipped).to.equal('test_stop');
+        expect(Date.now() - started).to.be.below(1000);
+        expect(pub._flushing).to.equal(false);
+        expect((await pub.flush()).skipped).to.equal('test_stop');
+    });
+});
