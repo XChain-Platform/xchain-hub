@@ -105,6 +105,56 @@ function batchRoundInsert(r, sourceChain, head, verified, fence, createdAt, admi
         createdAt, admitCols);
 }
 
+// A duplicate round whose stored row is the ORPHANED landing of this same batch: the
+// source chain rolled the batch back and re-mined it, and the re-push reached the hub
+// before (or while) the retraction for the rolled-back action ran. Deduping it would
+// leave the row on its pre-reorg generation, so the generation-fenced retraction
+// delete then removes the only row the canonical batch has, and nothing re-pushes a
+// batch that already landed.
+//
+// The test is one-directional: a batch row from the same source chain, at a LOWER
+// push generation, whose action index is at or ABOVE this push's. A source chain's
+// action counter only moves backwards through a rollback, so that combination means
+// the stored row's action was rolled back. An overlapping batch from a later window
+// (D25) always carries a higher action index and keeps the plain dedupe, so a round
+// an untouched earlier batch still carries is never re-attributed to a newer one.
+// Self-finalized rows (no action index, bare-array proof) never match.
+async function orphanedBatchLandingOf(sourceChain, round, fence) {
+    if (!sourceChain || !Number.isFinite(fence.batchActionIndex)) return false;
+    if (typeof this.db.findPriceSnapshotsForRound !== 'function') return false;
+    let rows = await this.db.findPriceSnapshotsForRound(round);
+    if (!Array.isArray(rows)) return false;
+    for (let row of rows) {
+        if (!row || row.status === 'skipped' || row.source_chain !== sourceChain) continue;
+        if (typeof row.consensus_proof !== 'string' || !row.consensus_proof.startsWith('{"batch":')) continue;
+        let gen = Number(row.push_generation);
+        let action = Number(row.source_action_index);
+        if (row.source_action_index === null || row.source_action_index === undefined) continue;
+        if (Number.isFinite(gen) && Number.isFinite(action) &&
+            gen < fence.pushGeneration && action >= fence.batchActionIndex) return true;
+    }
+    return false;
+}
+
+// Re-store a re-landed round from the canonical batch through the same per-round
+// upsert, which moves its action index, generation, landing block and proof onto the
+// canonical landing, so the generation fence of the late retraction spares it. Emits
+// what the hub now HOLDS (the upsert keeps the earlier landing clock), re-read rather
+// than built, so a mirror never receives a value this hub does not store.
+async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt) {
+    let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
+    await batchRoundInsert.call(this, r, sourceChain, head, verified, fence, createdAt, admitCols);
+    let rows = await this.db.findPriceSnapshotsForRound(r.round);
+    for (let row of (Array.isArray(rows) ? rows : [])) {
+        if (row && row.status !== 'skipped') {
+            this.emit('row:inserted', { table: 'price_snapshots', row: row, origin: 'chain-ingest' });
+        }
+    }
+    logger.warn('PriceAggregator: round ' + r.round + ' re-landed from ' + sourceChain + ' at action ' +
+        fence.sourceActionIndex + ' generation ' + fence.pushGeneration +
+        '; its rolled-back batch row is moved onto the canonical landing');
+}
+
 // Store every round of a verified batch that is not already finalized here, and
 // stamp the landing clock on the ones that are. Async because the dedupe read, the
 // insert and the stamp are its own awaits, in the order the single pass made them;
@@ -116,6 +166,16 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence) {
         let existing = await duplicateBatchRoundRead.call(this, r.round);
         if (existing && existing.length > 0) {
             duplicates++;
+            let relanded = false;
+            try {
+                relanded = await orphanedBatchLandingOf.call(this, sourceChain, r.round, fence);
+                if (relanded) await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt);
+            } catch (err) {
+                // The round is still finalized here; a failed move leaves it on the old
+                // landing, which is what the dedupe did before, so it is never a reject.
+                logger.error(nodeUtil.format('PriceAggregator: could not move re-landed round ' + r.round +
+                    ' onto its canonical batch:', err));
+            }
             // The round is already finalized HERE, but this batch is how the round
             // reached the CHAIN, and the landing clock is what fee pricing bounds
             // itself on once that gate is armed. On a validator every round of its
