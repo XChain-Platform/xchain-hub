@@ -27,10 +27,11 @@
 
 const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 const batchLandingReset     = require('./batch_landing_reset.js');
+const zeroStampRounds       = require('./zero_stamp_rounds.js');
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so this
 // module still exports ONE price-family mixin that src/db/index.js installs unchanged.
-module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
+module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zeroStampRounds, {
 
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/consensus.js:374.
@@ -66,19 +67,6 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
     // Moved here from src/api.js:2039.
     async findPriceSnapshotsById(since, limit) {
         return this.doQuery('SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
-    },
-
-    // Reads only unstamped, non-skipped rounds for the landing-clock repair sweep. The
-    // covering (batch_block_time, round_number, status) key returns zero-stamped entries
-    // already in round order, so the read stops after `limit` rounds past the cursor. A
-    // pair-led key cannot: ordering by round across every pair materializes and filesorts
-    // every zero-stamped row, which outran the statement limit on a few hundred thousand.
-    async findZeroBatchBlockTimePriceSnapshotRoundsAfter(round, limit) {
-        return this.doQuery(
-            `SELECT DISTINCT round_number
-             FROM price_snapshots FORCE INDEX (idx_batchtime_round_status)
-             WHERE batch_block_time = 0 AND round_number > ? AND status != 'skipped'
-             ORDER BY round_number ASC LIMIT ?`, [round, limit]);
     },
 
     // Reads rows from price_snapshots.
