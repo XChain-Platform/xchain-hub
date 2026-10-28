@@ -73,6 +73,11 @@ module.exports = {
             confirmationCheckFailures: this.confirmationCheckFailures,
             lastConfirmationCheckAt:  this.lastConfirmationCheckAt,
             flushesSkippedInFlight:   this.flushesSkippedInFlight || 0,
+            // A flush holding the mutex since flushStartedAt; a stalled sweep shows as a
+            // flushInFlight that never clears while flushesSkippedInFlight climbs.
+            flushInFlight:            !!this._flushing,
+            flushStartedAt:           this._flushStartedAt || null,
+            lastFlushSkippedAt:       this.lastFlushSkippedAt || null,
             archiveChunkLosses: this._archiveChunkLosses,
             anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
             anchorMarkersPruned:     this.anchorMarkersPruned,
@@ -358,7 +363,10 @@ module.exports = {
 
     async flush(opts){
         let failoverOnly = !!(opts && opts.failoverOnly);
-        if(this._flushing) return this.noteFlushSkippedInFlight();
+        if(this._flushing){
+            this.lastFlushSkippedAt = Date.now();
+            return this.noteFlushSkippedInFlight();
+        }
         // Mainnet writes are shut until the window opens: skip the whole cycle, rows stay pending.
         if(!mainnetWritesOpen(this.network, this.nowSeconds())) return { anchored: [], archive: 'none', skipped: 'mainnet_window_closed' };
         this._flushing = true;
