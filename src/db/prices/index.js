@@ -262,8 +262,11 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // per-pair skip markers at src/oracle/consensus.js:2302, which issued the same statement
     // with only its indentation differing.
     //
-    // The upsert only refreshes a row that is still 'skipped': a pair that already finalized
-    // keeps its price, its anchor and its status, so a late skip never demotes a finalized row.
+    // The upsert is a no-op on a duplicate key: a pair that already finalized keeps its price,
+    // its anchor and its status, and a marker that is already 'skipped' keeps its first
+    // reference_block and block_timestamp. A live mirror drops a skipped-to-skipped change
+    // (it replaces a row only for finalized or disputed), so rewriting the columns here made
+    // the hub disagree with every streaming mirror while a freshly bootstrapped one copied it.
     async setSkippedPriceSnapshotRound(round, coinPairs, referenceBlock, blockTimestamp) {
         let placeholders = coinPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
         let params = [];
@@ -273,9 +276,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  validator_count, consensus_round, consensus_proof, status)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
-                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
-                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
-                 status = IF(status = 'skipped', 'skipped', status)`;
+                 status = status`;
         return this.doQuery(query, params);
     },
 
