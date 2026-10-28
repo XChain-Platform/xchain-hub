@@ -16,7 +16,30 @@
 
 const assert = require('node:assert/strict');
 const sinon = require('sinon');
-const priceQueries = require('../../../../src/db/prices/index.js');
+const ROUNDS_PATH = require.resolve('../../../../src/db/prices/zero_stamp_rounds.js');
+const INDEX_PATH = require.resolve('../../../../src/db/prices/index.js');
+
+// The absent-index latch is module state; load a fresh copy so each case starts unlatched.
+function freshPriceQueries() {
+    delete require.cache[ROUNDS_PATH];
+    delete require.cache[INDEX_PATH];
+    return require(INDEX_PATH);
+}
+
+let priceQueries = freshPriceQueries();
+
+// Throws ABSENT only for the hinted statement, like a real server lacking the key.
+function dbAbsentForHint() {
+    const calls = [];
+    return {
+        calls,
+        async doQuery(sql, params) {
+            calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+            if (/FORCE INDEX/.test(sql)) throw ABSENT;
+            return [{ round_number: 7 }];
+        },
+    };
+}
 
 // Shaped like the mariadb driver's error: the server text lands in sqlMessage, while
 // message carries the driver's own wrapper.
@@ -36,7 +59,34 @@ function dbFailingFirstWith(err) {
     };
 }
 
+describe('zero-stamped price round query latch across ticks', () => {
+    beforeEach(() => { priceQueries = freshPriceQueries(); });
+
+    it('issues the hinted statement once across ticks, so doQuery has no repeated error to log', async () => {
+        const db = dbAbsentForHint();
+        for (let tick = 0; tick < 3; tick++) {
+            const rows = await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(db, tick, 100);
+            assert.deepEqual(rows, [{ round_number: 7 }]);
+        }
+        assert.equal(db.calls.filter((c) => /FORCE INDEX/.test(c.sql)).length, 1);
+        assert.equal(db.calls.length, 4);
+        assert.doesNotMatch(db.calls[2].sql, /FORCE INDEX/);
+        assert.doesNotMatch(db.calls[3].sql, /FORCE INDEX/);
+    });
+
+    it('keeps the hint on every call while the index is present', async () => {
+        const calls = [];
+        const db = { calls, async doQuery(sql) { calls.push(sql); return []; } };
+        for (let tick = 0; tick < 3; tick++) {
+            await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(db, 0, 100);
+        }
+        assert.equal(calls.filter((s) => /FORCE INDEX/.test(s)).length, 3);
+    });
+});
+
 describe('zero-stamped price round query without its index', () => {
+    beforeEach(() => { priceQueries = freshPriceQueries(); });
+
     it('reads unhinted when the forced index is absent, with the same filter and bounds', async () => {
         const db = dbFailingFirstWith(ABSENT);
         const rows = await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(db, 136050, 100);
@@ -53,7 +103,7 @@ describe('zero-stamped price round query without its index', () => {
         const warn = sinon.spy(getLogger(), 'warn');
         try {
             for (let tick = 0; tick < 3; tick++) {
-                await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(dbFailingFirstWith(ABSENT), 0, 100);
+                await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(dbAbsentForHint(), 0, 100);
             }
             assert.ok(warn.callCount <= 1, 'warned ' + warn.callCount + ' times');
         } finally {

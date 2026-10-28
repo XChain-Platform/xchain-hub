@@ -2663,12 +2663,6 @@
       "f85a847d000c3e8cb410e00493da2da0dfc2313713f11463fe6a671ab26012b2",
       "0736cc627f0a0da2ae5e23cb2b13f74d43abb51e6041c9b314a4f37b80c0507f"
     ],
-    "30695b30ff4ba329": [
-      "6bc426f8f60fd4e1036e5665b1b1f4f1b5f1d390f0f65670f792988280a8f336",
-      "440db27e2dd46c8b13615c5deef8e59e2086c2d44d8157112a91b457a2e5c158",
-      "8d1e38218e80e8c3fd3486ea73834ce94ab65d3b905049a71aa45b841d75d082",
-      "012eaf63794e23eb8b9656f4e1a9c88628823b95257d092753a13f25241b03ec"
-    ],
     "30eeb60ea449ac4b": [
       "ccb5e2e70da6b10f973febecadd5078fa28db4aad26eaa84552936993d83d958",
       "4d34f4bd90d9df818a60ce05360e2ebe3fc63f9722fd93511dee1b71d81074b6",
@@ -12681,6 +12675,14 @@
       "da25b89b69b3c64608b2213bdfb3d571ab1a477caa9627d4d982de4b29591437",
       "f70aad02b2de6f272831a1ebfc0ba10dbcf71ba839f5a6dc87f1191626b19c70"
     ],
+    "f591c5047ee0b2da": [
+      "324fd0001d9f59d07dc1f90736d0dcd79d553e2f74fa86653359c778a66a7903",
+      "6dd7e01b590fe67a38d39ddf9d51dc4da2c28b8831f30b69e91bbf79b9f6d410",
+      "6bc426f8f60fd4e1036e5665b1b1f4f1b5f1d390f0f65670f792988280a8f336",
+      "440db27e2dd46c8b13615c5deef8e59e2086c2d44d8157112a91b457a2e5c158",
+      "8d1e38218e80e8c3fd3486ea73834ce94ab65d3b905049a71aa45b841d75d082",
+      "012eaf63794e23eb8b9656f4e1a9c88628823b95257d092753a13f25241b03ec"
+    ],
     "f5f59ccb7949bca3": [
       "bed4d6c722657d0321a591cac8b4748cc6690e60349a45222d38dd5bb171ac04",
       "5480e0d8ae91a99ab1fdf1592338bbb98f602970ea2db6603c2bcd14de637f73",
@@ -13160,7 +13162,7 @@
         "ci:regression"
       ],
       "fileCount": 1075,
-      "titleCount": 9588,
+      "titleCount": 9590,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13818,7 +13820,7 @@
         "test/unit/db/migration/price_snapshots_batch_seq_index.test.js": "07f5e9a3d2e718db",
         "test/unit/db/mirror_columns/mirror_columns_shape.test.js": "c13d1c2be2787f16",
         "test/unit/db/prices/orphaned_landing_reset_statements.test.js": "015403b7d133087b",
-        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "30695b30ff4ba329",
+        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
         "test/unit/db/prices/zero_stamp_rounds_query.test.js": "e6bb9129100c4481",
         "test/unit/db/ready_frame_max_ids/db_ready_frame_max_ids.test.js": "21cd8570a5fcac15",
         "test/unit/db/retry/db_capability_snapshots_deadlock_retry.test.js": "3feb90a7728edc20",
@@ -14294,7 +14296,7 @@
     },
     "test": {
       "fileCount": 1075,
-      "titleCount": 9588,
+      "titleCount": 9590,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14952,7 +14954,7 @@
         "test/unit/db/migration/price_snapshots_batch_seq_index.test.js": "07f5e9a3d2e718db",
         "test/unit/db/mirror_columns/mirror_columns_shape.test.js": "c13d1c2be2787f16",
         "test/unit/db/prices/orphaned_landing_reset_statements.test.js": "015403b7d133087b",
-        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "30695b30ff4ba329",
+        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
         "test/unit/db/prices/zero_stamp_rounds_query.test.js": "e6bb9129100c4481",
         "test/unit/db/ready_frame_max_ids/db_ready_frame_max_ids.test.js": "21cd8570a5fcac15",
         "test/unit/db/retry/db_capability_snapshots_deadlock_retry.test.js": "3feb90a7728edc20",
@@ -15375,7 +15377,7 @@
     },
     "test:all": {
       "fileCount": 1160,
-      "titleCount": 10463,
+      "titleCount": 10465,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16118,7 +16120,7 @@
         "test/unit/db/migration/price_snapshots_batch_seq_index.test.js": "07f5e9a3d2e718db",
         "test/unit/db/mirror_columns/mirror_columns_shape.test.js": "c13d1c2be2787f16",
         "test/unit/db/prices/orphaned_landing_reset_statements.test.js": "015403b7d133087b",
-        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "30695b30ff4ba329",
+        "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
         "test/unit/db/prices/zero_stamp_rounds_query.test.js": "e6bb9129100c4481",
         "test/unit/db/ready_frame_max_ids/db_ready_frame_max_ids.test.js": "21cd8570a5fcac15",
         "test/unit/db/retry/db_capability_snapshots_deadlock_retry.test.js": "3feb90a7728edc20",

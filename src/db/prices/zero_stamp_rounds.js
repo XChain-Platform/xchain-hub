@@ -54,17 +54,22 @@ module.exports = {
     // `npm run migrate` lacks it; the hint would then fail every tick, so the read runs
     // unhinted (slow on a large table, but it progresses) and says once what is missing.
     async findZeroBatchBlockTimePriceSnapshotRoundsAfter(round, limit) {
-        try {
-            return await this.doQuery(zeroStampRoundsSql(` FORCE INDEX (${ZERO_STAMP_INDEX})`), [round, limit]);
-        } catch (e) {
-            if (!isAbsentIndex(e)) throw e;
-            if (!warnedIndexAbsent) {
+        // Once the key is known absent, skip the hinted statement: db.doQuery logs every
+        // failure at error level, so retrying it each tick would print a 1176 error line
+        // per page read while the fallback works. A hub restart after the migration
+        // picks the key up again.
+        if (!warnedIndexAbsent) {
+            try {
+                return await this.doQuery(zeroStampRoundsSql(` FORCE INDEX (${ZERO_STAMP_INDEX})`), [round, limit]);
+            } catch (e) {
+                if (!isAbsentIndex(e)) throw e;
                 warnedIndexAbsent = true;
                 logger.warn(`price_snapshots index ${ZERO_STAMP_INDEX} is absent; the landing-clock sweep reads `
-                    + 'without it until `npm run migrate` applies 2026-10-28-price-snapshots-zero-stamp-round-index.sql');
+                    + 'without it until `npm run migrate` applies 2026-10-28-price-snapshots-zero-stamp-round-index.sql '
+                    + 'and the hub restarts');
             }
-            return this.doQuery(zeroStampRoundsSql(''), [round, limit]);
         }
+        return this.doQuery(zeroStampRoundsSql(''), [round, limit]);
     },
 
 };
