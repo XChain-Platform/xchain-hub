@@ -278,7 +278,15 @@ module.exports = {
     // this mixin because configs is the one family every hub boots with; the
     // ping and health RPCs race it against a timeout.
     // Moved here from src/api.js:735, src/api.js:753.
+    //
+    // Single-flight: concurrent callers share the one SELECT 1 in flight, and the next
+    // call after it settles issues a fresh one (nothing is cached), so on a saturated
+    // pool the health polls do not pile up behind the work they measure.
     async getDatabaseLivenessProbe(){
-        return this.doQuery('SELECT 1', []);
+        if (!this._livenessProbeInFlight) {
+            this._livenessProbeInFlight = Promise.resolve(this.doQuery('SELECT 1', []))
+                .finally(() => { this._livenessProbeInFlight = null; });
+        }
+        return this._livenessProbeInFlight;
     }
 };

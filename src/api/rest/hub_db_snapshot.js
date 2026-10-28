@@ -28,10 +28,14 @@ const { resolveBtcChainId } = require('../../anchor/snapshot_checkpoint/chain_id
 const { validateLimit, validateSince } = require('../validate');
 const { mountSnapshotQueryValidation } = require('./hub_db_snapshot_query');
 const { mountCapabilitySnapshotProof } = require('./capability_snapshot_proof');
+const { RATE_LIMIT_RPC_ERROR_CODE } = require('../rate_limit_policy');
+const DEFAULT_SNAPSHOT_MAX_INFLIGHT = 4;   // of the ten pooled connections; HUB_SNAPSHOT_MAX_INFLIGHT overrides
+const SNAPSHOT_BUSY_RETRY_AFTER_S = 1;
 
 function mountSnapshotRoutes(app, ctx) {
     const helpers = snapshotHelpers(ctx);
     mountSnapshotAuth(app, ctx);
+    mountSnapshotConcurrencyGate(app, ctx);
     mountSnapshotQueryValidation(app);
     mountPriceSnapshots(app, ctx, helpers);
     mountMatchSnapshots(app, ctx, helpers);
@@ -111,15 +115,42 @@ function mountSnapshotAuth(app, { HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_AP
     });
 }
 
+// One bound on the snapshot reads in flight, whoever sends them. The per-IP limiter
+// exempts loopback and private-range callers and a re-bootstrapping fleet stays under
+// each source's budget, so unbounded a page flood fills the shared pool and the health
+// probe's SELECT 1 starves. Excess is shed with the limiter's 429 shape and Retry-After,
+// which the indexer bootstrap retries; finish or close frees the slot (error, abort).
+function mountSnapshotConcurrencyGate(app, { hubConfig }) {
+    const configured = parseInt((hubConfig || {}).HUB_SNAPSHOT_MAX_INFLIGHT, 10);
+    const cap = Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_SNAPSHOT_MAX_INFLIGHT;
+    let inFlight = 0;
+    app.use('/hub-db/snapshot', (req, res, next) => {
+        if (inFlight >= cap) {
+            res.setHeader('Retry-After', String(SNAPSHOT_BUSY_RETRY_AFTER_S));
+            return res.status(429).json({ error: 'snapshot reads at capacity', code: RATE_LIMIT_RPC_ERROR_CODE,
+                data: { limit: cap, policy: 'global-inflight', retryAfterSeconds: SNAPSHOT_BUSY_RETRY_AFTER_S } });
+        }
+        let released = false; inFlight++;
+        const release = () => { if (!released) { released = true; inFlight--; } };
+        res.on('finish', release).on('close', release);
+        next();
+    });
+}
+
+// A page route's limit (capped at 10000) and since_id cursor, or `sent` once a 400 is out.
+function pageQuery(req, res) {
+    const { limit, since_id: sinceId } = req.query;
+    const err = (limit && validateLimit(limit)) || (sinceId && validateSince(sinceId));
+    if (err) { res.status(400).json(err); return { sent: true }; }
+    return { limit: limit ? Math.min(parseInt(limit), 10000) : 10000, since: sinceId ? parseInt(sinceId) : 0 };
+}
+
 function mountPriceSnapshots(app, ctx, helpers) {
     const { hub, logger, bigIntReplacer } = ctx;
     const { admissionHeightsForSnapshot, landedForSnapshot } = helpers;
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             let rows = await hub.db.findPriceSnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
@@ -160,10 +191,7 @@ function mountMatchSnapshots(app, ctx, helpers) {
     const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             // Exclude retracted rows: the streaming path DELETEs them on reorg
             // (retractMatchesForReorg marks status='retracted' for the ANCHOR archive and
@@ -181,10 +209,7 @@ function mountMatchSnapshots(app, ctx, helpers) {
 
     app.get('/hub-db/snapshot/capability_snapshots', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             let rows = await hub.db.findCapabilitySnapshotsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainId }, bigIntReplacer));
@@ -200,10 +225,7 @@ function mountRemoteTokenSnapshots(app, ctx, helpers) {
     const { admissionHeightsForSnapshot, landedForSnapshot, btcChainIdForSnapshot } = helpers;
     app.get('/hub-db/snapshot/remote_token_snapshots', async (req, res) => {
         try {
-            if (req.query.limit) { const limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            const limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { const sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            const since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             const rows = await hub.db.findRemoteTokenSnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'remote_token_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainId }, bigIntReplacer));
@@ -228,10 +250,7 @@ function mountCallCheckpointSnapshots(app, ctx, helpers) {
     // every bootstrapped row while the streamed (SELECT *) path kept it.
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             // Exclude retracted rows (see the cross_chain_matches snapshot above): the
             // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
@@ -254,10 +273,7 @@ function mountCallCheckpointSnapshots(app, ctx, helpers) {
     // mirrored (the indexer mirror schema has no such column).
     app.get('/hub-db/snapshot/state_checkpoints', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             let rows = await hub.db.findStateCheckpointsById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
@@ -285,10 +301,7 @@ function mountBridgeSnapshots(app, ctx, helpers) {
     // byte-for-byte from a long-running streamed mirror.
     app.get('/hub-db/snapshot/bridge_transfers', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             let rows = await hub.db.findBridgeTransfers(since, limit);
             res.type('json').send(JSON.stringify({ table: 'bridge_transfers', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainId }, bigIntReplacer));
@@ -306,10 +319,7 @@ function mountBridgeSnapshots(app, ctx, helpers) {
     // the opposite direction.
     app.get('/hub-db/snapshot/policy_snapshots', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             let rows = await hub.db.findPolicySnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'policy_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainId }, bigIntReplacer));
@@ -329,10 +339,7 @@ function mountListSnapshots(app, ctx, helpers) {
     // versions. A higher seq supersedes membership without retracting an older row.
     app.get('/hub-db/snapshot/list_snapshots', async (req, res) => {
         try {
-            if (req.query.limit) { const limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            const limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { const sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            const since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             const btcChainId = btcChainIdForSnapshot(); await btcChainId;
             const rows = await hub.db.findListSnapshots(since, limit);
             res.type('json').send(JSON.stringify({ table: 'list_snapshots', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainId }, bigIntReplacer));
@@ -352,10 +359,7 @@ function mountAttestSnapshots(app, ctx, helpers) {
     // publisher and re-verifies publisher_attestations against its OWN oracle_publish set).
     app.get('/hub-db/snapshot/anchor_reward_attestations', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             let rows = await hub.db.findAnchorRewardAttestations(since, limit);
             res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
@@ -383,10 +387,7 @@ function mountAttestSnapshots(app, ctx, helpers) {
     // bootstrapping mirror would have to skip.
     app.get('/hub-db/snapshot/attestation_responses', async (req, res) => {
         try {
-            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
-            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            const { limit, since, sent } = pageQuery(req, res); if (sent) return;
             let rows = await hub.db.findAttestationResponsesById(since, limit);
             res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, heights: admissionHeightsForSnapshot(), landed: landedForSnapshot(), watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
