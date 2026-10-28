@@ -188,6 +188,13 @@ xchainPriceSourceTests('abstention (LOCAL failures) - the pair is omitted entire
         expect(out.price).to.equal(BOOTSTRAP_AT_100K);
     });
 
+    it('abstains when the XCHAIN ticker cannot be resolved', async function () {
+        // XCHAIN_PRICE_DERIVATION_SPEC: anything but exactly one ticker row is a
+        // local failure. Finalized BTC/USD is present so the lookup is reached.
+        const { src } = makeSource({ tick: [] }, FINALIZED_BTC);
+        expect(await src.derive(CTX)).to.equal(null);
+    });
+
     it('never throws, so an abstention cannot take the 36 API pairs with it', async function () {
         const { src } = makeSource({ throwOn: (sql) => sql === COIN_ID_SQL }, FINALIZED_BTC);
         let out;
@@ -205,13 +212,6 @@ xchainPriceSourceTests('carry-forward (publication is unconditional)', function 
         expect(out).to.not.equal(null);
         expect(out.price).to.equal(BOOTSTRAP_AT_100K);
         expect(out.meta).to.include({ derived: false, carriedFrom: 'bootstrap', fillCount: 0 });
-    });
-
-    it('abstains when the XCHAIN ticker cannot be resolved', async function () {
-        // XCHAIN_PRICE_DERIVATION_SPEC: anything but exactly one ticker row is a
-        // local failure. Finalized BTC/USD is present so the lookup is reached.
-        const { src } = makeSource({ tick: [] }, FINALIZED_BTC);
-        expect(await src.derive(CTX)).to.equal(null);
     });
 
     it('publishes the bootstrap when the window is empty and nothing has finalized', async function () {
