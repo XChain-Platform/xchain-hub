@@ -38,9 +38,9 @@ function installPublisher(hub, payload, response) {
     };
 }
 
-describe('PriceAggregator active-chain PRICE repair', function () {
-    let hub, agg, validators;
+let hub, agg, validators;
 
+function installHooks() {
     beforeEach(function () {
         hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
@@ -56,7 +56,9 @@ describe('PriceAggregator active-chain PRICE repair', function () {
     });
 
     afterEach(function () { sinon.restore(); });
+}
 
+function registerValidationCases() {
     it('restores a missing round through the same verified batch ingest used by pushpricebatch', async function () {
         let payload = signedPayload(agg, validators, false);
         installPublisher(hub, payload);
@@ -113,7 +115,9 @@ describe('PriceAggregator active-chain PRICE repair', function () {
         expect(wrongAction).to.include({ ran: true, restored: 0, refused: 1 });
         expect(hub.db.setBatchPriceSnapshotRound.called).to.equal(false);
     });
+}
 
+function registerQueueCases() {
     it('queues a retracted window behind an active pass and runs it next', async function () {
         let release;
         let blocked = new Promise(resolve => { release = resolve; });
@@ -152,7 +156,9 @@ describe('PriceAggregator active-chain PRICE repair', function () {
         await agg._lastPriceRestoreBackground;
         agg.stopPriceChainRestore();
     });
+}
 
+function registerStopCases() {
     it('stops queued work and makes a running pass stop before its next database read', async function () {
         let release;
         let blocked = new Promise(resolve => { release = resolve; });
@@ -175,7 +181,9 @@ describe('PriceAggregator active-chain PRICE repair', function () {
             .to.deep.equal({ ran: false, reason: 'repair stopped' });
         expect(agg._priceRestoreRunning).to.equal(false);
     });
+}
 
+function registerBackgroundWalkCases() {
     it('releases the running latch when the drain throws unexpectedly', async function () {
         agg._priceRestoreQueue = {
             get length() { throw new Error('unexpected queue failure'); }
@@ -227,7 +235,9 @@ describe('PriceAggregator active-chain PRICE repair', function () {
         expect(hub.oraclePublisher.fetchLandedBatches.callCount).to.be.at.most(6);
         expect(hub.db.findPriceSnapshotRowsForRounds.calledOnce).to.equal(true);
     });
+}
 
+function registerPresenceReadCase() {
     it('uses one price_snapshots presence read for both two and two hundred rounds', async function () {
         async function run(count) {
             let rounds = Array.from({ length: count }, (_, i) => ({ round: i + 1 }));
@@ -254,4 +264,13 @@ describe('PriceAggregator active-chain PRICE repair', function () {
         expect([small.statements, large.statements]).to.deep.equal([1, 1]);
         expect(small.sql).not.to.match(/SELECT \*/);
     });
+}
+
+describe('PriceAggregator active-chain PRICE repair', function () {
+    installHooks();
+    registerValidationCases();
+    registerQueueCases();
+    registerStopCases();
+    registerBackgroundWalkCases();
+    registerPresenceReadCase();
 });
