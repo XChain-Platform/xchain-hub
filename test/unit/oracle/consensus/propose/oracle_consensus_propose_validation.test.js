@@ -242,7 +242,8 @@ function registerOracleconsensusFollowerPriceValidationMinsubmissions1Tests11() 
         let skip = insertCalls[1];
         expect(skip.sql).to.include("'skipped'");
         expect(skip.sql).to.match(/ON DUPLICATE KEY UPDATE/);                   // never demotes a finalized row
-        expect(skip.sql).to.match(/IF\(status = 'skipped'/);
+        expect(skip.sql).to.match(/status = status/);                         // a duplicate keeps the first marker
+        expect(skip.sql).to.not.match(/VALUES\(reference_block\)/);
         expect(skip.params).to.deep.equal([7, 'LTC/USD', 100, 1700000000]);     // only the dropped pair, same round refs
     });
 }
