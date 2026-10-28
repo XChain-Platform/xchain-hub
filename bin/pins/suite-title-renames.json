@@ -59,6 +59,9 @@
     },
     "test/unit/anchor/snapshot_checkpoint/due.test.js": {
       "snapshot checkpoint due selection returns null when the tip is missing": "snapshot checkpoint height guards returns null when the chain height is missing"
+    },
+    "test/chaos/database/db_pool_exhaustion.test.js": {
+      "Chaos: DB Pool Exhaustion (DB-3) pool timeout errors count toward circuit breaker": "Chaos: DB Pool Exhaustion (DB-3) pool acquire timeouts do not count toward circuit breaker"
     }
   }
 }

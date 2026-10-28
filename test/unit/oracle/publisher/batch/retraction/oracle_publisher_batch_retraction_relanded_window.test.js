@@ -70,7 +70,8 @@ const relandedBeforeTheRetraction = async function () {
     expect(h.p._buffer.size, 'nothing restored to propose').to.equal(0);
     expect(h.p._windows.has(0), 'the window is not re-armed').to.equal(false);
 
-    await new Promise(resolve => setTimeout(resolve, 20));
+    // No grace timer is armed (above), so nothing is pending to wait out; force the
+    // assembly a timer would have run and prove it signs nothing.
     await h.p._windowChain;
     await h.p.assembleWindow(0);
     expect(h.signer.calls, 'no second signing round').to.have.length(1);

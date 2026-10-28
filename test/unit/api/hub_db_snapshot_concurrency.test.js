@@ -135,6 +135,15 @@ function get(server, path) {
     return { done, request };
 }
 
+// Requests answered so far. With the reads still held this accounts for every
+// request; only then is the in-flight peak final, since one still in transit
+// could yet overshoot the cap.
+function answeredCount(calls) {
+    let answered = 0;
+    for (const c of calls) c.done.then(() => { answered++; });
+    return () => answered;
+}
+
 let server = null;
 
 async function stopServer() {
@@ -154,8 +163,8 @@ function capSuite() {
 
         const calls = Array.from({ length: 5 * cap }, (_, i) =>
             get(server, '/hub-db/snapshot/price_snapshots?limit=10000&since_id=' + (i * 10000)));
-        await waitFor(() => db.snapshotInFlight >= cap);
-        await tick(50);
+        const answered = answeredCount(calls);
+        await waitFor(() => answered() + db.snapshotInFlight === calls.length);
         expect(db.snapshotPeak).to.be.at.most(cap);
 
         releaseAll();
@@ -178,8 +187,8 @@ function capSuite() {
         mountSnapshotRoutes(app, snapshotCtx(db, undefined));
         server = await listen(app);
         const calls = Array.from({ length: 3 * POOL_SIZE }, () => get(server, '/hub-db/snapshot/price_snapshots'));
-        await waitFor(() => db.snapshotInFlight >= 1);
-        await tick(50);
+        const answered = answeredCount(calls);
+        await waitFor(() => db.snapshotInFlight >= 1 && answered() + db.snapshotInFlight === calls.length);
         expect(db.snapshotPeak).to.be.within(1, POOL_SIZE - 2);
         releaseAll();
         await Promise.all(calls.map((c) => c.done));
@@ -202,6 +211,10 @@ function releaseSuite() {
             }
         };
         const app = express();
+        // The gate frees a slot on the response's close; this counter, mounted first,
+        // sees the same event, so it shows when the aborted request's slot is free.
+        let closed = 0;
+        app.use((req, res, next) => { res.on('close', () => { closed++; }); next(); });
         mountSnapshotRoutes(app, snapshotCtx(db, { HUB_SNAPSHOT_MAX_INFLIGHT: '1' }));
         server = await listen(app);
 
@@ -215,7 +228,7 @@ function releaseSuite() {
         expect(busy.status).to.equal(429);
         aborted.request.destroy();
         await aborted.done;
-        await tick(50);
+        await waitFor(() => closed >= 3);                 // the failed, the shed and the aborted request
 
         const firstGate = heldGate;
         heldGate = null;
@@ -239,8 +252,8 @@ function headroomSuite() {
 
         const calls = Array.from({ length: 20 }, (_, i) =>
             get(server, '/hub-db/snapshot/price_snapshots?limit=10000&since_id=' + (i * 10000)));
-        await waitFor(() => db.snapshotInFlight >= 4);
-        await tick(50);
+        const answered = answeredCount(calls);
+        await waitFor(() => answered() + db.snapshotInFlight === calls.length);
 
         const rpc = buildSystemRpc({
             hub: { network: 'regtest', db }, hubConfig: {}, p2pConfig: null,

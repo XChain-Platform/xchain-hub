@@ -116,7 +116,7 @@ function registerPriceaggregatorRetractfromactionindexBatchMarkerClear1Tests1() 
         let calls = hub.db.doQuery.getCalls();
         // The orphaned-landing reset lookup runs with or without a publisher.
         expect(calls.length).to.equal(4);
-        expect(calls[0].args[0]).to.include('self_finalized.source_action_index IS NULL');
+        expect(calls[0].args[0]).to.match(/^SELECT DISTINCT batch_block_time, .* FROM price_snapshots WHERE source_chain = \?/);
         expect(calls.slice(2).every(c => /^DELETE FROM/.test(c.args[0]))).to.equal(true);
     });
 }
