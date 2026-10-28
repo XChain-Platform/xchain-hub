@@ -87,6 +87,15 @@ const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
 
+// The driver's queued-acquire timeout: every pooled connection is busy, MariaDB is
+// up, so it is saturation, not the unreachable database the breaker is for. Its
+// other ER_GET_CONNECTION_TIMEOUT ("pool failed to retrieve": no live connection
+// and none creatable) is a real connect failure, so the message tells them apart.
+function isPoolSaturation(e){
+    return !!e && (e.code === 'ER_GET_CONNECTION_TIMEOUT' || e.errno === 45028)
+        && String(e.sqlMessage || e.message || '').includes('pool timeout: failed to retrieve');
+}
+
 // The DDL lives at src/sql/, one level above this db home. Resolved here, against
 // THIS file, because schema/bootstrap.js sits one directory deeper and a path built
 // there would climb out of the wrong directory.
@@ -246,8 +255,13 @@ class Database {
                 this.circuitFailures = 0;
             } catch (e){
                 attempts++;
-                this.circuitFailures = (this.circuitFailures || 0) + 1;
-                if(this.circuitFailures >= this.circuitThreshold){
+                // Saturation neither counts toward nor resets the breaker's streak: one
+                // busy round fans out more acquires than the pool limit, and counting them
+                // refused every DB caller for the cooldown while the database was serving.
+                const saturated = isPoolSaturation(e);
+                if(!saturated)
+                    this.circuitFailures = (this.circuitFailures || 0) + 1;
+                if(!saturated && this.circuitFailures >= this.circuitThreshold){
                     this.circuitState = 'open';
                     this.circuitOpenUntil = Date.now() + this.circuitCooldown;
                     throw new Error('Circuit breaker opened after ' + this.circuitFailures + ' consecutive failures');
@@ -256,7 +270,7 @@ class Database {
                     throw new Error('Could not connect to MariaDB after ' + maxAttempts + ' attempts');
                 const delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
                 const jitter = Math.floor(Math.random() * delay * 0.3);
-                logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
+                logger.info((saturated ? 'MariaDB pool saturated' : "Can't connect to MariaDB") + '. Retrying in ' + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
                 await this.sleep(delay + jitter);
             }
