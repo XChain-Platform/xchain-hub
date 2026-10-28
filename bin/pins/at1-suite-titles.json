@@ -3961,16 +3961,6 @@
     "49474d2cdd994a47": [
       "49474d2cdd994a474ebcaa39274180986c6061d8ff4f52d8017306f996e91be1"
     ],
-    "499b1161f24ec495": [
-      "4965a58cd3476fbf4588c2134d64df3302eb993ee3c3930ecac3284bc3977473",
-      "82cf4991e37d385f1f4f5cac95566edcaccf8f462fc022431726da531b3e7dd9",
-      "1487fc2a0c5c0ae0d6f8664b861a3c23f391fd2b1b93d2c67576f2d82ecf1380",
-      "d0d1dd0463873d6da6daa78c5cbf2565c9851d1fece38bc63808ae64c7c840f1",
-      "e6af35c364bb6339c1a05f0dea2a6faaa1342e7e27d40328639ea3aa39c79193",
-      "df9481d0d6920528c66d2d252046df702179361c1a698825a52ff1baf487e23b",
-      "ad8e67f1982b25a81d84183142a1074c59a65aa20807c2077ea592c89beff1f4",
-      "0a93cb8941e1bb00a39cb8173372fc404043f1d909ca9e29adcf987cbe880fd7"
-    ],
     "49c068a6f4d55799": [
       "3a80d247799cb676efc9cd5c97ce24af87c6d4324e8843c47f67a3afd4f26e45",
       "c05e8a622c8651a998f73df81272c5ffc5da9c80182930c40b1044c1b716dad0",
@@ -6111,6 +6101,17 @@
     ],
     "6a8187d4a62ac18c": [
       "6a8187d4a62ac18c78e9fc1645a12d5f72093862d46b1f07b38e134bdc578787"
+    ],
+    "6acf113872158a7d": [
+      "105d97e34e4020a03f413d41ddf12a5087ba31d2bdb1efd8ca32dfa9469d8fef",
+      "4965a58cd3476fbf4588c2134d64df3302eb993ee3c3930ecac3284bc3977473",
+      "82cf4991e37d385f1f4f5cac95566edcaccf8f462fc022431726da531b3e7dd9",
+      "1487fc2a0c5c0ae0d6f8664b861a3c23f391fd2b1b93d2c67576f2d82ecf1380",
+      "d0d1dd0463873d6da6daa78c5cbf2565c9851d1fece38bc63808ae64c7c840f1",
+      "e6af35c364bb6339c1a05f0dea2a6faaa1342e7e27d40328639ea3aa39c79193",
+      "df9481d0d6920528c66d2d252046df702179361c1a698825a52ff1baf487e23b",
+      "ad8e67f1982b25a81d84183142a1074c59a65aa20807c2077ea592c89beff1f4",
+      "0a93cb8941e1bb00a39cb8173372fc404043f1d909ca9e29adcf987cbe880fd7"
     ],
     "6ad2af39109208bf": [
       "bb225f1c0248a1c5cf9396ccd5ee8395599bf96ea65f0318b930932949b0dcc5",
@@ -14103,7 +14104,7 @@
         "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_relayed_third_hub_identity.test.js": "4ea91f34cdae7cfb",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
-        "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
+        "test/unit/peers/rpc_batch_guard.test.js": "6acf113872158a7d",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
         "test/unit/providers/http_get_provider_fetch.test.js": "b45dc58f909b8c76",
         "test/unit/providers/http_get_provider_health_check.test.js": "64073938227b8635",
@@ -15236,7 +15237,7 @@
         "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_relayed_third_hub_identity.test.js": "4ea91f34cdae7cfb",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
-        "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
+        "test/unit/peers/rpc_batch_guard.test.js": "6acf113872158a7d",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
         "test/unit/providers/http_get_provider_fetch.test.js": "b45dc58f909b8c76",
         "test/unit/providers/http_get_provider_health_check.test.js": "64073938227b8635",
@@ -16401,7 +16402,7 @@
         "test/unit/peers/manager/peer_manager_relay_feed_url.test.js": "49189ce1a3cef5d5",
         "test/unit/peers/manager/peer_manager_relayed_third_hub_identity.test.js": "4ea91f34cdae7cfb",
         "test/unit/peers/manager/peer_manager_stop_open_sockets.test.js": "bb8d22d13c16ee01",
-        "test/unit/peers/rpc_batch_guard.test.js": "499b1161f24ec495",
+        "test/unit/peers/rpc_batch_guard.test.js": "6acf113872158a7d",
         "test/unit/providers/http_get_provider.test.js": "4f26175b5ce8d039",
         "test/unit/providers/http_get_provider_fetch.test.js": "b45dc58f909b8c76",
         "test/unit/providers/http_get_provider_health_check.test.js": "64073938227b8635",

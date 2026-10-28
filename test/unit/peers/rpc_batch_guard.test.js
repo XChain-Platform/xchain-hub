@@ -114,6 +114,38 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         }
     };
 
+    const rejectsNonObjectElementsCleanly = async () => {
+        const bodies = [
+            [null],
+            [{ jsonrpc: '2.0', method: 'getprice', id: 1 }, null],
+            [1, 2], [true], ['x'], [[]]
+        ];
+        for (const b of bodies) {
+            const counter = { calls: 0 };
+            const server = http.createServer(buildApp(true, counter));
+            await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+            try {
+                const res = await fetch(`http://127.0.0.1:${server.address().port}/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(b)
+                });
+                const text = await res.text();
+                const label = JSON.stringify(b);
+                assert.strictEqual(res.status, 400, label);
+                assert.match(res.headers.get('content-type'), /application\/json/, label);
+                const parsed = JSON.parse(text);
+                assert.strictEqual(parsed.jsonrpc, '2.0', label);
+                assert.strictEqual(parsed.id, null, label);
+                assert.strictEqual(parsed.error.code, -32600, label);
+                assert.ok(!/TypeError|node_modules/.test(text), label);
+                assert.strictEqual(counter.calls, 0, 'router must not dispatch: ' + label);
+            } finally {
+                await new Promise((resolve) => server.close(resolve));
+            }
+        }
+    };
+
     let registerresolvemaxbatch7;
 
     {
@@ -152,6 +184,7 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         it('reproduces the fan-out WITHOUT the guard (21 calls dispatch 21 handlers)', reproducesTheFanOutWithoutTheTest2);
         it('rejects an over-cap batch with 400 / -32600 and dispatches nothing', rejectsAnOverCapBatchWithTest3);
         it('passes an at-cap batch through to the dispatcher', passesAnAtCapBatchThroughTest4);
+        it('answers a batch with a null or non-object element with a clean JSON 400 / -32600', rejectsNonObjectElementsCleanly);
         it('leaves a single (non-array) call untouched', leavesASingleNonArrayCallTest5);
         it('leaves a bodiless GET to the req.body shim (no 500, no 400)', leavesABodilessGetToTheTest6);
         registerresolvemaxbatch7();
