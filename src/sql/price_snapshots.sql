@@ -63,5 +63,9 @@ CREATE TABLE price_snapshots (
     -- so the mirror's bootstrap paging and the hub's own snapshot reads share it.
     KEY idx_pair_batchtime_round (coin_pair, batch_block_time, round_number),
     -- getNextAnchorBatchSeq takes MAX(batch_seq); without this key it full-scans the table.
-    KEY idx_batch_seq (batch_seq)
+    KEY idx_batch_seq (batch_seq),
+    -- The batch retraction reads (rounds of a retracted PRICE batch, orphaned landing
+    -- stamps) pin source_chain and range over source_action_index under a generation fence;
+    -- without this key they scan the table and hit the statement timeout.
+    KEY idx_source_chain_action (source_chain, source_action_index, push_generation)
 );
