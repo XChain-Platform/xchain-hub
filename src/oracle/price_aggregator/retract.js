@@ -187,6 +187,47 @@ async function resetRetractedBatchWindowsOrError(sourceChain, windows) {
     }
 }
 
+// A window list naming more rounds than this in total is from a broken sender; it
+// clears no marker by range.
+const MAX_RETRACTED_BATCH_ROUNDS = 10000;
+
+// Every round the retracted windows name, ascending, or none past the cap.
+function retractedWindowRounds(windows) {
+    const rounds = new Set();
+    for (const w of windows) {
+        if (w.last - w.first + 1 > MAX_RETRACTED_BATCH_ROUNDS - rounds.size) return [];
+        for (let round = w.first; round <= w.last; round++) rounds.add(round);
+    }
+    return Array.from(rounds).sort((a, b) => a - b);
+}
+
+// One marker clear, guarded because a publisher failure must never turn a completed
+// retraction into an error return: the rows are already gone.
+async function clearMarkersLogged(publisher, rounds, what) {
+    try {
+        await publisher.clearPublishedMarkers(rounds);
+    } catch (e) {
+        logger.error(nodeUtil.format('PriceAggregator: clearing published markers for retracted batch '
+            + what + ' ' + rounds.join(',') + ' failed:', e && e.message));
+    }
+}
+
+// D28: clear the publisher's durable at-most-once marker for every round the retracted
+// batch carried. Without this the marker outlives the rows it stands for, the
+// at-most-once guard suppresses the re-publish that recovery needs, and the reorg costs
+// an HOUR of price history instead of a round. The batch rows read before the deletes
+// name only rounds this hub stored from the batch itself; a round this hub had already
+// finalized carries no batch row, yet the retracted batch published it, so every round
+// the retracted windows name that no batch row covered is cleared as well (all of them
+// when nothing was deleted).
+async function clearRetractedMarkers(publisher, batchRounds, windows, snapDeleted) {
+    if (snapDeleted > 0 && batchRounds.length > 0) await clearMarkersLogged(publisher, batchRounds, 'rounds');
+    const ranged = retractedWindowRounds(windows);
+    const stored = new Set(batchRounds);
+    const missing = snapDeleted === 0 ? ranged : ranged.filter(round => !stored.has(round));
+    if (missing.length > 0) await clearMarkersLogged(publisher, missing, 'ranges');
+}
+
 async function readRetractedBatchRounds(sourceChain, b) {
     let batchRounds = [];
     try {
@@ -266,20 +307,7 @@ module.exports = {
         let windowError = await resetRetractedBatchWindowsOrError.call(this, sourceChain, windows);
         if (windowError) return windowError;
 
-        // D28: clear the publisher's durable at-most-once marker for every round the
-        // retracted batch carried. Without this the marker outlives the rows it stands
-        // for, the at-most-once guard suppresses the re-publish that recovery needs, and
-        // the reorg costs an HOUR of price history instead of a round. Guarded because a
-        // publisher failure must never turn a completed retraction into an error return:
-        // the rows are already gone.
-        if (seam.canClearMarkers && snapDeleted > 0 && batchRounds.length > 0) {
-            try {
-                await seam.publisher.clearPublishedMarkers(batchRounds);
-            } catch (e) {
-                logger.error(nodeUtil.format('PriceAggregator: clearing published markers for retracted batch rounds '
-                    + batchRounds.join(',') + ' failed:', e && e.message));
-            }
-        }
+        if (seam.canClearMarkers) await clearRetractedMarkers(seam.publisher, batchRounds, windows, snapDeleted);
 
         logger.info('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };

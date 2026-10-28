@@ -216,10 +216,14 @@ async function aPlainDuplicateDeliveryStillRetracts() {
         [{ first_round: BATCH_ROUND, last_round: SELF_ROUND }]);
     expect(res.retracted.price_snapshots).to.equal(2);
 
-    // The batch is gone from the chain: the row goes and the recovery re-publish is armed.
+    // The batch is gone from the chain: the row goes and the recovery re-publish is armed,
+    // first for the round the batch row backed, then for the self-finalized round the
+    // window names, since the retracted batch published that one too.
     expect(rowsOf(BATCH_ROUND).length).to.equal(0);
-    expect(markerDeletes).to.deep.equal([[BATCH_ROUND]]);
+    expect(rowsOf(SELF_ROUND).length).to.equal(2);
+    expect(markerDeletes).to.deep.equal([[BATCH_ROUND], [SELF_ROUND]]);
     expect(publisher._publishedRounds.has(BATCH_ROUND)).to.equal(false);
+    expect(publisher._publishedRounds.has(SELF_ROUND)).to.equal(false);
 }
 
 async function aLaterOverlappingBatchNeverTakesOverTheRound() {

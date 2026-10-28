@@ -5,13 +5,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Pins the batch-marker decoration of price retraction: retracting a window whose
+// Pins the batch-window marker clear of price retraction: retracting a window whose
 // batch is fully finalized clears that round's published D28 marker even when no
-// snapshot or oracle price row is removed.
+// snapshot or oracle price row is removed. Only retract.js is loaded, so the clear is
+// proven to hold without the anchor publisher in the process.
 
 const assert = require('node:assert/strict');
-// Loaded for its side effect: it decorates retractFromActionIndex with marker clearing.
-require('../../../../../../src/anchor/publisher/archive/checkpoint_price/marker_retraction.js');
 const retraction = require('../../../../../../src/oracle/price_aggregator/retract.js');
 
 function finalizedBatchFixture(){
