@@ -54,10 +54,10 @@ function boot() {
     });
 }
 
-function post(path, body) {
+function post(path, body, extraHeaders) {
     return new Promise((resolve, reject) => {
         const req = http.request({ host: '127.0.0.1', port, path, method: 'POST',
-            headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (res) => {
+            headers: Object.assign({ 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }, extraHeaders) }, (res) => {
             let text = '';
             res.on('data', (c) => { text += c; });
             res.on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'] || '', text }));
@@ -97,6 +97,24 @@ describe('hub JSON body parser errors', () => {
         const r = await post('/echo', '{"a":1}');
         expect(r.status).to.equal(200);
         expect(JSON.parse(r.text)).to.deep.equal({ got: { a: 1 } });
+    });
+
+    it('answers an undecodable gzip or deflate body with a clean JSON 400', async () => {
+        for (const enc of ['gzip', 'deflate']) {
+            const r = await post('/echo', 'notgzip', { 'content-encoding': enc });
+            expect(r.status, enc).to.equal(400);
+            expect(r.type, enc).to.match(/application\/json/);
+            expect(JSON.parse(r.text)).to.deep.equal({ error: 'invalid request body' });
+            expect(r.text).to.not.match(/node:zlib|node:internal|<pre>/);
+            expect(r.text).to.not.match(LEAK);
+        }
+    });
+
+    it('still parses a valid gzip-encoded JSON body', async () => {
+        const body = require('zlib').gzipSync(Buffer.from('{"a":2}'));
+        const r = await post('/echo', body, { 'content-encoding': 'gzip' });
+        expect(r.status).to.equal(200);
+        expect(JSON.parse(r.text)).to.deep.equal({ got: { a: 2 } });
     });
 
     it('does not swallow a route error into the parser error shape', async () => {

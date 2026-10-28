@@ -50,11 +50,13 @@ function installMiddleware(app, ctx) {
 // NODE_ENV is unset in a deployed hub, so Express finalhandler would render a body-parser
 // failure as an HTML page carrying err.stack (install path, dependency file:line). Placed
 // directly after express.json() it sees only parser errors: later route errors never reach
-// it. A parser error carries a client 4xx status and a string type; anything else passes on.
+// it. A parser error carries a client 4xx status; anything else passes on. The type is not
+// required: raw-body wraps a zlib inflate failure (bad Content-Encoding gzip/deflate) as a 400
+// with no type, whose stack would otherwise render as HTML.
 function bodyParserErrorHandler(err, req, res, next) {
     const status = err && err.status;
     const clientError = Number.isInteger(status) && status > 399 && status < 500;
-    if(res.headersSent || typeof err.type !== 'string' || !clientError) return next(err);
+    if(res.headersSent || !clientError) return next(err);
     const message = status === 413 ? 'request entity too large'
                   : err.type === 'entity.parse.failed' ? 'invalid JSON body'
                   : 'invalid request body';

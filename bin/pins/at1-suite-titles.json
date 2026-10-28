@@ -194,6 +194,14 @@
       "a7a0d088d0effcd409738cc4dc1d922700320a3fa0a045b457a7a048c3876ac6",
       "73ea53abf76e7ad9708f2437268af69b2fcf6fdb376c77f26a155f9ed7679c6b"
     ],
+    "045240b374c93631": [
+      "1aae3fb818c59e1486e4ecda462d3dc243c0cb37a6bd58e198750caba34c8d18",
+      "7b5afb1e9d0d4b97ff67580d5bef6d7646c54579704dffebb8842b0bfc3993f7",
+      "dc07bd96819a2f34c90115fbc60a8f45fdc1b3b31db7859e115bfc68059fe8b9",
+      "48f54e216add58d794075c158295e67e402db503aa723cd93eedccc6c44c44f7",
+      "a6af29c54fee2ade0cba6a92e839cdac570130704f2b603f81063d0cfab16454",
+      "8a4bbe4344a0dd8c887f7179773fbd811471395f9a4dc234d066a2f7a8f8cb21"
+    ],
     "04b223945eb67bc5": [
       "71912c6e08f89245b22e1a9568db4ae187fb19678558874b3fd7b65d6ba7b2ef",
       "f726e4d80c045e18ed4c936337c5aa00efb495cce20de46a72927b44ead8b906",
@@ -1746,12 +1754,6 @@
       "a3eace7559d44ba1e8e736a5e5a9b47b212e351371e420f00c878cc4b10527a1",
       "8c37002e7fa47e3e3dd76b7f7e186d75d380ba727aa73db50a8d2e0956fa747d",
       "78dbdc589f86a86c513f6369f353983cfdcf96a7a3b6c52dd71baa93cac7483e"
-    ],
-    "221cc88d32cbb656": [
-      "1aae3fb818c59e1486e4ecda462d3dc243c0cb37a6bd58e198750caba34c8d18",
-      "dc07bd96819a2f34c90115fbc60a8f45fdc1b3b31db7859e115bfc68059fe8b9",
-      "48f54e216add58d794075c158295e67e402db503aa723cd93eedccc6c44c44f7",
-      "8a4bbe4344a0dd8c887f7179773fbd811471395f9a4dc234d066a2f7a8f8cb21"
     ],
     "22a05e11666cb09b": [
       "75fc0eacaeb21c2b6f14b1c9f46e1336809d3b809987297e6be462dc2f9210f6",
@@ -13147,7 +13149,7 @@
         "ci:regression"
       ],
       "fileCount": 1074,
-      "titleCount": 9577,
+      "titleCount": 9579,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13365,7 +13367,7 @@
         "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
-        "test/unit/api/body_parser_error.test.js": "221cc88d32cbb656",
+        "test/unit/api/body_parser_error.test.js": "045240b374c93631",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "26bf32bc8528aff4",
@@ -14280,7 +14282,7 @@
     },
     "test": {
       "fileCount": 1074,
-      "titleCount": 9577,
+      "titleCount": 9579,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14498,7 +14500,7 @@
         "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
-        "test/unit/api/body_parser_error.test.js": "221cc88d32cbb656",
+        "test/unit/api/body_parser_error.test.js": "045240b374c93631",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "26bf32bc8528aff4",
@@ -15360,7 +15362,7 @@
     },
     "test:all": {
       "fileCount": 1159,
-      "titleCount": 10452,
+      "titleCount": 10454,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15663,7 +15665,7 @@
         "test/unit/anchor/snapshot_checkpoint/signed_record.test.js": "bb1f2099c4d69d0f",
         "test/unit/anchor/snapshot_checkpoint/snapshot_mesh.test.js": "646601a4bc243f96",
         "test/unit/api/api_push_unknown_chain.test.js": "203281f6a9fdda81",
-        "test/unit/api/body_parser_error.test.js": "221cc88d32cbb656",
+        "test/unit/api/body_parser_error.test.js": "045240b374c93631",
         "test/unit/api/boot_auth_gate.test.js": "9eddb3ae53f0f141",
         "test/unit/api/boot_guard/boot_guard.test.js": "404b58aba66d3577",
         "test/unit/api/boot_guard/oracle_epoch_env_baseline.test.js": "26bf32bc8528aff4",
