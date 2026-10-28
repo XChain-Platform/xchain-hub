@@ -143,13 +143,40 @@ module.exports = {
     // state is unknown, which a retraction does not resolve, and only an operator may
     // release one.
     //
-    // Nothing here can ask whether the retracted batch is back in a mempool: the
-    // encoder answers only which block holds a txid (get_tx_block), so a reorged batch
-    // re-mined from the mempool and the recovery re-publish can both land.
+    // A retraction can arrive AFTER the new branch has already re-mined the batch (a
+    // delayed or retried delivery). Those rounds are not lost, the chain still carries
+    // them, so the landing chain's indexer is asked first and every round a valid batch
+    // on the active chain covers keeps its markers and stays shed: re-arming it would
+    // put a duplicate wire on chain. Fails open to "none carried" when the indexer
+    // cannot be asked, because a duplicate costs only a fee while a suppressed
+    // recovery costs the window's price history.
+    //
+    // What the indexer cannot see is a retracted batch still sitting in a mempool, so
+    // a re-mine that lands after this read can still race the recovery re-publish;
+    // assembleWindow asks the chain once more for every window flagged here.
     async clearPublishedMarkers(rounds) {
         let list = (Array.isArray(rounds) ? rounds : [rounds])
             .map(r => parseInt(r)).filter(r => Number.isFinite(r));
         if (list.length === 0) return 0;
+
+        let carried = new Set();
+        try { carried = await this.roundsCarriedByChain(list); }
+        catch (e) { logger.warn(nodeUtil.format('OraclePublisher: cannot ask the chain whether retracted rounds re-landed:', e && e.message)); }
+        if (carried.size > 0) {
+            for (let r of carried) this.markRoundLanded(r);
+            logger.info('OraclePublisher: retracted round(s) ' + Array.from(carried).join(', ') + ' are already ' +
+                'carried by a valid batch on the active chain; their publish markers stand and they are not re-published');
+            list = list.filter(r => !carried.has(r));
+            if (list.length === 0) return 0;
+        }
+
+        if (!this._retractedWindows) this._retractedWindows = new Set();
+        for (let r of list) {
+            this._retractedWindows.add(this.windowIndexOf(r));
+            while (this._retractedWindows.size > 4096) {
+                this._retractedWindows.delete(this._retractedWindows.values().next().value);
+            }
+        }
 
         for (let r of list) {
             this._publishedRounds.delete(r);
@@ -170,6 +197,36 @@ module.exports = {
             ' retracted batch round(s) (' + deleted + ' durable row(s) removed); the recovery ' +
             're-publish is no longer suppressed');
         return deleted;
+    },
+
+    // Called by assembleWindow. A window clearPublishedMarkers re-armed published
+    // once already, so the new branch may have re-mined that batch between the clear
+    // and this assembly. Shed every buffered round a valid batch on the active chain
+    // now carries, which leaves nothing to propose when the whole window re-landed and
+    // only the uncovered rounds when part of it did. Only flagged windows pay the
+    // indexer read, so the ordinary window-close path is unchanged. Fails open: an
+    // indexer that cannot be asked reads as "none carried" and the recovery proceeds.
+    async shedRetractedWindowCarriedByChain(windowIndex, first, last) {
+        if (!this._retractedWindows || !this._retractedWindows.has(windowIndex)) return 0;
+        let pending = this.bufferedRange(first, last).map(r => parseInt(r.round));
+        if (pending.length === 0) return 0;
+        let carried;
+        try { carried = await this.roundsCarriedByChain(pending); }
+        catch (e) {
+            logger.warn(nodeUtil.format('OraclePublisher: cannot ask the chain whether retracted window [' + first +
+                ',' + last + '] re-landed; re-publishing it:', e && e.message));
+            return 0;
+        }
+        let shed = 0;
+        for (let r of pending) {
+            if (carried.has(r)) shed += this.noteBatchLanded(r, r, null);
+        }
+        return shed;
+    },
+
+    // The window reached an assembly outcome, so its retraction check is spent.
+    forgetRetractedWindow(windowIndex) {
+        if (this._retractedWindows) this._retractedWindows.delete(windowIndex);
     },
 
     // ----- Durable at-most-once marker (oracle_published_rounds) -----
