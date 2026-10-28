@@ -15,10 +15,14 @@
 // so the landing-clock sweep never progressed; it must fall back to an unhinted read.
 
 const assert = require('node:assert/strict');
+const sinon = require('sinon');
 const priceQueries = require('../../../../src/db/prices/index.js');
 
-const ABSENT = Object.assign(new Error("Key 'idx_batchtime_round_status' doesn't exist in table 'price_snapshots'"),
-    { errno: 1176, code: 'ER_KEY_DOES_NOT_EXITS' });
+// Shaped like the mariadb driver's error: the server text lands in sqlMessage, while
+// message carries the driver's own wrapper.
+const ABSENT = Object.assign(new Error('(conn:1, no: 1176, SQLState: 42000) query failed'),
+    { errno: 1176, code: 'ER_KEY_DOES_NOT_EXISTS',
+      sqlMessage: "Key 'idx_batchtime_round_status' doesn't exist in table 'price_snapshots'" });
 
 function dbFailingFirstWith(err) {
     const calls = [];
@@ -42,6 +46,19 @@ describe('zero-stamped price round query without its index', () => {
         assert.doesNotMatch(db.calls[1].sql, /FORCE INDEX/);
         assert.match(db.calls[1].sql, / WHERE batch_block_time = 0 AND round_number > \? AND status != 'skipped' ORDER BY round_number ASC LIMIT \?$/);
         assert.deepEqual(db.calls[1].params, [136050, 100]);
+    });
+
+    it('warns once per process, not on every tick', async () => {
+        const { getLogger } = require('../../../../src/observability');
+        const warn = sinon.spy(getLogger(), 'warn');
+        try {
+            for (let tick = 0; tick < 3; tick++) {
+                await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(dbFailingFirstWith(ABSENT), 0, 100);
+            }
+            assert.ok(warn.callCount <= 1, 'warned ' + warn.callCount + ' times');
+        } finally {
+            warn.restore();
+        }
     });
 
     it('rethrows any other failure, so a statement timeout still surfaces', async () => {

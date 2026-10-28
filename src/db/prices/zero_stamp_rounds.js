@@ -27,7 +27,7 @@ const logger = getLogger();
 
 const ZERO_STAMP_INDEX = 'idx_batchtime_round_status';
 // MariaDB's "Key '...' doesn't exist in table" for an index hint naming an absent key.
-const ER_KEY_DOES_NOT_EXITS = 1176;
+const ER_KEY_DOES_NOT_EXISTS = 1176;
 
 let warnedIndexAbsent = false;
 
@@ -39,7 +39,7 @@ function zeroStampRoundsSql(hint) {
 }
 
 function isAbsentIndex(e) {
-    return !!e && (e.errno === ER_KEY_DOES_NOT_EXITS || e.code === 'ER_KEY_DOES_NOT_EXITS')
+    return !!e && (e.errno === ER_KEY_DOES_NOT_EXISTS || e.code === 'ER_KEY_DOES_NOT_EXISTS')
         && String(e.sqlMessage || e.message || '').includes(ZERO_STAMP_INDEX);
 }
 
