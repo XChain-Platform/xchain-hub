@@ -16,17 +16,9 @@
 
 const assert = require('node:assert/strict');
 const sinon = require('sinon');
-const ROUNDS_PATH = require.resolve('../../../../src/db/prices/zero_stamp_rounds.js');
-const INDEX_PATH = require.resolve('../../../../src/db/prices/index.js');
-
-// The absent-index latch is module state; load a fresh copy so each case starts unlatched.
-function freshPriceQueries() {
-    delete require.cache[ROUNDS_PATH];
-    delete require.cache[INDEX_PATH];
-    return require(INDEX_PATH);
-}
-
-let priceQueries = freshPriceQueries();
+// The absent-index latch is held per Database instance, so each case's fresh fake db
+// starts unlatched and the module is never reloaded.
+const priceQueries = require('../../../../src/db/prices/index.js');
 
 // Throws ABSENT only for the hinted statement, like a real server lacking the key.
 function dbAbsentForHint() {
@@ -60,8 +52,6 @@ function dbFailingFirstWith(err) {
 }
 
 describe('zero-stamped price round query latch across ticks', () => {
-    beforeEach(() => { priceQueries = freshPriceQueries(); });
-
     it('issues the hinted statement once across ticks, so doQuery has no repeated error to log', async () => {
         const db = dbAbsentForHint();
         for (let tick = 0; tick < 3; tick++) {
@@ -85,8 +75,6 @@ describe('zero-stamped price round query latch across ticks', () => {
 });
 
 describe('zero-stamped price round query without its index', () => {
-    beforeEach(() => { priceQueries = freshPriceQueries(); });
-
     it('reads unhinted when the forced index is absent, with the same filter and bounds', async () => {
         const db = dbFailingFirstWith(ABSENT);
         const rows = await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(db, 136050, 100);
@@ -102,10 +90,11 @@ describe('zero-stamped price round query without its index', () => {
         const { getLogger } = require('../../../../src/observability');
         const warn = sinon.spy(getLogger(), 'warn');
         try {
+            const db = dbAbsentForHint();
             for (let tick = 0; tick < 3; tick++) {
-                await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(dbAbsentForHint(), 0, 100);
+                await priceQueries.findZeroBatchBlockTimePriceSnapshotRoundsAfter.call(db, 0, 100);
             }
-            assert.ok(warn.callCount <= 1, 'warned ' + warn.callCount + ' times');
+            assert.equal(warn.callCount, 1);
         } finally {
             warn.restore();
         }

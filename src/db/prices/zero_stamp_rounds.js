@@ -29,7 +29,10 @@ const ZERO_STAMP_INDEX = 'idx_batchtime_round_status';
 // MariaDB's "Key '...' doesn't exist in table" for an index hint naming an absent key.
 const ER_KEY_DOES_NOT_EXISTS = 1176;
 
-let warnedIndexAbsent = false;
+// The Database instances that found the key absent. Per instance, not per module, so
+// the latch lives exactly as long as the pool it describes and no test has to reload
+// this module (a reload breaks the identity the db mixin install relies on).
+const indexAbsentOn = new WeakSet();
 
 function zeroStampRoundsSql(hint) {
     return `SELECT DISTINCT round_number
@@ -58,12 +61,12 @@ module.exports = {
         // failure at error level, so retrying it each tick would print a 1176 error line
         // per page read while the fallback works. A hub restart after the migration
         // picks the key up again.
-        if (!warnedIndexAbsent) {
+        if (!indexAbsentOn.has(this)) {
             try {
                 return await this.doQuery(zeroStampRoundsSql(` FORCE INDEX (${ZERO_STAMP_INDEX})`), [round, limit]);
             } catch (e) {
                 if (!isAbsentIndex(e)) throw e;
-                warnedIndexAbsent = true;
+                indexAbsentOn.add(this);
                 logger.warn(`price_snapshots index ${ZERO_STAMP_INDEX} is absent; the landing-clock sweep reads `
                     + 'without it until `npm run migrate` applies 2026-10-28-price-snapshots-zero-stamp-round-index.sql '
                     + 'and the hub restarts');
