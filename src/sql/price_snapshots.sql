@@ -61,5 +61,7 @@ CREATE TABLE price_snapshots (
     -- The landing stamp is written by round_number and read by (coin_pair, landing
     -- clock, round_number) on the indexer side; keep the hub copy indexed the same way
     -- so the mirror's bootstrap paging and the hub's own snapshot reads share it.
-    KEY idx_pair_batchtime_round (coin_pair, batch_block_time, round_number)
+    KEY idx_pair_batchtime_round (coin_pair, batch_block_time, round_number),
+    -- getNextAnchorBatchSeq takes MAX(batch_seq); without this key it full-scans the table.
+    KEY idx_batch_seq (batch_seq)
 );
