@@ -64,6 +64,10 @@ CREATE TABLE price_snapshots (
     KEY idx_pair_batchtime_round (coin_pair, batch_block_time, round_number),
     -- getNextAnchorBatchSeq takes MAX(batch_seq); without this key it full-scans the table.
     KEY idx_batch_seq (batch_seq),
+    -- The landing-clock repair sweep reads zero-stamped, non-skipped rounds in round order
+    -- past a cursor; this covering key serves the equality, the range, the ORDER BY and the
+    -- status filter, where the pair-led key filesorts every zero-stamped row.
+    KEY idx_batchtime_round_status (batch_block_time, round_number, status),
     -- The batch retraction reads (rounds of a retracted PRICE batch, orphaned landing
     -- stamps) pin source_chain and range over source_action_index under a generation fence;
     -- without this key they scan the table and hit the statement timeout.

@@ -68,18 +68,17 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, {
         return this.doQuery('SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
     },
 
-    // Reads only unstamped, non-skipped rounds for the landing-clock repair sweep.
+    // Reads only unstamped, non-skipped rounds for the landing-clock repair sweep. The
+    // covering (batch_block_time, round_number, status) key returns zero-stamped entries
+    // already in round order, so the read stops after `limit` rounds past the cursor. A
+    // pair-led key cannot: ordering by round across every pair materializes and filesorts
+    // every zero-stamped row, which outran the statement limit on a few hundred thousand.
     async findZeroBatchBlockTimePriceSnapshotRoundsAfter(round, limit) {
         return this.doQuery(
-            `SELECT DISTINCT pending.round_number
-             FROM (
-                 SELECT DISTINCT coin_pair
-                 FROM price_snapshots FORCE INDEX (idx_pair_batchtime_round)
-             ) AS pairs
-             STRAIGHT_JOIN price_snapshots AS pending FORCE INDEX (idx_pair_batchtime_round)
-               ON pending.coin_pair = pairs.coin_pair AND pending.batch_block_time = 0
-             WHERE pending.round_number > ? AND pending.status != 'skipped'
-             ORDER BY pending.round_number ASC LIMIT ?`, [round, limit]);
+            `SELECT DISTINCT round_number
+             FROM price_snapshots FORCE INDEX (idx_batchtime_round_status)
+             WHERE batch_block_time = 0 AND round_number > ? AND status != 'skipped'
+             ORDER BY round_number ASC LIMIT ?`, [round, limit]);
     },
 
     // Reads rows from price_snapshots.

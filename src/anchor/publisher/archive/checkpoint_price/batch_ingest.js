@@ -99,6 +99,30 @@ function earliestLandingForRound(round, batches){
     return landed;
 }
 
+// The ascending rounds one sweep page asks about: every row of an indexed page is already
+// zero-stamped and live, while a legacy id page still needs that filter applied here.
+function sweepPageRounds(answer, indexed){
+    return Array.from(new Set(answer.filter(row => indexed ||
+        (String(row && row.status) !== 'skipped' &&
+        wholeNumber(row && row.batch_block_time, 0) === 0)).map(row =>
+        wholeNumber(row && row.round_number, 0)).filter(round => round !== null)))
+        .sort((a, b) => a - b);
+}
+
+// Stamp the rounds of one sweep page the landing chain fully answered; returns rows stamped.
+async function stampSweepPage(context, aggregator, rounds){
+    if(rounds.length === 0) return 0;
+    const landings = await context.fetchPriceBatchLandings(rounds[0], rounds[rounds.length - 1]);
+    if(landings === null) return 0;
+    let stamped = 0;
+    for(const round of rounds){
+        if(round >= landings.completeBelow) break;
+        const blockTime = earliestLandingForRound(round, landings.batches);
+        if(blockTime !== null) stamped += await aggregator.stampBatchLanding(round, blockTime);
+    }
+    return stamped;
+}
+
 const methods = {
 
     // Every valid PRICE batch overlapping [first, last] on the landing chain, read page by
@@ -155,7 +179,11 @@ const methods = {
     },
 
     // One bounded sweep. Production reads only zero-stamped rounds through an indexed
-    // round cursor. The cursor starts over on each slow tick so unresolved clocks retry.
+    // round cursor that persists across ticks: a sweep resumes where the last one stopped
+    // and starts over at 0 only once it has read past the newest zero-stamped round, so
+    // unresolved clocks still retry on the next pass. Restarting at 0 on every tick would
+    // spend each sweep's whole page budget on old rounds no landed batch can ever stamp
+    // and never reach a reset window near the tip.
     async runPriceBatchLandingBackfill(){
         if(this.priceLandingBackfillRunning) return 0;
         const aggregator = this.hub && this.hub.priceAggregator;
@@ -166,8 +194,8 @@ const methods = {
             const indexedQuery = this.db && this.db.findZeroBatchBlockTimePriceSnapshotRoundsAfter;
             const legacyQuery = this.db && this.db.findPriceSnapshotsById;
             if(typeof indexedQuery !== 'function' && typeof legacyQuery !== 'function') return 0;
-            let cursor = typeof indexedQuery === 'function' ? 0 :
-                (wholeNumber(this.priceLandingBackfillRowCursor, 0) || 0);
+            let cursor = wholeNumber(typeof indexedQuery === 'function' ?
+                this.priceLandingBackfillRoundCursor : this.priceLandingBackfillRowCursor, 0) || 0;
             for(let page = 0; page < PRICE_BACKFILL_MAX_PAGES; page++){
                 const indexed = typeof indexedQuery === 'function';
                 const answer = indexed ?
@@ -175,7 +203,8 @@ const methods = {
                     await legacyQuery.call(this.db, cursor, PRICE_BACKFILL_ROW_PAGE);
                 if(!Array.isArray(answer)) throw new Error('zero-stamped round query returned no row list');
                 if(answer.length === 0){
-                    if(!indexed) this.priceLandingBackfillRowCursor = 0;
+                    if(indexed) this.priceLandingBackfillRoundCursor = 0;
+                    else this.priceLandingBackfillRowCursor = 0;
                     break;
                 }
                 const cursorField = indexed ? 'round_number' : 'id';
@@ -183,24 +212,13 @@ const methods = {
                     wholeNumber(row && row[cursorField], 1) || 0));
                 if(nextCursor <= cursor) throw new Error('price snapshot page did not advance');
                 if(!indexed) this.priceLandingBackfillRowCursor = nextCursor;
-                const rounds = Array.from(new Set(answer.filter(row => indexed ||
-                    (String(row && row.status) !== 'skipped' &&
-                    wholeNumber(row && row.batch_block_time, 0) === 0)).map(row =>
-                    wholeNumber(row && row.round_number, 0)).filter(round => round !== null)))
-                    .sort((a, b) => a - b);
-                if(rounds.length > 0){
-                    const landings = await this.fetchPriceBatchLandings(rounds[0], rounds[rounds.length - 1]);
-                    if(landings !== null){
-                        for(const round of rounds){
-                            if(round >= landings.completeBelow) break;
-                            const blockTime = earliestLandingForRound(round, landings.batches);
-                            if(blockTime !== null) stamped += await aggregator.stampBatchLanding(round, blockTime);
-                        }
-                    }
-                }
+                stamped += await stampSweepPage(this, aggregator, sweepPageRounds(answer, indexed));
                 cursor = nextCursor;
+                // Persisted only after the page's stamps, so a failure mid-page retries it.
+                if(indexed) this.priceLandingBackfillRoundCursor = nextCursor;
                 if(answer.length < PRICE_BACKFILL_ROW_PAGE){
-                    if(!indexed) this.priceLandingBackfillRowCursor = 0;
+                    if(indexed) this.priceLandingBackfillRoundCursor = 0;
+                    else this.priceLandingBackfillRowCursor = 0;
                     break;
                 }
             }
