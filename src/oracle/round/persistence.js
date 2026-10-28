@@ -48,6 +48,16 @@ module.exports = {
     // fire-and-forget exactly like the registered-sender persist beside it, and an
     // indexer fault must cost an audit row rather than the round.
     async persistFromStakeWeight(round, envelope, prices, senderPubkey) {
+        // While the BTC tip is unavailable the round number stands in for the height.
+        // That is not a BTC height, so asking the indexer about it can only draw a
+        // "not yet indexed" answer that the consensus-input monitor would count as a
+        // link failure on a healthy indexer. The audit row is diagnostic-only, so skip
+        // the lookup without counting a feed fault.
+        if (this.chainTipFallbackActive) {
+            logger.warn('Oracle: skipping DB persist for sender ' + envelope.sender + ' on round ' + round +
+                ': BTC chain tip unavailable, round number anchor is not a block height (no stake-weight lookup made)');
+            return;
+        }
         let feed = this.hub && this.hub.stakeWeightFeed;
         let placed = await stakeMembership(feed, this.currentBtcBlockHeight, senderPubkey);
         if (placed.status === 'member') {
