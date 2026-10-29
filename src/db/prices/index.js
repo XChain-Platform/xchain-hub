@@ -29,10 +29,11 @@ const priceIngestWatermarks = require('./price_ingest_watermarks.js');
 const batchLandingReset     = require('./batch_landing_reset.js');
 const zeroStampRounds       = require('./zero_stamp_rounds.js');
 const chainRestore          = require('./chain_restore.js');
+const newestPage            = require('./newest_page.js');
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so this
 // module still exports ONE price-family mixin that src/db/index.js installs unchanged.
-module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zeroStampRounds, chainRestore, {
+module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zeroStampRounds, chainRestore, newestPage, {
 
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/consensus.js:374.
@@ -176,19 +177,6 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/price_aggregator.js:782.
     async updatePriceSnapshotByRoundNumber(landed, round, landed2) {
         return this.doQuery(`UPDATE price_snapshots SET batch_block_time = ? WHERE round_number = ? AND status != 'skipped' AND (batch_block_time = 0 OR batch_block_time > ?)`, [landed, round, landed2]);
-    },
-
-    // Reads the newest price_snapshots rows in every status, skipped and disputed
-    // included, for health consumers. Moved here from src/XChainHub.js:969, the
-    // status 'all' branch.
-    async findPriceSnapshotsAnyStatus(limit) {
-        return this.doQuery("SELECT * FROM price_snapshots ORDER BY round_number DESC, coin_pair ASC LIMIT ?", [limit]);
-    },
-
-    // Reads the newest finalized price_snapshots rows, the historical default that fee
-    // and price consumers rely on. Moved here from src/XChainHub.js:972.
-    async findPriceSnapshotsFinalized(limit) {
-        return this.doQuery("SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?", [limit]);
     },
 
     // Reads the newest finalized price_snapshots row for one coin pair.

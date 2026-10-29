@@ -140,7 +140,7 @@ describe('price_snapshots: columns xchain-dashboard reads', function () {
     it('the status-all read the dashboard uses still selects every column', async function () {
         let hub = createMockHub();
         await hub.db.findPriceSnapshotsAnyStatus(5);
-        expect(hub.db.doQuery.getCall(0).args[0]).to.match(/^SELECT \* FROM price_snapshots /);
+        expect(hub.db.doQuery.getCall(1).args[0]).to.match(/^SELECT \* FROM price_snapshots /);
     });
 
     it('names a column the DDL no longer declares', function () {
