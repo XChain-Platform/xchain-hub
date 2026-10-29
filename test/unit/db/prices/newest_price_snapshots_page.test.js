@@ -80,6 +80,26 @@ function generatedTable(seed) {
     return rows;
 }
 
+// Empty, fewer than the limit, exactly the limit, a boundary round split by the limit,
+// and the finalized filter mixed with other statuses.
+function boundaryCases() {
+    return [
+        { rows: [], limit: 5 },
+        { rows: [row(3, 'BTC/USD')], limit: 5 },
+        { rows: [row(3, 'BTC/USD'), row(3, 'DOGE/USD')], limit: 2 },
+        {
+            rows: [row(9, 'BTC/USD'), row(8, 'BTC/USD'), row(8, 'DOGE/USD'),
+                row(8, 'ETH/USD'), row(7, 'BTC/USD')],
+            limit: 3
+        },
+        {
+            rows: [row(9, 'BTC/USD', 'skipped'), row(8, 'BTC/USD'),
+                row(8, 'DOGE/USD', 'disputed'), row(7, 'BTC/USD')],
+            limit: 2
+        }
+    ];
+}
+
 describe('price_snapshots newest page range bound', () => {
     for (const finalizedOnly of [false, true]) {
         const variant = finalizedOnly ? 'finalized rows' : 'rows in any status';
@@ -94,22 +114,7 @@ describe('price_snapshots newest page range bound', () => {
         });
 
         it(`matches original semantics for ${variant} at page boundary cases`, async () => {
-            const cases = [
-                { rows: [], limit: 5 },
-                { rows: [row(3, 'BTC/USD')], limit: 5 },
-                { rows: [row(3, 'BTC/USD'), row(3, 'DOGE/USD')], limit: 2 },
-                {
-                    rows: [row(9, 'BTC/USD'), row(8, 'BTC/USD'), row(8, 'DOGE/USD'),
-                        row(8, 'ETH/USD'), row(7, 'BTC/USD')],
-                    limit: 3
-                },
-                {
-                    rows: [row(9, 'BTC/USD', 'skipped'), row(8, 'BTC/USD'),
-                        row(8, 'DOGE/USD', 'disputed'), row(7, 'BTC/USD')],
-                    limit: 2
-                }
-            ];
-            for (const item of cases) {
+            for (const item of boundaryCases()) {
                 const { result } = await readPage(item.rows, finalizedOnly, item.limit);
                 assert.deepEqual(result, originalPage(item.rows, finalizedOnly, item.limit));
             }
