@@ -191,20 +191,23 @@ function registerFeature13dBQueryWrappersPart1() {
       coin_pair: 'BTC/USD'
     }]);
     await feature13dBQueryWrappersHub.getPriceSnapshots(5);
-    expect(rootSuiteMockDb.doQuery.getCall(0).args[1]).to.deep.equal([5]);
-    expect(rootSuiteMockDb.doQuery.getCall(0).args[0]).to.include('price_snapshots');
+    // A boundary read (the 5th newest round) and then the bounded page read.
+    expect(rootSuiteMockDb.doQuery.getCall(0).args[1]).to.deep.equal([4]);
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[1][1]).to.equal(5);
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[0]).to.include('price_snapshots');
     // Default stays finalized-only (fee/price consumers unchanged);
     // status='all' additionally returns skipped/disputed rows so
     // health/monitoring consumers can see stall/fork states (#180 seam).
-    expect(rootSuiteMockDb.doQuery.getCall(0).args[0]).to.include("status = 'finalized'");
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[0]).to.include("status = 'finalized'");
     rootSuiteMockDb.doQuery.resetHistory();
     rootSuiteMockDb.doQuery.resolves([{
       coin_pair: 'BTC/USD'
     }]);
     await feature13dBQueryWrappersHub.getPriceSnapshots(5, 'all');
-    expect(rootSuiteMockDb.doQuery.getCall(0).args[0]).to.include('price_snapshots');
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[0]).to.include('price_snapshots');
     expect(rootSuiteMockDb.doQuery.getCall(0).args[0]).to.not.include("status = 'finalized'");
-    expect(rootSuiteMockDb.doQuery.getCall(0).args[1]).to.deep.equal([5]);
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[0]).to.not.include("status = 'finalized'");
+    expect(rootSuiteMockDb.doQuery.getCall(1).args[1][1]).to.equal(5);
     rootSuiteMockDb.doQuery.resetHistory();
     rootSuiteMockDb.doQuery.resolves([{
       coin_pair: 'BTC/USD'
