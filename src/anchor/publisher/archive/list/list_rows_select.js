@@ -34,12 +34,6 @@ module.exports = {
 
     listIdsOf(rows){
         return listRows(rows).map(row => ({ snapshot_id: String(row.snapshot_id) }));
-    },
-
-    listCapabilityWants(rows){
-        return listRows(rows).map(row => ({
-            block: Number(row.snapshot_block), capability: 'cross_chain'
-        }));
     }
 
 };

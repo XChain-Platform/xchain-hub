@@ -60,10 +60,12 @@ const WHOLE_FEDERATION = '*';
 
 // Stake sets whose weighted gate can halt a rail: `price` rounds (a prior halt), the
 // `oracle_publish` election that puts a finalized PRICE on chain (a healthy price share can
-// still fail to publish), `attestation` rounds, `cross_chain` settlement, and the
-// whole-federation set config-change consensus tallies, all under the same two-thirds
-// predicate. Kept equal to DERIVED_CAPABILITIES plus WHOLE_FEDERATION by test.
-const DEFAULT_CAPABILITIES = ['price', 'oracle_publish', 'attestation', 'cross_chain', WHOLE_FEDERATION];
+// still fail to publish), the `archive_publish` set the archive leg signs on (oracle_publish
+// minus rollcall-absent sources once its presence gate is armed, identical before),
+// `attestation` rounds, `cross_chain` settlement, and the whole-federation set config-change
+// consensus tallies, all under the same two-thirds predicate. Kept equal by test to every
+// capability the hub persists a snapshot for, plus DERIVED_CAPABILITIES and WHOLE_FEDERATION.
+const DEFAULT_CAPABILITIES = ['price', 'oracle_publish', 'archive_publish', 'attestation', 'cross_chain', WHOLE_FEDERATION];
 
 // Five minutes. Stake moves at block cadence and the alert is a forecast with
 // hours of lead time, so a tighter loop only adds indexer load; ten polls still

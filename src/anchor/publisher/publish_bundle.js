@@ -124,13 +124,13 @@ module.exports = {
         // A DEGRADED ROUND DEFERS THE BUNDLE, rather than falling through to publish a
         // v0 carrying ATTEST_SIG_COUNT 0 on the reasoning that "the anchor always
         // lands and only the reward gains the quorum dependency". That reasoning is
-        // false against the wire: the indexer's v0 BUNDLE parser requires
-        // ATTEST_SIG_COUNT >= 1 (actions/anchor.js, the bundle publisher tail), so a
-        // count-0 bundle is not a degraded anchor, it is an INVALID one. The fallback
-        // therefore paid a real DOGE fee to put a permanently invalid row on chain and
-        // still anchored nothing. Count 0 is legal only on the v1 ARCHIVE head, which
-        // has its own `< 0` check and its own degraded path; the two are not
-        // interchangeable and this site had borrowed the archive's rule.
+        // false against the wire: the indexer's v0 and v3 bundle tail parser requires
+        // ATTEST_SIG_COUNT >= 1 at every height (actions/anchor/validate.js,
+        // parseBundleTail), so a count-0 bundle is not a degraded anchor, it is an
+        // INVALID one. Publishing it pays a real DOGE fee to put a permanently invalid
+        // row on chain and still anchors nothing. Count 0 is legal only on the v1
+        // ARCHIVE head, which has its own `< 0` check and its own degraded path; the
+        // two are not interchangeable, and the bundle must never borrow the archive's rule.
         //
         // Deferring is safe: nothing is recorded and no transaction is built, so the
         // checkpoints stay pending and the next cycle republishes them. The failure

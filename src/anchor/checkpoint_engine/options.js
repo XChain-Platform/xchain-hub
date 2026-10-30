@@ -172,9 +172,9 @@ module.exports = {
         this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, off_cadence: 0,
                                  indexer_read_failed: 0, indexer_no_block: 0, indexer_replaying: 0,
                                  supersede_no_replay: 0, supersede_target_mismatch: 0,
-                                 supersede_digest_mismatch: 0 };
+                                 supersede_digest_mismatch: 0, indexer_divergence: 0, rootless: 0 };
         this._lastCosignDeclineReason = null;
-        this._cosignDeclineLoggedAt   = {};   // per-reason warn throttle, on the cadence-stall window
+        this._cosignDeclineLoggedAt   = {};   // pre-auth decline warn throttle per reason, on the cadence-stall window
         // Leader self-accepts that failed after quorum (queueSelfAccept): Map<roundId, held>,
         // re-run on each tick, plus lifetime counts of failed attempts and of retries given up.
         this._selfAcceptRetries   = new Map();
@@ -227,6 +227,13 @@ module.exports = {
         this._roundFailures             = 0;
         this._roundFailuresByChain      = {};
         this._lastRoundFailureByChain   = {};
+        // Rounds this hub led that its own proposal check refused (noteLeaderDecline), by
+        // reason. Zero-filled with every reason that check returns so the stats shape is fixed.
+        this._leaderDeclines = { indexer_replaying: 0, supersede_no_replay: 0, supersede_unwitnessed: 0,
+                                 supersede_no_disagreement: 0, supersede_target_mismatch: 0,
+                                 supersede_digest_mismatch: 0, checkpoint_disagreement: 0, checkpoint_reorged: 0 };
+        this._leaderDeclinesTotal      = 0;
+        this._lastLeaderDeclineByChain = {};
     }
 
 };

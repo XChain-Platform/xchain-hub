@@ -153,3 +153,43 @@ describe('archive verifiers log a row this hub never held', () => {
             String(call.args[0]).includes('accepting on local absence alone'))).to.equal(true);
     });
 });
+
+// The unsigned status column and key list of a bridge or policy row this hub never held.
+describe('archive verifiers refuse an unheld bridge or policy row the builder could not emit', () => {
+    const bridgeRow = over => Object.assign(StateAnchorPublisher.prototype.serializeBridgeTransfer(bridge()), over);
+    const policyRow = over => Object.assign(StateAnchorPublisher.prototype.serializePolicySnapshot(policy()), over);
+
+    it('accepts an unheld bridge transfer archived as finalized or as retracted', async () => {
+        for(const status of ['finalized', 'retracted']){
+            expect(await buildPub({}).verifyArchivedBridgeTransfer(bridgeRow({ status })), status).to.equal(true);
+        }
+    });
+
+    it('refuses an unheld bridge transfer with a status its table never holds', async () => {
+        expect(await buildPub({}).verifyArchivedBridgeTransfer(bridgeRow({ status: 'bogus' }))).to.equal(false);
+    });
+
+    it('refuses an unheld bridge transfer with an extra key or a string snapshot block', async () => {
+        expect(await buildPub({}).verifyArchivedBridgeTransfer(bridgeRow({ extra: 1 }))).to.equal(false);
+        expect(await buildPub({}).verifyArchivedBridgeTransfer(bridgeRow({ snapshot_block: String(BLOCK) })))
+            .to.equal(false);
+    });
+
+    it('accepts an unheld finalized policy snapshot and refuses a retracted one', async () => {
+        expect(await buildPub({}).verifyArchivedPolicySnapshot(policyRow())).to.equal(true);
+        expect(await buildPub({}).verifyArchivedPolicySnapshot(policyRow({ status: 'retracted' }))).to.equal(false);
+    });
+
+    it('refuses an unheld policy snapshot with a missing key', async () => {
+        const row = policyRow();
+        delete row.effective_time;
+        expect(await buildPub({}).verifyArchivedPolicySnapshot(row)).to.equal(false);
+    });
+
+    it('keeps comparing a held bridge transfer to its twin whatever the unheld rule says', async () => {
+        const held = Object.assign(bridge(), { status: 'retracted' });
+        expect(await buildPub({ bridge: held }).verifyArchivedBridgeTransfer(bridgeRow({ status: 'retracted' })))
+            .to.equal(true);
+        expect(await buildPub({ bridge: held }).verifyArchivedBridgeTransfer(bridgeRow())).to.equal(false);
+    });
+});

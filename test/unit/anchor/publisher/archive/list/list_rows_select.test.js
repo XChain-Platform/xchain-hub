@@ -7,8 +7,9 @@
 
 const { expect } = require('chai');
 const {
-    capListRows, sortedListRows, listIdsOf, listCapabilityWants
+    capListRows, sortedListRows, listIdsOf
 } = require('../../../../../../src/anchor/publisher/archive/list/list_rows_select.js');
+const { archiveCapabilityWants } = require('../../../../../../src/anchor/publisher/archive/capability_wants.js');
 
 describe('archive list row selection', () => {
     it('caps nine rows at eight and reports the cap', () => {
@@ -41,11 +42,12 @@ describe('archive list row selection', () => {
         expect(listIdsOf(rows)).to.deep.equal([{ snapshot_id: '12' }, { snapshot_id: '3' }]);
     });
 
+    // Pin the one shared list rule, so builder and follower cannot drift on the list kind
     it('projects cross-chain capability wants in the given order', () => {
         let rows = [{ snapshot_block: '7' }, { snapshot_block: 5 }];
 
-        expect(listCapabilityWants(rows)).to.deep.equal([
-            { block: 7, capability: 'cross_chain' },
+        expect(archiveCapabilityWants({ list_snapshots: rows }, null, () => false)).to.deep.equal([
+            { block: '7', capability: 'cross_chain' },
             { block: 5, capability: 'cross_chain' }
         ]);
     });

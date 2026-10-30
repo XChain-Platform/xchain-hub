@@ -26,6 +26,7 @@
 const crypto = require('crypto');
 const { MATCH_KEYS, CALL_KEYS } = require('./constants.js');
 const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
+const { hasSupersedeFields } = require('../checkpoint_engine/supersede_suffix.js');
 const eq = require('../../consensus/equivocation_header.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
@@ -52,6 +53,11 @@ function isCheckpointAnchorRow(row){
 }
 
 function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
+    // Refuse a supersession marker as the wrapper: the fold canonical has no SUPERSEDE
+    // segment, so its bytes would differ from what the light client rebuilds for that row.
+    if(hasSupersedeFields(checkpoint))
+        throw new Error('fold wrapper checkpoint ' + checkpoint.chain + '/' + checkpoint.network + ' seq ' +
+                        checkpoint.checkpoint_seq + ' carries supersession fields; the fold canonical has no SUPERSEDE segment');
     let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
               checkpointForms.checkpointRootSuffix(checkpoint) + foldArchiveSuffix({
                   MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
@@ -74,7 +80,10 @@ const foldPublisherMethods = {
         if(!ordered[wrapperSectionIndex]) return null;
         let wrapper = ordered[wrapperSectionIndex];
         let cp = this.cpFromRow(wrapper);
+        // Hold while an unsettled archive send may still be in flight (the v1 round's hold)
+        if(this.archiveRoundIntentHeld(await this.getLiveArchiveIntent(network), network)) return null;
         let batchSeq = await this.getNextBatchSeq();
+        if(this.foldSeqSpentByOwnAddress(batchSeq)) return null;
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return null;
         let archive = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
@@ -211,6 +220,8 @@ const foldPublisherMethods = {
     },
 
     async collectFoldArchive(group, network){
+        // Refresh the own spent seq before the subdeadline starts, so the read never eats it
+        await this.refreshOwnArchiveSeqFloor();
         let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
                                          Number(this.roundTimeoutMs) || 30000));
         let timer;
@@ -269,6 +280,7 @@ const foldPublisherMethods = {
     async completeFoldArchive(archiveSection, signer, txid){
         if(!archiveSection) return;
         await this.markArchiveSent(String(archiveSection.cp.network), archiveSection.batchSeq, txid);
+        this.noteOwnArchiveSeq(archiveSection.batchSeq);
         let broadcaster = signer && signer.broadcastFn
             ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer, { allowUnconfirmed: true }));
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
@@ -292,6 +304,7 @@ module.exports = {
     isAnchorFoldActive,
     isArchiveAnchorRow,
     isCheckpointAnchorRow,
+    hasSupersedeFields,
     foldArchiveCanonical,
     foldPublisherMethods,
 

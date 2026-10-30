@@ -63,6 +63,7 @@ function registerBundleAttestationRound() {
         registerQuorumCases();
         registerDeferralCases();
         registerImpostorCase();
+        registerSupersedeMarkerCases();
     });
 }
 
@@ -238,7 +239,7 @@ function registerDeferralCases() {
         // failed reward attestation must never block an anchor".
         //
         // That invariant was sound in intent and wrong against the wire. The indexer's
-        // v0 BUNDLE parser requires ATTEST_SIG_COUNT >= 1 (actions/anchor.js, the
+        // v0 BUNDLE parser requires ATTEST_SIG_COUNT >= 1 (validate.js parseBundleTail, the
         // bundle publisher tail), so the fallback never produced a degraded-but-valid
         // anchor: it produced an INVALID one, paid for with a real DOGE fee, and
         // anchored nothing. Count 0 is legal only on the v1 ARCHIVE head, which keeps
@@ -349,5 +350,42 @@ function registerImpostorCase() {
             { label: 'the leader to defer a bundle no follower co-signs' });
         expect(leader.published.some(p => p.split('|')[1] === '0'),
             'no v0 bundle is published over a superseded row').to.be.false;
+    });
+}
+
+// A plain row a later supersede marker covers is never selected, proposed or co-signed.
+function registerSupersedeMarkerCases() {
+    it('followers refuse to co-sign a bundle on a row a later supersede marker covers', async function () {
+        // Every follower holds a marker whose supersedes_from reaches the proposer's row, so
+        // the reader rule reports that row superseded and the followers' selector holds none.
+        let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+        let leader = v0Order(bus)[0];
+        for (let nd of bus.nodes) {
+            if (nd === leader) continue;
+            let held = nd.db.checkpoints[0];
+            nd.db.checkpoints.push(Object.assign({}, held, { id: 2, block_index: held.block_index + 1,
+                block_hash: 'f1'.repeat(32), checkpoint_seq: held.checkpoint_seq + 1,
+                supersedes_from: held.block_index, rules_digest: 'ab'.repeat(32) }));
+            expect(await nd.pub.findAnchorEligibleSections(), 'a superseded newest row is not selected').to.deep.equal([]);
+        }
+        await startAll(bus);
+        await leader.pub.flush();
+        await waitUntil(() => leader.pub.unattestedDeferrals > 0,
+            { label: 'the leader to defer a bundle no follower co-signs' });
+        expect(leader.published.some(p => p.split('|')[1] === '0'),
+            'no v0 bundle is published over a marker-superseded row').to.be.false;
+    });
+
+    it('the selector skips a marker-superseded row but keeps a row below the marker floor', async function () {
+        let bus  = buildMesh(1);
+        let nd   = bus.nodes[0];
+        let held = nd.db.checkpoints[0];
+        let marker = Object.assign({}, held, { id: 2, block_index: held.block_index + 1, block_hash: 'f2'.repeat(32),
+            checkpoint_seq: held.checkpoint_seq + 1, supersedes_from: held.block_index + 1, rules_digest: 'cd'.repeat(32) });
+        nd.db.checkpoints.push(marker);
+        let rows = await nd.pub.findAnchorEligibleSections();
+        expect(rows.map(r => r.checkpoint_seq), 'a floor above the row leaves it eligible').to.deep.equal([held.checkpoint_seq]);
+        marker.supersedes_from = held.block_index;
+        expect(await nd.pub.findAnchorEligibleSections(), 'a floor at the row supersedes it').to.deep.equal([]);
     });
 }

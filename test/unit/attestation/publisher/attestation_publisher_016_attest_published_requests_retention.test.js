@@ -193,6 +193,22 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         expect(del.params, 'the drained rid is not excluded').to.not.include(RID_A);
     }); });
 
+describe('AttestationPublisher: attest_published_requests retention on an unreadable queue', function () { afterEach(hookAt97681); it('skips the sweep when the durable WAL cannot be read, so no queued request loses its marker', async function () {
+        // A directory at the queue path makes the read fail with EISDIR: not a missing
+        // file, so the exclusion list is unknown and nothing may be deleted.
+        sinon.stub(console, 'warn');
+        sinon.stub(console, 'error');
+        const db  = mkDb(1);
+        const pub = makePublisher(MY_PUB, { db, p2pConfig: { [ENV_KEY]: '600000' } });
+        fs.mkdirSync(pub.queuePath);
+        try {
+            expect(await pub.prunePublishedRequests()).to.equal(0);
+            expect(deletes(db).length, 'an unread WAL must not read as an empty one').to.equal(0);
+        } finally {
+            fs.rmdirSync(pub.queuePath);
+        }
+    }); });
+
 describe('AttestationPublisher: attest_published_requests retention (#4869)', function () { afterEach(hookAt97681); it('skips the sweep entirely when the queue is too deep to exclude safely', async function () {
         sinon.stub(console, 'warn');
         const db  = mkDb(1);

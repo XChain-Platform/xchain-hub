@@ -24,6 +24,7 @@
 const canonicalForms    = require('./canonical_forms.js');
 const { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal } = require('./supersede_fill.js');
 const { checkpointProposalDecline } = require('./replay_hold.js');
+const { hasSupersedeFields } = require('./supersede_suffix.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
@@ -65,10 +66,9 @@ module.exports = {
         // snapshot_block, so a shared seq implies a shared snapshot_block implies one
         // payload. Followers re-derive and refuse a mismatch (handleSignReq).
         let cp = await this.checkpointForRound(chain, network, bh, snapshotBlock);
-        const proposalDecline = await this.leaderProposalDecline(
-            chain, network, cp, bh);
-        if(proposalDecline)
-            return this.noteCheckpointDecline(proposalDecline, cp, 'open leader round');
+        // A decline returns its reason, so the cadence callers keep this chain's failure entry.
+        const proposalDecline = await this.leaderProposalDecline(chain, network, cp, bh);
+        if(proposalDecline) return this.noteLeaderDecline(proposalDecline, cp);
         // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
         // (empty-root) canonical if the indexer hasn't produced them yet (operator must
         // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
@@ -92,7 +92,7 @@ module.exports = {
         if(!this.claimSeqSignature(cp, canonical)) return;
         this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
-        let snapCount = validators.length;   // raw row count (matches handleFinalized + anchor.js:336)
+        let snapCount = validators.length;   // raw row count (matches handleFinalized + the indexer's quorum.js oracleN)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum    = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
@@ -109,7 +109,7 @@ module.exports = {
 
     async leaderProposalDecline(chain, network, cp, bh){
         let expectedSupersede;
-        if(cp.supersedes_from != null || cp.rules_digest != null)
+        if(hasSupersedeFields(cp))
             expectedSupersede = await this.supersedeFieldsForRound(
                 chain, network, bh);
         return checkpointProposalDecline(cp, bh, expectedSupersede);

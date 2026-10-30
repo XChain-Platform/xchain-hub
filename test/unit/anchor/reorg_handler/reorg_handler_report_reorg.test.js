@@ -20,6 +20,7 @@ const ReorgHandler   = require('../../../../src/anchor/reorg_handler');
 const { createMockHub }     = require('../../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4 } = require('../../../helpers/fixtures');
 const { waitUntil }  = require('../../../helpers/waitUntil');
+const { getLogger }  = require('../../../../src/observability');
 
 // A valid observed-hash pair for the R2-C2 wire format (distinct 64-hex).
 const OLD_HASH = 'a'.repeat(64);
@@ -52,6 +53,7 @@ describe('ReorgHandler', function () {
 
     registerReportReorg();
     registerExecuteRollback();
+    registerExecuteRollbackLogLevel();
     registerHandleAlert();
     registerReportReorgValidation();
     registerCommitQuorumFailure();
@@ -201,6 +203,23 @@ function registerExecuteRollback() {
         it('adds reorgId to processed set', async function () {
             await rh.executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-x', 1, '[]');
             expect(rh.processed.has('reorg-x')).to.be.true;
+        });
+    });
+}
+
+// executeRollback() deletes attestations, so it logs at warn like the decoder and indexer.
+function registerExecuteRollbackLogLevel() {
+    describe('executeRollback() log level', function () {
+        it('logs the rollback start and completion at warn, naming the reorg', async function () {
+            const logger = getLogger();
+            const warn = sinon.stub(logger, 'warn');
+            const info = sinon.stub(logger, 'info');
+            await rh.executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-w', 3, '[]');
+            const warned = warn.getCalls().map(c => String(c.args[0]));
+            expect(warned.some(m => m.startsWith('Reorg: Rolling back cross-chain state for BTC at height 500000') &&
+                m.includes('reorg-w'))).to.equal(true);
+            expect(warned.some(m => m.startsWith('Reorg: Rollback complete for reorg-w'))).to.equal(true);
+            expect(info.getCalls().map(c => String(c.args[0])).filter(m => m.startsWith('Reorg: Roll'))).to.deep.equal([]);
         });
     });
 }

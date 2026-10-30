@@ -71,7 +71,7 @@ module.exports = {
         }
 
         let me = this.leaderInSigningSet(signingSet, anchor, first, last);
-        if(me === null) return empty;
+        if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return empty;
         let snapCount = signingSet.length;
 
         let held = await this.fillWindowGaps(first, last, rounds, signingSet, me);
@@ -95,7 +95,7 @@ module.exports = {
 
         // Genuine single-member set (membership proven above): this hub's own
         // signature IS the quorum, matching bftQuorumOrSingle's single-node bypass.
-        if(snapCount <= 1 || !this.peerManager){
+        if(snapCount <= 1){
             this.stats.batchSignQuorums++;
             return { met: true, sigs: [{ pubkey: me, sig: mySig }],
                      firstRound: first, lastRound: last, btcBlockHeight: anchor, canonical: canonical };
@@ -103,6 +103,15 @@ module.exports = {
 
         return await this.openSignRound({ first, last, anchor, canonical, signingSet, snapCount,
                                           signatures, rounds });
+    },
+
+    // True, with a warning, when a multi-member set has no peer manager: it can never
+    // reach quorum, so the window publishes nothing rather than a lone-signature batch.
+    peerlessMultiMemberSet(signingSet, anchor, first, last){
+        if(signingSet.length <= 1 || this.peerManager) return false;
+        logger.warn('OracleBatchSigner: no peer manager for a ' + signingSet.length + '-member price set at anchor ' +
+                     anchor + '; no batch for window [' + first + ',' + last + ']');
+        return true;
     },
 
     // Add every missing round finalized here or by an answering peer to the proposal
@@ -138,7 +147,7 @@ module.exports = {
     async fillFromPeers(first, last, gaps, signingSet, me, rounds, held){
         let quorum = bftQuorumOrSingle(signingSet.length, 1);
         if(quorum <= 1) return true;
-        if(!this.peerManager) return true;
+        if(!this.peerManager) return false;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
         let answer = await this.openFillRound({ first, last, gaps, peers, quorum });

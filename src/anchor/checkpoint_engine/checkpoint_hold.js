@@ -14,6 +14,8 @@
 
 'use strict';
 
+const { replayWindowFor } = require('./supersede_fill.js');
+
 const CHECKPOINT_HASH_FIELDS = [
     'ledger_hash',
     'actions_hash',
@@ -29,11 +31,12 @@ function supersedeWitnessDecline(rules){
     return 'supersede_unwitnessed';
 }
 
+// Bound the override by the strict window parser the leader uses, so a blank or missing bound covers nothing.
 function witnessedReplayCovers(rules, blockIndex){
-    const replay = rules && rules.replay;
-    return replay && replay.state === 'replayed' && replay.witness === 'passed' &&
-        replay.changed === true && Number(replay.target) <= Number(blockIndex) &&
-        Number(blockIndex) <= Number(replay.replay_to);
+    const span = replayWindowFor(rules);
+    if(!span) return false;
+    const block = Number(blockIndex);
+    return span.target <= block && block <= span.replay_to;
 }
 
 function checkpointHoldDecline(row, own, rules){

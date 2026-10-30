@@ -26,7 +26,7 @@
 // BTC [151560..151723] and EVERY ONE was `price`. Of 13 verdict divergences against
 // origin, five were ATTEST actions refused `invalid: insufficient signer stake` (no
 // `attestation` snapshot) and one was an ANCHOR archive head stored `unverified` (no
-// `oracle_publish` snapshot: xchain-indexer actions/anchor.js:384-387, `oracleN === 0`).
+// `oracle_publish` snapshot: xchain-indexer actions/anchor/quorum.js verifyHeadQuorum, `oracleN === 0`).
 //
 // The ordering is the whole difficulty and it is what `derives before any batch
 // arrives` below exists to pin: the indexer validates a parsed batch BEFORE it pushes

@@ -47,7 +47,7 @@ module.exports = {
     //   - anchor_<CHAIN>/anchor_bundle AT/ABOVE the anchor-reward flag-day, and
     //     anchor_archive AT/ABOVE the archive-reward flag-day: the indexer DOES
     //     re-derive these on-chain from the v0/v1 XANCPUB publisher attestation
-    //     (anchor.js createValidatorReward / reconcileAnchorRewardWinner), crediting
+    //     (anchor_reward_derive.js createValidatorReward / reconcileAnchorRewardWinner), crediting
     //     the same frozen ANCHOR_REWARD_AMOUNT / ARCHIVE_REWARD_AMOUNT. The hub still
     //     records the row locally (RewardTracker isDerived path), but this selector
     //     does NOT archive it on a scoped hub: the flag-day exclusion clause in

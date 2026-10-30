@@ -123,6 +123,16 @@ module.exports = {
         });
     },
 
+    // True, with a warning, when a multi-member set has no peer manager: both attestation
+    // rounds abstain before the slot claim, since a lone signature is a sub-quorum.
+    abstainWithoutPeers(snapCount, snapshotBlock, round){
+        if(snapCount <= 1 || this.peerManager) return false;
+        logger.warn('StateAnchorPublisher: no peer manager for a ' + snapCount + '-member oracle_publish set at ' +
+                    'snapshot_block ' + Number(snapshotBlock) + '; abstaining from the ' + round +
+                    ' rather than self-attesting');
+        return true;
+    },
+
     // Run the archive publisher-attestation round for a batch THIS hub is publishing
     // (mirrors runPublisherAttestationRound for the archive leg). The signing/quorum set
     // is resolved at the wrapper checkpoint's snapshot_block, the SAME set the indexer
@@ -154,6 +164,9 @@ module.exports = {
         // drops the reward (PUBLISHER must be in the verified set). Fall back to a count-0
         // tail rather than emit an attestation whose reward can never be credited.
         if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
+        if(this.abstainWithoutPeers(snapCount, cp.snapshot_block,
+                                    'archive publisher-attestation round (ATTEST_SIG_COUNT 0, no reward)'))
+            return { met: false, sigs: [] };
 
         // One XANCPUB signature per slot (attest_round.js claimAttestSlot): a rank-1
         // failover reuses rank 0's wrapper checkpoint, so a hub that co-signed rank 0
@@ -164,7 +177,7 @@ module.exports = {
         signatures.set(me, mySig);
 
         // Genuine single-node set (snapCount === 1, membership proven above).
-        if(snapCount <= 1 || !this.peerManager)
+        if(snapCount <= 1)
             return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
         return await this.openArchiveAttestRound(cp, batchSeq, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig);
     },

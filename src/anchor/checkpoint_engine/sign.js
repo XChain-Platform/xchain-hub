@@ -22,8 +22,8 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
+const { hasSupersedeFields } = require('./supersede_suffix.js');
 const {
-    hasSupersedeFields,
     supersedeCosignDecline,
     checkpointProposalDecline,
 } = require('./replay_hold.js');
@@ -31,6 +31,21 @@ const ValidatorIdentity = require('../../validators/identity.js');
 const { XCHK_SIGN, ALLOWED_CHAINS } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+
+// Co-sign declines handleSignReq reaches before it authenticates the sender.
+const PRE_AUTH_COSIGN_DECLINES = new Set(['own_tip_unresolved', 'snapshot_out_of_tolerance']);
+// Fallback pre-auth decline log window when the engine has no stall-log window set.
+const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
+
+const DIVERGENCE_FIELDS = ['network', 'block_index', 'block_hash', 'ledger_hash', 'actions_hash', 'contract_hash',
+    'state_root', 'state_root_version', 'block_merkle_root', 'block_merkle_version'];
+
+// Name the signed fields where the proposal and our own indexer block differ (log detail only).
+function divergentFields(cp, bh){
+    const norm = (v) => (v == null ? '' : String(v).toLowerCase());
+    const diff = DIVERGENCE_FIELDS.filter((f) => norm(cp[f]) !== norm(bh[f]));
+    return diff.length ? 'differs on ' + diff.join(',') : 'canonical differs';
+}
 
 module.exports = {
 
@@ -63,7 +78,7 @@ module.exports = {
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
         // Both declines here run before the sender is authenticated, so any peer can
-        // trigger them: noteCosignDecline throttles its warning per reason for that.
+        // trigger them: noteCheckpointDecline throttles their warning per reason for that.
         let myBtc = await this.resolveSnapshotBlock();
         if(!Number.isFinite(myBtc)) return this.noteCosignDecline('own_tip_unresolved', cp);   // no own tip -> fail closed
         if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks)
@@ -111,24 +126,53 @@ module.exports = {
 
     // Count a follower's refusal to co-sign and name it. Declining is the fail-closed answer;
     // a silent one lets a member drop out of every quorum with no trace while the rest still
-    // sign. Every decline is counted; repeated delivery logs once for each reason and seq.
+    // sign. Every decline is counted; noteCheckpointDecline decides how often it is logged.
     noteCosignDecline(reason, cp, detail){
         const declines = this._cosignDeclines || (this._cosignDeclines = {});
         declines[reason] = (declines[reason] || 0) + 1;
         this._lastCosignDeclineReason = reason;
-        this.noteCheckpointDecline(reason, cp, 'co-sign', detail);
+        this.noteCheckpointDecline(reason, cp, 'co-sign', detail, declines[reason]);
     },
 
-    noteCheckpointDecline(reason, cp, action, detail){
-        const logged = this._cosignDeclineLogged || (this._cosignDeclineLogged = new Set());
-        const key = reason + '|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq;
-        if(logged.has(key)) return;
-        logged.add(key);
-        while(logged.size > 512) logged.delete(logged.values().next().value);
-        const count = this._cosignDeclines && this._cosignDeclines[reason];
+    // Count a round this hub led that its own proposal check refused, name it for that chain
+    // until clearRoundFailure, and return the reason (the hold is fail-closed, nothing else reports it).
+    noteLeaderDecline(reason, cp){
+        const declines = this._leaderDeclines || (this._leaderDeclines = {});
+        declines[reason] = (declines[reason] || 0) + 1;
+        this._leaderDeclinesTotal = (this._leaderDeclinesTotal || 0) + 1;
+        if(!this._lastLeaderDeclineByChain) this._lastLeaderDeclineByChain = {};
+        this._lastLeaderDeclineByChain[cp.chain] = { reason: reason, block: Number(cp.snapshot_block),
+            block_index: Number(cp.block_index), seq: Number(cp.checkpoint_seq), at: Date.now() };
+        this.noteCheckpointDecline(reason, cp, 'open leader round', null, declines[reason]);
+        return reason;
+    },
+
+    // Log once per action, reason and seq, with the caller's own count. A co-sign decline
+    // that runs before the sender is authenticated logs once per reason per stall-log window.
+    noteCheckpointDecline(reason, cp, action, detail, count){
+        if(action === 'co-sign' && PRE_AUTH_COSIGN_DECLINES.has(reason)){
+            if(!this.preAuthDeclineLogDue(reason)) return;
+        } else {
+            const logged = this._cosignDeclineLogged || (this._cosignDeclineLogged = new Set());
+            const key = action + '|' + reason + '|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq;
+            if(logged.has(key)) return;
+            logged.add(key);
+            while(logged.size > 512) logged.delete(logged.values().next().value);
+        }
         logger.warn('StateCheckpointEngine: declining to ' + action + ' ' + cp.chain + '@' + cp.block_index +
             ' seq ' + cp.checkpoint_seq + ': ' + reason + (detail ? ' (' + detail + ')' : '') +
             (count ? ' (declines for this reason so far: ' + count + ')' : ''));
+    },
+
+    // Throttle on time, not seq: the seq and snapshot_block of a pre-auth decline are
+    // whatever an unauthenticated sender put on the wire, so a per-seq key logs every message.
+    preAuthDeclineLogDue(reason){
+        const loggedAt = this._cosignDeclineLoggedAt || (this._cosignDeclineLoggedAt = {});
+        const windowMs = Number.isFinite(this._cadenceStallLogMs) ? this._cadenceStallLogMs : DECLINE_LOG_WINDOW_MS;
+        const now = Date.now();
+        if(loggedAt[reason] != null && now - loggedAt[reason] < windowMs) return false;
+        loggedAt[reason] = now;
+        return true;
     },
 
     // Refuse a round that starts less than intervalBlocks after our last FINALIZED
@@ -179,21 +223,15 @@ module.exports = {
             supersedes_from:      cp.supersedes_from,
             rules_digest:         cp.rules_digest
         });
-        if(mine !== canonical){
-            logger.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index + ' diverges from our indexer, NOT signing');
-            return;
-        }
+        if(mine !== canonical) return this.noteCosignDecline('indexer_divergence', cp, divergentFields(cp, bh));
 
         // Matching the proposer is NOT sufficient post-flag-day. Two rootless
         // hubs agree byte-for-byte (the canonical's root suffix is empty when the roots
         // are null), so the check above passes and we would co-sign a checkpoint that
         // carries none of the light-client commitment its own flag-day requires. The
         // propose path already refuses this; refuse it here too.
-        if(canonicalForms.isRootless(cp)){
-            logger.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index +
-                ' is checkpoint-commitment active but carries no light-client roots, NOT signing');
-            return;
-        }
+        if(canonicalForms.isRootless(cp))
+            return this.noteCosignDecline('rootless', cp, 'checkpoint-commitment active, light-client roots absent');
 
         // One payload per sequence. The leader is free to choose block_index at a given
         // snapshot_block, so this is the guard that stops a proposer collecting quorum on

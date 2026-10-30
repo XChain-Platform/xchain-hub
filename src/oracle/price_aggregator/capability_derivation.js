@@ -45,7 +45,7 @@
  * chain-only node, of 13 verdict divergences against origin, five were ATTEST actions
  * refused `invalid: insufficient signer stake` for a missing `attestation` snapshot
  * and one was an ANCHOR archive head stored `unverified` for a missing
- * `oracle_publish` snapshot (xchain-indexer actions/anchor.js:519 documents that
+ * `oracle_publish` snapshot (xchain-indexer actions/anchor/quorum.js verifyHeadQuorum documents that
  * exact behaviour). So the pass derives every name in DERIVED_CAPABILITIES, on the
  * same window, the same clock and the same shared writer.
  *

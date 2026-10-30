@@ -29,16 +29,21 @@
  *
  * Resolution order (first match wins):
  *   1. HUB_CLAUDE_CONFIG_DIR    (hub-scoped, deliberately set for the hub)
- *   2. CLAUDE_CONFIG_DIR        (standard CLI env, fallback)
- *   3. HUB_CLAUDE_CODE_OAUTH_TOKEN  (hub-scoped token; paired with isolated dir)
- *   4. CLAUDE_CODE_OAUTH_TOKEN  (standard CLI env)
- *   5. HUB_ANTHROPIC_API_KEY   (hub-scoped API key; direct API mode)
+ *   2. HUB_CLAUDE_CODE_OAUTH_TOKEN  (hub-scoped token; paired with the hub's own dir)
+ *   3. HUB_ANTHROPIC_API_KEY   (hub-scoped API key; direct API mode)
+ *   4. CLAUDE_CONFIG_DIR        (standard CLI env, ambient)
+ *   5. CLAUDE_CODE_OAUTH_TOKEN  (standard CLI env, ambient)
  *   6. ANTHROPIC_API_KEY        (ambient API key; direct API mode)
  *   7. Default ~/.claude-xchain if it's been pre-populated by
  *      `CLAUDE_CONFIG_DIR=~/.claude-xchain claude login`
  *      (HUB_CLAUDE_DEFAULT_CONFIG_DIR overrides the default dir path;
  *      point it at a nonexistent dir to disable this fallback, e.g. for
  *      hermetic tests on a host that has a populated ~/.claude-xchain)
+ *
+ * Every HUB_-scoped credential outranks every ambient one, so a shell's own
+ * `claude login` or OAuth token never switches a hub that was given an API key
+ * onto the CLI transport and the operator's subscription. Inside each scope a
+ * populated config dir, then an OAuth token, still beats an API key.
  *
  * The `checkConfigDir` gate ensures empty, stale or logged-out dir values
  * fall through cleanly to the next candidate: it reads `.credentials.json`
@@ -124,30 +129,34 @@ function resolveHubLlmAuth(ctx) {
     const hubApiKey = trim(envSource.HUB_ANTHROPIC_API_KEY);
     const apiKey   = trim(envSource.ANTHROPIC_API_KEY);
 
+    // Hub-scoped credentials first, in dir, token, API key order, so no ambient
+    // credential can shadow one the operator set for the hub (same HUB_-first
+    // rule as resolveOpenAiAuth's HUB_OPENAI_API_KEY).
     if (hubDir && checkConfigDir(hubDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'hub_config_dir', env: { CLAUDE_CONFIG_DIR: hubDir } };
     }
+
+    // Token paths pair with an isolated dir so the spawned CLI keeps its state
+    // under the hub's own directory rather than the host operator's. The hub
+    // token never pairs with the ambient CLAUDE_CONFIG_DIR, which may be the
+    // operator's personal login now that this branch can outrank it.
+    if (hubToken) {
+        const hubIsolatedDir = hubDir || defaultDir;
+        ensureIsolatedDir(hubIsolatedDir);
+        return { ok: true, transport: 'claude_spawn', source: 'hub_token', env: { CLAUDE_CODE_OAUTH_TOKEN: hubToken, CLAUDE_CONFIG_DIR: hubIsolatedDir } };
+    }
+    if (hubApiKey) {
+        return { ok: true, transport: 'anthropic_api', source: 'hub_api_key', apiKey: hubApiKey };
+    }
+
+    // Ambient credentials, the same dir, token, API key order.
     if (cliDir && checkConfigDir(cliDir)) {
         return { ok: true, transport: 'claude_spawn', source: 'cli_config_dir', env: { CLAUDE_CONFIG_DIR: cliDir } };
     }
-
-    // Token paths pair with an isolated dir so the spawned CLI keeps its state
-    // under the hub's own directory rather than the host operator's.
-    const isolatedDir = hubDir || cliDir || defaultDir;
-    if (hubToken) {
-        ensureIsolatedDir(isolatedDir);
-        return { ok: true, transport: 'claude_spawn', source: 'hub_token', env: { CLAUDE_CODE_OAUTH_TOKEN: hubToken, CLAUDE_CONFIG_DIR: isolatedDir } };
-    }
     if (cliToken) {
+        const isolatedDir = hubDir || cliDir || defaultDir;
         ensureIsolatedDir(isolatedDir);
         return { ok: true, transport: 'claude_spawn', source: 'cli_token', env: { CLAUDE_CODE_OAUTH_TOKEN: cliToken, CLAUDE_CONFIG_DIR: isolatedDir } };
-    }
-
-    // HUB_ANTHROPIC_API_KEY (hub-scoped) wins over ANTHROPIC_API_KEY (ambient),
-    // mirroring the HUB_-prefix convention used for the config-dir/token paths
-    // above and for resolveOpenAiAuth's HUB_OPENAI_API_KEY.
-    if (hubApiKey) {
-        return { ok: true, transport: 'anthropic_api', source: 'hub_api_key', apiKey: hubApiKey };
     }
     if (apiKey) {
         return { ok: true, transport: 'anthropic_api', source: 'api_key', apiKey };

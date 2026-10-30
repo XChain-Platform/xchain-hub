@@ -103,7 +103,7 @@ module.exports = {
     // (getcapabilityvalidators). Those are distinct indexer queries with
     // distinct membership semantics, and the on-chain verifier picks the same
     // way (`weighted ? getStakeWeightsByCapability : getValidatorsByCapability`,
-    // xchain-indexer anchor.js). Reading the count snapshot unconditionally made
+    // xchain-indexer actions/anchor/quorum.js). Reading the count snapshot unconditionally made
     // this gate answer a different question from the leader quorum that judges
     // the same round: above the flag-day a validator present in the weighted set
     // (so counted by the indexer, and listed in round.validators) but absent from

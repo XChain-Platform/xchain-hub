@@ -41,7 +41,7 @@ function mkPub(){
 function hex(n){ return 'a'.repeat(n); }
 
 // The v1/v6 archive head exactly as publishArchive assembles it (same field
-// order as the indexer parser, anchor.js formats[1]/formats[6]). Mirrored rather
+// order as the indexer parser, actions/anchor/index.js formats[1]/formats[6]). Mirrored rather
 // than called because the real builder is inline in a DB-bound publish path;
 // the field list is the contract this test measures against.
 function archiveHead(version, chunk0Len, wrapperSigs, attestSigs){

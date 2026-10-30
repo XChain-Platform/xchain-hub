@@ -247,7 +247,7 @@ function registerMultiSourceArchiveTests() {
 
     // 2649: an unscoped-network hub (this.network === '') routed through
     // resolveQuorumNetwork reaches the SAME weighted-vs-count verdict as the indexer,
-    // which gates on the record's NETWORK (anchor.js: data['NETWORK']). Pre-fix the hub
+    // which gates on the record's NETWORK (quorum.js: data['NETWORK']). Pre-fix the hub
     // gated on this.network (''), so it declared count quorum where the indexer applied
     // the stake predicate: a live-vs-recovered reward fork.
 function registerMultiSourceNetworkTest() {
@@ -256,7 +256,7 @@ function registerMultiSourceNetworkTest() {
         for (const cp of [ { network: 'mainnet', snapshot_block: 961000 },   // at activation -> weighted
                            { network: 'mainnet', snapshot_block: 960999 },   // one below      -> count
                            { network: 'regtest', snapshot_block: 5 } ]) {    // regtest active 0 -> weighted
-            // Indexer's record-scoped decision (anchor.js gates on the record NETWORK).
+            // Indexer's record-scoped decision (quorum.js gates on the record NETWORK).
             let indexerVerdict = swq.isStakeWeightedQuorumActive(cp.snapshot_block, cp.network);
             // Hub, routed: gate on resolveQuorumNetwork(record, deployment).
             let hubVerdict = swq.isStakeWeightedQuorumActive(cp.snapshot_block, resolveQuorumNetwork(cp, DEPLOY));

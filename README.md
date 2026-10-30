@@ -174,7 +174,7 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 | `BTC_ENCODER_API_KEY` | (none) | API key for the BTC encoder |
 | `BTC_ADDRESS` | (none) | BTC address that pays the on-chain ATTEST v1 (response) broadcast fee |
 | `BTC_PUBKEY_HEX` | (none) | Pubkey hex for the BTC_ADDRESS (encoder needs both for PSBT construction) |
-| `ANTHROPIC_API_KEY` | (none) | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
+| `ANTHROPIC_API_KEY` | (none) | One of the credentials that can serve the `llm` provider. The hub takes the first of `HUB_CLAUDE_CONFIG_DIR`, `HUB_CLAUDE_CODE_OAUTH_TOKEN`, `HUB_ANTHROPIC_API_KEY`, then the ambient `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (see `src/lib/hub_credentials.js`). With none set, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
 | `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |
 
 See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md) for the full list of 30+ environment variables.
