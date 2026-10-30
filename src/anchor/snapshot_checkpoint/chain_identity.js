@@ -48,6 +48,8 @@ async function purgeDeadChainRows(db, network) {
         await db.deleteCrossChainCallsByNetwork(network);
     if (typeof db.deleteAllCapabilitySnapshots === 'function')
         await db.deleteAllCapabilitySnapshots();
+    if (typeof db.deleteSnapshotCheckpointsByChainAndNetwork === 'function')
+        await db.deleteSnapshotCheckpointsByChainAndNetwork('BTC', network);
 }
 
 // Regtest only, as on the pushed hub: a set written before the id was known is this

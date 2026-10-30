@@ -28,6 +28,20 @@ const CONFIRMATIONS = 6;
 const VALIDATORS = ['1', '2', '3'].map(c => ({ pubkey: c.repeat(64) }));
 const FOLLOWER = VALIDATORS[1].pubkey;
 
+function deleteCheckpoints(checkpoints, chain, network) {
+    for (const [height, checkpoint] of checkpoints) {
+        if (checkpoint.chain === chain && checkpoint.network === network)
+            checkpoints.delete(height);
+    }
+}
+
+function checkpointDeleteMethods(checkpoints) {
+    return {
+        deleteSnapshotCheckpointsByChainAndNetwork: sinon.spy(async (chain, network) =>
+            deleteCheckpoints(checkpoints, chain, network)),
+    };
+}
+
 // An in-memory hub database: the configs table under the real configs methods, the
 // capability rows, and listUncheckpointedSnapshotBlocks with the SQL's join (a configs
 // row on this network, coin bitcoin or btc in any case, module chain_tips, param chain_id,
@@ -42,7 +56,7 @@ function followerDb() {
         if (row) row.param_value = paramValue;
         else configs.push({ coin, network, module, param_name: paramName, param_value: paramValue });
     };
-    return Object.assign({}, configsDb, {
+    return Object.assign({}, configsDb, checkpointDeleteMethods(checkpoints), {
         configs,
         capabilityRows,
         checkpoints,
@@ -290,6 +304,8 @@ describe('snapshot checkpoint chain identity changes', function () {
             expect(hub.db.deleteCrossChainMatchesByNetwork.calledOnceWithExactly('regtest')).to.equal(true);
             expect(hub.db.deleteCrossChainCallsByNetwork.calledOnceWithExactly('regtest')).to.equal(true);
             expect(hub.db.deleteAllCapabilitySnapshots.calledOnce).to.equal(true);
+            expect(hub.db.deleteSnapshotCheckpointsByChainAndNetwork
+                .calledOnceWithExactly('BTC', 'regtest')).to.equal(true);
             expect(hub.db.capabilityRows).to.deep.equal([]);
             expect(await hub.db.getChainId('BTC', 'regtest')).to.equal(CHAIN_ID);
         } finally {
@@ -307,6 +323,7 @@ describe('snapshot checkpoint chain identity changes', function () {
             await hub.engine.tick();
             expect(hub.db.deleteAllCapabilitySnapshots.called).to.equal(false);
             expect(hub.db.deleteCrossChainMatchesByNetwork.called).to.equal(false);
+            expect(hub.db.deleteSnapshotCheckpointsByChainAndNetwork.called).to.equal(false);
             expect(await hub.db.getChainId('BTC', 'testnet')).to.equal(CHAIN_ID);
         } finally {
             clock.restore();
@@ -321,5 +338,40 @@ describe('snapshot checkpoint chain identity changes', function () {
             ['bitcoin', 'regtest', 'chain_tips', 'chain_id', CHAIN_ID, CHAIN_ID]);
         expect(await db.getChainId('BTC', 'regtest')).to.equal(CHAIN_ID);
         expect(doQuery.secondCall.args[1]).to.deep.equal(['bitcoin', 'regtest', 'chain_tips']);
+    });
+});
+
+describe('snapshot checkpoint stale rows after chain identity changes', function () {
+    const start = useFollowerHubs();
+
+    it('removes stale checkpoints so the regenerated chain can store the same height', async function () {
+        const hub = start('regtest', { chainId: DEAD_CHAIN_ID });
+        const blockIndex = 394;
+        const stale = {
+            chain: 'BTC', network: 'regtest', block_index: blockIndex,
+            block_hash: 'c'.repeat(64), state_root: 'd'.repeat(64),
+            state_root_version: 1, validator_signatures: '[]',
+        };
+        const replacement = Object.assign({}, stale, {
+            block_hash: 'a'.repeat(64), state_root: 'b'.repeat(64),
+        });
+        const clock = sinon.useFakeTimers({ now: 1700000000000, toFake: ['Date'] });
+        try {
+            await hub.engine.tick();
+            expect(await hub.db.insertSnapshotCheckpoint(stale)).to.equal(true);
+            hub.setChainId(CHAIN_ID);
+            clock.tick(60000);
+            await hub.engine.tick();
+
+            expect(hub.db.deleteSnapshotCheckpointsByChainAndNetwork
+                .calledOnceWithExactly('BTC', 'regtest')).to.equal(true);
+            expect(await hub.db.getSnapshotCheckpoint('BTC', 'regtest', blockIndex)).to.equal(null);
+            expect(await hub.engine.claimPayload(replacement)).to.equal(true);
+            expect(await hub.db.insertSnapshotCheckpoint(replacement)).to.equal(true);
+            expect(await hub.db.getSnapshotCheckpoint('BTC', 'regtest', blockIndex))
+                .to.include({ block_hash: replacement.block_hash, state_root: replacement.state_root });
+        } finally {
+            clock.restore();
+        }
     });
 });

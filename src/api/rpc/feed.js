@@ -41,6 +41,13 @@ async function storeChainTip(hub, coin, network, height, time, chainId) {
     }
 }
 
+async function purgeChangedRegtestChain(db, coin, network) {
+    await db.deleteCrossChainMatchesByNetwork(network);
+    await db.deleteCrossChainCallsByNetwork(network);
+    await db.deleteAllCapabilitySnapshots();
+    await db.deleteSnapshotCheckpointsByChainAndNetwork(coin, network);
+}
+
 function chainTipFeedRpc(ctx) {
     const { hub } = ctx;
     return {
@@ -88,9 +95,7 @@ function chainTipFeedRpc(ctx) {
                 if (coin === 'BTC' && network === 'regtest' && hub.network === 'regtest' && chainId !== undefined) {
                     let storedTip = await hub.db.getChainTip(coin, network);
                     if (storedTip && storedTip.chainId && storedTip.chainId !== chainId) {
-                        await hub.db.deleteCrossChainMatchesByNetwork(network);
-                        await hub.db.deleteCrossChainCallsByNetwork(network);
-                        await hub.db.deleteAllCapabilitySnapshots();
+                        await purgeChangedRegtestChain(hub.db, coin, network);
                     }
                 }
                 await storeChainTip(hub, coin, network, height, time, chainId);
