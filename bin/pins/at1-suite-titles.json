@@ -1537,19 +1537,6 @@
       "bcf35818454b61d5beb2d8cdaa9cee154b510d24d5dc293094552a3aeb820722",
       "a2d92ceb01b72772e99c930a306d337e274ede929f436b6b73302ee3aea7c6a2"
     ],
-    "1f09b007ee21caf8": [
-      "990d223cbaf23e80853bfa0de3ac69702841f5bad6b65e77ed488be196b2906d",
-      "aa90466604c87f5cb0c6f1fbcdc57e19d8d6ecb7acdab1815c88e6e5ef67fe47",
-      "9d6a21280893dada90e6627cb7430e880c6254c0f38f3c25a2bf0e2c5e345ddf",
-      "7e74d94d4c653f9a50f821084aa2d59e96be852f495cb10992bc050f8772b655",
-      "554e9e112f5cae2b91130f998209208a52df62d7d116e812aed98dcffe97cf52",
-      "06d081423901bf861b6da28115af7f1a7590b9bbe989d1602c77825cdb2904cb",
-      "248ca95a441d446b4b28f7e2605719aed6a5a13872907266637901255288d740",
-      "d7dbbb1a75a65ac7175d5e0019c0e2de6f56b0b1aed8643d67c15b564e1e9dec",
-      "b8e3b7d09b89b34fd000c4b8eb49cc33f06f2bc13429db956d039c7e42f28166",
-      "9a3220e31559bd0fef8cfeba6564c910ee628fc0cd604a8555b4992d96f08af3",
-      "980a2e119525ff6b65478b2f8f5976f43d0645fa7206f69a05614fc667476fed"
-    ],
     "1fb266d69f6503bd": [
       "a8fe47de99c7b78d1596db5cc0da1fd1a21dee75f6b1c90420553f3e75eb0774",
       "3e963a6be3494afa80b5bc50a45ffe3e6103c42dda5b3f6f70202943b9af85e2",
@@ -8734,12 +8721,6 @@
       "19ad1e2b3ccf8cab06d147af037fa35ab6a563d75e96c1bb91c26a81119684d9",
       "7fb3926c6f8c834d7ec23bc4f5993b04f470ad1f1e675fc7087e5ca4dc45020e"
     ],
-    "a09c2a407ac481e4": [
-      "1e63bf9d128176c791e873a0489140ac4a7909817a7f9bb1a6584aa236af8ced",
-      "3706607888139effa34c805c7a9c887fc94357eca391cc1e592ba0e2d6e5cd00",
-      "f71f7e0b759af2e67eb614bcb67d69aa17492ca5a625e9642adb4d9f400a7fb6",
-      "dd6d004bc44eb4834b74b5ac5d3a150ee10ec2a1f5ef735cccf70ed92d610ee8"
-    ],
     "a0c14e13ef7ae834": [
       "cbb811d94482b89450d40968c7d62327d0f47b1fe1d0fe32cfbafa42b58adceb",
       "344204749813ab553b6108f8481389613a6247f669cf04b1bc70d54e0566382e",
@@ -9595,21 +9576,6 @@
       "f476f97164cbfb0090b6d4ab17b57ca14e4e266c1eae185857d1c4a0981f56d2",
       "552b9196d471cb50d743471bbcd3cff7adf467b15758e99d52eb4a65f1504e40",
       "154d60a9515a1950545b6f845f256cae5b425484f277598e7d9b8ce183487df0"
-    ],
-    "b14790df005a788a": [
-      "58e1130d437b25cae46d218efb726e7af9a8291724d8703fcd39f7924366083c",
-      "133d8a163341953c879b5c1757bed0a2ebc261490425645d6f94c056520a0bbb",
-      "4732bcfef4386db9c70ce4694ffb8f4d606502b2bfcd1c4e91ce825ee9f10100",
-      "66db6d6cddfc07cb9014938537e9f8a54a700407d399dfe6c670fe82aaa44a81",
-      "173383917c91559367ab6942866c76285672e49645e521899ac0b2e3e4258a3f",
-      "83516eed89bbf5ee16b46ddb5d0c457b21bdf703470008104748cfd5621d4ae9",
-      "faa086bddee167dce4b834fe2ada475716af98f4b63318734f3c982b39ce0bea",
-      "1cd4c9dd14fc7b71897fd6c7cede075cf5bb21ad850e45b3b260828ea2190a6b",
-      "9dd0d04859975f043085c06751efdbd95f7646ba07b09d93b6fddede91d60c06",
-      "39e3420578822a45251ac8860a79f935d517e66e01f3fccdd207640e87a0c2f9",
-      "014ecc5f704f722b4bfc904cafb7c71545570857c2fb3929462085418ed09bdf",
-      "69b9b6716be58dadfd30bce0752e8ffc8289c9f95a5169a34e59301748c01107",
-      "08739a631e76a2722bed0cce388e208f2bae0c5efb1973816faf8188d545e9a2"
     ],
     "b165c3bc1f58ab31": [
       "dc1958adc982554af236f1668bcc7a4777445f23358b9164936b2c80723a1016",
@@ -13219,6 +13185,43 @@
       "960033e26e9595e8be083448f9d6e996469af7cbf5c9a8fd85d518340a9c1a45",
       "e0c4e0362a04eb90aea01cbbd14b92e7e38ed18d9976e624fb539c1759bde9be",
       "9443849da8c3d0630465476a730d0e00d7c76be2ce700a2d5411033ee4286ba3"
+    ],
+    "14ab723ea1a944f2": [
+      "990d223cbaf23e80853bfa0de3ac69702841f5bad6b65e77ed488be196b2906d",
+      "aa90466604c87f5cb0c6f1fbcdc57e19d8d6ecb7acdab1815c88e6e5ef67fe47",
+      "9d6a21280893dada90e6627cb7430e880c6254c0f38f3c25a2bf0e2c5e345ddf",
+      "7e74d94d4c653f9a50f821084aa2d59e96be852f495cb10992bc050f8772b655",
+      "554e9e112f5cae2b91130f998209208a52df62d7d116e812aed98dcffe97cf52",
+      "06d081423901bf861b6da28115af7f1a7590b9bbe989d1602c77825cdb2904cb",
+      "248ca95a441d446b4b28f7e2605719aed6a5a13872907266637901255288d740",
+      "d7dbbb1a75a65ac7175d5e0019c0e2de6f56b0b1aed8643d67c15b564e1e9dec",
+      "b8e3b7d09b89b34fd000c4b8eb49cc33f06f2bc13429db956d039c7e42f28166",
+      "9a3220e31559bd0fef8cfeba6564c910ee628fc0cd604a8555b4992d96f08af3",
+      "980a2e119525ff6b65478b2f8f5976f43d0645fa7206f69a05614fc667476fed",
+      "d232c1f25bfa73045a3e2d79a00771c7301120b55bd6eed28aaec32ce73bfaa7"
+    ],
+    "278e80463cb8656f": [
+      "58e1130d437b25cae46d218efb726e7af9a8291724d8703fcd39f7924366083c",
+      "133d8a163341953c879b5c1757bed0a2ebc261490425645d6f94c056520a0bbb",
+      "4732bcfef4386db9c70ce4694ffb8f4d606502b2bfcd1c4e91ce825ee9f10100",
+      "66db6d6cddfc07cb9014938537e9f8a54a700407d399dfe6c670fe82aaa44a81",
+      "173383917c91559367ab6942866c76285672e49645e521899ac0b2e3e4258a3f",
+      "83516eed89bbf5ee16b46ddb5d0c457b21bdf703470008104748cfd5621d4ae9",
+      "faa086bddee167dce4b834fe2ada475716af98f4b63318734f3c982b39ce0bea",
+      "1cd4c9dd14fc7b71897fd6c7cede075cf5bb21ad850e45b3b260828ea2190a6b",
+      "9dd0d04859975f043085c06751efdbd95f7646ba07b09d93b6fddede91d60c06",
+      "3d17e11d1a6a8546b9ce47d3251b2b6fa6a7c3ea64f05c404df7c94628a412ac",
+      "39e3420578822a45251ac8860a79f935d517e66e01f3fccdd207640e87a0c2f9",
+      "19db77ec54b7ecc1b2cd86e5149425ffdd2f2832469c66921c8692fe25948d9e",
+      "69b9b6716be58dadfd30bce0752e8ffc8289c9f95a5169a34e59301748c01107",
+      "6fbcb65c63010481c36ce47c1ba071bf0bf36b849a425c276997f20be3f8ccb7"
+    ],
+    "1b48b928c1a97d43": [
+      "1e63bf9d128176c791e873a0489140ac4a7909817a7f9bb1a6584aa236af8ced",
+      "8e455fd920e50e52f7818f3ef28f0079442e1a8e66d69e3a3db1ff3419c0c059",
+      "3706607888139effa34c805c7a9c887fc94357eca391cc1e592ba0e2d6e5cd00",
+      "f71f7e0b759af2e67eb614bcb67d69aa17492ca5a625e9642adb4d9f400a7fb6",
+      "dd6d004bc44eb4834b74b5ac5d3a150ee10ec2a1f5ef735cccf70ed92d610ee8"
     ]
   },
   "scripts": {
@@ -13229,7 +13232,7 @@
         "ci:regression"
       ],
       "fileCount": 1083,
-      "titleCount": 9641,
+      "titleCount": 9644,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13439,7 +13442,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "1f09b007ee21caf8",
+        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "14ab723ea1a944f2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
@@ -13792,7 +13795,7 @@
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_17_get_call_list_calls_relay_row_surfacing.test.js": "6674ab3dae9883f9",
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_poll_failure_counters.test.js": "4526819bd84077a6",
         "test/unit/cross_chain/chain_tip_chain_id.test.js": "689a8740011a2f0f",
-        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
+        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "278e80463cb8656f",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
@@ -13913,7 +13916,7 @@
         "test/unit/db/schema/sql_price_status_pair_round_index_migration.test.js": "5b4cf28ad3981688",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "514c40adaa8fa030",
         "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "771819539e2a04c1",
-        "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
+        "test/unit/db/snapshot_checkpoints.test.js": "1b48b928c1a97d43",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/db/state_checkpoints_never_anchored_follower.test.js": "4e17a99f84750a5f",
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
@@ -14371,7 +14374,7 @@
     },
     "test": {
       "fileCount": 1083,
-      "titleCount": 9641,
+      "titleCount": 9644,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14581,7 +14584,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "1f09b007ee21caf8",
+        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "14ab723ea1a944f2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
@@ -14934,7 +14937,7 @@
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_17_get_call_list_calls_relay_row_surfacing.test.js": "6674ab3dae9883f9",
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_poll_failure_counters.test.js": "4526819bd84077a6",
         "test/unit/cross_chain/chain_tip_chain_id.test.js": "689a8740011a2f0f",
-        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
+        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "278e80463cb8656f",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
@@ -15055,7 +15058,7 @@
         "test/unit/db/schema/sql_price_status_pair_round_index_migration.test.js": "5b4cf28ad3981688",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "514c40adaa8fa030",
         "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "771819539e2a04c1",
-        "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
+        "test/unit/db/snapshot_checkpoints.test.js": "1b48b928c1a97d43",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/db/state_checkpoints_never_anchored_follower.test.js": "4e17a99f84750a5f",
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
@@ -15460,7 +15463,7 @@
     },
     "test:all": {
       "fileCount": 1168,
-      "titleCount": 10516,
+      "titleCount": 10519,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15755,7 +15758,7 @@
         "test/unit/anchor/snapshot_checkpoint/finalize_policy.test.js": "f4aa8f91110ef8e2",
         "test/unit/anchor/snapshot_checkpoint/finalized_message.test.js": "3107d67ca71b97ef",
         "test/unit/anchor/snapshot_checkpoint/finalized_row.test.js": "4b4d423fc2efb706",
-        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "1f09b007ee21caf8",
+        "test/unit/anchor/snapshot_checkpoint/follower_chain_identity.test.js": "14ab723ea1a944f2",
         "test/unit/anchor/snapshot_checkpoint/leader.test.js": "090d43c2cd1b3c84",
         "test/unit/anchor/snapshot_checkpoint/payload.test.js": "3c371fbaa0366ff7",
         "test/unit/anchor/snapshot_checkpoint/round_state.test.js": "d2b3a281b37a690c",
@@ -16108,7 +16111,7 @@
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_17_get_call_list_calls_relay_row_surfacing.test.js": "6674ab3dae9883f9",
         "test/unit/cross_chain/call_engine/cross_chain_call_engine_poll_failure_counters.test.js": "4526819bd84077a6",
         "test/unit/cross_chain/chain_tip_chain_id.test.js": "689a8740011a2f0f",
-        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "b14790df005a788a",
+        "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": "278e80463cb8656f",
         "test/unit/cross_chain/chain_tip_chain_id_schema.test.js": "0282a0c62bc5b67c",
         "test/unit/cross_chain/chain_tip_chain_id_writers.test.js": "c33e2293d4d6368b",
         "test/unit/cross_chain/chain_tip_null_chain_id_stamp.test.js": "3912d0c760dbd4eb",
@@ -16229,7 +16232,7 @@
         "test/unit/db/schema/sql_price_status_pair_round_index_migration.test.js": "5b4cf28ad3981688",
         "test/unit/db/schema/sql_unique_key_dedup_migration.test.js": "514c40adaa8fa030",
         "test/unit/db/schema/sql_unique_key_widen_migration.test.js": "771819539e2a04c1",
-        "test/unit/db/snapshot_checkpoints.test.js": "a09c2a407ac481e4",
+        "test/unit/db/snapshot_checkpoints.test.js": "1b48b928c1a97d43",
         "test/unit/db/state_checkpoints_clear_stamp.test.js": "8443a7a94097623f",
         "test/unit/db/state_checkpoints_never_anchored_follower.test.js": "4e17a99f84750a5f",
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
