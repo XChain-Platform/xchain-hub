@@ -65,6 +65,10 @@
     },
     "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": {
       "PriceAggregator.retractFromActionIndex() batch marker clear (D28) records tombstones then deletes, with no marker query, when no publisher is wired": "PriceAggregator.retractFromActionIndex() batch marker clear (D28) checks active-chain retention, records tombstones and deletes when no publisher is wired"
+    },
+    "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": {
+      "regtest chain-tip identity purge uses scoped SQL for cross-chain rows and an unfiltered snapshot delete": "regtest chain-tip identity purge uses scoped SQL for cross-chain and checkpoint rows and an unfiltered capability delete",
+      "regtest chain-tip identity purge purges all three tables before replacing a changed BTC regtest tip": "regtest chain-tip identity purge purges all stale chain tables before replacing a changed BTC regtest tip"
     }
   }
 }
