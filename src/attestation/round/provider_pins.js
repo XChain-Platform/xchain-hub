@@ -65,7 +65,8 @@ module.exports = {
         // governance change finalized, and a governance change activated at a later
         // block cannot alter an in-flight round. Mirrors the block-anchored MIN_STAKE
         // resolution that locks the responsible set.
-        let pinnedAc = this.providerRegistry.getAdditionalConfig(providerId, snapshotBlk) || {};
+        const anchoredAc = this.providerRegistry.getAdditionalConfig(providerId, snapshotBlk);
+        const pinnedAc = anchoredAc || {};
         // Model fallback ladder (Phase 4): the block-anchored approved_models
         // list is an ORDERED fallback chain. The request's serviceable span is
         // split into one segment per model, so a dead primary vendor stops
@@ -79,13 +80,13 @@ module.exports = {
             : 0;
         let pinnedFetchModel = approvedModels[modelIdx] || approvedModels[0] || null;
         let pinnedJudgeModel = pinnedAc.judge_model || null;
-        // The model->vendor map has to travel with the pinned model ids,
-        // not be read from each hub's live hotReloaded config. A governance change
-        // that adds a new-family model plus its model_vendors entry in one block
-        // otherwise splits the round, since a laggard hub holds the pinned id but
-        // not the mapping and cannot resolve a vendor at all.
-        let pinnedVendors = (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object')
-            ? pinnedAc.model_vendors : null;
+        // An empty anchored map is distinct from no anchored config. It keeps vendor
+        // inference exclusive to this block instead of falling through to a hub's
+        // live, hot-reloaded map.
+        const pinnedVendors = anchoredAc === null || anchoredAc === undefined
+            ? null
+            : (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object' &&
+               !Array.isArray(pinnedAc.model_vendors) ? pinnedAc.model_vendors : {});
         return {
             approvedModels:   approvedModels,
             modelIdx:         modelIdx,

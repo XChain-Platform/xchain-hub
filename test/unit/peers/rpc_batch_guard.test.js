@@ -204,11 +204,13 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
     }
 
     const srcApiJsMountsTheGuardTest11 = () => {
-        const src = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const boot = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../src/api/server.js'), 'utf8');
         const guardIdx = src.indexOf('makeRpcBatchGuard(');
         const routerIdx = src.indexOf('jsonRouter({');
-        assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from src/api.js');
-        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from src/api.js');
+        assert.notStrictEqual(boot.indexOf('createApp(ctx)'), -1, 'api.js must use the shared app builder');
+        assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from the shared app builder');
+        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from the shared app builder');
         assert.ok(guardIdx < routerIdx, 'the batch guard must be registered before the jsonRouter mount');
     };
 

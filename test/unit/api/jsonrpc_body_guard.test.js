@@ -87,11 +87,13 @@ describe('JSON-RPC body guard (Express 5 / body-parser 2.x regression)', functio
     });
 
     it('src/api.js wires the guard before the jsonRouter mount', () => {
-        const src = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const boot = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../src/api/server.js'), 'utf8');
         const guardIdx = src.indexOf('if (req.body === undefined) req.body = {}');
         const routerIdx = src.indexOf('jsonRouter(');
-        assert.notStrictEqual(guardIdx, -1, 'req.body guard missing from src/api.js');
-        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from src/api.js');
+        assert.notStrictEqual(boot.indexOf('createApp(ctx)'), -1, 'api.js must use the shared app builder');
+        assert.notStrictEqual(guardIdx, -1, 'req.body guard missing from the shared app builder');
+        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from the shared app builder');
         assert.ok(guardIdx < routerIdx, 'guard must be registered before the jsonRouter mount');
     });
 });

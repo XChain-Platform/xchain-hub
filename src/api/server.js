@@ -23,7 +23,7 @@
 
 const crypto = require('crypto');
 const nodeUtil = require('node:util');
-const jsonRouter = require('express-json-rpc-router');
+const defaultJsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
 const { installMiddleware } = require('./middleware');
@@ -34,13 +34,18 @@ const { mountRegistryRoutes } = require('./rest/registry');
 
 function createApp(ctx) {
     const { express, hubConfig } = ctx;
+    const jsonRouter = ctx.jsonRouter || defaultJsonRouter;
     const app = express();
     const observability = installMiddleware(app, ctx);
     const jsonRpcController = buildRpcController(ctx);
     mountSnapshotRoutes(app, ctx);
     mountTelemetryRoutes(app, ctx);
     mountRegistryRoutes(app, ctx);
+    // Bound the Promise.all dispatcher to 20 calls by default. This sits directly
+    // in front of JSON-RPC so REST routes with array bodies remain unaffected.
     app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));
+    // Body-parser 2.x leaves body undefined for requests without JSON. The router
+    // expects an object, so restore the earlier body-parser default before dispatch.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
     app.use(jsonRouter({ methods: jsonRpcController }));
     return { app, observability };

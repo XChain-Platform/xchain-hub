@@ -52,6 +52,57 @@ function logger() {
     return { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() };
 }
 
+function authContext(keys = {}) {
+    return {
+        HUB_API_KEY: '', HUB_FEED_API_KEY: '', HUB_REORG_API_KEY: '',
+        HUB_CONFIG_SECRETS_API_KEY: '', REORG_WRITE_METHODS: new Set(['pushreorg']),
+        WRITE_METHODS: new Set(['updateconfig']), SENSITIVE_READ_METHODS: new Set(),
+        SENSITIVE_READ_AUTH: true, ...keys
+    };
+}
+
+async function assertInvalidMethodsRejected() {
+    const keyConfigs = [
+        [{ HUB_API_KEY: 'bulk-key' }, 'updateconfig'],
+        [{ HUB_FEED_API_KEY: 'feed-key' }, 'gethubs'],
+        [{ HUB_REORG_API_KEY: 'reorg-key' }, 'pushreorg'],
+        [{ HUB_CONFIG_SECRETS_API_KEY: 'secrets-key' }, null]
+    ];
+    const bodies = [
+        { jsonrpc: '2.0', id: 1, method: 5 },
+        { jsonrpc: '2.0', id: 1, method: {} },
+        { jsonrpc: '2.0', id: 1, method: ['updateconfig'] },
+        [{ jsonrpc: '2.0', id: 1, method: true }]
+    ];
+    for (const [keys, gatedMethod] of keyConfigs) {
+        const app = express();
+        app.use(express.json());
+        app.use(authGate(authContext(keys)));
+        app.post('/', (req, res) => res.json({ ok: true }));
+        const server = await listen(app);
+        try {
+            for (const body of bodies) {
+                const res = await request(server, { method: 'POST', body });
+                expect(res.status).to.equal(400);
+                expect(res.headers['content-type']).to.match(/^application\/json/);
+                expect(res.json.error).to.deep.equal({ code: -32600, message: 'Invalid Request' });
+                expect(res.text).not.to.include('TypeError');
+                expect(res.text).not.to.include('<html');
+            }
+            if (gatedMethod) {
+                const mixed = await request(server, { method: 'POST', body: [
+                    { jsonrpc: '2.0', id: 1, method: 5 },
+                    { jsonrpc: '2.0', id: 2, method: gatedMethod }
+                ] });
+                expect(mixed.status).to.equal(401);
+                expect(mixed.json.error.code).to.equal(-32001);
+            }
+        } finally {
+            await new Promise(resolve => server.close(resolve));
+        }
+    }
+}
+
 function snapshotApp(findPriceSnapshotsById) {
     const app = express();
     mountSnapshotRoutes(app, {
@@ -194,12 +245,7 @@ describe('authentication and response transport', function () {
     it('refuses a write without a key and never copies the id into a header', async function () {
         const app = express();
         app.use(express.json());
-        app.use(authGate({
-            HUB_API_KEY: 'bulk-key', HUB_FEED_API_KEY: '', HUB_REORG_API_KEY: '',
-            HUB_CONFIG_SECRETS_API_KEY: '', REORG_WRITE_METHODS: new Set(),
-            WRITE_METHODS: new Set(['updateconfig']), SENSITIVE_READ_METHODS: new Set(),
-            SENSITIVE_READ_AUTH: true
-        }));
+        app.use(authGate(authContext({ HUB_API_KEY: 'bulk-key' })));
         app.post('/', (req, res) => res.json({ ok: true }));
         const server = await listen(app);
         try {
@@ -211,6 +257,7 @@ describe('authentication and response transport', function () {
             expect(res.headers['content-type']).to.match(/^application\/json/);
             expect(Object.values(res.headers).join('\n')).not.to.include('x-injected');
             expect(res.json.error).to.deep.equal({ code: -32001, message: 'Unauthorized' });
+            await assertInvalidMethodsRejected();
         } finally {
             await new Promise(resolve => server.close(resolve));
         }

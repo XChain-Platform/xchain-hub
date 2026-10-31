@@ -133,8 +133,8 @@ class LlmSettings {
         if (ac.judge_model)                this.JUDGE_MODEL        = String(ac.judge_model);
         if (Array.isArray(ac.judge_fallback_models))
             this.JUDGE_FALLBACK_MODELS = ac.judge_fallback_models.map(String);
-        if (ac.model_vendors && typeof ac.model_vendors === 'object')
-            this.MODEL_VENDORS = { ...ac.model_vendors };
+        this.MODEL_VENDORS = ac.model_vendors && typeof ac.model_vendors === 'object' &&
+            !Array.isArray(ac.model_vendors) ? { ...ac.model_vendors } : {};
         if (typeof ac.require_all_vendors === 'boolean')
             this.REQUIRE_ALL_VENDORS = ac.require_all_vendors;
     }

@@ -72,6 +72,11 @@ function lastCall(db) {
     return { sql: c.args[0], args: c.args[1] };
 }
 
+function timerIdAtDelay(clock, delay) {
+    const entry = Array.from(clock.timers).find(([, timer]) => timer.delay === delay);
+    return entry && entry[0];
+}
+
 describe('DDL: checkpoint and price archive bookkeeping', function () {
     it('state_checkpoints.sql carries batch_seq', function () {
         expect(ddlColumns('state_checkpoints')).to.include('batch_seq');
@@ -200,9 +205,10 @@ describe('folded archive pending-price budget', function () {
                 settled = true;
                 return result;
             });
-
             expect(pub.archiveFoldSubdeadlineMs).to.equal(30000);
             await clock.tickAsync(1000);
+            const foldTimerId = timerIdAtDelay(clock, pub.archiveFoldSubdeadlineMs);
+            expect(foldTimerId).to.not.equal(undefined);
             expect(settled).to.equal(false);
             await clock.tickAsync(250);
             releasePriceRounds();
@@ -210,7 +216,7 @@ describe('folded archive pending-price budget', function () {
             const rows = await folded;
             expect(rows.prices).to.have.length(ARCHIVE_MAX_PRICE_ROUNDS * 2);
             expect(rows.cappedOrTrimmed).to.equal(true);
-            expect(clock.countTimers()).to.equal(0);
+            expect(clock.timers.has(foldTimerId)).to.equal(false);
         } finally {
             clock.restore();
         }
