@@ -19,14 +19,11 @@
 'use strict';
 
 const { supersedeWitnessDecline, checkpointHoldDecline } = require('./checkpoint_hold.js');
+const { hasSupersedeFields } = require('./supersede_suffix.js');
 
 function indexerReplayOpen(rules){
     const state = rules && rules.replay && rules.replay.state;
     return state === 'pending' || state === 'replaying';
-}
-
-function hasSupersedeFields(cp){
-    return cp && (cp.supersedes_from != null || cp.rules_digest != null);
 }
 
 function supersedeCosignDecline(cp, rules, expectedSupersede){

@@ -28,6 +28,7 @@ const COUNTERS = [
     ['_seqDoubleSignRefusals', 'xchain_checkpoint_seq_double_sign_refusals_total', 3],
     ['_cadenceStalls', 'xchain_checkpoint_cadence_stalls_total', 9],
     ['_roundFailures', 'xchain_checkpoint_round_failures_total', 5],
+    ['_leaderDeclinesTotal', 'xchain_checkpoint_leader_declines_total', 8],
     ['_selfAcceptFailures', 'xchain_checkpoint_self_accept_failures_total', 6]
 ];
 

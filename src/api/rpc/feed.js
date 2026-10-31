@@ -18,7 +18,7 @@
  *
  ********************************************************************/
 
-const { validateChain, strictInt, rpcParamError } = require('../validate');
+const { validateChain, validateNetwork, strictInt, rpcParamError } = require('../validate');
 
 function buildFeedRpc(ctx) {
     return Object.assign({}, chainTipFeedRpc(ctx), priceRoundFeedRpc(ctx), priceBatchFeedRpc(ctx), attestBatchFeedRpc(ctx), oraclePriceFeedRpc(ctx));
@@ -48,6 +48,14 @@ async function purgeChangedRegtestChain(db, coin, network) {
     await db.deleteSnapshotCheckpointsByChainAndNetwork(coin, network);
 }
 
+async function purgeIfChangedRegtestChain(hub, coin, network, chainId) {
+    if (coin !== 'BTC' || network !== 'regtest' || hub.network !== 'regtest' || chainId === undefined) return;
+    const storedTip = await hub.db.getChainTip(coin, network);
+    if (storedTip && storedTip.chainId && storedTip.chainId !== chainId) {
+        await purgeChangedRegtestChain(hub.db, coin, network);
+    }
+}
+
 function chainTipFeedRpc(ctx) {
     const { hub } = ctx;
     return {
@@ -67,6 +75,9 @@ function chainTipFeedRpc(ctx) {
             // wording either way, so logs and operator runbooks are unchanged.
             let chainErr = validateChain(coin);
             if (chainErr) throw rpcParamError(chainErr.error);
+            const targetNetwork = network === undefined || network === null ? 'mainnet' : network;
+            const networkErr = validateNetwork(targetNetwork);
+            if (networkErr) throw rpcParamError(networkErr.error);
             if(block_height === undefined || block_height === null)
                 return {error: "block_height is required"};
             if(block_time === undefined || block_time === null)
@@ -92,13 +103,8 @@ function chainTipFeedRpc(ctx) {
                 // hub.network is THIS hub's own configured network, never the caller's
                 // param: a testnet/mainnet hub must not purge over a caller claiming
                 // network: 'regtest' twice with different chain_ids.
-                if (coin === 'BTC' && network === 'regtest' && hub.network === 'regtest' && chainId !== undefined) {
-                    let storedTip = await hub.db.getChainTip(coin, network);
-                    if (storedTip && storedTip.chainId && storedTip.chainId !== chainId) {
-                        await purgeChangedRegtestChain(hub.db, coin, network);
-                    }
-                }
-                await storeChainTip(hub, coin, network, height, time, chainId);
+                await purgeIfChangedRegtestChain(hub, coin, targetNetwork, chainId);
+                await storeChainTip(hub, coin, targetNetwork, height, time, chainId);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};

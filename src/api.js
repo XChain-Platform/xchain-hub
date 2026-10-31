@@ -73,15 +73,9 @@ const { resolveRoundCadence } = require('./oracle/round_cadence.js');
 const { resolveOracleEpochStart } = require('./oracle/oracle_epoch.js');
 const { parseCorsOrigin } = require('./api/cors_origin.js');
 const { parseExemptLocal } = require('./api/rate_limit_policy.js');
-const { resolveMaxBatch, makeRpcBatchGuard } = require('./peers/rpc_batch_guard.js');   // JSON-RPC batch cardinality cap
 // Shared constants: the co-sign/slash deviation band (#1299) and the per-network oracle epoch pins.
 const { ORACLE_DEVIATION_THRESHOLD, ORACLE_EPOCH_START_PINS } = require('./constants');
-const { installMiddleware } = require('./api/middleware');
-const { buildRpcController } = require('./api/rpc');
-const { mountSnapshotRoutes } = require('./api/rest/hub_db_snapshot');
-const { mountTelemetryRoutes } = require('./api/rest/telemetry');
-const { mountRegistryRoutes } = require('./api/rest/registry');
-const { startServer } = require('./api/server');
+const { createApp, startServer } = require('./api/server');
 
 const HUB_PORT = hubConfig.HUB_PORT;
 const HUB_HOST = hubConfig.HUB_HOST || '0.0.0.0';
@@ -310,7 +304,7 @@ function apiContext(hub) {
         WRITE_METHODS, REORG_WRITE_METHODS, SENSITIVE_READ_METHODS,
         CORS_ORIGIN, HUB_RATE_LIMIT_RPM, HUB_RATE_LIMIT_EXEMPT_LOCAL,
         TELEMETRY_ENABLED, TELEMETRY_RETENTION_DAYS, TELEMETRY_IP_SALT, TELEMETRY_ADMIN_KEY,
-        express, helmet, cors, rateLimit, http, WebSocket, axios, geoip,
+        express, helmet, cors, rateLimit, jsonRouter, http, WebSocket, axios, geoip,
     };
 }
 
@@ -367,33 +361,7 @@ async function startApi(){
     const hub = createHub();
     await startSubsystems(hub);
     const ctx = apiContext(hub);
-
-    const app = express();
-    const observability = installMiddleware(app, ctx);
-    const jsonRpcController = buildRpcController(ctx);
-    mountSnapshotRoutes(app, ctx);
-    mountTelemetryRoutes(app, ctx);
-    mountRegistryRoutes(app, ctx);
-
-    // Bound JSON-RPC batch cardinality (src/peers/rpc_batch_guard.js). The router below runs
-    // Promise.all over every element of a batch array, so a single ~100 KB body fans out
-    // into ~1,400 concurrent handlers on the shared DB pool. The limiter at the top of
-    // this stack already charges a batch one token per call; this caps it outright.
-    // Mounted in front of the router rather than globally, so it governs the dispatcher
-    // that amplifies and cannot reject a REST route's array body.
-    // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
-    // (every connector sends one call object), so the cap breaks no existing client.
-    app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));
-
-    // Express 5 / body-parser 2.x leaves req.body undefined when a request carries
-    // no JSON body (a GET, or a POST without application/json), whereas body-parser
-    // 1.x set it to {}. express-json-rpc-router requires req.body to be an object or
-    // it throws ("req.body is required"). Restore the {} default so unmatched requests
-    // that fall through to this root-mounted router get a normal JSON-RPC error
-    // response instead of crashing the request.
-    app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
-    app.use(jsonRouter({methods: jsonRpcController}));
-
+    const { app, observability } = createApp(ctx);
     startServer(app, ctx, observability);
 }
 

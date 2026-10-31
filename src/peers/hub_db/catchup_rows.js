@@ -6,6 +6,7 @@
 // How catch-up asks whether the hub already holds a peer row, and how it stores one it verified.
 
 const { priceSnapshotAlreadyHeld, storePriceSnapshot } = require('./price_round_groups.js');
+const { hasSupersedeFields } = require('../../anchor/checkpoint_engine/supersede_suffix.js');
 
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
@@ -53,7 +54,7 @@ const ROW_WRITERS = Object.freeze({
         const args = [r.chain, r.network, r.block_index, r.block_hash, r.ledger_hash, r.actions_hash,
             r.contract_hash, r.checkpoint_seq, r.snapshot_block, r.state_root, r.state_root_version,
             r.block_merkle_root, r.block_merkle_version, r.validator_signatures];
-        if (r.supersedes_from != null || r.rules_digest != null)
+        if (hasSupersedeFields(r))
             args.push(r.supersedes_from, r.rules_digest);
         return db.createStateCheckpoint(...args);
     },

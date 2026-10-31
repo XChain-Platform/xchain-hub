@@ -41,7 +41,11 @@ describe('checkpoint supersede suffix bytes @regression', function () {
 
     it('returns an empty suffix when both supersession fields are absent', function () {
         const { hasSupersedeFields, supersedeSuffix } = require('../../../../src/anchor/checkpoint_engine/supersede_suffix.js');
+        const replayHold = require('../../../../src/anchor/checkpoint_engine/replay_hold.js');
 
+        expect(replayHold.hasSupersedeFields).to.equal(hasSupersedeFields);
+        expect(hasSupersedeFields(null)).to.equal(false);
+        expect(hasSupersedeFields(undefined)).to.equal(false);
         expect(hasSupersedeFields(plainCheckpoint)).to.equal(false);
         expect(supersedeSuffix(plainCheckpoint)).to.equal('');
     });
