@@ -26,8 +26,8 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
 const queueMethods      = require('../../../../../../src/oracle/publisher/queue.js');
+const priceQueries      = require('../../../../../../src/db/prices/index.js');
 const { createMockHub } = require('../../../../../helpers/mockHub');
-
 function makeValidator() {
     let { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
     let pubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex');
@@ -36,9 +36,7 @@ function makeValidator() {
         sign: (payload) => crypto.sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('hex')
     };
 }
-
 const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
-
 const CHAIN         = 'DOGE';
 const BATCH_ROUND   = 200;      // stored on this hub from the batch itself
 const SELF_ROUND    = 201;      // finalized here first, so the batch only stamps it
@@ -48,9 +46,7 @@ const OLD_BLOCK     = 800500;
 const OLD_TIME      = 1700009000;
 const NEW_BLOCK     = 800500;   // re-mined at the same height
 const NEW_TIME      = 1700009600;
-
 let hub, agg, table, watermark, markerDeletes, publisher;
-
 function makeRounds() {
     return [BATCH_ROUND, SELF_ROUND].map((round, i) => ({
         round,
@@ -59,7 +55,6 @@ function makeRounds() {
         pairs: [{ pair: 'BTC/USD', price: String(50000 + i) }, { pair: 'LTC/USD', price: String(70 + i) }]
     }));
 }
-
 function makeBatch(overrides) {
     let rounds = makeRounds();
     let payload = agg.buildPriceBatchPayload(BATCH_ROUND, SELF_ROUND, BATCH_ANCHOR,
@@ -70,14 +65,12 @@ function makeBatch(overrides) {
         block_time: OLD_TIME, block_index: OLD_BLOCK, action_index: ACTION_INDEX, push_generation: 3
     }, overrides);
 }
-
 function snapshotOf(validators) {
     return {
         capability: 'price', blockIndex: OLD_BLOCK, count: validators.length,
         validators: validators.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
     };
 }
-
 const live = (r) => r.status !== 'skipped';
 const isBatchRow = (r) => typeof r.consensus_proof === 'string' && r.consensus_proof.startsWith('{"batch":');
 
@@ -105,6 +98,31 @@ function installBatchPresenceRead(db) {
     };
 }
 
+function installBatchUpsert(db) {
+    db.setBatchPriceSnapshotRound = async (...args) => priceQueries.setBatchPriceSnapshotRound.call({
+        async doQuery(sql) {
+            const [round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
+                sourceActionIndex, pushGeneration, blockTime] = args;
+            const update = sql.slice(sql.indexOf('ON DUPLICATE KEY UPDATE'));
+            const guard = /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)/.test(update);
+            for (let p of pairs) {
+                let row = table.find(r => r.round_number === round && r.coin_pair === p.pair);
+                if (!row) {
+                    row = { id: table.length + 1, round_number: round, coin_pair: p.pair, batch_block_time: 0 };
+                    table.push(row);
+                }
+                const status = guard && row.status === 'disputed' ? row.status : 'finalized';
+                Object.assign(row, { price: p.price, reference_block: referenceBlock, reference_chain: referenceChain,
+                    block_timestamp: timestamp, validator_count: validatorCount, consensus_proof: proofJson,
+                    status, source_chain: referenceChain, source_action_index: sourceActionIndex,
+                    push_generation: pushGeneration, batch_block_time: (row.batch_block_time === 0 ||
+                        blockTime < row.batch_block_time) ? blockTime : row.batch_block_time });
+            }
+            return { affectedRows: pairs.length };
+        }
+    }, ...args);
+}
+
 // An in-memory price_snapshots behind the named DB methods both paths call, with the
 // SQL semantics the paths rely on: the per-round upsert keyed on (round, pair) that
 // keeps the EARLIER landing clock, the fenced delete, and the landing-clock resets.
@@ -120,26 +138,9 @@ function installFakeDb() {
     db.getPriceSnapshotByRoundNumber = async (round) =>
         table.filter(r => r.round_number === round && live(r)).slice(0, 1).map(r => ({ id: r.id }));
     installBatchPresenceRead(db);
+    installBatchUpsert(db);
     db.findPriceSnapshotsForRound = async (round) =>
         table.filter(r => r.round_number === round).map(r => Object.assign({}, r));
-    db.setBatchPriceSnapshotRound = async (round, pairs, referenceBlock, referenceChain, timestamp,
-                                           validatorCount, proofJson, sourceActionIndex, pushGeneration, blockTime) => {
-        for (let p of pairs) {
-            let row = table.find(r => r.round_number === round && r.coin_pair === p.pair);
-            if (!row) {
-                row = { id: table.length + 1, round_number: round, coin_pair: p.pair, batch_block_time: 0 };
-                table.push(row);
-            }
-            Object.assign(row, {
-                price: p.price, reference_block: referenceBlock, reference_chain: referenceChain,
-                block_timestamp: timestamp, validator_count: validatorCount, consensus_proof: proofJson,
-                status: 'finalized', source_chain: referenceChain, source_action_index: sourceActionIndex,
-                push_generation: pushGeneration,
-                batch_block_time: (row.batch_block_time === 0 || blockTime < row.batch_block_time) ? blockTime : row.batch_block_time
-            });
-        }
-        return { affectedRows: pairs.length };
-    };
     db.updatePriceSnapshotByRoundNumber = async (landed, round) => {
         for (let r of table) {
             if (r.round_number === round && live(r) && (r.batch_block_time === 0 || r.batch_block_time > landed)) r.batch_block_time = landed;
@@ -247,6 +248,17 @@ async function aSamePositionReMineMovesToTheNewGeneration() {
     expect(moved.length).to.equal(2);
     expect(moved.every(row => row.push_generation === 5 &&
         row.source_action_index === ACTION_INDEX)).to.equal(true);
+}
+
+async function aBatchRelandKeepsAReorgDispute() {
+    await agg.receiveValidatedBatch(CHAIN, makeBatch());
+    for (const row of table) if (row.round_number === BATCH_ROUND) row.status = 'disputed';
+    const again = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
+
+    expect(again).to.deep.equal({ accepted: true, stored: 0, duplicates: 2, rejected: 0 });
+    const held = table.filter(row => row.round_number === BATCH_ROUND);
+    expect(held.map(row => row.status)).to.deep.equal(['disputed', 'disputed']);
+    expect(held.map(row => row.push_generation)).to.deep.equal([5, 5]);
 }
 
 async function aPlainDuplicateDeliveryStillRetracts() {
@@ -378,6 +390,7 @@ describe('PriceAggregator batch re-landed after a reorg survives the late retrac
 
     it('keeps the batch-sourced round of a re-mined batch and its publish marker', aReMinedBatchKeepsItsBatchSourcedRound);
     it('moves a same-action-index re-mine onto the new generation', aSamePositionReMineMovesToTheNewGeneration);
+    it('keeps a BTC reorg dispute while moving a re-landed batch to its new generation', aBatchRelandKeepsAReorgDispute);
     it('restores a round deleted when the keep check could not answer', aDeletedRoundReturnsThroughImmediateRepair);
     it('deletes a kept orphan when the generation fence refuses its rewrite', aLaggingIndexerCannotKeepARefusedOrphan);
     it('still deletes the round and clears the marker on a plain duplicate delivery', aPlainDuplicateDeliveryStillRetracts);

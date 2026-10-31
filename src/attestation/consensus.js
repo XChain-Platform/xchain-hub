@@ -121,6 +121,7 @@ class AttestationConsensus extends EventEmitter {
         if(ah.isAdmissionEra(this.hub && this.hub.network, requestBlock)){
             myAdmit = await this.resolveRoundAdmitBlocks();
             if(!myAdmit){
+                this.roundAdmissionRefusedCount.admission_tip++;
                 logger.error('AttestationConsensus: refusing to open round ' + rid.substring(0,16) +
                     '... at block ' + requestBlock + '; no fresh BTC admission tip to stamp an admission height from');
                 return;

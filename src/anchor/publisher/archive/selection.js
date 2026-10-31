@@ -161,12 +161,12 @@ module.exports = {
     },
 
     // Build repeatedly because removing a quorum row can also remove its capability set.
-    async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows){
+    async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows, splitter){
         let archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
             rows.calls, rewardRows, rows);
         while(true){
             const jsonBytes = Buffer.byteLength(archive.json, 'utf8');
-            const wire = this.archiveWire(archive.json);
+            const wire = this.archiveWire(archive.json, splitter);
             const maxChunks = this.maxArchiveChunks();
             const ratios = [jsonBytes / ARCHIVE_MAX_JSON_BYTES,
                 wire.b64.length / ARCHIVE_MAX_WIRE_B64_BYTES,
@@ -309,10 +309,10 @@ module.exports = {
     },
 
     // The archive body as it travels: its crc32, the compressed base64url text, and the chunks.
-    archiveWire(json){
+    archiveWire(json, splitter){
         let crc      = this.crc32Hex(json);
         let b64      = zlib.gzipSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
-        let chunks   = this.splitChunks(b64);
+        let chunks   = splitter ? splitter(b64) : this.splitChunks(b64);
         return { json, crc, b64, chunks };
     }
 

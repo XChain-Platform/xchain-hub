@@ -38,10 +38,12 @@ function archiveCount(wire){
     return Number(parsed.fields[parsed.next]);
 }
 
-async function publishFoldedGroups(groups){
+async function publishFoldedGroups(groups, archiveBody = 'body'){
     let pub = Object.create(StateAnchorPublisher.prototype);
     let wires = [], archiveAvailable = true;
     pub.identity = { getPubkeyHex: () => 'aa' };
+    pub._bundlesOversize = 0;
+    pub._foldArchiveDroppedOversize = 0;
     pub.getActiveOraclePublishPubkeys = async () => ['aa'];
     pub.splitBundle = () => ({ bundles: groups, oversize: [] });
     pub.hub = { resolveDogeLatestBlock: async () => 0 };
@@ -50,7 +52,8 @@ async function publishFoldedGroups(groups){
     pub.standsDownFromBundle = () => false;
     pub.bundleHeldByIntent = async () => false;
     pub.collectFoldArchive = async () => archiveAvailable ? { result: Promise.resolve({
-        wrapperSectionIndex: 0, batchSeq: 0, count: 1, crc: '0', chunks: ['body'], signatures: []
+        wrapperSectionIndex: 0, batchSeq: 0, count: 1, crc: '0',
+        chunks: [archiveBody], headChars: archiveBody.length, signatures: []
     }) } : null;
     pub.armFoldArchiveRound = () => {};
     pub.collectBundleAttestation = async () => ({ attested: false, attestSigs: [] });
@@ -66,7 +69,7 @@ async function publishFoldedGroups(groups){
     pub.announceBundleDone = () => {};
     let sections = groups.flat();
     await pub.publishNetworkBundles({}, 'regtest', sections, 100, false, [], { rows: 0 });
-    return wires;
+    return { wires, pub };
 }
 
 const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
@@ -217,16 +220,24 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
 
     it('publishes every byte-budget group this cycle and folds the archive into exactly one', async function () {
         let btc = section('BTC', 'b'), ltc = section('LTC', 'l');
-        let fitting = await publishFoldedGroups([[btc, ltc]]);
+        let fittingResult = await publishFoldedGroups([[btc, ltc]]);
+        let fitting = fittingResult.wires;
         expect(fitting).to.have.length(1);
         expect(walkSections(fitting[0]).sections.map(s => s.chain)).to.deep.equal(['BTC', 'LTC']);
         expect(archiveCount(fitting[0])).to.equal(1);
 
-        let split = await publishFoldedGroups([[btc], [ltc]]);
+        let splitResult = await publishFoldedGroups([[btc], [ltc]]);
+        let split = splitResult.wires;
         expect(split).to.have.length(2);
         expect(split.flatMap(wire => walkSections(wire).sections.map(s => s.chain)))
             .to.deep.equal(['BTC', 'LTC']);
         expect(split.map(archiveCount)).to.deep.equal([1, 0]);
+
+        let dropped = await publishFoldedGroups([[btc, ltc]], 'x'.repeat(9000));
+        expect(dropped.wires).to.have.length(1);
+        expect(archiveCount(dropped.wires[0])).to.equal(0);
+        expect(dropped.pub._foldArchiveDroppedOversize).to.equal(1);
+        expect(dropped.pub._bundlesOversize).to.equal(0);
     });
 });
 

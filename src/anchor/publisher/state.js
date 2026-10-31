@@ -92,6 +92,8 @@ module.exports = {
         // operator's post-deploy check, not for a dashboard tile.
         this._sectionsAnchored = 0;
         this._bundlesOversize  = 0;
+        this._foldArchiveNoHeadRoom = 0;
+        this._foldArchiveDroppedOversize = 0;
         // Split of that count by the rank this hub held for the row it anchored.
         // A backup-rank publish means the elected rank-0 publisher did NOT anchor
         // within its ladder step, so the federation is running on failover with

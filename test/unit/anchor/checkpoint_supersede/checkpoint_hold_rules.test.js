@@ -22,12 +22,17 @@ const {
 
 function checkpoint(overrides){
     return {
+        network: 'regtest',
+        snapshot_block: 100,
         block_index: 100,
         block_hash: 'aa',
         ledger_hash: '11',
         actions_hash: '22',
         contract_hash: '33',
         state_root: '44',
+        state_root_version: 1,
+        block_merkle_root: '55',
+        block_merkle_version: 1,
         ...overrides,
     };
 }
@@ -80,7 +85,8 @@ function returnsReorgedFirstForBlockHashMismatch(){
 }
 
 function returnsDisagreementForOtherHashMismatch(){
-    const fields = ['ledger_hash', 'actions_hash', 'contract_hash', 'state_root'];
+    const fields = ['ledger_hash', 'actions_hash', 'contract_hash', 'state_root',
+        'state_root_version', 'block_merkle_root', 'block_merkle_version'];
     for(const field of fields){
         const own = checkpoint({ [field]: '99' });
         expect(checkpointHoldDecline(checkpoint(), own, null))
@@ -97,6 +103,28 @@ function ignoresUnavailableStateRoot(){
     )).to.equal(null);
 }
 
+function ignoresUnavailableCommitmentFields(){
+    const fields = ['state_root_version', 'block_merkle_root', 'block_merkle_version'];
+    for(const field of fields){
+        expect(checkpointHoldDecline(
+            checkpoint({ [field]: null }), checkpoint(), null
+        )).to.equal(null);
+        expect(checkpointHoldDecline(
+            checkpoint(), checkpoint({ [field]: null }), null
+        )).to.equal(null);
+    }
+}
+
+function ignoresUnsignedCommitmentFieldsBeforeActivation(){
+    const row = checkpoint({ network: 'mainnet', snapshot_block: 960999 });
+    expect(checkpointHoldDecline(
+        row, checkpoint({ block_merkle_root: '99' }), null
+    )).to.equal(null);
+    expect(checkpointHoldDecline(
+        row, checkpoint({ state_root: '99' }), null
+    )).to.equal('checkpoint_disagreement');
+}
+
 function acceptsCoveredDisagreement(){
     const own = checkpoint({ ledger_hash: '99' });
 
@@ -104,6 +132,9 @@ function acceptsCoveredDisagreement(){
     expect(checkpointHoldDecline(
         checkpoint({ block_index: '100' }), own,
         replay({ target: '100', replay_to: '100' })
+    )).to.equal(null);
+    expect(checkpointHoldDecline(
+        checkpoint(), checkpoint({ block_merkle_root: '99' }), replay()
     )).to.equal(null);
 }
 
@@ -146,6 +177,10 @@ describe('checkpoint hold rules', function checkpointHoldRulesSuite(){
         returnsDisagreementForOtherHashMismatch);
     it('ignores state_root unless both readings provide one',
         ignoresUnavailableStateRoot);
+    it('ignores each commitment field unless both readings provide one',
+        ignoresUnavailableCommitmentFields);
+    it('ignores unsigned commitment fields before activation',
+        ignoresUnsignedCommitmentFieldsBeforeActivation);
     it('accepts disagreement covered by witnessed replay',
         acceptsCoveredDisagreement);
     it('declines incomplete or out-of-range replay',

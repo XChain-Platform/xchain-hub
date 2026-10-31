@@ -67,7 +67,7 @@ function registerOwnAdoptionCases() {
     for (let version of [0, 3]) {
         it('defers the reward for an attested adoption of its own v' + version + ' bundle', async function () {
             let pub = makePub({ exists: true, truncated: false, anchors: [anchorRow(version)] });
-            await adopt(pub, true, version);
+            expect(await adopt(pub, true, version)).to.equal('ours');
             let e = onlyEntry(pub);
             expect(e.txid).to.equal(TXID);
             expect(e.publisher).to.equal(ME);
@@ -81,7 +81,8 @@ function registerOwnAdoptionCases() {
 
     it('still defers the reward for a fresh send, with no ownership lookup', async function () {
         let pub = makePub(() => { throw new Error('a fresh send must not look ownership up'); });
-        await pub.recordBundleReward(GROUP, ME, true, SIGS, { txid: TXID }, NET, SNAP, TXID, 0);
+        expect(await pub.recordBundleReward(GROUP, ME, true, SIGS, { txid: TXID }, NET, SNAP, TXID, 0))
+            .to.equal(null);
         expect(onlyEntry(pub).txid).to.equal(TXID);
         expect(pub.rpcCalls).to.equal(0);
     });
@@ -91,7 +92,7 @@ function registerSkippedAdoptionCases() {
     for (let version of [0, 3]) {
         it("records nothing when the adopted v" + version + " bundle is a peer's", async function () {
             let pub = makePub({ exists: true, truncated: false, anchors: [anchorRow(version, { publisher: OTHER })] });
-            await adopt(pub, true, version);
+            expect(await adopt(pub, true, version)).to.equal('peer');
             expect(pub._deferredRewardAttest.size).to.equal(0);
             expect(pub.rewardCalls.length).to.equal(0);
         });
@@ -99,7 +100,7 @@ function registerSkippedAdoptionCases() {
 
     it('records nothing, and counts it, when the ownership lookup fails', async function () {
         let pub = makePub(() => { throw new Error('indexer down'); });
-        await adopt(pub, true, 0);
+        expect(await adopt(pub, true, 0)).to.equal('undetermined');
         expect(pub._deferredRewardAttest.size).to.equal(0);
         expect(pub.rewardCalls.length).to.equal(0);
         expect(pub._adoptedOwnershipUndetermined).to.equal(1);
@@ -107,14 +108,14 @@ function registerSkippedAdoptionCases() {
 
     it('records nothing when the indexer knows no anchor on the adopted txid', async function () {
         let pub = makePub({ exists: false });
-        await adopt(pub, true, 0);
+        expect(await adopt(pub, true, 0)).to.equal('undetermined');
         expect(pub._deferredRewardAttest.size).to.equal(0);
         expect(pub.rewardCalls.length).to.equal(0);
     });
 
     it('skips the lookup entirely for an unattested adoption', async function () {
         let pub = makePub({ exists: true, truncated: false, anchors: [anchorRow(0)] });
-        await adopt(pub, false, 0);
+        expect(await adopt(pub, false, 0)).to.equal('undetermined');
         expect(pub.rpcCalls).to.equal(0);
         expect(pub._deferredRewardAttest.size).to.equal(0);
         expect(pub.rewardCalls.length).to.equal(0);
@@ -139,7 +140,7 @@ function registerPublishOrderCase() {
         pub.noteBundlePublished = () => {};
         pub.announceBundleDone = () => { announced++; };
         pub.adoptedBundleOwnership = async () => { throw new Error('ownership check blew up'); };
-        await pub.publishBundle({}, 'testnet', GROUP, SNAP, false, [], { rows: 0 }, null);
+        await pub.publishBundle({}, 'regtest', GROUP, SNAP, false, [], { rows: 0 }, null);
         expect(announced, 'peers still hear the bundle is anchored').to.equal(1);
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });

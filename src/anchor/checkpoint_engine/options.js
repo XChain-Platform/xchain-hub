@@ -171,8 +171,10 @@ module.exports = {
         // nothing else shows the margin shrinking. Zero-filled so the stats shape is fixed.
         this._cosignDeclines = { own_tip_unresolved: 0, snapshot_out_of_tolerance: 0, off_cadence: 0,
                                  indexer_read_failed: 0, indexer_no_block: 0, indexer_replaying: 0,
-                                 supersede_no_replay: 0, supersede_target_mismatch: 0,
-                                 supersede_digest_mismatch: 0, indexer_divergence: 0, rootless: 0 };
+                                 supersede_no_replay: 0, supersede_unwitnessed: 0,
+                                 supersede_no_disagreement: 0, supersede_target_mismatch: 0,
+                                 supersede_digest_mismatch: 0, checkpoint_disagreement: 0,
+                                 checkpoint_reorged: 0, indexer_divergence: 0, rootless: 0 };
         this._lastCosignDeclineReason = null;
         this._cosignDeclineLoggedAt   = {};   // pre-auth decline warn throttle per reason, on the cadence-stall window
         // Leader self-accepts that failed after quorum (queueSelfAccept): Map<roundId, held>,

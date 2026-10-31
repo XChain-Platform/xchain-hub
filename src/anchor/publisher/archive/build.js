@@ -320,6 +320,16 @@ module.exports = {
         let chunks = [];
         for(let i = 0; i < b64.length; i += this.chunkMaxBytes) chunks.push(b64.slice(i, i + this.chunkMaxBytes));
         return chunks.length ? chunks : [''];
+    },
+
+    splitFoldChunks(b64, headChars){
+        if(!Number.isInteger(headChars) || headChars < 1)
+            throw new RangeError('fold archive head must have at least one character');
+        if(b64.length <= headChars) return [b64];
+        let chunks = [b64.slice(0, headChars)];
+        for(let i = headChars; i < b64.length; i += this.chunkMaxBytes)
+            chunks.push(b64.slice(i, i + this.chunkMaxBytes));
+        return chunks;
     }
 
 };

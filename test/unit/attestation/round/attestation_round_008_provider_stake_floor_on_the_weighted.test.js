@@ -237,9 +237,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 getModule:   sinon.stub().returns({ fetch: fetchStub })
             });
             let ar = new AttestationRound(hub, reg);
+            ar.setConsensus({ roundAdmissionRefusedCount: { unfinalizable: 0, admission_tip: 0 } });
             await ar.startRound(makeRequest({ redundancy: 3 }), 100);
             expect(ar.rounds.size).to.equal(0);
             expect(fetchStub.called).to.be.false;
+            expect(ar.consensus.roundAdmissionRefusedCount.unfinalizable).to.equal(1);
         }); }); });
 
 // ── provider stake floor ───────────────────────────────────────

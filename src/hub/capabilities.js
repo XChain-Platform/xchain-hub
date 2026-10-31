@@ -120,20 +120,17 @@ class Capabilities {
         // Same for a FULLNODE override: its consensus knobs must come from the pinned
         // coin bundle every service ships, or this hub runs a challenge schedule and
         // reward split its peers reject.
-        this.assertCanonicalFullnode(parsed.FULLNODE || parsed.full_node);
+        const fullnodeBlock = parsed.FULLNODE || parsed.full_node;
+        this.assertCanonicalFullnode(fullnodeBlock);
         if(!this.p2pConfig) this.p2pConfig = {};
         const KEYS = ['CAPABILITIES', 'DISABLED_CAPABILITIES', 'price', 'cross_chain',
-                      'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS',
-                      'FULLNODE', 'full_node'];
+                      'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS'];
         for(let k of KEYS){
             if(k in parsed) this.p2pConfig[k] = parsed[k];
         }
-        // Consumers read cfg.FULLNODE.BTC_RPC; accept the README's 'full_node' spelling as
-        // an alias so the documented HUB_CAPABILITY_CONFIG override reaches selfTest
-        // instead of being dropped by the whitelist.
-        if(this.p2pConfig.full_node && !this.p2pConfig.FULLNODE){
-            this.p2pConfig.FULLNODE = this.p2pConfig.full_node;
-        }
+        // Resolve the documented alias from this file, not from the already seeded
+        // runtime config. FULLNODE wins when both spellings are present.
+        if(fullnodeBlock !== undefined) this.p2pConfig.FULLNODE = fullnodeBlock;
         this.seedCanonicalFullnode();
         // Keep a live registry's view in sync so hot-reload applies without a restart.
         if(this.capabilityRegistry){

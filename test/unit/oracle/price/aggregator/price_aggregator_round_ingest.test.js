@@ -252,7 +252,7 @@ function registerPriceaggregatorReceivevalidatedround1Tests9() {
         expect(insertSqls).to.have.length(1);
         insertSqls.forEach(sql => {
             expect(sql).to.match(/ON DUPLICATE KEY UPDATE/);
-            expect(sql).to.match(/status\s*=\s*'finalized'/);
+            expect(sql).to.match(/status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)/);
         });
     });
 

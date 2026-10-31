@@ -112,6 +112,11 @@ module.exports = {
         try { bh = await this.indexerCall(cp.chain, 'getblockhashes', { block_index: cp.block_index }); }
         catch(e){ return this.noteCosignDecline('indexer_read_failed', cp, String(e && e.message).slice(0, 200)); }   // can't confirm -> don't sign
         if(!bh) return this.noteCosignDecline('indexer_no_block', cp);
+        if(bh.error){
+            const detail = String(bh.error).slice(0, 200);
+            const reason = /^block not indexed:/.test(detail) ? 'indexer_no_block' : 'indexer_read_failed';
+            return this.noteCosignDecline(reason, cp, detail);
+        }
         let proposalDecline = supersedeCosignDecline(cp, bh.rules);
         let expectedSupersede;
         if(!proposalDecline && hasSupersedeFields(cp))

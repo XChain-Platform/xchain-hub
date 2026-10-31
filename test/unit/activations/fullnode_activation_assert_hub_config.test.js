@@ -97,13 +97,12 @@ describe('XChainHub.seedCanonicalFullnode', function () {
     }
   });
 });
-describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () {
-  let tmpPath, warnStub, logStub;
-  beforeEach(function () {
+let tmpPath, warnStub, logStub;
+function installConfigSpies() {
     warnStub = sinon.stub(console, 'warn');
     logStub = sinon.stub(console, 'log');
-  });
-  afterEach(function () {
+}
+function cleanConfigFixture() {
     warnStub.restore();
     logStub.restore();
     if (tmpPath) {
@@ -111,12 +110,15 @@ describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () 
         fs.unlinkSync(tmpPath);
       } catch (_) {}
     }
-  });
-  function writeConfig(obj) {
-    tmpPath = path.join(os.tmpdir(), 'xc283_caps_' + process.pid + '_' + Math.random().toString(36).slice(2) + '.json');
-    fs.writeFileSync(tmpPath, JSON.stringify(obj));
-    return tmpPath;
-  }
+}
+function writeConfig(obj) {
+  tmpPath = path.join(os.tmpdir(), 'xc283_caps_' + process.pid + '_' + Math.random().toString(36).slice(2) + '.json');
+  fs.writeFileSync(tmpPath, JSON.stringify(obj));
+  return tmpPath;
+}
+describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () {
+  beforeEach(installConfigSpies);
+  afterEach(cleanConfigFixture);
   it('refuses a divergent FULLNODE file on mainnet WITHOUT merging it', function () {
     let hub = makeHub('mainnet');
     expect(() => hub.loadCapabilityConfigFile(writeConfig({
@@ -145,5 +147,34 @@ describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () 
     expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://coin');
     expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal(CANONICAL.REWARD_SHARE);
     expect(hub.p2pConfig.FULLNODE.CONFIRM_DEPTH).to.equal(CANONICAL.CONFIRM_DEPTH);
+  });
+});
+describe('XChainHub.loadCapabilityConfigFile FULLNODE integration', function () {
+  beforeEach(installConfigSpies);
+  afterEach(cleanConfigFixture);
+  it('loads local full_node alias keys and seeds canonical knobs under them', function () {
+    const hub = makeHub('mainnet');
+    hub.loadCapabilityConfigFile(writeConfig({
+      full_node: { BTC_RPC: 'http://coin', ENABLED: 'false', POLL_MS: 1234 }
+    }));
+    expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://coin');
+    expect(hub.p2pConfig.FULLNODE.ENABLED).to.equal('false');
+    expect(hub.p2pConfig.FULLNODE.POLL_MS).to.equal(1234);
+    expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal(CANONICAL.REWARD_SHARE);
+    expect(hub.p2pConfig.FULLNODE.CONFIRM_DEPTH).to.equal(CANONICAL.CONFIRM_DEPTH);
+  });
+  it('applies a full_node alias during hot reload', function () {
+    const hub = makeHub('mainnet');
+    hub.loadCapabilityConfigFile(writeConfig({ FULLNODE: { BTC_RPC: 'http://first' } }));
+    hub.loadCapabilityConfigFile(writeConfig({ full_node: { BTC_RPC: 'http://second' } }));
+    expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://second');
+  });
+  it('prefers FULLNODE when both block spellings are present', function () {
+    const hub = makeHub('mainnet');
+    hub.loadCapabilityConfigFile(writeConfig({
+      FULLNODE: { BTC_RPC: 'http://canonical-name' },
+      full_node: { BTC_RPC: 'http://legacy-name' }
+    }));
+    expect(hub.p2pConfig.FULLNODE.BTC_RPC).to.equal('http://canonical-name');
   });
 });

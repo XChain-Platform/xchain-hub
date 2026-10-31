@@ -141,13 +141,17 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 finalized:                      new Set(),
                 finalizedMax:                   10000,
                 finalizedEvictedWhilePendingCount: 0,
-                roundTimeoutCount:              4
+                roundTimeoutCount:              4,
+                roundAdmissionRefusedCount:     { unfinalizable: 3, admission_tip: 2 }
             });
             // Quorum loss must NOT be folded into failed_count: failed_count is a
             // gauge over the TTL-evicting rounds map, so a combined number would
             // let an eviction cancel a timeout out of a consumer's rise check.
             let stats = ar.getStats();
             expect(stats.consensus_timeout_count).to.equal(4);
+            expect(stats.consensus_admission_refused_count).to.equal(5);
+            expect(stats.consensus_admission_refused_unfinalizable_count).to.equal(3);
+            expect(stats.consensus_admission_refused_admission_tip_count).to.equal(2);
             expect(stats.failed_count).to.equal(0);
         }); }); });
 

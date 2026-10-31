@@ -26,7 +26,7 @@ const NOW = 1754870400000;
 // A fake AttestationRound carrying only the fields the collector reads.
 function fakeRound(overrides = {}){
     return Object.assign({
-        consensus: { roundTimeoutCount: 5 },
+        consensus: { roundTimeoutCount: 5, roundAdmissionRefusedCount: { unfinalizable: 3, admission_tip: 2 } },
         pollRpcErrorCount: 2,
         pollTransportErrorCount: 3,
         pollAuthErrorCount: 1,
@@ -60,6 +60,8 @@ describe('hub attestation scrape series', function () {
     it('renders quorum loss, poll errors by kind and poll freshness from live fields', function () {
         const out = install({ attestationRound: fakeRound() }).render();
         expect(sample(out, 'xchain_attestation_consensus_timeouts_total')).to.equal(5);
+        expect(sample(out, 'xchain_attestation_admission_refusals_total', '{reason="unfinalizable"}')).to.equal(3);
+        expect(sample(out, 'xchain_attestation_admission_refusals_total', '{reason="admission_tip"}')).to.equal(2);
         expect(sample(out, 'xchain_attestation_poll_errors_total', '{kind="rpc"}')).to.equal(2);
         expect(sample(out, 'xchain_attestation_poll_errors_total', '{kind="transport"}')).to.equal(3);
         expect(sample(out, 'xchain_attestation_poll_errors_total', '{kind="auth"}')).to.equal(1);
@@ -133,5 +135,6 @@ describe('hub attestation scrape series', function () {
         }
         expect(definesMethod(roundSource, 'pollUnsuccessfulForMs')).to.equal(true);
         expect(assignsField(sourceUnder('attestation/consensus'), 'roundTimeoutCount')).to.equal(true);
+        expect(assignsField(sourceUnder('attestation/consensus'), 'roundAdmissionRefusedCount')).to.equal(true);
     });
 });

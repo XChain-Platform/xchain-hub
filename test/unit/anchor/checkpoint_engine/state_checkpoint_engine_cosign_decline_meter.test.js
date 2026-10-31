@@ -12,8 +12,8 @@
 
 // A follower that cannot confirm a proposed checkpoint declines to co-sign, which is the
 // fail-closed answer, and the decline must leave a trace: a silent one lets a member whose
-// own indexer is down drop out of every quorum while the rest still sign. Each of the five
-// declines is counted by reason, warned at most once per window, and reported by
+// own indexer is down drop out of every quorum while the rest still sign. Every decline
+// is counted by reason, warned at most once per window, and reported by
 // getcheckpointstats, and a leader's round timeout names the validators that never signed.
 // No signing decision moves: every case below that declines still does not co-sign.
 
@@ -103,13 +103,58 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         expect(engine.cosigned).to.have.lengthOf(1);
         expect(Object.values(engine._cosignDeclines).every(n => n === 0)).to.equal(true);
     });
+});
+
+describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
+    it('classifies getblockhashes result errors before checkpoint hold checks', async function () {
+        const cases = [
+            ['block not indexed: 500', 'indexer_no_block'],
+            ['indexer database not ready', 'indexer_read_failed'],
+        ];
+        for(const [error, reason] of cases){
+            const engine = buildFollower({ indexerCall: async () => ({ error }) });
+            const lines = await warnsDuring(() => engine.handleSignReq(signReq()));
+            expect(engine.cosigned, error).to.have.lengthOf(0);
+            expect(engine._cosignDeclines[reason], error).to.equal(1);
+            expect(engine._cosignDeclines.checkpoint_reorged || 0, error).to.equal(0);
+            expect(lines.join('\n'), error).to.include(reason).and.to.include(error);
+        }
+    });
+
+    it('counts canonical divergence and rootless fallback refusals', async function () {
+        const rooted = signReq().data.checkpoint;
+        const rootless = Object.assign({}, rooted, {
+            state_root: null, state_root_version: null,
+            block_merkle_root: null, block_merkle_version: null,
+        });
+        const cases = [
+            ['indexer_divergence', rooted, Object.assign({}, TIP, { ledger_hash: 'ff'.repeat(32) })],
+            ['rootless', rootless, Object.assign({}, TIP, rootless)],
+        ];
+        for(const [reason, cp, bh] of cases){
+            const engine = buildFollower({});
+            const broadcasts = [];
+            engine.peerManager.broadcast = (...args) => broadcasts.push(args);
+            const canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
+            const lines = await warnsDuring(() => {
+                StateCheckpointEngine.prototype.coSignAgainstOwnBlock.call(engine, cp, canonical, bh, pk(follower));
+                StateCheckpointEngine.prototype.coSignAgainstOwnBlock.call(engine, cp, canonical, bh, pk(follower));
+            });
+            expect(broadcasts, reason + ' stays fail-closed').to.deep.equal([]);
+            expect(engine._cosignDeclines[reason]).to.equal(2);
+            expect(engine._lastCosignDeclineReason).to.equal(reason);
+            expect(lines.filter(line => line.includes(reason))).to.have.lengthOf(1);
+        }
+    });
 
     it('getcheckpointstats reports every reason and the last one seen', async function () {
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
         expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
             'indexer_read_failed', 'indexer_no_block', 'indexer_replaying', 'supersede_no_replay',
-            'supersede_target_mismatch', 'supersede_digest_mismatch', 'indexer_divergence', 'rootless');
+            'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
+            'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',
+            'indexer_divergence', 'rootless');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();
