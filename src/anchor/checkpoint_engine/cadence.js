@@ -175,7 +175,9 @@ module.exports = {
             if(this.signedRoundConflict(btcBlock) != null) return;
             // A new interval supersedes any timed-out round still waiting for a retry.
             if(this._roundRetries) this._roundRetries.clear();
-            let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
+            let validators;
+            try { validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock); }
+            catch(e){ this.noteCadenceStall(btcBlock, 'capability validator resolve failed: ' + (e && e.message)); return; }
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
             await this.leadCadenceRound(btcBlock, validators);
         } finally {

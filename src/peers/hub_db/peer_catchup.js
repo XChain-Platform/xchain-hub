@@ -139,6 +139,7 @@ class HubDbPeerCatchup {
         this.db = opts.db;
         this.peerManager = opts.peerManager;
         this.feedKey = opts.feedKey || '';
+        this.network = opts.network != null ? String(opts.network) : '';
         this.pageSize = positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE);
         this.warnIntervalMs = positiveOr(opts.warnIntervalMs, DEFAULT_WARN_INTERVAL_MS);
         this.retryIntervalMs = positiveOr(opts.retryIntervalMs, DEFAULT_RETRY_INTERVAL_MS);
@@ -374,7 +375,7 @@ class HubDbPeerCatchup {
         }
     }
 
-    // Retryable or failed-read refusals leave the walk behind instead of entering the memo.
+    // A retryable or failed-read refusal is not remembered because a later walk may accept it.
     async verifyWalkRow(walk, row, priceRoundRows) {
         const { peer, table, reads } = walk;
         const memoKey = this.refusals.keyFor(walk.peerIdentity || peer, table, row);
@@ -382,12 +383,13 @@ class HubDbPeerCatchup {
         const failedBefore = reads ? reads.failedServes : 0;
         const verdict = await this.verifyRow(walk.verifier, row, {
             table, peer, peerIdentity: walk.peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
-            readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
+            network: this.network, readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
         });
         if (verifierAccepted(verdict)) return verdict;
         this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
             ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
-        if ((verdict && verdict.retry === true) || (reads && reads.failedServes > failedBefore)) walk.leftBehind = true;
+        if (verdict && (verdict.retry === true || verdict.retryable === true)) walk.leftBehind = true;
+        else if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
         else this.refusals.remember(memoKey);
         return verdict;
     }

@@ -309,12 +309,6 @@
       "c7e213167924a7be1e116434f55f034cceee229da4005ecf96070e57623f83b1",
       "7ca8f371491449011977a3660243be5a7e229e16967725712ee69ea63e586325"
     ],
-    "07242f5941b3abd1": [
-      "4fc42baa0cc22b1bbe6e9781067fd316a85fbe86434fbcb05d67c2e6f47f8b07",
-      "326a0b5d6eddfeb29698b91025ff49fec25ccc9c6c960b169f134b465961f197",
-      "67ef5b46f6d4721ebca860f879cd1cf9c67b48fd04a3b8c3fdd1096ceaf8e6ff",
-      "ca4d07304472b4d1e9f94bdc0ec505073736c0cc83707a0b854a6a5afb557d0b"
-    ],
     "0729800c22ae4dc6": [
       "c7189c57ed20fdc2cc5775f6a8bec5db7d0369d78b7a14705055dcffcfca5404",
       "29c1ae2484237f4478caed50a6e8db4c14cf88cfe6c25e2373b07329fa4d6b3c",
@@ -550,6 +544,13 @@
       "b346e297587549df91208b6b69c9ea56220b731316df2d28cb8ff5c241b71f0d",
       "931caaa588ffff66c86f636e5429e63beb02210604b684559a847412574e9d02",
       "9e9fbb8c11286c47c98f9e8f4a4c4ebbd30b4e55b8d41fd584f6678d1e0b8d0b"
+    ],
+    "0adbebaec45e5e87": [
+      "2da50b320891c0541334ee4de50043a0f4eb7addf93625701ad30374b6759a48",
+      "ffabff689a8a55db7bd5c253bdb6dff2eab09058a1f09017227879fc35683c3f",
+      "5411ae23013774bb88035d163c4b3fcc8632f037a2076acfce494e4b03d41469",
+      "d9295c34a6eeaa6bfc5b3283aab39249e164437fc81f5098f5a57590d2340a26",
+      "b345fb816152d38d4e1f3c439686101f27b9458b376b0027732577f0d36eca33"
     ],
     "0af56bff93fd06c4": [
       "87809ff221e5c5a108d23ead1a1cbf9f592b8321fea0b5687ec19e688543b03e",
@@ -1404,14 +1405,6 @@
     "1cdb68f547d8bc5f": [
       "eb585bffd939138be13a72a20e878c7cde5e410dda44be5fd496d6734b7346a4",
       "da76006608828c628f0601363eafc861cd73d8e793788c1d19f40c3afbd60ea7"
-    ],
-    "1d01da10c5943f80": [
-      "5ae573b54688d56dd66eb1e30c1217bb8b84617197c34600b4cacba2ae3ed244",
-      "9d2177c9b48a53dfa8c37422e37c2ceeba2888bd50841a32e0de214dbb9891cc",
-      "55b7a9f5a24e0c1de4a771cfcf68bf6a175e33f6a00ded3b575ecdf075c69d32",
-      "da6cc7068e0939d10c3740c9bf7de5a08f4d2a662111408bcfd5ab80da8d8b8f",
-      "4834b13c0aad98e73be27dc5e496109be5896958e53ad5c9b6ec3c72be041717",
-      "5bf347402a1c22a805e1fd49cbb85fc14710b271b6e5baf472fb0b814875089c"
     ],
     "1d65458c2e9035bf": [
       "e6ede0566c1f2efb60625f0a54d45a72a92a7452bf701e8331d06a141392c724",
@@ -2945,6 +2938,14 @@
       "7c8677c261bd028d6973773cc3994d2b2e23c816a149ac901e1fe345e3cef1df",
       "825502efad0f5482286322cd5f01bad4134f900160a9b047732ae0fa2aeb2247"
     ],
+    "33e4713966751c39": [
+      "4fc42baa0cc22b1bbe6e9781067fd316a85fbe86434fbcb05d67c2e6f47f8b07",
+      "326a0b5d6eddfeb29698b91025ff49fec25ccc9c6c960b169f134b465961f197",
+      "67ef5b46f6d4721ebca860f879cd1cf9c67b48fd04a3b8c3fdd1096ceaf8e6ff",
+      "ca4d07304472b4d1e9f94bdc0ec505073736c0cc83707a0b854a6a5afb557d0b",
+      "c3158b775c0f844fae2a9feb25c402c1d18062093fef1367d61e289bc24431e6",
+      "66f9f9c29ce694e4e83765b2b764e7152a5e00e5e0f06c3962c17110c843de82"
+    ],
     "33f689fbf51caded": [
       "59c69a5241c9d6fbbe0b30f601f7f5a381f4a4e07f91c9bed5850848f902a0b4",
       "3f4cc36b4924d0e22e24609e6084cf29a36ece48f50ed732bf58be4c44c0e415",
@@ -3245,9 +3246,6 @@
     "399c15098284150d": [
       "6d69cb6dab05c7ecc7238f79c2e4fbe0a6d905aed4797ca3446712d2bef0b3cc",
       "56c1d2d86d6cacb2d6709ec044ac22452a80b9c6735b9e507103bf5dffb72198"
-    ],
-    "39a1199e9685740f": [
-      "39a1199e9685740f3674c4ea3b685b32bb2f57a07df727e58dc7eca9f3033225"
     ],
     "39b53f9d7c09ed7b": [
       "dc0be5643271b0cb3f77d399396abb9269922861ffa1f3ef753603eb26ba784c",
@@ -3856,18 +3854,6 @@
       "31815dcc705d00e6aa992e3c3b73c498d4e1b2f55f8ad16624eeede05b8b7a20",
       "80dc37b3c08f50e856792f9dd1a41f210afd9e2027ad18f07a208e66a0121f45"
     ],
-    "456dfaafdaa4eeb3": [
-      "4a830cc5b6e0216348611b63666ea489d780206bd2bf9fa8449ba090283d889f",
-      "5430301e6baab56d3614a304c951e3b6bc6868e51f0cac3647719769e6574594",
-      "3ec549cf57534391f2b7efac0c93881b6e1663d52e560835751761e45c2d5eb9",
-      "d21fa088aceadda6561c06c6826bed135f6638cc113e44fe70d724e259c9d8b8",
-      "dcdfe5493ee202c80ee41ba1f7e0abd6d3dd9fb3ddb4446702dde4c3cf6a5b97",
-      "b6a09b9f71e9ca8fb7198aff2fb4b57adb8bf3c2e3d3cb29d307d2e30c736c67",
-      "34511a1cbfc4b2afdcceb088be1e0cea64ec2ed499957cbfada9f845eec2361a",
-      "20ce548e228710fd52e015b1edd60bbe4ed872eb4167b765a9273459865f34ce",
-      "87c9c14f54b9c576bb711c1554ad827e36d35f12e7d83e85156adde48a9fae4f",
-      "0c31e80bdd9313431a7ac7ae21f7279d27b74b7680ae41897afd083c6fad8e85"
-    ],
     "459e4d8a348bee9d": [
       "71e7ebc3be87ba3537a2da27b954789cde13b21004d422398e937e2466f10f6d",
       "32321bdcddf2850f91836bba9636cbed4e37cc66899377d15704d9e1a3cf64a2",
@@ -3928,6 +3914,15 @@
       "eba39307fcbfff0cc6acb4e9611dabb40e65e76628d6f154543d1acd06ba775c",
       "7ec5722490c8b2bc9ed553d8d4cbd42453e86224bb9ae9d5ff9a44dadcb29fb4",
       "4640bd7373f231e11ef51b2e1278edb5d49824beb4023423dde2a31704f6e229"
+    ],
+    "46667be38bc74ec3": [
+      "5ae573b54688d56dd66eb1e30c1217bb8b84617197c34600b4cacba2ae3ed244",
+      "905bdb9e80995ed997ace00e4c400709a141562f896b5c97676499122851cd87",
+      "9d2177c9b48a53dfa8c37422e37c2ceeba2888bd50841a32e0de214dbb9891cc",
+      "55b7a9f5a24e0c1de4a771cfcf68bf6a175e33f6a00ded3b575ecdf075c69d32",
+      "da6cc7068e0939d10c3740c9bf7de5a08f4d2a662111408bcfd5ab80da8d8b8f",
+      "4834b13c0aad98e73be27dc5e496109be5896958e53ad5c9b6ec3c72be041717",
+      "5bf347402a1c22a805e1fd49cbb85fc14710b271b6e5baf472fb0b814875089c"
     ],
     "46a9fe141bdfcea0": [
       "230a804a296f2429ecee6b8a29452ff22f7cc10ad7ea6ca14f85dc922edc6bc8",
@@ -6589,6 +6584,9 @@
       "d8d14d9052792f98b87377b73d076991cf445a0c457d03823ac3de4a1cdaf6e2",
       "eb958dcfefd5a0b72b9e5553934e9ae0aca7f96dcb8697726c1930de89482e51"
     ],
+    "72c70a3a5ec7381f": [
+      "72c70a3a5ec7381f2d6dcdf005d81f976aa6b0619ae697e10e8b646bee8d55d5"
+    ],
     "72ca5679a6b0395f": [
       "ad3d1ab22417bb4e7626caba6f889f7bf396c7ca53d4cd030e5bac6d6391135f",
       "623aa8386c08c1ad6a2a0a031cf46652c256a0fdfeced227ef072411f04a4538",
@@ -7178,6 +7176,19 @@
       "4579b99ce8017a45123890ab5dc4f32344371313e103cda88e3306980ba72bc1",
       "41c8b906bb54d84fd92c27e95eff156f29fc0df02e40f5cfa3b00813acdc0bd3",
       "ead72e82d321aab935de0c1516f3ab828104adfb045aae7f5178810b0123427b"
+    ],
+    "7c1090a9325173da": [
+      "4a830cc5b6e0216348611b63666ea489d780206bd2bf9fa8449ba090283d889f",
+      "5430301e6baab56d3614a304c951e3b6bc6868e51f0cac3647719769e6574594",
+      "e07ebfede0db21f225317b8b90743f7aeb58fc283cfc0fa5b542fda2d1763a40",
+      "3ec549cf57534391f2b7efac0c93881b6e1663d52e560835751761e45c2d5eb9",
+      "d21fa088aceadda6561c06c6826bed135f6638cc113e44fe70d724e259c9d8b8",
+      "dcdfe5493ee202c80ee41ba1f7e0abd6d3dd9fb3ddb4446702dde4c3cf6a5b97",
+      "b6a09b9f71e9ca8fb7198aff2fb4b57adb8bf3c2e3d3cb29d307d2e30c736c67",
+      "34511a1cbfc4b2afdcceb088be1e0cea64ec2ed499957cbfada9f845eec2361a",
+      "20ce548e228710fd52e015b1edd60bbe4ed872eb4167b765a9273459865f34ce",
+      "87c9c14f54b9c576bb711c1554ad827e36d35f12e7d83e85156adde48a9fae4f",
+      "0c31e80bdd9313431a7ac7ae21f7279d27b74b7680ae41897afd083c6fad8e85"
     ],
     "7c23903029ef5fd5": [
       "e32ae4249ba225bfa88d293b24d5d1643de89f7984990341e885cff504d99b11",
@@ -7976,6 +7987,31 @@
       "1fe5e6a33764e164914e56a389a84404dea5854bb2f0506bcf53fa844c192472",
       "76d6fdb1e5f0809155c987bf5e06a27981141a8ae9365dc261e62eac851f77b8"
     ],
+    "8e957dfdb35568e1": [
+      "115a6fc9c0914e159bf8c9329c9da796bd6e7b840e0513e1db10ed8c209d91ab",
+      "efdfe9999977495505bce68f8fe7688e8f3a62dbcab67ddfee6af65f2d00c1fb",
+      "9a4e21e4fe9eae33aaf7468c9b7b2d09fe7c81b7fa57c41c4901a9c2ecfca615",
+      "0ca0b489b5ea0fb153eb4080ed943dfe37ecb63e6c1c7e5791a4aac3ad428f95",
+      "ad4d5246fa1dabb4fb34a93221fef9ddb71fb7550e1c2b205078c991cb42b0d3",
+      "46bc0de96e753676a9ffdc1bbc9bae238f15ed7fcc76ae8465bbde21b011e9bb",
+      "f97b8479c8602974239f8114259761b10933c687d41d199d1728cacec3eea722",
+      "5652bced7b537b4c97de2f2dfb521806192844567747fc045f1a7d58a8b434af",
+      "fa6691f1135348d1c0d398299240be3f06f32ac0d8bf28dce2adb7b5caa418a5",
+      "f6c4baa3b77abcfc057c39e2713769be4f753f6746fc9ddb97dd7ce6ea65a9d5",
+      "ebe90db78ff1f4923fc79c9a0c0180602d967875354c35e9888c62a7aaf12937",
+      "9a9f1e8c67a996f9cf17c32b75d75820caaf9b7aa841f05581422b7f6845b769",
+      "95015a51b086aa44e90818f736b7fc8b03b3db40626a584c988645c0376564d9",
+      "44430e67d5d767a567f5cfad7b9d1245602bee0b88a1b716b585b770376d279c",
+      "f520311276b6fb070524c01f0eba85a1f3282534d1a5ee85841cb14958f41082",
+      "0ea147ab6575ba1780573e85ad90d3c29e7112d09f5cdc2b65f3b680429628a5",
+      "6fbd8af437d222d433dee6547970ca0255d6ccfa49ca7b6dab333ab7c6b0a8bf",
+      "a17bfaa42ccf6eeedc5d491c3dd719bd8f6b7926c188cd60f064b1abf17e295b",
+      "54e4ad333d8707d00080a2ead9ab8d506a6a4e88a38fb9ffd0cbe22830705a65",
+      "b940207b75dadaadd4c1c5eedfaf24274c04ce7f3b690a2e4f21e6a9c8abf2f8",
+      "93045becdc44f17a6906de13ff484fb4ba8daccfa9d3df4e76cb14d8028cfe12",
+      "8a1190be0d10dbab8df0ed4788a95638aad505536423e3f2296722063852d151",
+      "6d822e59e0e202e0d3afa38cbbaf9a5602f8f80c4d0db3ba649419aeb37a8ef1"
+    ],
     "8e96ae3fab0ea493": [
       "84628d207e276993aab2e83aacb7c64906ead23f7e1eb095daed7e094216b336",
       "2cefed9b239f5f9c4d8be2481be81937e1b68e84a04b2c7c5e948c95da5ab2fe",
@@ -8666,29 +8702,6 @@
     "9e5205d5201cc872": [
       "d7f5f65790b2f6ab5975e912625bddfc1e221dddb38beae10922df61994c6daf",
       "a028062f22ef16737a8a55e3ab8c7ff29f145277ac458951868cf0a6960915d0"
-    ],
-    "9e600b30c9222d4a": [
-      "115a6fc9c0914e159bf8c9329c9da796bd6e7b840e0513e1db10ed8c209d91ab",
-      "efdfe9999977495505bce68f8fe7688e8f3a62dbcab67ddfee6af65f2d00c1fb",
-      "9a4e21e4fe9eae33aaf7468c9b7b2d09fe7c81b7fa57c41c4901a9c2ecfca615",
-      "0ca0b489b5ea0fb153eb4080ed943dfe37ecb63e6c1c7e5791a4aac3ad428f95",
-      "ad4d5246fa1dabb4fb34a93221fef9ddb71fb7550e1c2b205078c991cb42b0d3",
-      "46bc0de96e753676a9ffdc1bbc9bae238f15ed7fcc76ae8465bbde21b011e9bb",
-      "5652bced7b537b4c97de2f2dfb521806192844567747fc045f1a7d58a8b434af",
-      "f6c4baa3b77abcfc057c39e2713769be4f753f6746fc9ddb97dd7ce6ea65a9d5",
-      "ebe90db78ff1f4923fc79c9a0c0180602d967875354c35e9888c62a7aaf12937",
-      "9a9f1e8c67a996f9cf17c32b75d75820caaf9b7aa841f05581422b7f6845b769",
-      "95015a51b086aa44e90818f736b7fc8b03b3db40626a584c988645c0376564d9",
-      "44430e67d5d767a567f5cfad7b9d1245602bee0b88a1b716b585b770376d279c",
-      "f520311276b6fb070524c01f0eba85a1f3282534d1a5ee85841cb14958f41082",
-      "0ea147ab6575ba1780573e85ad90d3c29e7112d09f5cdc2b65f3b680429628a5",
-      "6fbd8af437d222d433dee6547970ca0255d6ccfa49ca7b6dab333ab7c6b0a8bf",
-      "a17bfaa42ccf6eeedc5d491c3dd719bd8f6b7926c188cd60f064b1abf17e295b",
-      "54e4ad333d8707d00080a2ead9ab8d506a6a4e88a38fb9ffd0cbe22830705a65",
-      "b940207b75dadaadd4c1c5eedfaf24274c04ce7f3b690a2e4f21e6a9c8abf2f8",
-      "93045becdc44f17a6906de13ff484fb4ba8daccfa9d3df4e76cb14d8028cfe12",
-      "8a1190be0d10dbab8df0ed4788a95638aad505536423e3f2296722063852d151",
-      "6d822e59e0e202e0d3afa38cbbaf9a5602f8f80c4d0db3ba649419aeb37a8ef1"
     ],
     "9e72924575321297": [
       "8575659eef65237c89a34eb69b6046b686db27f287a62072d8275234eaaa7378",
@@ -10082,6 +10095,10 @@
       "78c3870299ebe3a68f00b735f4decb8c3ff8c866411d9061698c090711965f1b",
       "135eb0425f9b6a813904c5c9c9e013c80a31fa5ad1cee316eb0cefcf04d99377"
     ],
+    "b961d9ae93e3b163": [
+      "39a1199e9685740f3674c4ea3b685b32bb2f57a07df727e58dc7eca9f3033225",
+      "4cffcde9254a0acfa203e00427687becb6c306a5acdc1e85cd5589ee1c25a591"
+    ],
     "b97cfc11de3c8a0d": [
       "273ed52461b2ec704a57d1f3ca70aace799c94ff33e402ad99108dacbb439751",
       "070827c1854b79ea28829d8f7eb9d5d4a8b24e380e94ed92579fd71488c13deb",
@@ -10299,6 +10316,9 @@
       "5b381b75f816401d3611be5e92d5998f0b6c8a6890e8c39700e32f3d94e2fe1d",
       "f8778727c59cabe22e2ad30fab95e6a89235a91c55e859ff6d39ecd6a7b3f0c5",
       "2ca8ff15b56f1506b36e08f721631c1f77994b9b2d50b80d0ed8341239ea493c"
+    ],
+    "bdeda9590b550004": [
+      "bdeda9590b55000421403925893fb76957427a1f4257979a30158564677596dd"
     ],
     "be27a3163e6cce21": [
       "5abcbfb3474517eaf7ad74db4653ba8bd1136de6446536be83c447fffb2b2126",
@@ -10842,12 +10862,6 @@
       "f2938a341d19bd4dec712e2aa4c35238b77cce27adc7471fa471294630f967f2",
       "aa7a4a697d63d8c67b60f4c7b126c5617ca961a8b753b6003570f43fc8f12270",
       "854f307576491575aa2641709c4b9a7dfa766ce456e29631b9feb50cf77d6ef7"
-    ],
-    "c9404661b057857e": [
-      "ffabff689a8a55db7bd5c253bdb6dff2eab09058a1f09017227879fc35683c3f",
-      "5411ae23013774bb88035d163c4b3fcc8632f037a2076acfce494e4b03d41469",
-      "d9295c34a6eeaa6bfc5b3283aab39249e164437fc81f5098f5a57590d2340a26",
-      "b345fb816152d38d4e1f3c439686101f27b9458b376b0027732577f0d36eca33"
     ],
     "c95430f6badc53ff": [
       "47971f9d5df841373b306363df1560e3aae956d83f00e04142fec1afab2667d6",
@@ -13389,8 +13403,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1100,
-      "titleCount": 9759,
+      "fileCount": 1102,
+      "titleCount": 9769,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13417,6 +13431,7 @@
         "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
         "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
         "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
+        "test/unit/anchor/checkpoint_engine/liveness/validator_resolution_stall.test.js": "72c70a3a5ec7381f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -13568,7 +13583,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
         "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
-        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "9e600b30c9222d4a",
+        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
         "test/unit/anchor/publisher/state_anchor_publisher_finalized_binding.test.js": "9eee2b66db2c2aad",
         "test/unit/anchor/publisher/state_anchor_publisher_flush_gates.test.js": "a68272db59f1acf6",
@@ -13756,7 +13771,7 @@
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_013_effector_safety_guards.test.js": "dec9b7b5b2e7d3f8",
-        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "456dfaafdaa4eeb3",
+        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "7c1090a9325173da",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_015_effector_safety_guards.test.js": "312c1b328eee3895",
         "test/unit/attestation/relay/attestation_relay.test.js": "f320646532ccf25c",
         "test/unit/attestation/relay/attestation_relay_000_opt_in_and_flag_day_inertness.test.js": "c15697af3854d0e8",
@@ -14271,7 +14286,7 @@
         "test/unit/oracle/publisher/oracle_publisher_controls.test.js": "e9a1825a136ab8cc",
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
-        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "c9404661b057857e",
+        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "0adbebaec45e5e87",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
         "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
@@ -14331,7 +14346,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "1d01da10c5943f80",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "46667be38bc74ec3",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
@@ -14339,7 +14354,7 @@
         "test/unit/peers/hub_db/price_catchup_round_group.test.js": "1b03dc8119cc9fd1",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
         "test/unit/peers/hub_db/price_round_groups.test.js": "7ec94c6350ed0bf3",
-        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "07242f5941b3abd1",
+        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster_01_broadcast_row.test.js": "b9a05ae92d57f4d5",
@@ -14353,6 +14368,7 @@
         "test/unit/peers/hub_db_broadcaster/hub_db_stream_health.test.js": "3ffd1528c333499f",
         "test/unit/peers/hub_list/hub_list_builder.test.js": "4edd3204d52be158",
         "test/unit/peers/hub_list/peer_catchup_inbound_feed_url.test.js": "368c83482f15fa4c",
+        "test/unit/peers/manager/connect_timeout.test.js": "bdeda9590b550004",
         "test/unit/peers/manager/observer_send_hold.test.js": "4e934108081616f1",
         "test/unit/peers/manager/peer_manager.test.js": "f52a236e0a1a348f",
         "test/unit/peers/manager/peer_manager_01_reject_reason_for_a_dropped_inbound_message.test.js": "b8cfba2ce97ff1f4",
@@ -14431,7 +14447,7 @@
         "test/unit/shared/admission/follower_admission_bound.test.js": "7c70b209a2630d31",
         "test/unit/shared/admission/follower_admission_bound_consensus.test.js": "004683efac27946c",
         "test/unit/shared/admission/follower_admission_scope_engines.test.js": "9c60c670e069e73e",
-        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "39a1199e9685740f",
+        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "b961d9ae93e3b163",
         "test/unit/shared/bcmath.test.js": "2f73f31a28a3acdc",
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",
@@ -14548,8 +14564,8 @@
       }
     },
     "test": {
-      "fileCount": 1100,
-      "titleCount": 9759,
+      "fileCount": 1102,
+      "titleCount": 9769,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14576,6 +14592,7 @@
         "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
         "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
         "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
+        "test/unit/anchor/checkpoint_engine/liveness/validator_resolution_stall.test.js": "72c70a3a5ec7381f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -14727,7 +14744,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
         "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
-        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "9e600b30c9222d4a",
+        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
         "test/unit/anchor/publisher/state_anchor_publisher_finalized_binding.test.js": "9eee2b66db2c2aad",
         "test/unit/anchor/publisher/state_anchor_publisher_flush_gates.test.js": "a68272db59f1acf6",
@@ -14915,7 +14932,7 @@
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_013_effector_safety_guards.test.js": "dec9b7b5b2e7d3f8",
-        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "456dfaafdaa4eeb3",
+        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "7c1090a9325173da",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_015_effector_safety_guards.test.js": "312c1b328eee3895",
         "test/unit/attestation/relay/attestation_relay.test.js": "f320646532ccf25c",
         "test/unit/attestation/relay/attestation_relay_000_opt_in_and_flag_day_inertness.test.js": "c15697af3854d0e8",
@@ -15430,7 +15447,7 @@
         "test/unit/oracle/publisher/oracle_publisher_controls.test.js": "e9a1825a136ab8cc",
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
-        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "c9404661b057857e",
+        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "0adbebaec45e5e87",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
         "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
@@ -15490,7 +15507,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "1d01da10c5943f80",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "46667be38bc74ec3",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
@@ -15498,7 +15515,7 @@
         "test/unit/peers/hub_db/price_catchup_round_group.test.js": "1b03dc8119cc9fd1",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
         "test/unit/peers/hub_db/price_round_groups.test.js": "7ec94c6350ed0bf3",
-        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "07242f5941b3abd1",
+        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster_01_broadcast_row.test.js": "b9a05ae92d57f4d5",
@@ -15512,6 +15529,7 @@
         "test/unit/peers/hub_db_broadcaster/hub_db_stream_health.test.js": "3ffd1528c333499f",
         "test/unit/peers/hub_list/hub_list_builder.test.js": "4edd3204d52be158",
         "test/unit/peers/hub_list/peer_catchup_inbound_feed_url.test.js": "368c83482f15fa4c",
+        "test/unit/peers/manager/connect_timeout.test.js": "bdeda9590b550004",
         "test/unit/peers/manager/observer_send_hold.test.js": "4e934108081616f1",
         "test/unit/peers/manager/peer_manager.test.js": "f52a236e0a1a348f",
         "test/unit/peers/manager/peer_manager_01_reject_reason_for_a_dropped_inbound_message.test.js": "b8cfba2ce97ff1f4",
@@ -15590,7 +15608,7 @@
         "test/unit/shared/admission/follower_admission_bound.test.js": "7c70b209a2630d31",
         "test/unit/shared/admission/follower_admission_bound_consensus.test.js": "004683efac27946c",
         "test/unit/shared/admission/follower_admission_scope_engines.test.js": "9c60c670e069e73e",
-        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "39a1199e9685740f",
+        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "b961d9ae93e3b163",
         "test/unit/shared/bcmath.test.js": "2f73f31a28a3acdc",
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",
@@ -15654,8 +15672,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1186,
-      "titleCount": 10641,
+      "fileCount": 1188,
+      "titleCount": 10651,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15768,6 +15786,7 @@
         "test/unit/anchor/checkpoint_engine/liveness/refused_reproposal.test.js": "4cdfc7e5f916dbd5",
         "test/unit/anchor/checkpoint_engine/liveness/string_tip_cadence.test.js": "efb0b8428cd662a5",
         "test/unit/anchor/checkpoint_engine/liveness/tip_skew_race.test.js": "c3313947c4c955b1",
+        "test/unit/anchor/checkpoint_engine/liveness/validator_resolution_stall.test.js": "72c70a3a5ec7381f",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine.test.js": "477e0bddd2edb7d2",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_broadcast_gap.test.js": "014569cebafb97e0",
         "test/unit/anchor/checkpoint_engine/state_checkpoint_engine_cadence_latch.test.js": "8364b018c2ce91be",
@@ -15919,7 +15938,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
         "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
-        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "9e600b30c9222d4a",
+        "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
         "test/unit/anchor/publisher/state_anchor_publisher_finalized_binding.test.js": "9eee2b66db2c2aad",
         "test/unit/anchor/publisher/state_anchor_publisher_flush_gates.test.js": "a68272db59f1acf6",
@@ -16107,7 +16126,7 @@
         "test/unit/attestation/publisher/broadcast/attestation_publisher_011_processqueue_no_broadcaster_replay_error.test.js": "d92fcf3de6dc666a",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_012_defaultbroadcast.test.js": "771f40a32f4eb1fb",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_013_effector_safety_guards.test.js": "dec9b7b5b2e7d3f8",
-        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "456dfaafdaa4eeb3",
+        "test/unit/attestation/publisher/broadcast/attestation_publisher_014_effector_safety_guards.test.js": "7c1090a9325173da",
         "test/unit/attestation/publisher/broadcast/attestation_publisher_015_effector_safety_guards.test.js": "312c1b328eee3895",
         "test/unit/attestation/relay/attestation_relay.test.js": "f320646532ccf25c",
         "test/unit/attestation/relay/attestation_relay_000_opt_in_and_flag_day_inertness.test.js": "c15697af3854d0e8",
@@ -16622,7 +16641,7 @@
         "test/unit/oracle/publisher/oracle_publisher_controls.test.js": "e9a1825a136ab8cc",
         "test/unit/oracle/publisher/oracle_publisher_durability.test.js": "effa694196334e3d",
         "test/unit/oracle/publisher/oracle_publisher_hydrate_last_published.test.js": "e72c6c5b72735299",
-        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "c9404661b057857e",
+        "test/unit/oracle/publisher/oracle_publisher_intent_withdraw.test.js": "0adbebaec45e5e87",
         "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": "174662224e8ac2eb",
         "test/unit/oracle/publisher/oracle_publisher_missing_txid.test.js": "814d21828c5a7872",
         "test/unit/oracle/publisher/oracle_publisher_observability.test.js": "0a19522e84f46be9",
@@ -16682,7 +16701,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "1d01da10c5943f80",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "46667be38bc74ec3",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
@@ -16690,7 +16709,7 @@
         "test/unit/peers/hub_db/price_catchup_round_group.test.js": "1b03dc8119cc9fd1",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
         "test/unit/peers/hub_db/price_round_groups.test.js": "7ec94c6350ed0bf3",
-        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "07242f5941b3abd1",
+        "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster_01_broadcast_row.test.js": "b9a05ae92d57f4d5",
@@ -16704,6 +16723,7 @@
         "test/unit/peers/hub_db_broadcaster/hub_db_stream_health.test.js": "3ffd1528c333499f",
         "test/unit/peers/hub_list/hub_list_builder.test.js": "4edd3204d52be158",
         "test/unit/peers/hub_list/peer_catchup_inbound_feed_url.test.js": "368c83482f15fa4c",
+        "test/unit/peers/manager/connect_timeout.test.js": "bdeda9590b550004",
         "test/unit/peers/manager/observer_send_hold.test.js": "4e934108081616f1",
         "test/unit/peers/manager/peer_manager.test.js": "f52a236e0a1a348f",
         "test/unit/peers/manager/peer_manager_01_reject_reason_for_a_dropped_inbound_message.test.js": "b8cfba2ce97ff1f4",
@@ -16782,7 +16802,7 @@
         "test/unit/shared/admission/follower_admission_bound.test.js": "7c70b209a2630d31",
         "test/unit/shared/admission/follower_admission_bound_consensus.test.js": "004683efac27946c",
         "test/unit/shared/admission/follower_admission_scope_engines.test.js": "9c60c670e069e73e",
-        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "39a1199e9685740f",
+        "test/unit/shared/admission/peer_catchup_admission_wire.test.js": "b961d9ae93e3b163",
         "test/unit/shared/bcmath.test.js": "2f73f31a28a3acdc",
         "test/unit/shared/canonical_int.test.js": "96192d5ba6dbcedc",
         "test/unit/shared/config_int.test.js": "5f859f73deb64c59",

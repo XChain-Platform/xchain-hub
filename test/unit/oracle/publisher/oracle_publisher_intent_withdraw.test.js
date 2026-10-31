@@ -72,7 +72,7 @@ function makeDb() {
 }
 
 // One publisher life over the shared directory and table; a restart is a second call.
-async function boot(dir, db, broadcast) {
+async function boot(dir, db, broadcast, hydrate = true) {
     let p = new OraclePublisher({
         network: 'regtest', db,
         p2pConfig: { PUBLISHER_QUEUE_PATH: path.join(dir, 'queue.jsonl'),
@@ -83,7 +83,7 @@ async function boot(dir, db, broadcast) {
     p.encoder = null;
     p.setBroadcastHook(broadcast);
     p.setBalanceHook(async () => 1000);
-    await p.hydratePublishedMarkers();
+    if (hydrate) await p.hydratePublishedMarkers();
     return p;
 }
 
@@ -162,5 +162,28 @@ function registerQuarantineTests() {
                                                     revealTxHex: '0200beef' });
         // The intent rows keep quarantining and now name the reveal to look for.
         expect(ctx.db.rows).to.deep.equal(ROUNDS.map(r => ({ round: r, txid: 'dd'.repeat(32), sent_at: null })));
+    });
+
+    it('a failed startup hydration cannot hide a crash-mid-send intent from the publish pass', async function () {
+        let sent = [];
+        ctx.db.rows.push({ round: ROUNDS[0], txid: null, sent_at: null });
+        const query = ctx.db.doQuery.bind(ctx.db);
+        let startup = true;
+        ctx.db.doQuery = async (sql, args) => {
+            if (startup && /^SELECT round, txid, sent_at FROM oracle_published_rounds$/.test(String(sql).trim())) {
+                startup = false;
+                throw new Error('startup read failed');
+            }
+            return query(sql, args);
+        };
+        let p = await boot(ctx.dir, ctx.db, async payload => { sent.push(payload); return { txid: 'ef'.repeat(32) }; }, false);
+        await enqueueBatch(p);
+        await p.hydratePublishedMarkers().catch(() => {});
+
+        await p.processQueue();
+
+        expect(sent, 'the intent-only marker must prevent a second DOGE spend').to.deep.equal([]);
+        expect(deadLetters(ctx.dir).map(d => d.round)).to.deep.equal([ROUNDS[0]]);
+        expect(p._quarantinedRounds.has(ROUNDS[0])).to.equal(true);
     });
 }

@@ -27,6 +27,7 @@ const nodeUtil = require('node:util');
 const hubVersion = require('../../../package.json').version;
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+const OUTBOUND_HANDSHAKE_TIMEOUT_MS = 10000;
 
 // What the P2P port answers over plain HTTP: the mirror-snapshot reads api.js
 // wired, and 404 for everything else.
@@ -248,7 +249,10 @@ class PeerConnections {
         let url = /^wss?:\/\//.test(addr) ? addr : 'ws://' + addr;
         let ws;
         try {
-            ws = new WebSocket(url, { maxPayload: maxPayload });
+            ws = new WebSocket(url, {
+                maxPayload: maxPayload,
+                handshakeTimeout: OUTBOUND_HANDSHAKE_TIMEOUT_MS
+            });
         } catch (e) {
             logger.error(nodeUtil.format('Failed to create WebSocket to ' + addr + ':', e));
             this.scheduleReconnect(addr);

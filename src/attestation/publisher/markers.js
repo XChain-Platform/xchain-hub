@@ -119,10 +119,9 @@ module.exports = {
     // restart, and QUARANTINES every unconfirmed one. Quarantine is scoped to the
     // status the crashed send was for, so an unresolved advisory row does not also
     // hold the ok response the request is still waiting for; a row naming no status at
-    // all is pre-upgrade and holds the whole request, as it did before. Best-effort: a
-    // DB error is logged and startup continues, leaving the in-process guard as the only
-    // cover for this process lifetime (the behavior before this marker existed, never
-    // worse).
+    // all is pre-upgrade and holds the whole request, as it did before. A startup read
+    // error is logged and startup continues; every later send still reads its marker
+    // and either recovers the quarantine or defers while the table is unavailable.
     async hydratePublishedMarkers(){
         let db = this.hubDb();
         if (!db) return;
@@ -188,7 +187,7 @@ module.exports = {
     // answer the requester paid for.
     //
     // Returns one of:
-    //   'send'  - no marker for this status, or intent-only from THIS process; proceed
+    //   'send'  - no marker for this status; proceed
     //   'sent'  - already broadcast (durable status entry, or quarantined); drop, do not send
     //   'defer' - the marker could not be read; fail closed, leave the entry queued and
     //             retry on a later sweep
@@ -209,6 +208,17 @@ module.exports = {
             logger.error(nodeUtil.format('AttestationPublisher: cannot read the durable publish marker for %s...; deferring broadcast (fail closed to avoid a duplicate BTC spend):',
                 rid.substring(0,16), e));
             return 'defer';
+        }
+        if (marker && (marker.sent_at === null || marker.sent_at === undefined)){
+            let armed = (marker.intent_status === null || marker.intent_status === undefined)
+                ? null : String(marker.intent_status);
+            if (armed === null || armed === st){
+                let key = armed === null ? rid : this.publicationKey(rid, armed);
+                this._quarantinedRequests.add(key);
+                logger.warn('AttestationPublisher: ' + rid.substring(0,16) + '... (' + st + ') has an unconfirmed ' +
+                    'publish intent; not re-broadcasting while its on-chain state is unknown');
+                return 'sent';
+            }
         }
         if (marker && marker.sent_at !== null && marker.sent_at !== undefined){
             // A row naming no statuses predates the per-outcome columns, so what it

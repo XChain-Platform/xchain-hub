@@ -41,6 +41,7 @@ function makeCatchup(overrides) {
     return new HubDbPeerCatchup({
         db: opts.db || priceDb(),
         peerManager: opts.peerManager || peerManager(true),
+        network: opts.network,
         tables: opts.tables || ['price_snapshots'],
         getVerifier: opts.getVerifier || (() => async () => true),
         fetchPage: opts.fetchPage,

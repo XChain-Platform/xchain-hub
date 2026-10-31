@@ -34,55 +34,87 @@ function socket() {
     };
 }
 
+function finalTableGate() {
+    let release;
+    let reached;
+    const table = MIRRORED_TABLES[MIRRORED_TABLES.length - 1];
+    const page = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { reached = resolve; });
+    const fetchPage = sinon.stub().callsFake(async (peer, requestedTable) => {
+        if (requestedTable !== table)
+            return { table: requestedTable, schema_version: HUB_SCHEMA_VERSION, rows: [] };
+        reached();
+        return page;
+    });
+    return { table, fetchPage, started, release };
+}
+
+function gatedCatchup(fetchPage) {
+    return new HubDbPeerCatchup({
+        peerManager: peerManager(),
+        getVerifier: () => async () => true,
+        fetchPage,
+        logger: { warn: sinon.stub(), error: sinon.stub() }
+    });
+}
+
+function expectFinalTablePending(catchup) {
+    const state = catchup.caughtUpState();
+    expect(MIRRORED_TABLES.slice(0, -1).every(table => state[table] === true)).to.equal(true);
+    expect(state[MIRRORED_TABLES[MIRRORED_TABLES.length - 1]]).to.equal(false);
+    expect(catchup.isCaughtUp()).to.equal(false);
+}
+
+function admissionBroadcaster(catchup) {
+    const broadcaster = new HubDbBroadcaster({}, {});
+    broadcaster.admissionWatermark = {
+        heights: () => ({ cross_chain_matches: { BTC: 99 } })
+    };
+    Object.assign(broadcaster, {
+        _admissionHoldFloor: { cross_chain_matches: { BTC: 50 } },
+        _admissionTimer: 1
+    });
+    broadcaster.attachAdmissionSource({ peerCatchup: catchup });
+    return broadcaster;
+}
+
+async function readyFrame(broadcaster) {
+    const subscriber = socket();
+    await broadcaster.addSubscriber(subscriber);
+    return JSON.parse(subscriber.send.firstCall.args[0]);
+}
+
 describe('peer catch-up admission wiring', function () {
     afterEach(function () { sinon.restore(); });
 
-    it('holds the ready frame at the floor until the final mirrored table catches up', async function () {
-        let releaseLastTable;
-        let reachedLastTable;
-        const lastTablePage = new Promise(resolve => { releaseLastTable = resolve; });
-        const lastTableStarted = new Promise(resolve => { reachedLastTable = resolve; });
-        const fetchPage = sinon.stub().callsFake(async (peer, table) => {
-            if (table !== MIRRORED_TABLES[MIRRORED_TABLES.length - 1]) return { table, schema_version: HUB_SCHEMA_VERSION, rows: [] };
-            reachedLastTable();
-            return lastTablePage;
-        });
-        const catchup = new HubDbPeerCatchup({
-            peerManager: peerManager(),
-            getVerifier: () => async () => true,
-            fetchPage,
-            logger: { warn: sinon.stub(), error: sinon.stub() }
-        });
-        const running = catchup.start();
-        await lastTableStarted;
-
-        const state = catchup.caughtUpState();
-        expect(MIRRORED_TABLES.slice(0, -1).every(table => state[table] === true)).to.equal(true);
-        expect(state[MIRRORED_TABLES[MIRRORED_TABLES.length - 1]]).to.equal(false);
-        expect(catchup.isCaughtUp()).to.equal(false);
-
+    it('passes the hub deployment network to the production catch-up worker', function () {
+        sinon.stub(HubDbPeerCatchup.prototype, 'start').resolves();
         const broadcaster = new HubDbBroadcaster({}, {});
-        broadcaster.admissionWatermark = {
-            heights: () => ({ cross_chain_matches: { BTC: 99 } })
-        };
-        broadcaster._admissionHoldFloor = { cross_chain_matches: { BTC: 50 } };
-        broadcaster._admissionTimer = 1;
-        const hub = { peerCatchup: catchup };
+        broadcaster.sampleAdmission = sinon.stub().resolves();
+        const hub = { network: 'mainnet', peerManager: peerManager() };
         broadcaster.attachAdmissionSource(hub);
+        expect(hub.peerCatchup.network).to.equal('mainnet');
+        broadcaster.stop();
+    });
 
-        const waitingSocket = socket();
-        await broadcaster.addSubscriber(waitingSocket);
-        const waitingReady = JSON.parse(waitingSocket.send.firstCall.args[0]);
+    it('holds the ready frame at the floor until the final mirrored table catches up', async function () {
+        const gate = finalTableGate();
+        const catchup = gatedCatchup(gate.fetchPage);
+        const running = catchup.start();
+        await gate.started;
+
+        expectFinalTablePending(catchup);
+
+        const broadcaster = admissionBroadcaster(catchup);
+        const waitingReady = await readyFrame(broadcaster);
         expect(waitingReady.caught_up).to.equal(false);
         expect(waitingReady.heights).to.deep.equal({ cross_chain_matches: { BTC: 50 } });
 
-        releaseLastTable({ table: MIRRORED_TABLES[MIRRORED_TABLES.length - 1], schema_version: HUB_SCHEMA_VERSION, rows: [] });
+        gate.release({ table: gate.table, schema_version: HUB_SCHEMA_VERSION, rows: [] });
         await running;
         expect(catchup.isCaughtUp()).to.equal(true);
 
-        const readySocket = socket();
-        await broadcaster.addSubscriber(readySocket);
-        const ready = JSON.parse(readySocket.send.firstCall.args[0]);
+        const ready = await readyFrame(broadcaster);
         expect(ready.caught_up).to.equal(true);
         expect(ready.heights).to.deep.equal({ cross_chain_matches: { BTC: 99 } });
 

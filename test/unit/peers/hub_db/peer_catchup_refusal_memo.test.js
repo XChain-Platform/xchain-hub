@@ -39,6 +39,13 @@ function warnLines(logger, text) {
 describe('hub DB peer catch-up refusal memo', function () {
     afterEach(function () { sinon.restore(); });
 
+    registerRefusalReuseTests();
+    registerRetryableRefusalTest();
+    registerRefusalReportingTests();
+});
+
+function registerRefusalReuseTests() {
+
     it('does not re-verify a row refused for a local reason on the next walk', async function () {
         const verifier = refusingVerifier();
         const { catchup, logger } = memoCatchup(verifier, servingRows(() => SKIPPED));
@@ -75,6 +82,20 @@ describe('hub DB peer catch-up refusal memo', function () {
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
     });
 
+    it('does not remember a retryable verifier failure and forwards the deployment network', async function () {
+        const verifier = sinon.stub().resolves({ ok: false, retryable: true, reason: 'validator lookup failed' });
+        const { catchup } = memoCatchup(verifier, servingRows(() => SKIPPED.slice(0, 1)), { network: 'mainnet' });
+        await catchup.run();
+        await catchup.run();
+        expect(verifier.callCount).to.equal(2);
+        expect(verifier.firstCall.args[1].network).to.equal('mainnet');
+        expect(catchup.refusals.size()).to.equal(0);
+        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(false);
+    });
+}
+
+function registerRefusalReportingTests() {
+
     it('logs one summary line per walk for rows already refused', async function () {
         const { catchup, logger } = memoCatchup(refusingVerifier(), servingRows(() => SKIPPED));
         await catchup.run();
@@ -95,10 +116,9 @@ describe('hub DB peer catch-up refusal memo', function () {
         expect(memo.has(keys[0])).to.equal(false);
         expect(memo.has(keys[2])).to.equal(true);
     });
-});
+}
 
-describe('hub DB peer catch-up refusal memo', function () {
-    afterEach(function () { sinon.restore(); });
+function registerRetryableRefusalTest() {
     it('retries an explicit retryable refusal on the next walk', async function () {
         const verifier = sinon.stub();
         verifier.onFirstCall().resolves({ ok: false, reason: 'validator lookup failed', retry: true });
@@ -113,4 +133,4 @@ describe('hub DB peer catch-up refusal memo', function () {
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
         expect(warnLines(logger, 'validator lookup failed')).to.have.length(1);
     });
-});
+}

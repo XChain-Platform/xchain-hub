@@ -3,11 +3,64 @@
 const sinon = require('sinon');
 const { expect } = require('chai');
 const swq = require('../../../../src/consensus/stake_weighted_quorum.js');
+const ValidatorIdentity = require('../../../../src/validators/identity.js');
+const checkpointForms = require('../../../../src/anchor/checkpoint_engine/canonical_forms.js');
+const checkpointVerifier = require('../../../../src/anchor/checkpoint_engine/catchup_verifier.js');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
 const capabilityVerifier = require('../../../../src/oracle/price_aggregator/capability_catchup_verifier.js');
 const attestationVerifier = require('../../../../src/attestation/response_mirror/catchup_verifier.js');
 
 const PUBKEY = 'ab'.repeat(32);
+
+function signedCheckpoint(network, signers) {
+    const row = {
+        chain: 'BTC', network, block_index: 91, block_hash: 'block',
+        ledger_hash: 'ledger', actions_hash: 'actions', contract_hash: 'contract',
+        checkpoint_seq: 12, snapshot_block: 12, state_root: null,
+        state_root_version: null, block_merkle_root: null, block_merkle_version: null
+    };
+    const canonical = checkpointForms.canonicalCheckpoint(row);
+    row.validator_signatures = JSON.stringify(signers.map(signer => ({
+        pubkey: signer.getPubkeyHex(), sig: signer.sign(canonical)
+    })));
+    return row;
+}
+
+function checkpointDb(signers) {
+    return {
+        findCapabilitySnapshotsBySnapshotBlock: async () => signers.map((signer, index) => ({
+            signing_pubkey: signer.getPubkeyHex(), source: 'source-' + index,
+            amount: ['70', '20', '10'][index]
+        }))
+    };
+}
+
+describe('state_checkpoints production catch-up context', function () {
+    it('uses the deployment network and refuses a differently labelled signed row', async function () {
+        const signers = Array.from({ length: 3 }, () => new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex));
+        const context = { db: checkpointDb(signers), network: 'mainnet' };
+        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(
+            signedCheckpoint('mainnet', signers), context)).to.equal(true);
+        const foreign = signedCheckpoint('testnet', [signers[0]]);
+        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(foreign, context)).to.deep.equal({
+            ok: false, reason: 'checkpoint network does not match deployment network'
+        });
+        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(foreign, { db: context.db })).to.equal(true);
+    });
+
+    it('marks validator lookup errors retryable while malformed rows remain lasting refusals', async function () {
+        const signer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const db = { findCapabilitySnapshotsBySnapshotBlock: async () => { throw new Error('database unavailable'); } };
+        const verdict = await checkpointVerifier.verifyStateCheckpointCatchupRow(
+            signedCheckpoint('mainnet', [signer]), { db, network: 'mainnet' });
+        expect(verdict).to.deep.equal({ ok: false, retry: true,
+            reason: 'validator lookup failed for snapshot_block 12: database unavailable' });
+        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(
+            { network: 'mainnet' }, { db, network: 'mainnet' })).to.deep.equal({
+            ok: false, reason: 'malformed state checkpoint row'
+        });
+    });
+});
 
 describe('capability_snapshots catch-up verifier', function () {
     afterEach(function () { sinon.restore(); });

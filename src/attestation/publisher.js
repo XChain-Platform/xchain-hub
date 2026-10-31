@@ -158,8 +158,8 @@ class AttestationPublisher {
         // sweep below, or that first sweep is exactly the pass that re-broadcasts a
         // response the pre-crash process already sent.
         await this.hydratePublishedMarkers().catch(err =>
-            logger.error('AttestationPublisher: durable publish-marker hydration failed; the in-process guard is ' +
-                          'the only cover this lifetime: ' + (err && err.message ? err.message : err)));
+            logger.error('AttestationPublisher: durable publish-marker hydration failed; per-entry marker reads will ' +
+                          'fail closed until the table is readable: ' + (err && err.message ? err.message : err)));
 
         // Crash recovery: replay any finalized responses that survived a restart
         // (a leader that crashed between the queue write and the broadcast).
