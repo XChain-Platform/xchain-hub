@@ -113,9 +113,58 @@ module.exports = {
     // the committed ledger only when the row is actually inserted (INSERT IGNORE), so a
     // duplicate finalize (another hub / restart race) never double-counts a fill.
     async writeFinalizedMatch(ev){
-        let row = ev.row;
+        this.ensureRetractionFence();
+        const token = { seq: this._retractionSeq, row: ev.row };
+        token.done = new Promise(resolve => { token.finish = resolve; });
+        this._pendingWrites.add(token);
+        try {
+            await this.writeFinalizedMatchFenced(ev, token);
+        } finally {
+            token.finish();
+            this._pendingWrites.delete(token);
+            this.pruneRetractionFence();
+        }
+    },
+
+    async writeFinalizedMatchFenced(ev, token){
+        const row = ev.row;
+        const startSeq = token.seq;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical (WI-2 bump 2)
+        if(!await this.persistMatchSnapshot(row)) return;
+        const btcChainId = await this.resolveBtcChainId(row.network);
+        if(this.retractedSince(startSeq, row)){
+            logger.warn('CrossChainDex: retraction landed while finalizing ' +
+                        String(row.match_id).substring(0, 16) + '...; skipping the row write and the mirror');
+            this.deferFinalize(row);
+            return;
+        }
+        let inserted;
+        try {
+            inserted = await this.insertMatchRow(row, btcChainId);
+        } catch(e){
+            logger.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
+                          String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this.deferFinalize(row);
+            return;
+        }
+        token.inserted = inserted;
+        if(this.retractedSince(startSeq, row)){
+            this.deferFinalize(row);
+            return;
+        }
+        if(inserted) this.applyCommit(row, +1);
+        token.capacityApplied = !!inserted;
+        this._inflight.delete(row.match_id);
+        await this.mirrorMatchRow(row);
+        logger.info('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
+                    row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
+                    ' [' + row.a_kind + '/' + row.b_kind + '] fill ' + row.a_amount + '⇄' + row.b_amount +
+                    ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
+        this.emit('match:finalized', { matchId: row.match_id });
+    },
+
+    async persistMatchSnapshot(row){
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
         // not just the round leader: the indexers verify the row's signatures
         // against capability_snapshots in whichever hub DB they mirror, and a
@@ -139,36 +188,60 @@ module.exports = {
             logger.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
             this.deferFinalize(row);
-            return;
+            return false;
         }
         if(!persistedRows){
             logger.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round)');
             this.deferFinalize(row);
-            return;
+            return false;
         }
-        // The durable INSERT is the fill, so account it in the reservation ledger BEFORE
-        // any fallible delivery step. A write that throws means nothing was committed
-        // here: defer it exactly as the two preconditions above do, so the next poll
-        // re-proposes rather than the round staying in-flight and retired forever.
-        let inserted;
-        try {
-            inserted = await this.insertMatchRow(row);
-        } catch(e){
-            logger.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
-                          String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this.deferFinalize(row);
-            return;
-        }
-        if(inserted) this.applyCommit(row, +1);
-        this._inflight.delete(row.match_id);
-        await this.mirrorMatchRow(row);
-        logger.info('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
-                    row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
-                    ' [' + row.a_kind + '/' + row.b_kind + '] fill ' + row.a_amount + '⇄' + row.b_amount +
-                    ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
-        this.emit('match:finalized', { matchId: row.match_id });
+        return true;
+    },
+
+    ensureRetractionFence(){
+        if(!this._retractionFence) this._retractionFence = [];
+        if(!this._pendingWrites) this._pendingWrites = new Set();
+        if(typeof this._retractionSeq !== 'number') this._retractionSeq = 0;
+    },
+
+    pruneRetractionFence(){
+        this.ensureRetractionFence();
+        let floor = this._retractionSeq;
+        for(const token of this._pendingWrites) if(token.seq < floor) floor = token.seq;
+        this._retractionFence = this._retractionFence.filter(entry => entry.seq > floor);
+    },
+
+    recordRetraction(chain, bounds){
+        this.ensureRetractionFence();
+        const entry = { seq: ++this._retractionSeq, chain: String(chain), ...bounds };
+        this._retractionFence.push(entry);
+        this.pruneRetractionFence();
+        return entry;
+    },
+
+    retractionCovers(entry, row){
+        const legMatches = (entry, side) => {
+            const index = Number(row[side + '_action_index']);
+            const generation = Number(row[side + '_push_generation'] || 0);
+            return entry.chain === String(row[side + '_chain']) && index >= entry.from &&
+                (!entry.bounded || index <= entry.to) && (!entry.fenced || generation <= entry.gen);
+        };
+        return legMatches(entry, 'a') || legMatches(entry, 'b');
+    },
+
+    retractedSince(startSeq, row){
+        this.ensureRetractionFence();
+        return this._retractionFence.some(entry =>
+            entry.seq > startSeq && this.retractionCovers(entry, row));
+    },
+
+    async waitForCoveredWrites(entry){
+        const covered = [...this._pendingWrites].filter(token =>
+            token.seq < entry.seq && this.retractionCovers(entry, token.row));
+        await Promise.all(covered.map(token => token.done));
+        return covered;
     },
 
     // Release a match that finalized in PBFT but whose write refused or failed, so the
@@ -185,13 +258,13 @@ module.exports = {
 
     // Returns true iff the row was actually inserted (false on INSERT IGNORE dedupe), so the
     // caller only updates the committed ledger once per fill.
-    async insertMatchRow(row){
+    async insertMatchRow(row, btcChainId){
         // Resolved into the value list rather than onto `row`: the row object is what the
         // canonical, the ledger and the retraction paths read, and btc_chain_id is transport,
         // never consensus. canonicalMatch enumerates its fields explicitly, so this value has
         // no path into a signed preimage. The column list and the statement live in
         // db.createCrossChainMatch.
-        let btcChainId = await this.resolveBtcChainId(row.network);
+        if(arguments.length < 2) btcChainId = await this.resolveBtcChainId(row.network);
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
         let res = await this.db.createCrossChainMatch(row, btcChainId);
@@ -264,12 +337,16 @@ module.exports = {
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
+        const entry = this.recordRetraction(chain, bounds);
+        const pending = await this.waitForCoveredWrites(entry);
+        const uncommitted = new Set(pending.filter(token => token.inserted && !token.capacityApplied)
+            .map(token => token.row.match_id));
         // Per-leg clause for whichever side is on the reorged chain, fenced by THAT leg's
         // generation; the statement is db.findFinalizedCrossChainMatchesForReorg.
         let rows = await this.db.findFinalizedCrossChainMatchesForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){
             await this.db.updateCrossChainMatchRetracted(r.match_id);
-            this.applyCommit(r, -1);                   // restore both legs' remaining capacity
+            if(!uncommitted.has(r.match_id)) this.applyCommit(r, -1);
             this._inflight.delete(r.match_id);
             // Clear the consensus finalized-ring entry (M-13): the match_id is the
             // round id, and without this a match re-formed after this reorg can never
