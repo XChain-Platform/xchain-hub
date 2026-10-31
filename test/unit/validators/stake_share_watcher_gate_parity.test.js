@@ -32,7 +32,26 @@ describe('StakeShareWatcher gate parity', function () {
     registerThresholdTests();
     registerEchoTests();
     registerAlarmIsolationTests();
+    registerArchivePublishReadTests();
 });
+
+// The archive leg's set is read by its own name, with the oracle_publish threshold.
+function registerArchivePublishReadTests() {
+
+    describe('the archive_publish set', function () {
+
+        it('reads the archive_publish set through the gate read and resolves its threshold', async function () {
+            const venue = makeVenue();
+            const { watcher } = makeWatcher(venue, null, null, { capabilities: ['archive_publish'] });
+            await watcher.pollOnce();
+            const asked = venue.calls.filter(c => c.method === 'getstakeweightsbycapability');
+            expect(asked.map(c => c.params.capability)).to.include('archive_publish');
+            const entry = watcher.monitor.entries.get('BTC:archive_publish');
+            expect(entry, 'a BTC:archive_publish row').to.exist;
+            expect(entry.level).to.not.equal(LEVELS.UNAVAILABLE);
+        });
+    });
+}
 
 function registerIndexerTests() {
 

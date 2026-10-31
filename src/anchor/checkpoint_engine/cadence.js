@@ -21,7 +21,7 @@
 
 'use strict';
 
-const { indexerReplayOpen } = require('./replay_hold.js');
+const { leaderReplayHoldReason } = require('./replay_gate.js');
 const { noteCheckpointStalled } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -111,9 +111,10 @@ module.exports = {
                     ' (' + this._roundFailuresByChain[chain] + ' failed round(s) for this chain so far)');
     },
 
-    // A round for this chain returned, so its last failure no longer describes it.
+    // A round for this chain returned undeclined, so its last failure and decline no longer describe it.
     clearRoundFailure(chain){
         if(this._lastRoundFailureByChain) delete this._lastRoundFailureByChain[chain];
+        if(this._lastLeaderDeclineByChain) delete this._lastLeaderDeclineByChain[chain];
     },
 
     // Seed the cadence latch from persisted checkpoints so a hub restart does
@@ -181,15 +182,11 @@ module.exports = {
             this._ticking = false;
         }
     },
+    // Hold the cadence on an open replay, or when no chain's replay state can be read.
     async leaderReplayHeld(btcBlock){
-        for(const chain of this.chains){
-            if(!this.indexers[chain] || !this.indexers[chain].url) continue;
-            try {
-                const bh = await this.indexerCall(chain, 'getblockhashes', {});
-                if(indexerReplayOpen(bh && bh.rules)){ this.noteCadenceStall(btcBlock, 'indexer_replaying'); return true; }
-            } catch(_e){}
-        }
-        return false;
+        const reason = await leaderReplayHoldReason(this);
+        if(reason) this.noteCadenceStall(btcBlock, reason);
+        return reason != null;
     },
     // True while `btcBlock` is inside the interval after the last FINALIZED checkpoint.
     finalizedLatchHolds(btcBlock){
@@ -214,7 +211,7 @@ module.exports = {
         this._attemptedCheckpointBtcBlock = btcBlock;
         for(let chain of this.chains){
             if(!this.indexers[chain].url) continue;
-            try { await this.runRound(chain, btcBlock, validators); this.clearRoundFailure(chain); }
+            try { if(!await this.runRound(chain, btcBlock, validators)) this.clearRoundFailure(chain); }
             catch(e){
                 // An indexer blip before the proposal: retryable here on a frozen tip, and
                 // the next block's leader retries the interval since no latch moved. Each
@@ -331,8 +328,7 @@ module.exports = {
             try {
                 let validators = await this.resolveCapabilityValidators('oracle_publish', retry.snapshotBlock);
                 if(!this.leadsCadenceSlot(retry.snapshotBlock, validators)) continue;
-                await this.runRound(chain, retry.snapshotBlock, validators, retry);
-                this.clearRoundFailure(chain);
+                if(!await this.runRound(chain, retry.snapshotBlock, validators, retry)) this.clearRoundFailure(chain);
             } catch(e){
                 this.noteRoundFailure(chain, retry.snapshotBlock, e);
             }

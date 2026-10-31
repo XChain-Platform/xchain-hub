@@ -239,7 +239,7 @@ module.exports = {
 
     // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block.
     // The block the published v1 declares on the wire is the block the indexer
-    // (anchor.js) + full-parse recovery verify the wrapper signatures against
+    // (actions/anchor/quorum.js) + full-parse recovery verify the wrapper signatures against
     // (oracle_publish @ snapshot_block). Resolving it at the current election
     // block instead would let signers present only in the current set
     // contribute signatures the indexer later drops, pushing validSigs below
@@ -248,7 +248,7 @@ module.exports = {
     // losing settled cross-chain state. The election set above may differ
     // (liveness); the set that gates co-signature acceptance must not.
     // Resolve the SIGNING set as the full {pubkey, source, weight} snapshot via
-    // resolveCapabilitySet (the SAME set the indexer anchor.js + full-parse
+    // resolveCapabilitySet (the SAME set the indexer quorum.js + full-parse
     // recovery verify the wrapper signatures against, oracle_publish @
     // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
     // the stake-weighted gate needs, so the publisher's local quorum decision
@@ -266,7 +266,7 @@ module.exports = {
     // resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
     // snapCount > 0. Without this the `snapCount <= 1` self-sign path below treats 0
     // as single-node: the leader signs an archive whose declared signing set it is
-    // not a member of, publishes a v1 that the indexer (anchor.js) and full-parse
+    // not a member of, publishes a v1 that the indexer (quorum.js) and full-parse
     // recovery both refuse (their quorum verifiers need at least one qualified
     // signer), and dequeues the settled cross_chain rows anyway - a live-vs-recovered
     // ledger fork. Returning 'none' leaves every row pending, so a later flush
@@ -290,7 +290,7 @@ module.exports = {
         let snapCount      = signingPubkeys.length;
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
         // legacy 2f+1 count; keyed on the BTC snapshot_block so the hub flips on the
-        // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
+        // same anchor as the indexer's verifyHeadQuorum (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
@@ -303,7 +303,7 @@ module.exports = {
         // short-circuits this test: a one-member set is not a degenerate self-sign,
         // because the one member may be validator A while the election (a DIFFERENT
         // resolver at a DIFFERENT height, see above) picked replacement publisher B.
-        // anchor.js filters B's seeded signature out by snapshot membership and records
+        // The indexer's verifyHeadQuorum filters B's seeded signature out by snapshot membership and records
         // the v1 'invalid: insufficient valid signatures (0/1)', while full-parse recovery
         // throws on the same wrapper - and this hub would dequeue the settled rows behind
         // it. The two sibling attestation rounds prove membership before their own

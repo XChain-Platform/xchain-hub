@@ -24,10 +24,9 @@
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
 const canonicalForms = require('./canonical_forms.js');
-const { ANCHOR_BUNDLE_MAX_BYTES } = require('./constants.js');
+const { ANCHOR_BUNDLE_MAX_BYTES, ANCHOR_SIG_PAIR_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-const { ANCHOR_SIG_PAIR_BYTES } = require('./constants.js');
 
 function orderedSections(sections){
     return (sections || []).slice().sort((a, b) => {
@@ -160,6 +159,12 @@ module.exports = {
                 logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
                              row.block_index + ' (seq ' + row.checkpoint_seq + ') carries no light-client roots; ' +
                              'skipped, an ANCHOR v0 section is root-bearing by construction');
+                continue;
+            }
+            // Skip a supersession marker: no v0 section carries the SUPERSEDE segment its signatures end in.
+            if(canonicalForms.hasSupersedeFields(row)){
+                logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' + row.block_index +
+                             ' (seq ' + row.checkpoint_seq + ') carries supersession fields; skipped, an ANCHOR v0 section carries no SUPERSEDE segment');
                 continue;
             }
             // Skip a root-bearing row below CHECKPOINT_COMMITMENT_ACTIVATION at its own

@@ -17,7 +17,7 @@
  * The STAKE_WEIGHTED_QUORUM gate (swq.isStakeWeightedQuorumActive) keys on a
  * NETWORK. The consensus/verification authority is the RECORD's network (the
  * checkpoint / match / call / anchor being processed): the indexer verifiers
- * (anchor.js, cross_settle, xexec) all gate on the record's NETWORK, so a hub
+ * (actions/anchor/quorum.js, cross_settle, xexec) all gate on the record's NETWORK, so a hub
  * that gated on its own DEPLOYMENT network instead would, on an unscoped or
  * cross-network hub, declare quorum by count while the indexer applies the
  * stricter stake predicate and rejects, forking the reward ledger. This helper

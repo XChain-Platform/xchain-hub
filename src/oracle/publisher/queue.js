@@ -352,12 +352,18 @@ module.exports = {
         if (cutoff <= 0) return 0;
 
         // Invariant 2: never prune a marker whose round can still be read off the
-        // durable queue file. Best-effort read; an unreadable queue returns [] and the
-        // window applies unchanged (the file being unreadable is already loud elsewhere).
+        // durable queue file. Strict read: an unreadable queue skips the prune, since
+        // the clamp cannot see which rounds it must protect (a missing file is empty).
         // A batch entry's `round` is its FIRST round, which is also the LOWEST round
         // it carries, so the clamp below still lands under every round the entry
         // protects and needs no batch-specific arm.
-        for (let entry of this.readQueue()) {
+        let state = this.readQueueState();
+        if (state === null) {
+            logger.warn('OraclePublisher: skipping the published-rounds retention sweep; the durable queue at ' +
+                this.queuePath + ' could not be read, so queued rounds cannot be protected');
+            return 0;
+        }
+        for (let entry of state.entries) {
             let r = Number(entry && entry.round);
             if (Number.isFinite(r) && r < cutoff) cutoff = r;
         }

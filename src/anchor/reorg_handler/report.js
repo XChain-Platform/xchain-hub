@@ -148,7 +148,9 @@ module.exports = {
     },
 
     async executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof, observedBlockTimeMs) {
-        logger.info('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
+        // Warn, like the decoder and indexer reorg lines: this deletes attestations.
+        logger.warn('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight +
+            ' (' + reorgId + ')');
 
         // Rollback bound: anchor to OUR OWN node's block_time for reorgHeight
         // (captured during self-verification) rather than the reporter-supplied
@@ -187,7 +189,7 @@ module.exports = {
         // durable state.
         await this.emitDisputedPriceRows(bound);
 
-        logger.info('Reorg: Rollback complete for ' + reorgId +
+        logger.warn('Reorg: Rollback complete for ' + reorgId +
             ': attestations and snapshots after ' + bound +
             (Number.isFinite(observedBlockTimeMs) ? ' (block_time-anchored)' : ' (reported timestamp)') +
             ' invalidated');

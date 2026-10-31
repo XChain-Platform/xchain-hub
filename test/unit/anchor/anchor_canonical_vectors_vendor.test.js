@@ -11,6 +11,7 @@
 const { expect } = require('chai');
 const fs = require('fs');
 const path = require('path');
+const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
 
 const fixturePath = path.resolve(__dirname, '../../fixtures/anchor_canonical_vectors.json');
 const authorityPath = path.resolve(__dirname,
@@ -26,7 +27,9 @@ describe('vendored anchor canonical vectors', function () {
     });
 
     it('is byte-identical to the documentation authority when available', function () {
-        if (!fs.existsSync(authorityPath)) this.skip();
+        // A present file is not enough: a lane symlink into a live main checkout is refused.
+        const verdict = siblingCheckout(__dirname, authorityPath);
+        if (!verdict.usable) return skipOrFail(this, verdict, 'the hub anchor canonical vectors byte-identity guard');
         expect(fs.readFileSync(fixturePath)).to.deep.equal(fs.readFileSync(authorityPath));
     });
 });

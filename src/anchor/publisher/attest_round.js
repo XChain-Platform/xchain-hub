@@ -144,7 +144,7 @@ module.exports = {
     // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
     // { met:false } on timeout / short quorum. ONE round per bundle, where the retired
     // per-chain path ran one per row. The SIGNING/QUORUM set is resolved at the bundle's
-    // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
+    // snapshot_block, the SAME set the indexer (anchor_reward_derive.js) verifies the attestation
     // against, so the hub never collects a quorum the chain then rejects.
     // The oracle_publish set this round tallies against, or null when the snapshot is
     // unavailable and the round abstains (met:false, the caller defers the bundle).
@@ -179,7 +179,9 @@ module.exports = {
         // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
         // drops the reward (PUBLISHER must be in the verified set). Return met:false (the
         // caller defers the bundle) rather than emit one whose reward can never be credited.
-        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
+        if(!signingPubkeys.includes(me) ||
+           this.abstainWithoutPeers(snapCount, b.snapshot_block, 'publisher-attestation round (bundle deferred)'))
+            return { met: false, sigs: [] };
 
         // One XANCPUB signature per slot: a hub that already co-signed another
         // publisher here would hand the indexer a slashable publisher-only pair, so
@@ -191,7 +193,7 @@ module.exports = {
 
         // Genuine single-node set (snapCount === 1, membership proven above): the
         // publisher's own attestation IS the quorum.
-        if(snapCount <= 1 || !this.peerManager)
+        if(snapCount <= 1)
             return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
         return await this.openAttestRound(b, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig);
     },

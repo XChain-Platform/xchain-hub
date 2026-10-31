@@ -43,14 +43,31 @@ describe('StakeShareWatcher', function () {
     registerWholeFederationTests();
 });
 
+// Collect every literal capability passed to persistCapabilitySnapshot( under src/.
+function persistedSnapshotCapabilities() {
+    const fs = require('fs'), path = require('path'), found = new Set();
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).forEach((d) => {
+        const p = path.join(dir, d.name);
+        if (d.isDirectory()) return walk(p);
+        if (!d.name.endsWith('.js')) return;
+        for (const m of fs.readFileSync(p, 'utf8').matchAll(/persistCapabilitySnapshot\(\s*'([a-z_]+)'/g)) found.add(m[1]);
+    });
+    walk(path.join(__dirname, '..', '..', '..', 'src'));
+    return Array.from(found).sort();
+}
+
 function registerStakeShareDefaultCapabilityTests() {
     it('watches by default every capability gate and the whole-federation config-change gate', function () {
         // A capability added to the snapshot writers but not here would halt with no forecast.
         const { DERIVED_CAPABILITIES } = require('../../../src/oracle/price_aggregator/derived_capabilities.js');
         expect(DERIVED_CAPABILITIES.length).to.be.above(0);
         expect(StakeShareWatcher.WHOLE_FEDERATION).to.equal('*');
-        expect(StakeShareWatcher.DEFAULT_CAPABILITIES.slice().sort())
-            .to.deep.equal(DERIVED_CAPABILITIES.concat(['*']).sort());
+        const persisted = persistedSnapshotCapabilities();
+        expect(persisted, 'the snapshot-writer scan found nothing, so it would check nothing').to.include('archive_publish');
+        const required = Array.from(new Set(DERIVED_CAPABILITIES.concat(persisted, ['*']))).sort();
+        expect(StakeShareWatcher.DEFAULT_CAPABILITIES.slice().sort(),
+            'watch every persisted snapshot capability, every derived capability and the whole federation')
+            .to.deep.equal(required);
     });
 
     it('accepts the whole-federation key in the capability override', function () {
@@ -372,7 +389,7 @@ function registerStakeShareLifecycleTests() {
             const venue = makeVenue();
             const { watcher } = makeWatcher(venue, null, null, { chains: null, capabilities: null });
             expect(watcher.chains).to.deep.equal(['BTC']);
-            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish', 'attestation', 'cross_chain', '*']);
+            expect(watcher.capabilities).to.deep.equal(['price', 'oracle_publish', 'archive_publish', 'attestation', 'cross_chain', '*']);
             expect(watcher.pollMs).to.equal(StakeShareWatcher.DEFAULT_POLL_MS);
         });
     });

@@ -234,7 +234,7 @@ module.exports = {
         let json;
         // Bounded decompress: the archive is attacker-supplied bytes decompressed
         // BEFORE any CRC/quorum check, so an unbounded gunzip is a gzip-bomb DoS.
-        // Mirror the committed indexer cap (anchor.js / recovery.js, 16 MiB).
+        // Mirror the committed indexer cap (actions/anchor/index.js archiveCrc / recovery.js, 16 MiB).
         try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url'), { maxOutputLength: 16 * 1024 * 1024 }).toString('utf8'); }
         catch(e){ return null; }
         if(this.crc32Hex(json) !== String(d.batch_crc32)) return null;
@@ -310,7 +310,7 @@ module.exports = {
         if(!round || round.done) return;
         // STAKE_WEIGHTED_QUORUM: fire on distinct-source signer stake > 2/3 of the
         // snapshot when weighted, else legacy signature count. Matches the indexer
-        // anchor.js / recovery verdict so the publisher never dequeues a batch the
+        // quorum.js / recovery verdict so the publisher never dequeues a batch the
         // chain then rejects (or stalls a stake-met-but-count-short batch).
         let met = round.weighted
             ? swq.meetsStakeThreshold(round.validators, round.signatures.keys())

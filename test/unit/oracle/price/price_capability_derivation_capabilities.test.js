@@ -98,9 +98,9 @@ function indexerVerdict(targetDb, anchor, signers, capability) {
         : 'invalid: insufficient signer stake';
 }
 
-// The status xchain-indexer actions/anchor.js stamps on an ARCHIVE HEAD whose payload
+// The status xchain-indexer actions/anchor/quorum.js stamps on an ARCHIVE HEAD whose payload
 // declares SNAPSHOT_BLOCK. Its shape is NOT the price/attest one: an empty
-// `oracle_publish` set is not a refusal, it is `unverified` (anchor.js:384-387,
+// `oracle_publish` set is not a refusal, it is `unverified` (quorum.js verifyHeadQuorum,
 // `if(oracleN === 0){ data['STATUS'] = 'unverified'; }`), which is the divergence the
 // measured node actually showed. Only once the set is non-empty does the quorum
 // predicate decide valid vs refused.
@@ -180,7 +180,7 @@ function registerCapabilityVerdictTests() {
         expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'attestation')).to.equal('valid');
     });
     it('flips the ANCHOR archive head from `unverified` to a real verdict', async function () {
-        // anchor.js:384-387: oracleN === 0 is not a refusal, it is `unverified`, which
+        // quorum.js verifyHeadQuorum: oracleN === 0 is not a refusal, it is `unverified`, which
         // is why this assertion is not the ATTEST one with a different capability.
         expect(indexerArchiveHeadStatus(db, ANCHOR, THREE_SIGNERS)).to.equal('unverified');
         await agg.runPriceCapabilityDerivation();

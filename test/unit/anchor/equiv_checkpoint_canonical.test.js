@@ -10,7 +10,7 @@
 
 // EQUIV header (WI-2 bump 2): checkpoint engine round-trip and collision-fix.
 // CONSENSUS-CRITICAL: the XCHECKPOINT canonical is rebuilt by the hub
-// (StateCheckpointEngine / StateAnchorPublisher), the indexer (anchor.js /
+// (StateCheckpointEngine / StateAnchorPublisher), the indexer (actions/anchor/index.js /
 // recovery.js), the SDK (checkpoint.js) and the explorer. They MUST produce
 // byte-identical bytes at every gate state, and the per-block checkpoint canonical
 // and the archive (v1) canonical (which legitimately share checkpoint_seq) MUST
@@ -129,7 +129,7 @@ function registerCrossServiceTests() {
     // to the suffix (field order, the .toLowerCase(), the pipe count, either gate) ships
     // green. The two sides gate that suffix by DIFFERENT rules on purpose (the hub on
     // CHECKPOINT_COMMITMENT AND root presence, StateCheckpointEngine.checkpointRootSuffix;
-    // the indexer on the wire VERSION being 0, anchor.js), which makes their equivalence
+    // the indexer on the wire VERSION being 0, actions/anchor/index.js), which makes their equivalence
     // on a REAL v0 section exactly the property that needs asserting. Spec D41 records
     // that the difference is safe only because a v0 section is root-bearing by
     // construction: the engine computes roots at/above the same flag-day and the

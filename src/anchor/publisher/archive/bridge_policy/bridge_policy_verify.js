@@ -56,6 +56,23 @@ function rowShapeRefusal(row, idKey, otherKey){
     return null;
 }
 
+// Return why an unheld row is not the shape the archive builder emits, or null. The
+// XBRIDGE and XPOLICY canonicals leave status and the key list unsigned, so a row with
+// no held twin must re-serialize unchanged and carry a status its table can hold.
+function unheldRowRefusal(row, serialized, statuses){
+    if(JSON.stringify(comparable(serialized)) !== JSON.stringify(comparable(row)))
+        return 'does not re-serialize unchanged with no held row';
+    if(!statuses.includes(row.status))
+        return 'is ' + row.status + ' with no held row';
+    return null;
+}
+
+// Admit either status on an unheld transfer: one is retracted in place and archived again,
+// so its finalized or retracted label still rests on the co-signers alone.
+const UNHELD_BRIDGE_STATUSES = Object.freeze(['finalized', 'retracted']);
+// Admit only finalized on an unheld policy row (append-only, no retraction path).
+const UNHELD_POLICY_STATUSES = Object.freeze(['finalized']);
+
 // Record that a row this hub never held was accepted on its signature quorum alone.
 function logUnheld(label, id){
     logger.info('StateAnchorPublisher: archive ' + label + ' ' + String(id).substring(0, 16) +
@@ -84,6 +101,13 @@ module.exports = {
                 return false;
             }
         } else {
+            const unheld = unheldRowRefusal(row, this.serializeBridgeTransfer(row), UNHELD_BRIDGE_STATUSES);
+            if(unheld){
+                logger.warn('StateAnchorPublisher: archive bridge transfer ' +
+                            String(row.transfer_id).substring(0, 16) +
+                            '... ' + unheld + '; NOT signing');
+                return false;
+            }
             logUnheld('bridge transfer', row.transfer_id);
         }
         return this.verifyArchivedBridgePolicyQuorum(row, 'bridge transfer',
@@ -127,6 +151,13 @@ module.exports = {
                 return false;
             }
         } else {
+            const unheld = unheldRowRefusal(row, this.serializePolicySnapshot(row), UNHELD_POLICY_STATUSES);
+            if(unheld){
+                logger.warn('StateAnchorPublisher: archive policy snapshot ' +
+                            String(row.snapshot_id).substring(0, 16) +
+                            '... ' + unheld + '; NOT signing');
+                return false;
+            }
             logUnheld('policy snapshot', row.snapshot_id);
         }
         return this.verifyArchivedBridgePolicyQuorum(row, 'policy snapshot',

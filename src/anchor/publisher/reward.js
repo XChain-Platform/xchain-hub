@@ -325,7 +325,9 @@ module.exports = {
             if(signingSet && signingSet.truncated === true) weightedSet.truncated = true;
             met = swq.meetsStakeThreshold(weightedSet, signers);
         } else {
-            met = signers.length >= bftQuorumOrSingle(pubkeys.size, 1);
+            // Size from the RAW row count, as the producer round, finalize.js and the indexer's
+            // verifyAttestation do; the deduped pubkeys.size undercounts a multi-source key.
+            met = signers.length >= bftQuorumOrSingle((signingSet || []).length, 1);
         }
             return met;
     },
@@ -360,7 +362,7 @@ module.exports = {
         if(!this.federationQuorumMet(signingSet, pubkeys, signers, network, snapshotBlock)){
             logger.warn('StateAnchorPublisher: federated reward attestation ' + rewardType + '/' + roundRef +
                          ' from ' + sender + ' failed local XANCPUB re-verification (' + signers.length +
-                         ' of ' + pubkeys.size + ' local oracle_publish signers); dropped');
+                         ' of ' + (signingSet || []).length + ' local oracle_publish signers); dropped');
             return;
         }
 

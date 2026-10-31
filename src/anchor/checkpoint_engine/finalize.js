@@ -62,7 +62,7 @@ module.exports = {
         let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
         // Size the quorum from the RAW row count (item 2651), matching the propose
-        // path (runRound) and the on-chain authority (anchor.js:336). The deduped
+        // path (runRound) and the on-chain authority (indexer quorum.js oracleN). The deduped
         // pubkeys.size used before diverged whenever a key was multi-source. `quorum` only
         // gates the count path (weighted uses meetsStakeThreshold), and below SWQ
         // validators.length == pubkeys.size, so this is inert below SWQ.

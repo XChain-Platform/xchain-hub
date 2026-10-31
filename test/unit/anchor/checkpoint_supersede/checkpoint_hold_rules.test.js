@@ -34,6 +34,7 @@ function checkpoint(overrides){
 
 function replay(overrides){
     return {
+        digest: 'cd'.repeat(32),
         replay: {
             state: 'replayed',
             target: 90,
@@ -115,6 +116,17 @@ function declinesIncompleteOrOutOfRangeReplay(){
         replay({ changed: false }),
         replay({ target: 101 }),
         replay({ replay_to: 99 }),
+        replay({ target: null }),
+        replay({ target: '' }),
+        replay({ target: ' ' }),
+        replay({ target: false }),
+        replay({ target: undefined }),
+        replay({ replay_to: null }),
+        replay({ replay_to: '' }),
+        replay({ target: 120, replay_to: 110 }),
+        replay({ target: -1 }),
+        { replay: replay().replay },
+        { digest: 'not-a-digest', replay: replay().replay },
         null,
     ];
 
