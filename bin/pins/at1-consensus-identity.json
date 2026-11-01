@@ -1,5 +1,5 @@
 {
-  "consensus_rules_digest": "f86d991549a2e24da25bcb2f83133ab42e6a7a23d95e1a896122baf6ca1b26b2",
+  "consensus_rules_digest": "12b5e800eb989e2d02e25475775c2ffa8a904c7acbb1719894a2bab7bc09d393",
   "consensus_rules_gates": {
     "anchor_reward_activation.ANCHOR_REWARD_ACTIVATION": "{\"mainnet\":961000,\"regtest\":0,\"testnet\":0}",
     "anchor_reward_activation.ARCHIVE_REWARD_ACTIVATION": "{\"mainnet\":963000,\"regtest\":0,\"testnet\":0}",
@@ -44,12 +44,12 @@
     "price_scale_activation.PRICE_V1_FEE_MAX_LENGTH": "20",
     "list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION": "{\"mainnet\":9999999999,\"regtest\":0,\"testnet\":154777}",
     "list_meta_activation.LIST_META_ACTIVATION": "{\"BTC:testnet\":155001,\"DOGE:testnet\":67962387,\"LTC:testnet\":4906040,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":9999999999}",
-    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"LTC:mainnet\":null,\"LTC:testnet\":4946814,\"mainnet\":null,\"regtest\":0}",
+    "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_ACTIVATION": "{\"DOGE:mainnet\":null,\"DOGE:testnet\":67989993,\"LTC:mainnet\":null,\"LTC:testnet\":4949697,\"mainnet\":null,\"regtest\":0}",
     "mirror_admission_margin_activation.ADMIT_CHAIN_MARGIN_BLOCKS": "{\"DOGE\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":16,\"remote_token_snapshots\":14},\"LTC\":{\"bridge_transfers\":14,\"cross_chain_calls\":14,\"cross_chain_matches\":14,\"list_snapshots\":14,\"policy_snapshots\":14,\"price_snapshots\":17,\"remote_token_snapshots\":14}}",
     "order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":0,\"testnet\":156908}",
     "remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION": "{\"BTC:testnet\":156908,\"DOGE:testnet\":68005165,\"LTC:testnet\":4927400,\"mainnet\":9999999999,\"regtest\":null,\"testnet\":156908}",
-    "archive_rollcall_presence_activation.ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION": "{\"BTC:testnet\":158396,\"DOGE:testnet\":68033131,\"LTC:testnet\":4946814,\"mainnet\":null,\"regtest\":0,\"testnet\":9999999999}",
-    "checkpoint_supersede_activation.CHECKPOINT_SUPERSEDE_ACTIVATION": "{\"BTC:testnet\":158396,\"DOGE:testnet\":68033131,\"LTC:testnet\":4946814,\"mainnet\":null,\"regtest\":0,\"testnet\":9999999999}"
+    "archive_rollcall_presence_activation.ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION": "{\"BTC:testnet\":158557,\"DOGE:testnet\":68035864,\"LTC:testnet\":4949697,\"mainnet\":null,\"regtest\":0,\"testnet\":9999999999}",
+    "checkpoint_supersede_activation.CHECKPOINT_SUPERSEDE_ACTIVATION": "{\"BTC:testnet\":158557,\"DOGE:testnet\":68035864,\"LTC:testnet\":4949697,\"mainnet\":null,\"regtest\":0,\"testnet\":9999999999}"
   },
   "gate_key_count": 49,
   "absent_gates": [],
