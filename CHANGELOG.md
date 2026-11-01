@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-01
+
+### Added
+- Added witnessed checkpoint supersession so validators can replace a checkpoint after a proven disagreement, and readers now see it.
+- Added six database migrations covering price snapshot indexes and checkpoint supersede columns, to be run by the operator.
+- Archive checkpoints now only count publishers that proved capability, and idle hubs are left out of archive publisher elections.
+
+### Changed
+- Armed the eight gates on testnet at the per-chain heights in the activation table, with mainnet unarmed.
+- Snapshot checkpoints now count their fallback depth on the BTC chain height, so a frozen indexer tip can no longer deadlock them.
+- Armed ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION on BTC:testnet at 158557.
+- Armed ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION on LTC:testnet at 4949697.
+- Armed ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION on DOGE:testnet at 68035864.
+- Armed CHECKPOINT_SUPERSEDE_ACTIVATION on BTC:testnet at 158557.
+- Armed CHECKPOINT_SUPERSEDE_ACTIVATION on LTC:testnet at 4949697.
+- Armed CHECKPOINT_SUPERSEDE_ACTIVATION on DOGE:testnet at 68035864.
+- Armed ADMIT_CHAIN_MARGIN_ACTIVATION on LTC:testnet at 4949697.
+
+### Fixed
+- Bounded database work under load: the anchor stamp sweep, snapshot page reads and queries to a frozen database no longer starve the health probe.
+- Price retractions and re-landed batches now keep or restore the right price rounds, and landing sweeps no longer self-join the snapshot table.
+- Malformed JSON-RPC batches, unknown method names and undecodable request bodies now get clean errors instead of stack traces.
+- Hub credential resolution now prefers hub-scoped settings over ambient shell logins, so a personal login cannot switch the transport of the hub.
+- DEX finalization and bridge persistence now account fills before delivery and defer on write errors, so a failed write is re-proposed, not stranded.
+- Checkpoint signing, replay holds, catch-up verification and peer feed reads are tighter, and a refusing peer is now backed off using its status and Retry-After.
+- Archive publisher bundle sizing and head budgeting, reward deferral and attestation retention were corrected so bundles stay within limits.
+- Price archive bookkeeping and oracle publisher queue, takeover and batch signer leader handling were hardened against stale or duplicate work.
+
 ## [0.26.2] - 2026-10-21
 
 ### Changed

@@ -49,7 +49,7 @@ const HUB_PARTS    = ['hub_rows.js'];
 // authored here, so it is the one file with no indexer twin).
 const TWINS        = ['regtest_env.js', 'shared_rows.js'].concat(PARTS);
 const INDEXER_DIR  = process.env.XCHAIN_INDEXER_DIR || path.join(SRC, '..', '..', 'xchain-indexer');
-const INDEXER_TWIN_COMMIT = 'dba11b12847720481a9fa09ab0aedef670f9b893';
+const INDEXER_TWIN_COMMIT = 'd06631707957815c53d6856d1634f42c34d5a9e0';
 
 function indexerGit(ctx, what, args, encoding = null) {
     if (!fs.existsSync(path.join(INDEXER_DIR, '.git'))) {
