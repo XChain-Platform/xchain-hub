@@ -78,9 +78,9 @@ module.exports = {
             [batchSeq, status, batchBlockTime, proofSha, roundNumber, coinPair, status, batchBlockTime, proofSha]);
     },
 
-    // Records the (round, pair) keys a retraction is about to delete, restricted to rows
-    // an archive already carried: only those need a tombstone. Same WHERE tail as
-    // deletePriceSnapshotsForRetraction, and called immediately before it.
+    // Records the (round, pair) keys a retraction is about to delete. It uses the exact
+    // range, generation and keep-round tail from deletePriceSnapshotsForRetraction, then
+    // narrows it to rows an archive already carried because only those need a tombstone.
     async insertPriceTombstonesForRetraction(sourceChain, from, to, gen, bounded, fenced, keepRounds) {
         let col = 'source_action_index';
         let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');

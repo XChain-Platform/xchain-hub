@@ -134,6 +134,9 @@ module.exports = {
         // landing in the same tick as an eviction would net out flat and be
         // swallowed by the consumer's rising-count comparison.
         this.roundTimeoutCount = 0;
+        // Rounds refused before a timeout can be armed, split by the gate that
+        // rejected them so metrics can identify quorum loss versus tip loss.
+        this.roundAdmissionRefusedCount = { unfinalizable: 0, admission_tip: 0 };
 
         // Process-lifetime count of bodies refused for exceeding
         // ATTEST_RESPONSE_BODY_MAX_BYTES, across all three surfaces the cap

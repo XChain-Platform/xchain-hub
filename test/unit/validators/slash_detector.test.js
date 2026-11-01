@@ -73,6 +73,15 @@ it('uses defaults when config is empty', function () {
             expect(sd2.deviationThreshold).to.equal(0.05);
             expect(sd2.missedRoundsThreshold).to.equal(30);
         });
+it('uses the safe default for invalid missed-round thresholds', function () {
+            for (const value of ['not-a-number', '0', '-1']) {
+                const sd2 = new SlashDetector(createMockHub({
+                    p2pConfig: { SLASH_MISSED_ROUNDS_THRESHOLD: value }
+                }));
+                expect(sd2.missedRoundsThreshold, value).to.equal(30);
+                expect(sd2.participationWindowSize, value).to.equal(60);
+            }
+        });
 it('binds the default slash band to the federation-uniform oracle co-sign band', function () {
             let { ORACLE_DEVIATION_THRESHOLD } = require('../../../src/constants');
             let sd2 = new SlashDetector(createMockHub({ p2pConfig: {} }));

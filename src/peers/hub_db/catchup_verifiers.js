@@ -36,6 +36,7 @@ const { verifyAnchorRewardCatchupRow } = require('../../anchor/publisher/reward_
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
+const { refusal, validatorLookupFailure } = require('./catchup_verdicts.js');
 const {
     canonicalRemoteTokenSnapshot,
     remoteTokenRowShapeOk
@@ -111,7 +112,12 @@ async function verifyRemoteTokenSnapshotCatchupRow(row, context) {
         context = context || this;
         const snapshotBlock = Number(row.snapshot_block);
         const weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, row.network);
-        const validators = await resolveRemoteTokenValidators(row, context, weighted);
+        let validators;
+        try {
+            validators = await resolveRemoteTokenValidators(row, context, weighted);
+        } catch (error) {
+            return validatorLookupFailure(snapshotBlock, error);
+        }
         if (validators.length === 0 || validators.truncated === true) return false;
         const signatures = parseRemoteTokenSignatures(row.validator_signatures);
         const canonical = canonicalRemoteTokenSnapshot(
@@ -120,8 +126,8 @@ async function verifyRemoteTokenSnapshotCatchupRow(row, context) {
         return weighted
             ? swq.meetsStakeThreshold(validators, valid)
             : valid.length >= bftQuorumOrSingle(validators.length, 1);
-    } catch (_err) {
-        return false;
+    } catch (error) {
+        return refusal(error && error.message ? error.message : String(error));
     }
 }
 

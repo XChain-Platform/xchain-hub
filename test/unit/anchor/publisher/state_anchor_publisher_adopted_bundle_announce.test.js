@@ -19,7 +19,7 @@ const ME    = 'ab'.repeat(32);
 const TXID  = 'cd'.repeat(32);
 const GROUP = [{ chain: 'BTC', block_index: 10, checkpoint_seq: 1, snapshot_block: 50 }];
 
-function makePublisher(exists) {
+function makePublisher(exists, owner) {
     let pub = Object.create(StateAnchorPublisher.prototype);
     let announced = 0;
     pub.identity = { getPubkeyHex: () => ME };
@@ -36,29 +36,37 @@ function makePublisher(exists) {
     pub.stampBundleSections = async () => {};
     pub.completeFoldArchive = async () => {};
     pub.noteBundlePublished = () => {};
-    pub.recordBundleReward = async () => {};
+    pub.recordBundleReward = async () => owner;
     pub.announceBundleDone = () => { announced++; };
     return { pub, announcements: () => announced };
 }
 
-async function announcements(network, exists) {
-    let fixture = makePublisher(exists);
+async function announcements(network, exists, owner) {
+    let fixture = makePublisher(exists, owner);
     await fixture.pub.publishBundle({}, network, GROUP, 60, false, [], { rows: 0 }, null);
     return fixture.announcements();
 }
 
 describe('StateAnchorPublisher: adopted bundle completion announcement', function () {
+    it('announces an adopted own bundle at the gate', async function () {
+        expect(await announcements('regtest', true, 'ours')).to.equal(1);
+    });
+
+    it('announces an adopted bundle with undetermined ownership at the gate', async function () {
+        expect(await announcements('regtest', true, 'undetermined')).to.equal(1);
+    });
+
     it('does not re-announce an adopted bundle under this hub key at the gate', async function () {
-        expect(await announcements('regtest', true)).to.equal(0);
+        expect(await announcements('regtest', true, 'peer')).to.equal(0);
     });
 
     it('still announces a freshly published bundle at the gate', async function () {
-        expect(await announcements('regtest', false)).to.equal(1);
+        expect(await announcements('regtest', false, null)).to.equal(1);
     });
 
     for(let network of ['mainnet', 'testnet']){
         it('preserves adopted bundle announcements below the gate on ' + network, async function () {
-            expect(await announcements(network, true)).to.equal(1);
+            expect(await announcements(network, true, 'peer')).to.equal(1);
         });
     }
 });

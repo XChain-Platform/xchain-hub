@@ -35,6 +35,7 @@ const crypto = require('crypto');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
+const { positiveIntConfig } = require('../lib/config_int.js');
 const { resolveDeviationThreshold } = require('./slash_detector/options.js');
 const deviationsMixin    = require('./slash_detector/deviations.js');
 const participationMixin = require('./slash_detector/participation.js');
@@ -84,7 +85,8 @@ class SlashDetector {
         // SLASH_DEVIATION_THRESHOLD override applies. It is a FLOOR checkDeviations widens in
         // a clamped round; options.js documents why a tighter or non-finite override throws.
         this.deviationThreshold = resolveDeviationThreshold(hub.p2pConfig);
-        this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
+        this.missedRoundsThreshold = positiveIntConfig(
+            hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD, 30, 'SLASH_MISSED_ROUNDS_THRESHOLD');
 
         // Count misses over twice the configured offense threshold. This catches
         // sustained low-rate participation while keeping the window large enough

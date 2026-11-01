@@ -350,15 +350,14 @@ module.exports = {
         logger.info('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
     },
 
-    // Record the reward for an adopted bundle only when the indexer binds it to THIS hub
-    // (our own lost-ACK send), since no other hub ever writes that attestation row. Never
-    // throws: the caller announces BUNDLE_DONE right after, and peers must hear it.
+    // Return the adopted bundle's owner so the caller suppresses BUNDLE_DONE only for a
+    // known peer; only our own lost-ACK send records a reward attestation here.
     async recordAdoptedBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion){
         try {
             if(!attested || !me){
                 logger.info('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
                             snapshotBlock + '; reward push skipped');
-                return;
+                return 'undetermined';
             }
             let owner = await this.adoptedBundleOwnership(txid, network, snapshotBlock, me);
             if(owner === 'ours'){
@@ -374,9 +373,11 @@ module.exports = {
                             ' has no readable publisher binding; reward skipped (' +
                             this._adoptedOwnershipUndetermined + ' undetermined adoptions)');
             }
+            return owner;
         } catch(e){
             logger.warn('StateAnchorPublisher: adopted-bundle reward check failed for ' + network + ' @ ' +
                         snapshotBlock + ': ' + (e && e.message));
+            return 'undetermined';
         }
     },
 
@@ -396,5 +397,4 @@ module.exports = {
         if(verdict === 'rejected') return 'peer';
         return 'undetermined';
     }
-
 };

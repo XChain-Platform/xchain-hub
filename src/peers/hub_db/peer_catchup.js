@@ -374,8 +374,7 @@ class HubDbPeerCatchup {
         }
     }
 
-    // A remembered refusal skips the verifier and its log line; a refusal that followed a
-    // failed indexer read is never remembered, since the next walk may well accept it.
+    // Retryable or failed-read refusals leave the walk behind instead of entering the memo.
     async verifyWalkRow(walk, row, priceRoundRows) {
         const { peer, table, reads } = walk;
         const memoKey = this.refusals.keyFor(walk.peerIdentity || peer, table, row);
@@ -388,7 +387,7 @@ class HubDbPeerCatchup {
         if (verifierAccepted(verdict)) return verdict;
         this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
             ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
-        if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
+        if ((verdict && verdict.retry === true) || (reads && reads.failedServes > failedBefore)) walk.leftBehind = true;
         else this.refusals.remember(memoKey);
         return verdict;
     }

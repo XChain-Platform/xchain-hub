@@ -30,7 +30,21 @@ module.exports = {
     // ---------------------------------------------------------------------------
 
     async writeFinalizedTransfer(ev){
-        let row = ev.row;
+        this.ensureRetractionFence();
+        const token = { seq: this._retractionSeq, row: ev.row };
+        token.done = new Promise(resolve => { token.finish = resolve; });
+        this._pendingWrites.add(token);
+        try {
+            await this.writeFinalizedTransferFenced(ev, token.seq);
+        } finally {
+            token.finish();
+            this._pendingWrites.delete(token);
+            this.pruneRetractionFence();
+        }
+    },
+
+    async writeFinalizedTransferFenced(ev, startSeq){
+        const row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
         row.finalizing_view      = ev.view != null ? ev.view : 0;
         if(!await this.persistSnapshotOrDefer(row, row.transfer_id, this.transferConsensus)) return;
@@ -43,7 +57,18 @@ module.exports = {
         // round it belongs to. Deferring instead matches the fail-closed rule below.
         try {
             row.btc_chain_id = await this.resolveBtcChainId(row.network);
+            if(this.retractedSince(startSeq, row)){
+                logger.warn('CrossChainBridge: retraction landed while finalizing ' +
+                            String(row.transfer_id).substring(0, 16) +
+                            '...; skipping the row write and the mirror');
+                this.defer(row.transfer_id, this.transferConsensus);
+                return;
+            }
             inserted = await this.db.insertBridgeTransfer(row);
+            if(this.retractedSince(startSeq, row)){
+                this.defer(row.transfer_id, this.transferConsensus);
+                return;
+            }
         }
         catch(e){
             logger.error('CrossChainBridge: finalized transfer write FAILED (fail-closed; deferring ' +
@@ -58,6 +83,48 @@ module.exports = {
                     row.src_chain + ':' + row.src_action_index + ' -> ' + row.dest_chain + ' ' +
                     row.amount + ' ' + row.tick + ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('transfer:finalized', { transferId: row.transfer_id });
+    },
+
+    ensureRetractionFence(){
+        if(!this._retractionFence) this._retractionFence = [];
+        if(!this._pendingWrites) this._pendingWrites = new Set();
+        if(typeof this._retractionSeq !== 'number') this._retractionSeq = 0;
+    },
+
+    pruneRetractionFence(){
+        this.ensureRetractionFence();
+        let floor = this._retractionSeq;
+        for(const token of this._pendingWrites) if(token.seq < floor) floor = token.seq;
+        this._retractionFence = this._retractionFence.filter(entry => entry.seq > floor);
+    },
+
+    recordRetraction(chain, bounds){
+        this.ensureRetractionFence();
+        const entry = { seq: ++this._retractionSeq, chain: String(chain), ...bounds };
+        this._retractionFence.push(entry);
+        this.pruneRetractionFence();
+        return entry;
+    },
+
+    retractionCovers(entry, row){
+        const index = Number(row.src_action_index);
+        const generation = Number(row.push_generation || 0);
+        return entry.chain === String(row.src_chain) && index >= entry.from &&
+            (!entry.bounded || index <= entry.to) && (!entry.fenced || generation <= entry.gen);
+    },
+
+    retractedSince(startSeq, row){
+        this.ensureRetractionFence();
+        return this._retractionFence.some(entry =>
+            entry.seq > startSeq && this.retractionCovers(entry, row));
+    },
+
+    async waitForCoveredWrites(entry){
+        const waits = [];
+        for(const token of this._pendingWrites){
+            if(token.seq < entry.seq && this.retractionCovers(entry, token.row)) waits.push(token.done);
+        }
+        await Promise.all(waits);
     },
 
     async writeFinalizedPolicy(ev){
@@ -176,6 +243,8 @@ module.exports = {
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
+        const entry = this.recordRetraction(chain, bounds);
+        await this.waitForCoveredWrites(entry);
         let rows = await this.db.findFinalizedBridgeTransferIdsForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){
             await this.db.updateBridgeTransfer(r.transfer_id);

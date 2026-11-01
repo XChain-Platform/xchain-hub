@@ -215,9 +215,9 @@ module.exports = {
         // refuse sections that anchor fine today; at/above it an unmet attestation
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
         let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
-        let split = this.splitBundle(sections, me, attestTail);
         const foldBlock = await resolveFoldBlock(this, snapshotBlock);
         const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
+        let split = this.splitBundle(sections, me, attestTail, foldActive);
         for(let refused of split.oversize){
             this._bundlesOversize++;
             logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
@@ -341,14 +341,15 @@ module.exports = {
         return parts.join('|');
     },
 
-    // Wire bytes a bundle would occupy with `attestSigCount` attesting signers, WITHOUT
-    // the signatures existing yet. The split has to run before the attestation round (each
-    // split bundle elects and attests on its own), and a (PUBKEY, SIG) pair is fixed width,
-    // so the tail is arithmetic: measure the body with an empty tail, then widen
+    // Wire bytes a bundle would occupy before the attestation signatures exist.
+    // Measure the v3 archive-count slot when the fold is active, otherwise v0.
+    // A signature pair is fixed width, so measure the empty tail, then widen
     // ATTEST_SIG_COUNT from its '0' to the real decimal and add one pair per signer.
-    v7Bytes(sections, publisher, attestSigCount){
+    v7Bytes(sections, publisher, attestSigCount, foldActive = false){
         let n    = Math.max(0, Number(attestSigCount) || 0);
-        let base = Buffer.byteLength(this.buildV7Payload(sections, publisher, []), 'utf8');
+        let wire = foldActive ? this.buildV3Payload(null, sections, null, publisher, [])
+                              : this.buildV7Payload(sections, publisher, []);
+        let base = Buffer.byteLength(wire, 'utf8');
         return base - 1 + String(n).length + (n * ANCHOR_SIG_PAIR_BYTES);
     },
 
@@ -370,19 +371,19 @@ module.exports = {
     // publisher-attestation quorum, because the indexer's v0 parser rejects a count-0
     // bundle outright. The caller passes 0 only below the anchor-reward flag-day, where
     // the payload genuinely carries no tail.
-    splitBundle(sections, publisher, attestSigCount){
+    splitBundle(sections, publisher, attestSigCount, foldActive = false){
         let ordered = (sections || []).slice().sort((a, b) => {
             let x = String(a.chain), y = String(b.chain);
             return x < y ? -1 : (x > y ? 1 : 0);
         });
         let bundles = [], oversize = [], current = [];
         for(let s of ordered){
-            let alone = this.v7Bytes([s], publisher, attestSigCount);
+            let alone = this.v7Bytes([s], publisher, attestSigCount, foldActive);
             if(alone > ANCHOR_BUNDLE_MAX_BYTES){
                 oversize.push({ chain: String(s.chain), block_index: Number(s.block_index), bytes: alone });
                 continue;
             }
-            if(current.length > 0 && this.v7Bytes(current.concat([s]), publisher, attestSigCount) > ANCHOR_BUNDLE_MAX_BYTES){
+            if(current.length > 0 && this.v7Bytes(current.concat([s]), publisher, attestSigCount, foldActive) > ANCHOR_BUNDLE_MAX_BYTES){
                 bundles.push(current);
                 current = [];
             }
@@ -396,5 +397,4 @@ module.exports = {
                         bundles.map(b => b.map(s => String(s.chain)).join('+')).join(', ') + ']');
         return { bundles: bundles, oversize: oversize };
     }
-
 };

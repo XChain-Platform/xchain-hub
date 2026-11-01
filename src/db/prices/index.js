@@ -226,7 +226,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // A single statement is the atomicity primitive here, needing no withTransaction.
     // `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
     // already resolved to its per-chain columns. The upsert upgrades a 'skipped' placeholder
-    // row to 'finalized'.
+    // row to 'finalized', but cannot revive a row concurrently marked 'disputed'.
     async setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols) {
         let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
         let params = [];
@@ -239,7 +239,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
                  block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
-                 consensus_proof = VALUES(consensus_proof), status = 'finalized',
+                 consensus_proof = VALUES(consensus_proof),
+                 status = IF(status = 'disputed', status, 'finalized'),
                  admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
                  admit_block_doge = VALUES(admit_block_doge)`;
         return this.doQuery(query, params);
@@ -272,10 +273,11 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/price_aggregator.js:722.
     //
     // Upsert, not a plain INSERT: a 'skipped' placeholder may already occupy this key and is
-    // overwritten with the real data; a finalized row is an idempotent no-op. created_at is
-    // NOT overwritten. One statement lands the round atomically (no transaction API). The
-    // admission columns are bound AFTER created_at so positional readers keep their index.
-    // `referenceChain` fills both reference_chain and source_chain.
+    // overwritten with the real data; a finalized row is an idempotent no-op. A disputed row
+    // keeps that status while canonical landing metadata moves. created_at is NOT overwritten.
+    // One statement lands the round atomically (no transaction API). The admission columns are
+    // bound AFTER created_at so positional readers keep their index. `referenceChain` fills
+    // both reference_chain and source_chain.
     async setPushedPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                       sourceActionIndex, pushGeneration, createdAt, admitCols) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
@@ -294,7 +296,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                     price = VALUES(price), reference_block = VALUES(reference_block),
                     reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = 'finalized', source_chain = VALUES(source_chain),
+                    status = IF(status = 'disputed', status, 'finalized'),
+                    source_chain = VALUES(source_chain),
                     source_action_index = VALUES(source_action_index),
                     push_generation = VALUES(push_generation),
                     admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
@@ -306,9 +309,11 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/price_aggregator.js:1183.
     //
     // One statement PER ROUND: the unit that must never be observed torn is the round.
-    // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push
-    // the fee-pricing bound later. The admission columns are bound AFTER created_at so
-    // positional readers keep their index. `referenceChain` fills reference_chain and source_chain.
+    // A skipped placeholder upgrades to the batch-backed row, whose reference_block is its
+    // landing height. A disputed row keeps its status while canonical landing metadata moves.
+    // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push the
+    // fee-pricing bound later. The admission columns are bound AFTER created_at so positional
+    // readers keep their index. `referenceChain` fills reference_chain and source_chain.
     async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                      sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?, ?)").join(', ');
@@ -328,7 +333,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                     price = VALUES(price), reference_block = VALUES(reference_block),
                     reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = 'finalized', source_chain = VALUES(source_chain),
+                    status = IF(status = 'disputed', status, 'finalized'),
+                    source_chain = VALUES(source_chain),
                     source_action_index = VALUES(source_action_index),
                     push_generation = VALUES(push_generation),
                     batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,

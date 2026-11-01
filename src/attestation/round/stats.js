@@ -113,6 +113,14 @@ module.exports = {
             // to every consumer of these stats. Monotonic for the process life,
             // so consumers alert on a rise, not on a nonzero snapshot.
             stats.consensus_timeout_count            = this.consensus.roundTimeoutCount;
+            const refused = this.consensus.roundAdmissionRefusedCount;
+            if(refused && typeof refused === 'object'){
+                stats.consensus_admission_refused_unfinalizable_count = Number(refused.unfinalizable) || 0;
+                stats.consensus_admission_refused_admission_tip_count = Number(refused.admission_tip) || 0;
+                stats.consensus_admission_refused_count =
+                    stats.consensus_admission_refused_unfinalizable_count +
+                    stats.consensus_admission_refused_admission_tip_count;
+            }
     }
 
 };

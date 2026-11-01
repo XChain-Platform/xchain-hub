@@ -21,6 +21,7 @@ const CrossChainDexEngine = require('../../cross_chain/dex_engine.js');
 const CrossChainCallEngine = require('../../cross_chain/call_engine.js');
 const CrossChainBridgeEngine = require('../../cross_chain/bridge_engine.js');
 const { listSnapshotCanonical } = require('../../cross_chain/list/canonical.js');
+const { refusal, validatorLookupFailure } = require('./catchup_verdicts.js');
 
 const FALLBACK_ENGINES = Object.freeze({
     cross_chain_matches: Object.create(CrossChainDexEngine.prototype),
@@ -126,7 +127,12 @@ async function verifyFinalizedRow(table, row, context) {
         const snapshotBlock = Number(row.snapshot_block);
         if (!Number.isSafeInteger(snapshotBlock) || snapshotBlock < 0) return false;
         const weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, row.network);
-        const validators = await resolveValidators(table, row, context, weighted);
+        let validators;
+        try {
+            validators = await resolveValidators(table, row, context, weighted);
+        } catch (error) {
+            return validatorLookupFailure(snapshotBlock, error);
+        }
         if (validators.length === 0 || validators.truncated === true) return false;
         const signatures = parseSignatures(row.validator_signatures);
         const canonical = canonicalFor(table, row, context);
@@ -134,8 +140,8 @@ async function verifyFinalizedRow(table, row, context) {
         return weighted
             ? swq.meetsStakeThreshold(validators, valid)
             : valid.length >= bftQuorumOrSingle(validators.length, 1);
-    } catch (_err) {
-        return false;
+    } catch (error) {
+        return refusal(error && error.message ? error.message : String(error));
     }
 }
 

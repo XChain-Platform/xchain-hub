@@ -328,6 +328,46 @@ function registerFeature9fencedRetraction() {
     registerFeature9fencedRetractionPart1();
   });
 }
+function registerFinalizeRetractionFence() {
+  it('drops a transfer when its source retraction lands during snapshot persistence', async function () {
+    const { engine, db, broadcaster } = makeEngine();
+    let snapshotEntered;
+    let releaseSnapshot;
+    const entered = new Promise(resolve => { snapshotEntered = resolve; });
+    engine.persistCapabilitySnapshot = sinon.stub().callsFake(() => {
+      snapshotEntered();
+      return new Promise(resolve => { releaseSnapshot = () => resolve(1); });
+    });
+    const row = feature8theWritePathIsFailClosedFinalized(engine, { push_generation: 2 });
+    const writing = engine.writeFinalizedTransfer({ row, signatures: [], view: 0 });
+    await entered;
+    const retracting = engine.retractTransfersForReorg('BTC', 41, 41, 2);
+    releaseSnapshot();
+    await Promise.all([writing, retracting]);
+    expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'))).to.equal(false);
+    expect(broadcaster.broadcastRow.called).to.equal(false);
+    expect(engine.transferConsensus.forgetFinalized.calledWith(row.transfer_id)).to.equal(true);
+    expect(engine._retractionFence).to.deep.equal([]);
+  });
+  it('keeps a transfer outside the concurrent retraction range', async function () {
+    const { engine, db, broadcaster } = makeEngine();
+    let snapshotEntered;
+    let releaseSnapshot;
+    const entered = new Promise(resolve => { snapshotEntered = resolve; });
+    engine.persistCapabilitySnapshot = sinon.stub().callsFake(() => {
+      snapshotEntered();
+      return new Promise(resolve => { releaseSnapshot = () => resolve(1); });
+    });
+    const row = feature8theWritePathIsFailClosedFinalized(engine, { push_generation: 2 });
+    const writing = engine.writeFinalizedTransfer({ row, signatures: [], view: 0 });
+    await entered;
+    const retracting = engine.retractTransfersForReorg('BTC', 42, 42, 2);
+    releaseSnapshot();
+    await Promise.all([writing, retracting]);
+    expect(db.calls.some(c => c.sql.startsWith('INSERT IGNORE INTO bridge_transfers'))).to.equal(true);
+    expect(broadcaster.broadcastRow.called).to.equal(true);
+  });
+}
 describe('CrossChainBridgeEngine', function () {
   afterEach(function () {
     sinon.restore();
@@ -336,4 +376,5 @@ describe('CrossChainBridgeEngine', function () {
   // ---------------------------------------------------------------------
   registerFeature8theWritePathIsFailClosed();
   registerFeature9fencedRetraction();
+  registerFinalizeRetractionFence();
 });

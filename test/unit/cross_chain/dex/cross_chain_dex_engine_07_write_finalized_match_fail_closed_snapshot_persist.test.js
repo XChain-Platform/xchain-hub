@@ -204,6 +204,7 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart2() {
     sinon.stub(eng, 'persistCapabilitySnapshot').resolves(3);
     let insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
     let commit = sinon.stub(eng, 'applyCommit');
+    let forget = sinon.stub(eng.consensus, 'forgetFinalized');
     let row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
     eng._inflight.add(row.match_id);
     await eng.writeFinalizedMatch({
@@ -321,6 +322,54 @@ function registerFeature15writeFinalizedMatchFailClosedSnapshotPersist() {
     registerFeature15writeFinalizedMatchFailClosedSnapshotPersistPart4();
   });
 }
+function registerFinalizeRetractionFence() {
+  it('drops a match when its source retraction lands during snapshot persistence', async function () {
+    const hub = makeDexHub();
+    const eng = new CrossChainDexEngine(hub);
+    let snapshotEntered;
+    let releaseSnapshot;
+    const entered = new Promise(resolve => { snapshotEntered = resolve; });
+    sinon.stub(eng, 'persistCapabilitySnapshot').callsFake(() => {
+      snapshotEntered();
+      return new Promise(resolve => { releaseSnapshot = () => resolve(1); });
+    });
+    const insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
+    const commit = sinon.stub(eng, 'applyCommit');
+    const forget = sinon.stub(eng.consensus, 'forgetFinalized');
+    const row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
+    row.a_push_generation = 2;
+    const writing = eng.writeFinalizedMatch({ row, signatures: [] });
+    await entered;
+    const retracting = eng.retractMatchesForReorg('LTC', 1, 1, 2);
+    releaseSnapshot();
+    await Promise.all([writing, retracting]);
+    expect(insert.called, 'a retracted in-flight match must not be inserted').to.be.false;
+    expect(commit.called, 'a retracted in-flight match must not reserve capacity').to.be.false;
+    expect(forget.calledWith(row.match_id)).to.be.true;
+    expect(eng._retractionFence).to.deep.equal([]);
+  });
+  it('keeps a match when the concurrent retraction covers neither leg', async function () {
+    const hub = makeDexHub();
+    const eng = new CrossChainDexEngine(hub);
+    let snapshotEntered;
+    let releaseSnapshot;
+    const entered = new Promise(resolve => { snapshotEntered = resolve; });
+    sinon.stub(eng, 'persistCapabilitySnapshot').callsFake(() => {
+      snapshotEntered();
+      return new Promise(resolve => { releaseSnapshot = () => resolve(1); });
+    });
+    const insert = sinon.stub(eng, 'insertMatchRow').resolves(true);
+    const commit = sinon.stub(eng, 'applyCommit');
+    const row = feature15writeFinalizedMatchFailClosedSnapshotPersistFinalizeRow();
+    const writing = eng.writeFinalizedMatch({ row, signatures: [] });
+    await entered;
+    const retracting = eng.retractMatchesForReorg('BTC', 1, 1, 2);
+    releaseSnapshot();
+    await Promise.all([writing, retracting]);
+    expect(insert.calledOnce).to.be.true;
+    expect(commit.calledWith(row, +1)).to.be.true;
+  });
+}
 describe('CrossChainDexEngine', function () {
   beforeEach(function () {
     loadModule();
@@ -334,4 +383,5 @@ describe('CrossChainDexEngine', function () {
 
   // ── Constructor ─────────────────────────────────────────────────────────
   registerFeature15writeFinalizedMatchFailClosedSnapshotPersist();
+  registerFinalizeRetractionFence();
 });

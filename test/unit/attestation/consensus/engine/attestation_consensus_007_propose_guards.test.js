@@ -16,6 +16,7 @@ const { expect }           = require('chai');
 const AttestationConsensus = require('../../../../../src/attestation/consensus');
 const ValidatorIdentity    = require('../../../../../src/validators/identity');
 const { createMockHub }    = require('../../../../helpers/mockHub');
+const admissionHeight      = require('../../../../../src/lib/admission_height.js');
 
 // Minimal provider registry: the COMMIT/buffer paths exercised here never
 // call into a provider (no agree() / no def lookups for unsigned commits).
@@ -138,6 +139,16 @@ describe('AttestationConsensus: propose() guards', function () { beforeEach(hook
         expect(c.pending.has(RID)).to.equal(false);
     }); });
 
+describe('AttestationConsensus: propose() guards', function () { beforeEach(hookAt21126); afterEach(hookAt21305); it('counts an admission-era round refused for a missing tip', async function () {
+        sinon.stub(admissionHeight, 'isAdmissionEra').returns(true);
+        c.resolveRoundAdmitBlocks = sinon.stub().resolves(null);
+        const state = roundState(me, [me], Buffer.from('b'), 'http_get', 1);
+        state.request.block_index = 1;
+        await c.propose(RID, state);
+        expect(c.pending.has(RID)).to.equal(false);
+        expect(c.roundAdmissionRefusedCount).to.deep.equal({ unfinalizable: 0, admission_tip: 1 });
+    }); });
+
 describe('AttestationConsensus: propose() guards', function () { beforeEach(hookAt21126); afterEach(hookAt21305); it('returns immediately if a round for the request is already pending', async function () {
         c.pending.set(RID, { timer: null });
         await c.propose(RID, roundState(me, [me], Buffer.from('b'), 'http_get', 1));
@@ -164,6 +175,7 @@ describe('AttestationConsensus: propose() guards', function () { beforeEach(hook
         // (no pending, no PROPOSE broadcast) and let the request expire + refund.
         await c.propose(RID, roundState(me, [me], Buffer.from('b'), 'http_get', 3));
         expect(c.pending.has(RID)).to.equal(false);
+        expect(c.roundAdmissionRefusedCount).to.deep.equal({ unfinalizable: 1, admission_tip: 0 });
         let propose = hub._peerManager.broadcast.getCalls().find(call => call.args[0] === 'ATTEST_PROPOSE');
         expect(propose).to.not.exist;
     }); });

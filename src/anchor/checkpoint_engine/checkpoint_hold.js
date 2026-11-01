@@ -15,11 +15,18 @@
 'use strict';
 
 const { replayWindowFor } = require('./supersede_fill.js');
+const canonicalForms = require('./canonical_forms.js');
 
 const CHECKPOINT_HASH_FIELDS = [
     'ledger_hash',
     'actions_hash',
     'contract_hash',
+];
+// Additional root suffix fields signed once checkpoint commitments are active.
+const CHECKPOINT_COMMITMENT_FIELDS = [
+    'state_root_version',
+    'block_merkle_root',
+    'block_merkle_version',
 ];
 
 function sameHash(left, right){
@@ -46,8 +53,11 @@ function checkpointHoldDecline(row, own, rules){
         !sameHash(row[field], own[field]));
     const stateRootDisagrees = row.state_root != null && own.state_root != null &&
         !sameHash(row.state_root, own.state_root);
+    const commitmentDisagrees = canonicalForms.isCheckpointCommitmentActive(row) &&
+        CHECKPOINT_COMMITMENT_FIELDS.some((field) =>
+            row[field] != null && own[field] != null && !sameHash(row[field], own[field]));
 
-    if(!disagrees && !stateRootDisagrees) return null;
+    if(!disagrees && !stateRootDisagrees && !commitmentDisagrees) return null;
     if(witnessedReplayCovers(rules, row.block_index)) return null;
     return 'checkpoint_disagreement';
 }

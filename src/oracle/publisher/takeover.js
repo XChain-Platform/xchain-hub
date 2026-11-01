@@ -59,7 +59,13 @@ module.exports = {
     // each of which must stay distinguishable in the log from "took over". Only one of
     // them is temporary: the ambiguity cooldown re-arms itself and comes back.
     // An unreadable on-chain check declines as if observed but is counted on its own.
-    async attemptTakeover(windowIndex) {
+    attemptTakeover(windowIndex) {
+        const run = this._windowChain.then(() => this.runTakeoverAttempt(windowIndex));
+        this._windowChain = run.then(() => undefined, () => undefined);
+        return run;
+    },
+
+    async runTakeoverAttempt(windowIndex) {
         if (!this.enabled) return false;
         // The plan's range, so the guards below check the rounds assembleWindow publishes.
         let { first, last } = this.windowPlan.rangeOf(windowIndex);

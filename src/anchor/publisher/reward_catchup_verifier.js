@@ -9,6 +9,7 @@ const { resolveQuorumNetwork } = require('../quorum_network.js');
 const attestMethods = require('./attest_round.js');
 const archiveAttestMethods = require('./archive/attest.js');
 const rewardMethods = require('./reward.js');
+const { refusal, validatorLookupFailure } = require('../../peers/hub_db/catchup_verdicts.js');
 
 function parseSignatures(value){
     if(Array.isArray(value)) return value;
@@ -87,7 +88,12 @@ async function verifyAnchorRewardCatchupRow(row, context){
         const network = String(row.network || '');
         if(!network) return false;
         const quorumNetwork = resolveQuorumNetwork(row, publisher && publisher.network);
-        const set = await resolveSigningSet(context, publisher, shape.snapshotBlock, quorumNetwork);
+        let set;
+        try {
+            set = await resolveSigningSet(context, publisher, shape.snapshotBlock, quorumNetwork);
+        } catch(error){
+            return validatorLookupFailure(shape.snapshotBlock, error);
+        }
         const pubkeys = new Set((set || []).map(v => String(v.pubkey).toLowerCase()));
         if(pubkeys.size === 0 || !pubkeys.has(shape.publisher)) return false;
         const identity = { network, snapshot_block: shape.snapshotBlock };
@@ -97,8 +103,8 @@ async function verifyAnchorRewardCatchupRow(row, context){
         const signers = verifiedSigners(signatures, pubkeys, canonical);
         return rewardMethods.federationQuorumMet(
             set, pubkeys, signers, network, shape.snapshotBlock);
-    } catch(_e){
-        return false;
+    } catch(error){
+        return refusal(error && error.message ? error.message : String(error));
     }
 }
 

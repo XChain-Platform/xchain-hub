@@ -265,6 +265,20 @@ function registerAnchorBundleSizeTests() {
             const att  = Array.from({ length: 5 }, (_, i) => ({ pubkey: String(i).repeat(64), sig: String(i).repeat(128) }));
             const real = Buffer.byteLength(pub.buildV7Payload(sections(3, 5), hex(64), att), 'utf8');
             expect(pub.v7Bytes(sections(3, 5), hex(64), att.length)).to.equal(real);
+            const realV3 = Buffer.byteLength(
+                pub.buildV3Payload(null, sections(3, 5), null, hex(64), att), 'utf8');
+            expect(pub.v7Bytes(sections(3, 5), hex(64), att.length, true)).to.equal(realV3);
+            expect(realV3 - real, 'ARCHIVE_COUNT 0 adds one separator and token').to.equal(2);
+
+            const pair = sections(2, 1);
+            const publisher = 'p'.repeat(BUNDLE_BUDGET - pub.v7Bytes(pair, '', 0));
+            expect(pub.v7Bytes(pair, publisher, 0)).to.equal(BUNDLE_BUDGET);
+            expect(pub.splitBundle(pair, publisher, 0).bundles).to.have.length(1);
+            const folded = pub.splitBundle(pair, publisher, 0, true);
+            expect(folded.oversize).to.deep.equal([]);
+            expect(folded.bundles).to.have.length(2);
+            for(const group of folded.bundles)
+                expect(pub.v7Bytes(group, publisher, 0, true)).to.be.at.most(BUNDLE_BUDGET);
         });
 
         it('fits 6 chains at 4 signers, 5 at 5, and 3 at 7 - the documented capacity cliff', function () {

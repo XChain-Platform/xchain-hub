@@ -130,6 +130,12 @@ const CASES = [
         own: block({ ledger_hash: '99'.repeat(32) }),
     },
     {
+        reason: 'checkpoint_disagreement',
+        label: 'checkpoint_disagreement for block_merkle_root',
+        cp: checkpoint(),
+        own: block({ block_merkle_root: '99'.repeat(32) }),
+    },
+    {
         reason: 'checkpoint_reorged',
         cp: checkpoint(),
         own: block({ block_hash: '99'.repeat(32) }),
@@ -138,7 +144,8 @@ const CASES = [
 
 describe('checkpoint disagreement holds @regression', function () {
     for(const testCase of CASES){
-        it('followers decline ' + testCase.reason + ' and log it once per seq', async function () {
+        const label = testCase.label || testCase.reason;
+        it('followers decline ' + label + ' and log it once per seq', async function () {
             const { engine, broadcasts } = buildEngine(
                 testCase.cp, testCase.own, testCase.expected);
             const request = signRequest(testCase.cp);
@@ -153,7 +160,7 @@ describe('checkpoint disagreement holds @regression', function () {
                 .to.have.lengthOf(1);
         });
 
-        it('leader rounds hold for ' + testCase.reason + ' and log it once per seq', async function () {
+        it('leader rounds hold for ' + label + ' and log it once per seq', async function () {
             const { engine, broadcasts } = buildEngine(
                 testCase.cp, testCase.own, testCase.expected);
             const warnings = await captureWarnings(async () => {
@@ -167,6 +174,26 @@ describe('checkpoint disagreement holds @regression', function () {
                 .to.have.lengthOf(1);
         });
     }
+});
+
+describe('checkpoint disagreement holds @regression', function () {
+    it('meters witnessed replay disagreements as indexer divergence', async function () {
+        const cp = checkpoint();
+        const own = block({ ledger_hash: '99'.repeat(32), rules: replay() });
+        const { engine, broadcasts } = buildEngine(cp, own);
+        const request = signRequest(cp);
+        const warnings = await captureWarnings(async () => {
+            await engine.handleSignReq(request);
+            await engine.handleSignReq(request);
+        });
+
+        expect(broadcasts).to.deep.equal([]);
+        expect(engine._cosignDeclines.indexer_divergence).to.equal(2);
+        expect(engine._cosignDeclines.checkpoint_disagreement).to.equal(0);
+        expect(engine._lastCosignDeclineReason).to.equal('indexer_divergence');
+        expect(warnings.filter((line) => line.includes('indexer_divergence')))
+            .to.have.lengthOf(1);
+    });
 
     it('co-signs a witnessed supersede that local finalized rows need', async function () {
         const cp = checkpoint({ supersedes_from: 90, rules_digest: DIGEST });
