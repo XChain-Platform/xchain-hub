@@ -50,13 +50,14 @@ module.exports = {
         // Hydrate the durable at-most-once guard before subscribing to new rounds:
         // load confirmed rounds into the in-process guard and quarantine any
         // intent-only rounds so a restart can never re-broadcast an already-published
-        // (or ambiguously-published) round. Best-effort; a DB error is logged inside.
+        // (or ambiguously-published) round. A DB error is logged here; later publish
+        // passes still read each marker and fail closed.
         if (this.db) {
             try {
                 await this.hydratePublishedMarkers();
             } catch (e) {
                 logger.error(nodeUtil.format('OraclePublisher: failed to hydrate durable publish markers on startup ' +
-                    '(the in-process guard still covers this lifetime): ', e));
+                    '(per-entry marker reads will fail closed until the table is readable): ', e));
             }
         }
 

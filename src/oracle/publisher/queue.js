@@ -274,8 +274,8 @@ module.exports = {
     // (sent_at NULL) round: a crash between intent and confirmation leaves the on-chain
     // state unknown, so those are never auto-rebroadcast: only surfaced for an operator
     // to verify and replay by hand (no price-by-round indexer query exists to reconcile
-    // them automatically). Best-effort: a DB error is logged and startup continues; the
-    // in-process guard still covers this process lifetime.
+    // them automatically). A DB error is logged and startup continues; every publish
+    // pass still reads the per-round marker and fails closed if it remains unavailable.
     //
     // The same scan restores the last-published markers getStats() reports, so a hub
     // that has published for months does not read as one that never published once its

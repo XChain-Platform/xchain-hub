@@ -103,7 +103,6 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 });
 
 function registerAnchorDefaultTests() {
-
     it('carries the documented defaults', function () {
         const pub = mkPub();
         expect(pub.chunkMaxBytes).to.equal(6000);
@@ -147,7 +146,6 @@ function registerAnchorDefaultTests() {
 }
 
 function registerAnchorChunkTests() {
-
     describe('ANCHOR_CHUNK_MAX_BYTES: head room under MAX_ACTION_DATA_LENGTH', function () {
 
         it('the v1/v6 fixed prefix costs about 322 bytes', function () {
@@ -195,7 +193,6 @@ function registerAnchorChunkTests() {
 }
 
 function registerAnchorElectionTests() {
-
     describe('ANCHOR_ELECTION_TOLERANCE_BLOCKS: the failover ladder ordering', function () {
 
         const BTC_BLOCK_MS   = 10 * 60 * 1000;         // BTC target spacing
@@ -233,7 +230,6 @@ function registerAnchorElectionTests() {
 }
 
 function registerAnchorBundleTests() {
-
     // The ANCHOR v0 bundle budget (D10). Same ceiling, different producer: the bundle
     // packs N checkpoint SECTIONS plus one attestation tail into one action, so the
     // knob that overflows first is the federation's SIGNER COUNT, not a chunk size.
@@ -281,6 +277,15 @@ function registerAnchorBundleSizeTests() {
                 expect(pub.v7Bytes(group, publisher, 0, true)).to.be.at.most(BUNDLE_BUDGET);
         });
 
+        it('v3Bytes includes the fold marker when no archive rides the bundle', function () {
+            const pub  = mkPub();
+            const att  = Array.from({ length: 5 }, (_, i) => ({ pubkey: String(i).repeat(64), sig: String(i).repeat(128) }));
+            const rows = sections(3, 5);
+            const real = Buffer.byteLength(pub.buildV3Payload(null, rows, null, hex(64), att), 'utf8');
+            expect(pub.v3Bytes(rows, hex(64), att.length)).to.equal(real);
+            expect(pub.v3Bytes(rows, hex(64), att.length) - pub.v7Bytes(rows, hex(64), att.length)).to.equal(2);
+        });
+
         it('fits 6 chains at 4 signers, 5 at 5, and 3 at 7 - the documented capacity cliff', function () {
             const pub = mkPub();
             for(const [signers, chains] of [[4, 6], [5, 5], [7, 3]]){
@@ -293,7 +298,12 @@ function registerAnchorBundleSizeTests() {
 }
 
 function registerAnchorBundleSplitTests() {
+    registerAnchorBundlePartitionTests();
+    registerAnchorBundleRefusalTests();
+    registerAnchorBundleFitTests();
+}
 
+function registerAnchorBundlePartitionTests() {
         // AT8: the split itself, not just the arithmetic.
         it('AT8: a 7-signer 4-chain bundle splits into two, chain-ascending, each under the budget', function () {
             const pub   = mkPub();
@@ -308,6 +318,9 @@ function registerAnchorBundleSplitTests() {
             expect(pub.v7Bytes(sections(4, 7), hex(64), 7)).to.be.above(BUNDLE_BUDGET);
         });
 
+}
+
+function registerAnchorBundleRefusalTests() {
         it('AT8: a single section wider than the budget is refused and counted, never sent', function () {
             const pub  = mkPub();
             // 45 signers on one section puts it past the budget even before the tail is
@@ -338,7 +351,9 @@ function registerAnchorBundleSplitTests() {
             expect(split.oversize[0].bytes, 'the refusal reports the tail-inclusive size')
                 .to.equal(pub.v7Bytes([lone], hex(64), 23));
         });
+}
 
+function registerAnchorBundleFitTests() {
         it('a bundle that already fits is never split', function () {
             const pub   = mkPub();
             const split = pub.splitBundle(sections(3, 5), hex(64), 5);
@@ -346,10 +361,24 @@ function registerAnchorBundleSplitTests() {
             expect(split.bundles[0].map(x => x.chain)).to.deep.equal(['AAAA', 'BBBB', 'CCCC']);
             expect(split.oversize).to.deep.equal([]);
         });
+
+        it('fold-active splitting refuses a group whose v3 fallback exceeds the budget', function () {
+            const pub = mkPub();
+            const lone = section('AAAA', 0);
+            const gap = BUNDLE_BUDGET - pub.v7Bytes([lone], hex(64), 0);
+            lone.block_hash += 'a'.repeat(gap);
+            expect(pub.v7Bytes([lone], hex(64), 0)).to.equal(BUNDLE_BUDGET);
+            expect(pub.v3Bytes([lone], hex(64), 0)).to.equal(BUNDLE_BUDGET + 2);
+            expect(pub.splitBundle([lone], hex(64), 0, false).bundles).to.have.length(1);
+            const split = pub.splitBundle([lone], hex(64), 0, true);
+            expect(split.bundles).to.deep.equal([]);
+            expect(split.oversize).to.deep.equal([
+                { chain: 'AAAA', block_index: 9625000, bytes: BUNDLE_BUDGET + 2 }
+            ]);
+        });
 }
 
 function registerAnchorBatchTests() {
-
     describe('ANCHOR_MAX_BATCH: the per-cycle DOGE spend bound', function () {
 
         it('bounds one archive to roughly a hundred DOGE transactions', function () {

@@ -130,6 +130,7 @@ class HubDbAdmissionSampling {
             hub.peerCatchup = new HubDbPeerCatchup({
                 db: this.db,
                 peerManager: hub.peerManager,
+                network: hub.network || '',
                 feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
             });
             startPeerCatchup = true;

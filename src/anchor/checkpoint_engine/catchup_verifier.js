@@ -69,6 +69,7 @@ async function verifyStateCheckpointCatchupRow(row, context){
     if(!row) return refusal('malformed state checkpoint row');
     try {
         const engine = checkpointEngine(context);
+        const deploymentNetwork = context && context.network != null ? String(context.network) : '';
         const normalize = engine && typeof engine.normalizeCheckpoint === 'function'
             ? engine.normalizeCheckpoint : checkpointMethods.normalizeCheckpoint;
         const normalized = normalize.call(engine || {}, row);
@@ -81,6 +82,8 @@ async function verifyStateCheckpointCatchupRow(row, context){
         });
         if(engine && typeof engine.assertCheckpointNetwork === 'function')
             engine.assertCheckpointNetwork(checkpoint, 'catch-up');
+        else if(deploymentNetwork && checkpoint.network !== deploymentNetwork)
+            return refusal('checkpoint network does not match deployment network');
         if(Number(checkpoint.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(checkpoint.snapshot_block))
             return refusal('checkpoint sequence does not match snapshot block');
         if(canonicalForms.isRootless(checkpoint))
@@ -96,7 +99,7 @@ async function verifyStateCheckpointCatchupRow(row, context){
         if(validators.truncated === true)
             return refusal('local validator set is truncated');
         const signers = validSigners(signatures, validators, canonicalForms.canonicalCheckpoint(checkpoint));
-        const quorumNetwork = engine ? engine.network : checkpoint.network;
+        const quorumNetwork = engine ? engine.network : (deploymentNetwork || checkpoint.network);
         const quorumMet = swq.isStakeWeightedQuorumActive(checkpoint.snapshot_block, quorumNetwork)
             ? swq.meetsStakeThreshold(validators, signers)
             : signers.size >= bftQuorumOrSingle(validators.length, 1);

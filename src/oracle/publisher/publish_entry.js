@@ -113,6 +113,7 @@ module.exports = {
     // is not a broadcast failure). False when this entry must not be sent.
     async durableMarkersAllowSend(entry, entryRounds, pass) {
         let sent = null;
+        let intent = null;
         let failed = false;
         for (let r of entryRounds) {
             let marker;
@@ -125,8 +126,13 @@ module.exports = {
                 break;
             }
             if (marker && marker.sent_at !== null && marker.sent_at !== undefined) { sent = marker; break; }
+            if (marker) { intent = marker; this._quarantinedRounds.add(Number(r)); break; }
         }
         if (failed) { pass.remaining.push(entry); return false; }
+        if (intent) {
+            this.entryResolvedInProcess(entry, entryRounds);
+            return false;
+        }
         if (sent) {
             // Already broadcast in a prior process; only still on the queue because
             // a rewrite failed before restart. Drop without re-sending. ANY contained
