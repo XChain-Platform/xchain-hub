@@ -49,12 +49,10 @@ module.exports = {
         //   hashes plus the chain/network/seq/index fields, ~322 B at mainnet
         //   heights) and the signature lists, at 194 B per (PUBKEY,SIG) pair; the
         //   publisher tail adds ~67 B for PUBLISHER + ATTEST_SIG_COUNT plus another
-        //   194 B per attesting signer. So 8192 - 6000 - 322 leaves ~1870 B of head
-        //   budget: about nine signature pairs on a tail-less head, or four wrapper
-        //   plus four attestation pairs once the tail is filled. THAT RESERVE is why
-        //   the value is 6000 and not something nearer 8000. It binds chunk 0 only (a
-        //   v2 continuation carries ~30 B of overhead), but one uniform slice keeps
-        //   splitChunks trivial.
+        //   194 B per attesting signer. The v3 fold path sizes chunk 0 down from this
+        //   ceiling to the room left beside its actual section group and worst-case
+        //   signature tails. Continuation chunks and the legacy v1 path still use the
+        //   configured ceiling unchanged.
         //   Tuner rule: this is the knob to LOWER when the federation grows. A v1
         //   with a 5+5 quorum needs chunkMaxBytes <= ~5860, a 7+7 quorum <= ~5080.
         //   Raising it costs fewer v2 txs but overflows the head first.
@@ -105,8 +103,8 @@ module.exports = {
     },
 
     initFailoverLadder(cfg){
-        // Failover-ladder step (see the derivation above; the ladder itself is in
-        // rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
+        // Failover-ladder step (the ladder itself is in rankUnlocked). Archive age starts
+        // at its oldest cargo block, in BTC blocks rather than wall-clock time, so
         // every hub computes the same rank unlock without clock sync; 36 blocks is
         // ~6h at the 10-minute target. The ORDERING is the load-bearing part:
         //   round timeout (120s) + DOGE burial (60 confs, ~1h)
@@ -122,23 +120,13 @@ module.exports = {
         // Never a divergence risk: concurrent unlocked publishers build identical archive
         // bodies, and the per-publisher XANCPUB tail is signed once per slot (claimAttestSlot).
         //
-        // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
-        // anchors to a STALLED batch, so its `since` grows without bound. On the v0
-        // CHECKPOINT BUNDLE leg the newest ELIGIBLE checkpoint tracks the live BTC
-        // tip, so `since` is normally bounded by CHECKPOINT_INTERVAL_BLOCKS *
-        // ANCHOR_CHECKPOINT_EVERY_N, i.e. 6 at the defaults (late rounds stretch it; see
-        // initCheckpointCadence). Rank 1 needs `since` >=
-        // 36, so at the default cadence NO rank above 0 is ever eligible and a bundle
-        // has no failover at all; its liveness rests on per-cycle re-election plus
-        // each hub's independent 24h timer, and a missed cycle costs one snapshot its
-        // own anchor, which the chained hashes recover.
-        // The inertness is therefore a property of the CADENCE, not of the ladder:
-        // ANCHOR_CHECKPOINT_EVERY_N >= 6 puts the bound at or above 36 and the backup
-        // ranks start unlocking here too. Raising that knob is not a cadence-only
-        // change; re-read this stanza before doing it.
-        // Lowering the tolerance is still not the fix: below the DOGE burial window it
-        // buys duplicate spends. A meaningful bundle ladder must measure time or
-        // flush attempts, not BTC-block age against a tip-tracking snapshot.
+        // SCOPE: both legs age from content that stays pending until it anchors. The
+        // archive election anchors to its oldest cargo row; the v0 CHECKPOINT BUNDLE leg
+        // anchors to the first eligible checkpoint of its chains since their last anchor
+        // (bundleContentBlock), not to the newest section, which a new checkpoint replaces
+        // every CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N blocks (6 at the
+        // defaults) and so never reached rank 1's 36. Lowering the tolerance is still not
+        // the fix: below the DOGE burial window it buys duplicate spends.
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).

@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.21.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-7%2C342%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.27.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-10%2C771%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -174,7 +174,7 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 | `BTC_ENCODER_API_KEY` | (none) | API key for the BTC encoder |
 | `BTC_ADDRESS` | (none) | BTC address that pays the on-chain ATTEST v1 (response) broadcast fee |
 | `BTC_PUBKEY_HEX` | (none) | Pubkey hex for the BTC_ADDRESS (encoder needs both for PSBT construction) |
-| `ANTHROPIC_API_KEY` | (none) | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
+| `ANTHROPIC_API_KEY` | (none) | One of the credentials that can serve the `llm` provider. The hub takes the first of `HUB_CLAUDE_CONFIG_DIR`, `HUB_CLAUDE_CODE_OAUTH_TOKEN`, `HUB_ANTHROPIC_API_KEY`, then the ambient `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (see `src/lib/hub_credentials.js`). With none set, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
 | `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |
 
 See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md) for the full list of 30+ environment variables.
@@ -215,19 +215,19 @@ neither source sets one, so these defaults hold on an unconfigured box:
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~6,524 tests) |
-| `npm run test:integration` | Integration tests (~98 tests, requires MariaDB) |
+| `npm test` | Run unit tests (~9,889 tests) |
+| `npm run test:integration` | Integration tests (~116 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
-| `npm run test:chaos` | Chaos engineering tests (81 tests) |
+| `npm run test:chaos` | Chaos engineering tests (87 tests) |
 | `npm run test:smoke` | Smoke tests (quick sanity check, 25 tests) |
-| `npm run test:regression` | Regression tests (tagged across all suites, 240 tests) |
-| `npm run test:regression:p0` | P0-priority regression tests (110 tests) |
-| `npm run test:regression:p0p1` | P0+P1 regression tests (195 tests) |
+| `npm run test:regression` | Regression tests (tagged across all suites, 280 tests) |
+| `npm run test:regression:p0` | P0-priority regression tests (150 tests) |
+| `npm run test:regression:p0p1` | P0+P1 regression tests (235 tests) |
 | `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite (7,342 tests) |
+| `npm run test:all` | Complete test suite (10,771 tests) |
 
 ### Running the DB-backed tiers
 

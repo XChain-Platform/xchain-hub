@@ -39,9 +39,11 @@ const FAMILIES = [
 
 // A method name two families both define is refused at boot: merged silently, the
 // later family would replace the earlier handler and the router would serve it with
-// nothing to say a handler had gone.
+// nothing to say a handler had gone. The table has no prototype: the router checks
+// `method in controller`, so a plain {} would dispatch constructor, toString and the
+// other Object.prototype names as handlers instead of answering -32601.
 function buildRpcController(ctx) {
-    const controller = {};
+    const controller = Object.create(null);
     for (const build of FAMILIES) {
         for (const [name, handler] of Object.entries(build(ctx))) {
             if (Object.prototype.hasOwnProperty.call(controller, name))

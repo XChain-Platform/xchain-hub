@@ -98,6 +98,19 @@ module.exports = {
             'UPDATE ' + TABLE + ' SET btc_chain_id = ? WHERE btc_chain_id IS NULL', [btcChainId]);
     },
 
+    // Stamps the chain identity on the newest NULL set only. A hub that learns the id late
+    // can hold a long backlog of NULL sets; stamping them all made every one due and the
+    // hub cleared them oldest first before leading its current slot. The older sets stay
+    // NULL and are never scanned, which leaves them to the hubs that already led them.
+    async stampNewestNullCapabilitySnapshotChainId(btcChainId) {
+        return this.doQuery(
+            'UPDATE ' + TABLE + ' cs JOIN (' +
+            'SELECT MAX(snapshot_block) AS snapshot_block FROM ' + TABLE +
+            ' WHERE btc_chain_id IS NULL' +
+            ') newest ON newest.snapshot_block = cs.snapshot_block ' +
+            'SET cs.btc_chain_id = ? WHERE cs.btc_chain_id IS NULL', [btcChainId]);
+    },
+
     // Counts the rows at one snapshot block and how many of them carry a NULL
     // btc_chain_id, for the proof endpoint's not-checkpointed diagnostic.
     async countCapabilitySnapshotChainIdStamps(snapshot_block) {

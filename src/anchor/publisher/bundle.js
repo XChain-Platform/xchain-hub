@@ -24,10 +24,10 @@
 const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
 const canonicalForms = require('./canonical_forms.js');
+const bundleSizing = require('./fold/bundle_sizing.js');
 const { ANCHOR_BUNDLE_MAX_BYTES } = require('./constants.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-const { ANCHOR_SIG_PAIR_BYTES } = require('./constants.js');
 
 function orderedSections(sections){
     return (sections || []).slice().sort((a, b) => {
@@ -68,6 +68,8 @@ async function resolveFoldBlock(ctx, fallback){
 }
 
 module.exports = {
+
+    ...bundleSizing,
 
     // The BUNDLE election key. One election per bundle, so the key binds only what a
     // bundle is identified by: its network and its snapshot_block (the MAX over the
@@ -162,6 +164,12 @@ module.exports = {
                              'skipped, an ANCHOR v0 section is root-bearing by construction');
                 continue;
             }
+            // Skip a supersession marker: no v0 section carries the SUPERSEDE segment its signatures end in.
+            if(canonicalForms.hasSupersedeFields(row)){
+                logger.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' + row.block_index +
+                             ' (seq ' + row.checkpoint_seq + ') carries supersession fields; skipped, an ANCHOR v0 section carries no SUPERSEDE segment');
+                continue;
+            }
             // Skip a root-bearing row below CHECKPOINT_COMMITMENT_ACTIVATION at its own
             // snapshot_block (roots arm earlier, at STATE_COMMITMENT): its signatures cover
             // the rootless canonical while the indexer rebuilds every v0 section WITH the
@@ -209,10 +217,10 @@ module.exports = {
         // flag-day publishBundle attaches none at all, so charging a tail there would
         // refuse sections that anchor fine today; at/above it an unmet attestation
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
-        let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
-        let split = this.splitBundle(sections, me, attestTail);
         const foldBlock = await resolveFoldBlock(this, snapshotBlock);
         const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
+        const attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
+        const split = this.splitBundle(sections, me, attestTail, foldActive);
         for(let refused of split.oversize){
             this._bundlesOversize++;
             logger.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
@@ -222,9 +230,12 @@ module.exports = {
                           'action silently, so this checkpoint stays off chain until the federation ' +
                           'signer count comes down');
         }
-        for(let group of split.bundles)
-            await this.publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped,
+        for(let group of split.bundles){
+            const contentBlock = await this.bundleContentBlock(network, group);
+            await this.publishBundle(signer, network, group, this.bundleLadderBlock(group, btcBlock, contentBlock),
+                                     failoverOnly, anchored, skipped,
                                      { active: foldActive, block: foldBlock });
+        }
         if(foldActive) this.suppressLegacyArchiveLeg();
     },
 
@@ -332,61 +343,5 @@ module.exports = {
         appendPublisherTail(parts, publisher, attestSigs);
         return parts.join('|');
     },
-
-    // Wire bytes a bundle would occupy with `attestSigCount` attesting signers, WITHOUT
-    // the signatures existing yet. The split has to run before the attestation round (each
-    // split bundle elects and attests on its own), and a (PUBKEY, SIG) pair is fixed width,
-    // so the tail is arithmetic: measure the body with an empty tail, then widen
-    // ATTEST_SIG_COUNT from its '0' to the real decimal and add one pair per signer.
-    v7Bytes(sections, publisher, attestSigCount){
-        let n    = Math.max(0, Number(attestSigCount) || 0);
-        let base = Buffer.byteLength(this.buildV7Payload(sections, publisher, []), 'utf8');
-        return base - 1 + String(n).length + (n * ANCHOR_SIG_PAIR_BYTES);
-    },
-
-    // The byte budget and its split rule (D10). Sections are packed chain-ascending into
-    // as many bundles as fit under ANCHOR_BUNDLE_MAX_BYTES; overflow is SPLIT, never
-    // dropped, because the decoder discards an oversize action silently and a dropped
-    // checkpoint is invisible fleet-wide. Returns { bundles, oversize }:
-    //   bundles  - section groups, each of which fits with `attestSigCount` attesting
-    //              signers, in chain order;
-    //   oversize - sections REFUSED because one alone exceeds the budget with that SAME
-    //              tail. The caller counts them (bundlesOversize) and says so loudly;
-    //              nothing is sent.
-    // Both checks size the same tail deliberately. Sizing the lone-section refusal at a
-    // zero tail admitted a section that only fits empty-tailed: the splitter passed it,
-    // the attestation round filled the tail, and the oversize payload died at the
-    // encoder's RangeError instead of being refused here - a checkpoint silently off
-    // chain, with bundlesOversize still reading 0. That asymmetry rode on a degraded
-    // ATTEST_SIG_COUNT 0 fallback that no longer exists: publishBundle DEFERS an unmet
-    // publisher-attestation quorum, because the indexer's v0 parser rejects a count-0
-    // bundle outright. The caller passes 0 only below the anchor-reward flag-day, where
-    // the payload genuinely carries no tail.
-    splitBundle(sections, publisher, attestSigCount){
-        let ordered = (sections || []).slice().sort((a, b) => {
-            let x = String(a.chain), y = String(b.chain);
-            return x < y ? -1 : (x > y ? 1 : 0);
-        });
-        let bundles = [], oversize = [], current = [];
-        for(let s of ordered){
-            let alone = this.v7Bytes([s], publisher, attestSigCount);
-            if(alone > ANCHOR_BUNDLE_MAX_BYTES){
-                oversize.push({ chain: String(s.chain), block_index: Number(s.block_index), bytes: alone });
-                continue;
-            }
-            if(current.length > 0 && this.v7Bytes(current.concat([s]), publisher, attestSigCount) > ANCHOR_BUNDLE_MAX_BYTES){
-                bundles.push(current);
-                current = [];
-            }
-            current.push(s);
-        }
-        if(current.length > 0) bundles.push(current);
-        if(bundles.length > 1)
-            logger.info('StateAnchorPublisher: bundle for ' + (ordered[0] ? ordered[0].network : '') +
-                        ' exceeds the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget at ' + attestSigCount +
-                        ' attesting signers; split chain-ascending into ' + bundles.length + ' bundles [' +
-                        bundles.map(b => b.map(s => String(s.chain)).join('+')).join(', ') + ']');
-        return { bundles: bundles, oversize: oversize };
-    }
 
 };

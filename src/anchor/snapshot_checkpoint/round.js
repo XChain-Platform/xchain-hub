@@ -57,7 +57,7 @@ function stop(engine) {
 async function handleMessage(engine, envelope) {
     if (!envelope || !envelope.data) return;
     if (envelope.type === XSNP_SIGN_REQ)
-        await handleSignRequest(engine, envelope.data);
+        await handleSignRequest(engine, envelope.data, envelope.sender);
     else if (envelope.type === XSNP_SIGN)
         await handleSignature(engine, envelope.data);
     else if (envelope.type === XSNP_FINALIZED)
@@ -108,7 +108,11 @@ async function lead(engine, cp, validators, snapshotBlock, signature) {
     };
     engine.snapshotRounds.set(id, pending);
     pending.timer = setTimeout(() => {
-        if (engine.snapshotRounds.get(id) === pending) engine.snapshotRounds.delete(id);
+        if (engine.snapshotRounds.get(id) !== pending) return;
+        // A quorum-met round still open here never finalized, so it is logged too.
+        const reason = pending.round.status().quorumMet ? 'quorum_met_unfinalized' : 'below_quorum';
+        logRoundTerminal(pending, ROUND_STATE.EXPIRED, reason);
+        closeRound(engine, pending);
     }, engine.roundTimeoutMs);
     if (pending.timer.unref) pending.timer.unref();
 
@@ -116,9 +120,12 @@ async function lead(engine, cp, validators, snapshotBlock, signature) {
     await advanceLeader(engine, pending);
 }
 
-async function handleSignRequest(engine, request) {
+async function handleSignRequest(engine, request, sender) {
     if (!request || !Number.isSafeInteger(request.snapshot_block) ||
-        request.snapshot_block < 0 || !request.cp) return;
+        request.snapshot_block < 0 || !request.cp) {
+        engine.noteSkip('sign_request_malformed', { sender });
+        return;
+    }
     const myPubkey = String(engine.identity && engine.identity.getPubkeyHex()).toLowerCase();
     if (request.pubkey === myPubkey) return;
 
@@ -139,8 +146,15 @@ async function handleSignRequest(engine, request) {
         record: engine.signedRecord,
         view,
     });
-    if (result.reply && engine.peerManager)
+    if (!result.reply) {
+        engine.noteSkip('sign_request_' + result.refusal, {
+            snapshotBlock: request.snapshot_block,
+            blockIndex: request.cp.block_index,
+            sender,
+        });
+    } else if (engine.peerManager) {
         engine.peerManager.broadcast(XSNP_SIGN, result.reply);
+    }
 }
 
 async function handleSignature(engine, reply) {
@@ -167,6 +181,7 @@ async function advanceLeader(engine, pending) {
         });
         if (decision.state === ROUND_STATE.PENDING) return;
         if (decision.state !== ROUND_STATE.FINALIZE) {
+            logRoundTerminal(pending, decision.state, decision.reason);
             closeRound(engine, pending);
             return;
         }
@@ -175,6 +190,7 @@ async function advanceLeader(engine, pending) {
             validator_signatures: decision.msg.signatures,
         });
         if (!snapshotCheckpointQuorum(signed, pending.validators, ValidatorIdentity.verify)) {
+            logRoundTerminal(pending, ROUND_STATE.ABORT, 'quorum_recheck_failed');
             closeRound(engine, pending);
             return;
         }
@@ -186,6 +202,21 @@ async function advanceLeader(engine, pending) {
         pending.checking = false;
         if (pending.finishing) closeRound(engine, pending);
     }
+}
+
+function logRoundTerminal(pending, state, reason) {
+    if (pending.terminalLogged) return;
+    pending.terminalLogged = true;
+    const tally = pending.round.status();
+    const stake = tally.stakeTally === null || tally.totalStake === null
+        ? 'unavailable'
+        : tally.stakeTally + '/' + tally.totalStake;
+    const action = state === ROUND_STATE.EXPIRED ? 'expired' : 'aborted';
+    logger.warn('SnapshotCheckpointEngine: round ' + pending.id + ' ' + action +
+        ' at snapshot block ' + pending.snapshotBlock + ' (checkpoint block ' +
+        pending.cp.block_index + '); signers collected ' + tally.signerCount + '/' +
+        tally.validatorCount + '; stake tallied ' + stake +
+        ' (quorum needs more than two-thirds); reason ' + reason);
 }
 
 function closeRound(engine, pending) {

@@ -293,8 +293,11 @@ class OracleConsensus extends EventEmitter {
             // In-flight guard, the convention XChainHub.refreshTransportSignerSet uses:
             // the query is an unbounded round trip and a bare setInterval stacks passes.
             if (this._reseedRunning) return;
+            // Bounded below the schedule's current round so a far-future finalized row
+            // cannot hide older history behind MAX(round_number) between rounds.
+            let band = this.oracleRoundBand();
             this._reseedRunning = true;
-            this.seedLastFinalizedPrices({ quiet: true })
+            this.seedLastFinalizedPrices({ quiet: true, belowRound: band ? band.current : undefined })
                 .catch(() => { /* seedLastFinalizedPrices never rejects; belt and braces */ })
                 .then(() => { this._reseedRunning = false; });
         }, this._reseedIntervalMs);

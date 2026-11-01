@@ -118,6 +118,7 @@ function mkPub(db){
     pub.ambiguousPollAttempts = 1;
     pub.peerManager           = null;                     // skips the XANC_FINALIZED announce
     pub.getActiveOraclePublishPubkeys = async () => [identity.getPubkeyHex().toLowerCase()];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.recordReward         = () => {};
     pub.runArchiveAttestationRound = async () => ({ met: false, sigs: [] });   // legacy v1, no quorum needed
     return { pub: pub, identity: identity };

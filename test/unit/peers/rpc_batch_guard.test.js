@@ -114,6 +114,71 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         }
     };
 
+    const rejectsNonObjectElementsCleanly = async () => {
+        const bodies = [
+            [null],
+            [{ jsonrpc: '2.0', method: 'getprice', id: 1 }, null],
+            [1, 2], [true], ['x'], [[]]
+        ];
+        for (const b of bodies) {
+            const counter = { calls: 0 };
+            const server = http.createServer(buildApp(true, counter));
+            await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+            try {
+                const res = await fetch(`http://127.0.0.1:${server.address().port}/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(b)
+                });
+                const text = await res.text();
+                const label = JSON.stringify(b);
+                assert.strictEqual(res.status, 400, label);
+                assert.match(res.headers.get('content-type'), /application\/json/, label);
+                const parsed = JSON.parse(text);
+                assert.strictEqual(parsed.jsonrpc, '2.0', label);
+                assert.strictEqual(parsed.id, null, label);
+                assert.strictEqual(parsed.error.code, -32600, label);
+                assert.ok(!/TypeError|node_modules/.test(text), label);
+                assert.strictEqual(counter.calls, 0, 'router must not dispatch: ' + label);
+            } finally {
+                await new Promise((resolve) => server.close(resolve));
+            }
+        }
+    };
+
+    const rejectsEmptyAndMethodlessBatches = async () => {
+        const bodies = [
+            [],
+            [{}],
+            [{ jsonrpc: '2.0', method: 'getprice', id: 1 }, {}],
+            [{ jsonrpc: '2.0', id: 1 }],
+            [{ jsonrpc: '2.0', method: 5, id: 1 }]
+        ];
+        for (const b of bodies) {
+            const label = JSON.stringify(b);
+            let nextCalled = false;
+            let status = null;
+            let payload = null;
+            const res = {
+                status(s) { status = s; return this; },
+                json(p) { payload = p; return this; }
+            };
+            makeRpcBatchGuard(CAP)({ body: b }, res, () => { nextCalled = true; });
+            assert.strictEqual(nextCalled, false, label);
+            assert.strictEqual(status, 400, label);
+            assert.deepStrictEqual(payload, {
+                jsonrpc: '2.0', id: null,
+                error: { code: -32600, message: 'Invalid Request' }
+            }, label);
+        }
+        // Valid batch and single call object still pass.
+        for (const ok of [[{ jsonrpc: '2.0', method: 'ping', id: 1 }], { jsonrpc: '2.0', method: 'ping', id: 1 }]) {
+            let nextCalled = false;
+            makeRpcBatchGuard(CAP)({ body: ok }, { status() { throw new Error('refused'); } }, () => { nextCalled = true; });
+            assert.strictEqual(nextCalled, true);
+        }
+    };
+
     let registerresolvemaxbatch7;
 
     {
@@ -139,11 +204,13 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
     }
 
     const srcApiJsMountsTheGuardTest11 = () => {
-        const src = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const boot = fs.readFileSync(path.join(__dirname, '../../../src/api.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '../../../src/api/server.js'), 'utf8');
         const guardIdx = src.indexOf('makeRpcBatchGuard(');
         const routerIdx = src.indexOf('jsonRouter({');
-        assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from src/api.js');
-        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from src/api.js');
+        assert.notStrictEqual(boot.indexOf('createApp(ctx)'), -1, 'api.js must use the shared app builder');
+        assert.notStrictEqual(guardIdx, -1, 'batch guard mount missing from the shared app builder');
+        assert.notStrictEqual(routerIdx, -1, 'jsonRouter mount missing from the shared app builder');
         assert.ok(guardIdx < routerIdx, 'the batch guard must be registered before the jsonRouter mount');
     };
 
@@ -152,7 +219,9 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         it('reproduces the fan-out WITHOUT the guard (21 calls dispatch 21 handlers)', reproducesTheFanOutWithoutTheTest2);
         it('rejects an over-cap batch with 400 / -32600 and dispatches nothing', rejectsAnOverCapBatchWithTest3);
         it('passes an at-cap batch through to the dispatcher', passesAnAtCapBatchThroughTest4);
-        it('leaves a single (non-array) call untouched', leavesASingleNonArrayCallTest5);
+        it('answers a batch with a null or non-object element with a clean JSON 400 / -32600', rejectsNonObjectElementsCleanly);
+        it('answers an empty batch or a method-less member with 400 / -32600 and calls next() for valid input', rejectsEmptyAndMethodlessBatches);
+        it('leaves a single (non-array) call untouched',leavesASingleNonArrayCallTest5);
         it('leaves a bodiless GET to the req.body shim (no 500, no 400)', leavesABodilessGetToTheTest6);
         registerresolvemaxbatch7();
         it('src/api.js mounts the guard before the jsonRouter mount', srcApiJsMountsTheGuardTest11);

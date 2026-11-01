@@ -186,6 +186,31 @@ describe('AttestationPublisher: effector-safety guards', function () { afterEach
         expect(readQueue(pub.queuePath).length).to.equal(0);
     }); });
 
+describe('AttestationPublisher: effector-safety guards', function () { afterEach(hookAt68170); it('a failed startup hydration cannot hide a crash-mid-send intent from the sweep', async function () {
+        const rid = 'd1'.repeat(32);
+        const rows = [{ request_id: rid, txid: null, sent_at: null, intent_status: 'ok' }];
+        const db = makeMarkerDb(rows);
+        const query = db.doQuery;
+        let startup = true;
+        db.doQuery = async (sql, params) => {
+            if (startup && /^SELECT/.test(sql) && !/WHERE request_id/.test(sql)) {
+                startup = false;
+                throw new Error('startup read failed');
+            }
+            return query(sql, params);
+        };
+        const pub = makePublisher(MY_PUB, { db });
+        await pub.hydratePublishedMarkers().catch(() => {});
+        const bcast = sinon.stub().resolves({ txid: 'duplicate' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, 'fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            status: 'ok', responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub.processQueue();
+        expect(bcast.called, 'the intent-only marker must prevent a second BTC spend').to.equal(false);
+        expect(pub._quarantinedRequests.has(rid + '|ok')).to.equal(true);
+    }); });
+
 describe('AttestationPublisher: effector-safety guards', function () { afterEach(hookAt68170); it('sweep FAILS CLOSED and retains the entry when the marker is unreadable', async function () {
         const rid = 'd8'.repeat(32);
         const db = makeMarkerDb([], /^SELECT request_id, txid/);

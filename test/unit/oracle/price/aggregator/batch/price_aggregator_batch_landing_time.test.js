@@ -106,6 +106,9 @@ function makeValidator() {
     // answer the stamp re-read from `stampedRows`.
     function stubDb(finalizedRounds = [], stampedRows = []) {
         let log = { inserts: [], updates: [], selects: [] };
+        hub.db.findPriceSnapshotRowsForRounds = async rounds => rounds
+            .filter(round => finalizedRounds.includes(round))
+            .map(round_number => ({ round_number, status: 'finalized' }));
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^SELECT id FROM price_snapshots/.test(sql)) {
                 return finalizedRounds.includes(params[0]) ? [{ id: 7 }] : [];

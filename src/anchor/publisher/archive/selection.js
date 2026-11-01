@@ -30,8 +30,11 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
 const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
+const ARCHIVE_FOLD_SUBDEADLINE_MS = 30000;
 
 module.exports = {
+
+    archiveFoldSubdeadlineMs: ARCHIVE_FOLD_SUBDEADLINE_MS,
 
     // Archive transport for the anchor_% reward rails. Read this before touching
     // recovery dedup: the "indexer can never re-derive these" invariant is NOT
@@ -44,7 +47,7 @@ module.exports = {
     //   - anchor_<CHAIN>/anchor_bundle AT/ABOVE the anchor-reward flag-day, and
     //     anchor_archive AT/ABOVE the archive-reward flag-day: the indexer DOES
     //     re-derive these on-chain from the v0/v1 XANCPUB publisher attestation
-    //     (anchor.js createValidatorReward / reconcileAnchorRewardWinner), crediting
+    //     (anchor_reward_derive.js createValidatorReward / reconcileAnchorRewardWinner), crediting
     //     the same frozen ANCHOR_REWARD_AMOUNT / ARCHIVE_REWARD_AMOUNT. The hub still
     //     records the row locally (RewardTracker isDerived path), but this selector
     //     does NOT archive it on a scoped hub: the flag-day exclusion clause in
@@ -90,6 +93,14 @@ module.exports = {
         return (rewards || []).filter(r => !this.isChainDerivedReward(r));
     },
 
+    // The pending price page, read from the common floor once rounds below it were omitted.
+    pendingPriceRounds(limit){
+        const floor = this.priceArchiveFloor();
+        return floor > 0 && this.db.findPriceSnapshotRoundsByBatchSeqFromRound
+            ? this.db.findPriceSnapshotRoundsByBatchSeqFromRound(floor, limit)
+            : this.db.findPriceSnapshotRoundsByBatchSeq(limit);
+    },
+
     // Every pending archive stream, with sentinel reads for the two protocol caps.
     async gatherArchiveRows(){
         if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
@@ -110,7 +121,7 @@ module.exports = {
                 ? this.db.findListSnapshotsByBatchSeq(ARCHIVE_MAX_LIST_ROWS + 1)
                 : Promise.resolve([]),
             this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
-            this.db.findPriceSnapshotRoundsByBatchSeq(ARCHIVE_MAX_PRICE_ROUNDS + 1),
+            this.pendingPriceRounds(ARCHIVE_MAX_PRICE_ROUNDS + 1),
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);
         rewards = this.dropChainDerivedRewards(rewards);
@@ -119,7 +130,8 @@ module.exports = {
             priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
         policies = policies.slice(0, ARCHIVE_MAX_POLICY_ROWS);
         priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
-        let prices = await this.db.findPriceSnapshotsForArchiveRounds(priceRounds);
+        let prices = await this.priceRoundsAboveCommonFloor(
+            await this.db.findPriceSnapshotsForArchiveRounds(priceRounds));
         return this.archiveRows(matches, calls, rewards, {
             bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
             cappedOrTrimmed: capped
@@ -149,12 +161,12 @@ module.exports = {
     },
 
     // Build repeatedly because removing a quorum row can also remove its capability set.
-    async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows){
+    async buildSizedArchive(network, batchSeq, rows, wrapperSnapshotBlock, rewardRows, splitter){
         let archive = await this.buildArchive(network, batchSeq, rows.matches, wrapperSnapshotBlock,
             rows.calls, rewardRows, rows);
         while(true){
             const jsonBytes = Buffer.byteLength(archive.json, 'utf8');
-            const wire = this.archiveWire(archive.json);
+            const wire = this.archiveWire(archive.json, splitter);
             const maxChunks = this.maxArchiveChunks();
             const ratios = [jsonBytes / ARCHIVE_MAX_JSON_BYTES,
                 wire.b64.length / ARCHIVE_MAX_WIRE_B64_BYTES,
@@ -297,10 +309,10 @@ module.exports = {
     },
 
     // The archive body as it travels: its crc32, the compressed base64url text, and the chunks.
-    archiveWire(json){
+    archiveWire(json, splitter){
         let crc      = this.crc32Hex(json);
         let b64      = zlib.gzipSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
-        let chunks   = this.splitChunks(b64);
+        let chunks   = splitter ? splitter(b64) : this.splitChunks(b64);
         return { json, crc, b64, chunks };
     }
 

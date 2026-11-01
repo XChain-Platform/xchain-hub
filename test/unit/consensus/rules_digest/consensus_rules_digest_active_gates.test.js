@@ -34,9 +34,9 @@ function stubRegistryRow(key, table) {
 // The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
 // helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
 function registerGateInventoryTest() {
-    it('is sorted, has 47 entries, and contains the gates the last trains append', function () {
+    it('is sorted, has 49 entries, and contains the gates the last trains append', function () {
         const keys = crd.knownGateKeys();
-        expect(keys).to.have.lengthOf(47, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.have.lengthOf(49, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
         expect(keys).to.deep.equal([...keys].sort());
         expect(keys).to.include.members([
             'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
@@ -75,7 +75,9 @@ function registerGateInventoryTest() {
             'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION',
             'list_meta_activation.LIST_META_ACTIVATION',
             'order_match_price_cross_activation.ORDER_MATCH_PRICE_CROSS_ACTIVATION',
-            'remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION'
+            'remote_token_admission_activation.REMOTE_TOKEN_ADMISSION_ACTIVATION',
+            'archive_rollcall_presence_activation.ARCHIVE_ROLLCALL_PRESENCE_ACTIVATION',
+            'checkpoint_supersede_activation.CHECKPOINT_SUPERSEDE_ACTIVATION'
         ]);
     });
 }
@@ -109,7 +111,7 @@ function registerPinnedDigestTest() {
             for (const [p] of saved) delete require.cache[p];
             const fresh = require('../../../../src/consensus_rules_digest.js');
             expect(fresh.computeConsensusRulesDigest().digest)
-                .to.equal('cac4806586d5e35020f85dd9f0a6b8106f9838a259c9a4b94a6c6cecb2678c06',
+                .to.equal('12b5e800eb989e2d02e25475775c2ffa8a904c7acbb1719894a2bab7bc09d393',
                     'the consensus rules digest moved; a gate was added, removed, reordered or re-armed');
         } finally {
             for (const [p, mod] of saved) { if (mod === undefined) delete require.cache[p]; else require.cache[p] = mod; }
@@ -148,7 +150,8 @@ function registerGateOrderingTest() {
                 'token_bridge_activation', 'anchor_bundle_order_activation', 'oracle_price_age_hourly_activation',
                 'oracle_hourly_window_activation', 'oracle_round_time_activation', 'price_scale_activation',
                 'list_share_producer_activation', 'list_meta_activation', 'mirror_admission_margin_activation',
-                'order_match_price_cross_activation', 'remote_token_admission_activation']);
+                'order_match_price_cross_activation', 'remote_token_admission_activation',
+                'archive_rollcall_presence_activation', 'checkpoint_supersede_activation']);
     });
 }
 

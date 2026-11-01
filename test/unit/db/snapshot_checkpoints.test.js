@@ -33,7 +33,20 @@ function recordingDb(result) {
     }, snapshots);
 }
 
+function registerDeleteTest() {
+    it('deletes checkpoints only for one chain and network', async function () {
+        const db = recordingDb({ affectedRows: 2 });
+        await db.deleteSnapshotCheckpointsByChainAndNetwork('BTC', 'regtest');
+        expect(db.calls[0]).to.deep.equal({
+            sql: 'DELETE FROM snapshot_checkpoints WHERE chain = ? AND network = ?',
+            args: ['BTC', 'regtest'],
+        });
+    });
+}
+
 describe('snapshot checkpoints hub table', function () {
+    registerDeleteTest();
+
     it('declares the checkpoint columns and unique chain height key', function () {
         const sql = fs.readFileSync(SQL_FILE, 'utf8');
         expect(sql).to.match(/id\s+BIGINT\s+NOT NULL\s+AUTO_INCREMENT/);

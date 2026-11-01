@@ -84,10 +84,15 @@ module.exports = {
         return {
             // Per-chain rounds this hub led that threw before proposing. An entry in
             // last_round_failure_by_chain means that chain's latest round produced no
-            // checkpoint; it is removed when a later round for that chain returns.
+            // checkpoint; it is removed when a later round for that chain returns undeclined.
             round_failures:              this._roundFailures || 0,
             round_failures_by_chain:     Object.assign({}, this._roundFailuresByChain),
             last_round_failure_by_chain: Object.assign({}, this._lastRoundFailureByChain),
+            // Rounds this hub led that its own proposal check refused, by reason. An entry in
+            // last_leader_decline_by_chain names the hold on that chain until a round passes it.
+            leader_declines:              Object.assign({}, this._leaderDeclines),
+            leader_declines_total:        this._leaderDeclinesTotal || 0,
+            last_leader_decline_by_chain: Object.assign({}, this._lastLeaderDeclineByChain),
             // Leader writes of its own quorum-finalized checkpoint that failed, how many wait
             // for a retry on the next tick, and how many were given up after the retry cap.
             self_accept_failures:        this._selfAcceptFailures || 0,

@@ -22,7 +22,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const canonicalForms = require('./canonical_forms.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
@@ -145,7 +144,7 @@ module.exports = {
     // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
     // { met:false } on timeout / short quorum. ONE round per bundle, where the retired
     // per-chain path ran one per row. The SIGNING/QUORUM set is resolved at the bundle's
-    // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
+    // snapshot_block, the SAME set the indexer (anchor_reward_derive.js) verifies the attestation
     // against, so the hub never collects a quorum the chain then rejects.
     // The oracle_publish set this round tallies against, or null when the snapshot is
     // unavailable and the round abstains (met:false, the caller defers the bundle).
@@ -180,7 +179,9 @@ module.exports = {
         // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
         // drops the reward (PUBLISHER must be in the verified set). Return met:false (the
         // caller defers the bundle) rather than emit one whose reward can never be credited.
-        if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
+        if(!signingPubkeys.includes(me) ||
+           this.abstainWithoutPeers(snapCount, b.snapshot_block, 'publisher-attestation round (bundle deferred)'))
+            return { met: false, sigs: [] };
 
         // One XANCPUB signature per slot: a hub that already co-signed another
         // publisher here would hand the indexer a slashable publisher-only pair, so
@@ -192,7 +193,7 @@ module.exports = {
 
         // Genuine single-node set (snapCount === 1, membership proven above): the
         // publisher's own attestation IS the quorum.
-        if(snapCount <= 1 || !this.peerManager)
+        if(snapCount <= 1)
             return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
         return await this.openAttestRound(b, publisher, canonical, quorum, weighted, signingSet, signatures, me, mySig);
     },
@@ -231,21 +232,12 @@ module.exports = {
         let publisher = String(d.publisher || '').toLowerCase();
         if(publisher !== sender) return;
 
-        // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block, hash-ordered by
-        // the bundle election key) and confirm the proposer is rank-unlocked on publishBundle's
-        // ladder. Ranks unlock with block age, unbounded; the selector match below pins the tip.
+        // The BUNDLE publisher election runs over oracle_publish @ snapshot_block; the proposer's
+        // rank is checked once our own rows are read below, since the ladder ages from the
+        // oldest content they owe. Ranks unlock with block age, unbounded; the selector match
+        // below pins the tip.
         let eligible = await this.getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
-        {
-            // Run the ladder check for EVERY set size: a single-member set must
-            // still bind sender === eligible[0] (rank 0), or any current member
-            // could impersonate the sole elected publisher.
-            let order = canonicalForms.hashOrder(
-                this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
-            let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-            let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
-            if(!this.rankUnlocked(order, sender, since)) return;          // proposer not unlocked
-        }
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would drop
         // our attestation signature anyway (same gate the archive follower applies).
         if(!eligible.includes(myPubkey)) return;
@@ -262,6 +254,14 @@ module.exports = {
             if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
             if(local[0].anchor_txid != null) return;                       // already anchored: a second publisher must not earn the reward
             mine.push(local[0]);
+        }
+        // The ladder check runs for EVERY set size: a single-member set must still bind
+        // sender === eligible[0] (rank 0), or any current member could impersonate the
+        // sole elected publisher. Age counts from the oldest content our rows owe.
+        if(!(await this.bundleSenderUnlocked(network, snapshotBlock, eligible, sender, mine))){
+            logger.warn('StateAnchorPublisher: declining XANCPUB co-sign for ' + network + ' @ ' + snapshotBlock +
+                        ': reason=publisher_rank_locked publisher=' + sender);
+            return;
         }
         if(!(await this.sectionsAreSelectorRows(network, snapshotBlock, mine))) return;
         if(this.buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;

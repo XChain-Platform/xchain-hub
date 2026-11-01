@@ -82,6 +82,17 @@ module.exports = {
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     },
 
+    // Snapshot checkpoints distinguish committed state availability from chain depth.
+    async resolveSnapshotCheckpointHeights(){
+        if(this.hub && typeof this.hub.resolveBtcCheckpointHeights === 'function')
+            return this.hub.resolveBtcCheckpointHeights();
+        const height = await this.resolveSnapshotBlock();
+        return height === null ? null : {
+            committedHeight: height,
+            chainHeight: height,
+        };
+    },
+
     async indexerCall(coin, method, params){
         let ix = this.indexers[coin];
         if(!ix || !ix.url) throw new Error('no indexer url for ' + coin);

@@ -31,7 +31,8 @@ function view(changes) {
         network: 'testnet',
         gateActive: true,
         expectedBlock: 100,
-        btcTip: 106,
+        committedHeight: 106,
+        chainHeight: 106,
         confirmations: 6,
         local: Object.assign({}, payload),
         signed: null,
@@ -59,7 +60,7 @@ describe('snapshot co-sign refusal constants', function () {
 
 describe('snapshotCosignRefusal accepted requests', function () {
     it('accepts a matching request at exactly the required depth', function () {
-        assert.strictEqual(result(request(), { btcTip: 106 }), null);
+        assert.strictEqual(result(request(), { chainHeight: 106 }), null);
     });
 
     it('compares hashes without regard to case', function () {
@@ -131,13 +132,21 @@ describe('snapshotCosignRefusal policy ordering', function () {
 
     it('refuses the wrong checkpoint block before checking depth', function () {
         assert.strictEqual(result(request({ block_index: 99 }), {
-            btcTip: 0
+            chainHeight: 0
         }), COSIGN_REFUSAL.WRONG_BLOCK);
     });
 
     it('refuses a shallow checkpoint before checking the local payload', function () {
         assert.strictEqual(result(request(), {
-            btcTip: 105,
+            chainHeight: 105,
+            local: null
+        }), COSIGN_REFUSAL.SHALLOW);
+    });
+
+    it('refuses committed height one block below required depth before local reads', function () {
+        assert.strictEqual(result(request(), {
+            committedHeight: 105,
+            chainHeight: 1000,
             local: null
         }), COSIGN_REFUSAL.SHALLOW);
     });

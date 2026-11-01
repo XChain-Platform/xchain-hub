@@ -22,6 +22,8 @@
 
 'use strict';
 
+const roundBandLib = require('../oracle_round_band.js');
+
 module.exports = {
 
     // Return the most recently finalized price for a coin pair from price_snapshots,
@@ -60,18 +62,30 @@ module.exports = {
     // the timed reseed bounds staleness per hub clock, so two hubs can judge one
     // PROPOSE against different rounds and co-sign differently.
 
-    // Fail-soft and monotonic like the seed it delegates to: carries the reference
-    // FORWARD only, never clears it, never throws on the consensus path.
+    // Fail-soft on the consensus path. Entries from this round or later are not
+    // references for it, so discard them before deciding whether a read is needed.
     async refreshLastFinalizedForRound(round) {
         if (!Number.isInteger(round)) return;
         if (this._lastFinalizedRefreshRound === round) return;
         this._lastFinalizedRefreshRound = round;
 
-        // The reference for round N is round N-1; anything at or past that is current.
-        const cached = this.maxCachedFinalizedRound();
-        if (cached !== null && cached >= round - 1) return;
+        let dropped = false;
+        if (this._lastFinalizedRounds) {
+            for (const [coinPair, cachedRound] of this._lastFinalizedRounds) {
+                if (Number.isFinite(cachedRound) && cachedRound >= round) {
+                    this._lastFinalizedRounds.delete(coinPair);
+                    if (this._lastFinalizedPrices) this._lastFinalizedPrices.delete(coinPair);
+                    dropped = true;
+                }
+            }
+        }
 
-        await this.seedLastFinalizedPrices({ quiet: true });
+        // The reference for round N is round N-1. A complete cache already at
+        // that point avoids the indexed read; any removal must be filled again.
+        const cached = this.maxCachedFinalizedRound();
+        if (!dropped && cached !== null && cached >= round - 1) return;
+
+        await this.seedLastFinalizedPrices({ quiet: true, belowRound: round });
 
         // Still behind after a read means this hub's own database never received the
         // previous round. Diagnostic only; nothing gates on it.
@@ -93,10 +107,25 @@ module.exports = {
         let r = Number(round);
         let stamped = Number.isFinite(r);
         let known = this.lastFinalizedRoundFor(coinPair);
+        let band = this.oracleRoundBand();
+        if (stamped && band !== null && r > band.max) return false;
         if (stamped && known !== null && r < known) return false;
         this._lastFinalizedPrices.set(coinPair, String(price));
         if (stamped) this._lastFinalizedRounds.set(coinPair, r);
         return true;
+    },
+
+    // The schedule's plausible round band from the wall clock, the same band the
+    // ingest fence refuses pushed rounds against. Read from the clock rather than
+    // OracleRound.getCurrentRound(): that value is 0 until the first tick and holds
+    // still while a slow round is in flight, so a follower co-signing later rounds
+    // would refuse their real rows. Null (no schedule) means no opinion.
+    oracleRoundBand() {
+        if (!this.oracleRound) return null;
+        return roundBandLib.roundBand({
+            epochStartMs:    this.oracleRound.epochStart,
+            roundIntervalMs: this.oracleRound.roundInterval
+        });
     },
 
     // Update the in-memory last-finalized-price cache after a round is stored.

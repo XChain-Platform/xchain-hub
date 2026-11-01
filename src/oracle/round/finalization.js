@@ -48,13 +48,55 @@ function isFederated(consensus, network, btcBlockHeight) {
         isFederatedHub(liveFederationSignals(consensus));
 }
 
+// Backoff between re-attempts of a rejected skipped-row write. A DB outage that
+// opens the circuit breaker rejects every write until its cooldown expires, and
+// nothing else ever writes this round's row (the round number is wall-clock
+// derived, so no later round revisits it): without a re-attempt the round stays
+// a permanent hole in the presence record on this hub and on every mirror. The
+// budget spans about half an hour, longer than a MariaDB restart or pause.
+const SKIP_STORE_RETRY_DELAYS_MS = [5000, 15000, 30000, 60000, 120000, 300000, 300000, 300000, 300000, 300000];
+
+// True once the consensus engine holds the round as finalized: a federation
+// PROPOSE landed the real rows, so a skipped marker has nothing left to add.
+function roundAlreadyFinalized(consensus, round) {
+    return !!(consensus.finalized && typeof consensus.finalized.has === 'function' && consensus.finalized.has(round));
+}
+
 // Store the round's durable skipped row instead of finalizing it; a rejected
-// write still leaves a round_lost record rather than only a prose error line.
-function storeAnchorSkip(consensus, round, btcBlockHeight, btcBlockTime, reason) {
-    consensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason).catch(err => {
-        logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', err.message));
-        noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
-            err: err && err.message ? err.message : String(err) });
+// write still leaves a round_lost record rather than only a prose error line,
+// and is re-attempted on a backoff until it lands or the budget runs out.
+// While an attempt is in flight or a re-attempt is armed, the round holds a slot
+// in finalizationTimers, so stop() clears the pending re-attempt, records the
+// round and writes its row once more itself, and a rejection that settles after
+// stop() (or after the round was rescheduled) finds its slot gone and stops there.
+// The write is idempotent: it never demotes a finalized row.
+function storeAnchorSkip(oracleRound, consensus, round, btcBlockHeight, btcBlockTime, reason, attempt = 0) {
+    let slot = { skipStoreRound: round, attempt };
+    oracleRound.finalizationTimers.set(round, slot);
+    let ownsSlot = () => oracleRound.finalizationTimers.get(round) === slot;
+    let release = () => { if (ownsSlot()) oracleRound.finalizationTimers.delete(round); };
+    consensus.storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason).then(release, err => {
+        let message = err && err.message ? err.message : String(err);
+        logger.error(nodeUtil.format('Oracle: Failed to store skipped round ' + round + ':', message));
+        noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected', err: message });
+        if (!ownsSlot()) return;
+        if (attempt >= SKIP_STORE_RETRY_DELAYS_MS.length || roundAlreadyFinalized(consensus, round)) {
+            if (attempt >= SKIP_STORE_RETRY_DELAYS_MS.length) {
+                logger.error('Oracle: Giving up on the skipped row for round ' + round + ' after ' +
+                    (attempt + 1) + ' attempts');
+            }
+            release();
+            return;
+        }
+        let timer = setTimeout(() => {
+            if (oracleRound.finalizationTimers.get(round) !== timer) return;
+            if (roundAlreadyFinalized(consensus, round)) {
+                oracleRound.finalizationTimers.delete(round);
+                return;
+            }
+            storeAnchorSkip(oracleRound, consensus, round, btcBlockHeight, btcBlockTime, reason, attempt + 1);
+        }, SKIP_STORE_RETRY_DELAYS_MS[attempt]);
+        oracleRound.finalizationTimers.set(round, timer);
     });
 }
 
@@ -89,7 +131,7 @@ module.exports = {
                         // durable, which is what advances the streak (item 4942); a
                         // local increment here would double-count a round whose fetch
                         // had already failed.
-                        storeAnchorSkip(this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
+                        storeAnchorSkip(this, this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
                             'chain-tip fallback active, anchor unreliable');
                         return;
                     }
@@ -101,7 +143,7 @@ module.exports = {
                     logger.warn('Oracle: Skipping finalization for round ' + round +
                         '; btcBlockHeight is the round-number fallback, not a BTC block, ' +
                         'and followers refuse a PROPOSE anchored there');
-                    storeAnchorSkip(this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
+                    storeAnchorSkip(this, this.oracleConsensus, round, btcBlockHeight, btcBlockTime,
                         'round-number anchor on a federated hub');
                     return;
                 }

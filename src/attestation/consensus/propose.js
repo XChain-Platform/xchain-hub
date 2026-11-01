@@ -123,6 +123,7 @@ module.exports = {
         // instead and let the request reach its normal deadline expiry + refund.
         let needed = Math.max(quorum, roundState.redundancy);
         if(responsible.length < needed){
+            this.roundAdmissionRefusedCount.unfinalizable++;
             logger.warn('AttestationConsensus: skipping unfinalizable round for ' + rid.substring(0,16) +
                 '... (responsible=' + responsible.length + ' < needed=' + needed +
                 '; quorum=' + quorum + ' redundancy=' + roundState.redundancy + ')');

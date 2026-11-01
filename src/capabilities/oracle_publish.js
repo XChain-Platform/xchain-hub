@@ -35,8 +35,8 @@
  * hub configured with a testnet address would pass a permissive check and then
  * publish nowhere, which is the silent failure this self-test exists to catch.
  *
- * THE SIGNER MODULE MUST EXPORT `broadcast(payload)` WHEN IT IS CONFIGURED AT
- * ALL. Every chunked publish this capability leads (a PRICE round's signature
+ * THE SIGNER MODULE MUST BE CONFIGURED AND EXPORT `broadcast(payload)`.
+ * Every chunked publish this capability leads (a PRICE round's signature
  * list, an ANCHOR, a ROLLCALL) is a two-phase P2SH encoding, and the hub's
  * built-in pipeline can only broadcast the FUNDING transaction of those two: it
  * fails closed at lib/guards/two_phase_guard.js rather than publishing a payload no
@@ -46,11 +46,12 @@
  * signer (xchain-node's `validator init`) already exports it; hand-built modules
  * are the gap, so it is checked here.
  *
- * The check is scoped to a CONFIGURED module. An unset HUB_SIGNER_MODULE is the
- * hub's documented "no operator signer, publishers stay idle" posture, which this
- * self-test has never spoken to and which the publishers already announce
- * themselves; failing it here would strip oracle_publish from every hub that has
- * never had a signer, which is not the silent failure being closed.
+ * An unset HUB_SIGNER_MODULE also fails the capability. The oracle_publish set is
+ * an election set for ANCHOR archives, so admitting an idle hub can elect a leader
+ * that has no way to land the batch. On a static regtest tip the height-based
+ * failover ladder cannot advance, leaving the same batch unpublished indefinitely.
+ * Keeping non-publishers out of the capability snapshot elects the next qualified
+ * hub in the same round.
  *
  ********************************************************************/
 
@@ -160,7 +161,11 @@ exports.selfTest = async (config) => {
         return { ok: false, reason: 'HUB_SIGNER_MODULE is configured but unusable: ' +
                                     (e && e.message ? e.message : String(e)) };
     }
-    if (hooks && typeof hooks.broadcastFn !== 'function') {
+    if (!hooks) {
+        return { ok: false, reason: 'HUB_SIGNER_MODULE is not configured; oracle_publish members ' +
+                                    'must export broadcast(payload) so an elected archive leader can publish' };
+    }
+    if (typeof hooks.broadcastFn !== 'function') {
         return { ok: false, reason: 'HUB_SIGNER_MODULE (' + hooks.source + ') exports no broadcast(payload); ' +
                                     'every chunked publish this capability leads is a two-phase P2SH encoding ' +
                                     'the built-in pipeline cannot finish, so this hub would sign publishes it ' +

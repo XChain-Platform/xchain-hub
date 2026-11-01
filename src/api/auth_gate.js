@@ -75,6 +75,15 @@ function callWantsConfigSecrets(call) {
     return configRedaction.wantsSecrets(call.params && call.params.include_secrets);
 }
 
+function methodName(call) {
+    return call && typeof call.method === 'string' ? call.method.toLowerCase() : '';
+}
+
+function hasInvalidMethod(call) {
+    return Boolean(call && typeof call === 'object' &&
+        call.method !== undefined && typeof call.method !== 'string');
+}
+
 function timingEqual(provided, expected) {
     let a = Buffer.from(provided), b = Buffer.from(expected);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -96,10 +105,7 @@ function bulkKeyMatches(provided, ctx) {
 function feedTierRefuses(calls, provided, ctx) {
     const { HUB_API_KEY, HUB_FEED_API_KEY } = ctx;
     if (!HUB_FEED_API_KEY) return false;
-    let feedRead = calls.some(call => {
-        let method = call && call.method;
-        return method && FEED_READ_METHODS.has(method.toLowerCase());
-    });
+    let feedRead = calls.some(call => FEED_READ_METHODS.has(methodName(call)));
     if (!feedRead) return false;
     return !(HUB_FEED_API_KEY && timingEqual(provided, HUB_FEED_API_KEY)) &&
         (!HUB_API_KEY || !timingEqual(provided, HUB_API_KEY));
@@ -111,10 +117,7 @@ function feedTierRefuses(calls, provided, ctx) {
 // do not mix tiers). Unset, they stay in the bulk tier below.
 function reorgTierRefuses(calls, provided, { HUB_REORG_API_KEY, REORG_WRITE_METHODS }) {
     if (HUB_REORG_API_KEY) {
-        let reorgGated = calls.some(call => {
-            let method = call && call.method;
-            return method && REORG_WRITE_METHODS.has(method.toLowerCase());
-        });
+        let reorgGated = calls.some(call => REORG_WRITE_METHODS.has(methodName(call)));
         if (reorgGated && !timingEqual(provided, HUB_REORG_API_KEY)) return true;
     }
     return false;
@@ -127,9 +130,8 @@ function bulkTierRefuses(calls, provided, ctx) {
             REORG_WRITE_METHODS, WRITE_METHODS, SENSITIVE_READ_METHODS, SENSITIVE_READ_AUTH } = ctx;
     if (HUB_API_KEY) {
         let gated = calls.some(call => {
-            let method = call && call.method;
-            if (!method) return false;
-            let m = method.toLowerCase();
+            let m = methodName(call);
+            if (!m) return false;
             // Reorg methods moved to their own tier above; the reorg key
             // must not authorize anything else, and the bulk key must no
             // longer authorize retractions.
@@ -184,6 +186,12 @@ function authGate(ctx) {
             } else if (HUB_API_KEY && !timingEqual(provided, HUB_API_KEY)) return unauthorized();
         }
         if (bulkTierRefuses(calls, provided, ctx)) return unauthorized();
+        if (calls.some(hasInvalidMethod)) {
+            return res.status(400).json({
+                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                error: { code: -32600, message: 'Invalid Request' }
+            });
+        }
         next();
     };
 }

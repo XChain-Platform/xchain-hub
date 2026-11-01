@@ -39,6 +39,7 @@ function mkPub(network, rewardRows, hits){
     });
     const me = identity.getPubkeyHex().toLowerCase();
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     return pub;
 }
 
@@ -88,6 +89,7 @@ function mkSelector(network, rows, maxBatch, hits){
     pub.maxBatch = maxBatch;
     const me = identity.getPubkeyHex().toLowerCase();
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     return pub;
 }
 

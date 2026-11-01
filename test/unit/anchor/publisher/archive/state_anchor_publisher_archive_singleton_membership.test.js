@@ -22,7 +22,7 @@
 //   path with no quorum check at all; and publishArchive's on-chain-validity gate
 //   short-circuited on `round.validators.length === 1` before quorumVerified ran.
 //
-// The indexer reaches the opposite verdict on the same bytes: anchor.js filters signers
+// The indexer reaches the opposite verdict on the same bytes: quorum.js filters signers
 // by snapshot membership and, with a one-member set, records the v1
 // 'invalid: insufficient valid signatures (0/1)', while full-parse recovery throws on
 // the wrapper. So the hub dequeued settled cross_chain rows behind an anchor that can
@@ -91,6 +91,7 @@ function archiveRound(signingSetFor) {
     let me = identity.getPubkeyHex().toLowerCase();
     let published = [];
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.resolveCapabilitySet          = async () => signingSetFor(me);
     pub.getNextBatchSeq               = async () => 7;
     pub.publishArchive                = async (round) => { published.push(round); };

@@ -23,10 +23,17 @@
 const coins = require('../coins');
 
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
+const ALLOWED_NETWORKS = new Set(coins.NETWORKS);
 
 function validateChain(chain) {
     if (!ALLOWED_CHAINS.has(chain))
         return { error: 'chain must be one of: BTC, LTC, DOGE' };
+    return null;
+}
+
+function validateNetwork(network) {
+    if (!ALLOWED_NETWORKS.has(network))
+        return { error: 'network must be one of: mainnet, testnet, regtest' };
     return null;
 }
 
@@ -71,14 +78,14 @@ function validateLimit(limit) {
 }
 
 // Same digit-only shape validateLimit enforces, for the other external integer
-// fields. Returns the exact integer, or null when the value is not a bare integer:
+// fields. Returns the exact safe integer, or null when the value is not a bare integer:
 // callers still own the sign/range check, since the legal band differs per field.
 function strictInt(value) {
     let n;
     if (typeof value === 'number')                                 n = value;
     else if (typeof value === 'string' && /^[0-9]+$/.test(value))  n = Number(value);
     else                                                           return null;
-    return Number.isInteger(n) ? n : null;
+    return Number.isSafeInteger(n) ? n : null;
 }
 
 // External row cursors and read-window bounds must survive conversion to a
@@ -101,4 +108,4 @@ function validateSince(since) {
     return null;
 }
 
-module.exports = { validateChain, rpcParamError, validateLimit, strictInt, strictSafeInt, validateSince };
+module.exports = { validateChain, validateNetwork, rpcParamError, validateLimit, strictInt, strictSafeInt, validateSince };

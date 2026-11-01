@@ -28,7 +28,52 @@
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+// Bounds on one sweep. flush() holds its _flushing latch across the sweep, so an unbounded
+// serial walk (rows times encoder latency) let one slow encoder hold the latch past a
+// rank-wake tick. Each txid is looked up once (a bundle stamps one row per section), at
+// most MAX_LOOKUPS txids per sweep, and nothing is started or awaited past BUDGET_MS. A
+// rotating cursor lets the next sweep resume where a capped one stopped. Instance fields
+// anchorStampSweepMaxLookups and anchorStampSweepBudgetMs override the defaults.
+const DEFAULT_SWEEP_MAX_LOOKUPS = 32;
+const DEFAULT_SWEEP_BUDGET_MS = 60000;
+const TIMED_OUT = Symbol('anchor-stamp-sweep-timed-out');
+
+function positiveIntOr(value, fallback){
+    return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+// Resolve with the lookup's result, or TIMED_OUT once ms pass; a late reply is dropped.
+function settleWithin(lookup, ms){
+    let timer;
+    const deadline = new Promise(resolve => {
+        timer = setTimeout(() => resolve(TIMED_OUT), ms);
+        if(timer.unref) timer.unref();
+    });
+    return Promise.race([lookup, deadline]).finally(() => clearTimeout(timer));
+}
+
+// Order txids from the cursor onward: just after the last txid looked up, or, when that txid
+// left the set (its stamps were cleared), at the position it held, so no tail is starved.
+function rotateFromCursor(txids, cursor){
+    if(!cursor || txids.length === 0) return txids;
+    const at = txids.indexOf(cursor.txid);
+    const start = at >= 0 ? (at + 1) % txids.length : cursor.index % txids.length;
+    return txids.slice(start).concat(txids.slice(0, start));
+}
+
 module.exports = {
+
+    // flush() re-entered while an earlier flush still holds _flushing (a rank-wake or interval
+    // tick landing inside a long sweep). The tick is only a delayed retry, but it was silent;
+    // count it for getAnchorStats and log how long the latch has been held.
+    noteFlushSkippedInFlight(){
+        this.flushesSkippedInFlight = (this.flushesSkippedInFlight || 0) + 1;
+        const heldMs = this._flushStartedAt ? Date.now() - this._flushStartedAt : null;
+        logger.warn('StateAnchorPublisher: flush skipped, the previous flush is still running' +
+                    (heldMs === null ? '' : ' after ' + heldMs + 'ms') +
+                    ' (' + this.flushesSkippedInFlight + ' skipped so far)');
+        return { anchored: [], archive: 'none', skipped: 'already_flushing' };
+    },
 
     async readAnchorStampSweepTip(){
         try {
@@ -50,57 +95,98 @@ module.exports = {
         const encoder = signer && signer.encoder;
         if(!encoder || typeof encoder.getTxStatus !== 'function') return 0;
 
-        const tip = await this.readAnchorStampSweepTip();
-        if(tip === null || tip < this.anchorStampReorgDepth) return 0;
-
-        let rows;
-        try {
-            rows = await this.db.findOwnAnchorCheckpointStamps(tip - this.anchorStampReorgDepth);
-        } catch(err){
-            logger.warn('StateAnchorPublisher: anchor stamp sweep could not read publisher markers: ' +
-                        (err && err.message));
-            return 0;
-        }
+        const rows = await this.readAnchorStampSweepRows();
+        if(!rows) return 0;
 
         // A bundle's reward round is the highest snapshot block among the sections its txid stamps.
         const bundleBlocks = new Map();
-        for(const row of rows || []){
+        const rowsByTxid = new Map();
+        for(const row of rows){
+            const txid = String(row.txid);
+            if(!rowsByTxid.has(txid)) rowsByTxid.set(txid, []);
+            rowsByTxid.get(txid).push(row);
             const block = Number(row.snapshot_block);
             if(row.snapshot_block === null || row.snapshot_block === undefined || !Number.isSafeInteger(block)) continue;
-            const txid = String(row.txid);
             if(!bundleBlocks.has(txid) || block > bundleBlocks.get(txid)) bundleBlocks.set(txid, block);
         }
-        const clearedTxids = new Set();
 
+        const vanished = await this.lookupAnchorStampTxids(encoder, Array.from(rowsByTxid.keys()));
         let cleared = 0;
-        for(const row of rows || []){
-            let location;
-            try {
-                location = await encoder.getTxStatus(String(row.txid));
-            } catch(err){
-                logger.warn('StateAnchorPublisher: anchor stamp sweep could not locate transaction ' +
-                            row.txid + ': ' + (err && err.message));
-                continue;
-            }
-            if(!location || location.status !== 'unknown') continue;
-
-            try {
-                const result = await this.db.updateStateCheckpointClearStamp(
-                    String(row.txid), String(row.chain), String(row.network),
-                    Number(row.block_index), Number(row.checkpoint_seq));
-                if(result && Number(result.affectedRows) > 0){
-                    cleared++;
-                    clearedTxids.add(String(row.txid));
-                }
-            } catch(err){
-                logger.warn('StateAnchorPublisher: anchor stamp sweep could not clear transaction ' +
-                            row.txid + ': ' + (err && err.message));
-            }
+        const clearedTxids = [];
+        for(const txid of vanished){
+            const n = await this.clearAnchorStampRows(txid, rowsByTxid.get(txid));
+            cleared += n;
+            if(n > 0) clearedTxids.push(txid);
         }
-
         // Retract the hub-local reward each swept bundle wrote at broadcast, since it never mined.
         for(const txid of clearedTxids){
             if(bundleBlocks.has(txid)) await this.retractSweptBundleReward(txid, bundleBlocks.get(txid));
+        }
+        return cleared;
+    },
+
+    // This hub's stamps buried past the reorg horizon, or null when the tip or markers are unreadable.
+    async readAnchorStampSweepRows(){
+        const tip = await this.readAnchorStampSweepTip();
+        if(tip === null || tip < this.anchorStampReorgDepth) return null;
+        try {
+            return (await this.db.findOwnAnchorCheckpointStamps(tip - this.anchorStampReorgDepth)) || [];
+        } catch(err){
+            logger.warn('StateAnchorPublisher: anchor stamp sweep could not read publisher markers: ' +
+                        (err && err.message));
+            return null;
+        }
+    },
+
+    // Look each txid up once, from the rotating cursor, within the lookup cap and the time
+    // budget. Returns the txids the encoder reports unknown to both mempool and chain. A failed
+    // lookup fails closed (the stamp stays); a lookup still pending at the budget ends the sweep.
+    async lookupAnchorStampTxids(encoder, txids){
+        const maxLookups = positiveIntOr(this.anchorStampSweepMaxLookups, DEFAULT_SWEEP_MAX_LOOKUPS);
+        const budgetMs = positiveIntOr(this.anchorStampSweepBudgetMs, DEFAULT_SWEEP_BUDGET_MS);
+        const startedAt = Date.now();
+        const vanished = [];
+        let looked = 0;
+        for(const txid of rotateFromCursor(txids, this._anchorStampSweepCursor)){
+            if(looked >= maxLookups) return vanished;
+            const remaining = budgetMs - (Date.now() - startedAt);
+            if(remaining <= 0) break;
+            looked++;
+            this._anchorStampSweepCursor = { txid, index: txids.indexOf(txid) };
+            let location;
+            try {
+                location = await settleWithin(Promise.resolve().then(() => encoder.getTxStatus(txid)), remaining);
+            } catch(err){
+                logger.warn('StateAnchorPublisher: anchor stamp sweep could not locate transaction ' +
+                            txid + ': ' + (err && err.message));
+                continue;
+            }
+            if(location === TIMED_OUT){
+                logger.warn('StateAnchorPublisher: anchor stamp sweep could not locate transaction ' +
+                            txid + ': no reply within the ' + budgetMs + 'ms sweep budget');
+                break;
+            }
+            if(location && location.status === 'unknown') vanished.push(txid);
+        }
+        if(looked < txids.length)
+            logger.warn('StateAnchorPublisher: anchor stamp sweep stopped at its ' + budgetMs + 'ms budget after ' +
+                        looked + ' of ' + txids.length + ' transaction(s); the next sweep resumes after the last one');
+        return vanished;
+    },
+
+    // Clear every section stamp a vanished txid holds. Returns how many stamps were cleared.
+    async clearAnchorStampRows(txid, rows){
+        let cleared = 0;
+        for(const row of rows){
+            try {
+                const result = await this.db.updateStateCheckpointClearStamp(
+                    txid, String(row.chain), String(row.network),
+                    Number(row.block_index), Number(row.checkpoint_seq));
+                if(result && Number(result.affectedRows) > 0) cleared++;
+            } catch(err){
+                logger.warn('StateAnchorPublisher: anchor stamp sweep could not clear transaction ' +
+                            txid + ': ' + (err && err.message));
+            }
         }
         return cleared;
     },

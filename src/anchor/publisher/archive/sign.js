@@ -21,24 +21,38 @@
 
 'use strict';
 
-const canonicalForms = require('../canonical_forms.js');
 const zlib = require('zlib');
 const ValidatorIdentity = require('../../../validators/identity.js');
 const StateCheckpointEngine = require('../../checkpoint_engine.js');
+const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { XANC_SIGN } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
+const SIGN_REQ_REFUSAL_LOG_MS = 60000;
+
 module.exports = {
+
+    // Every follower check of an archive round reads its set here; network is
+    // the record's quorum network on which that set is judged.
+    async archiveFollowerPubkeys(blockIndex, network, capability = 'oracle_publish'){
+        const legacyOverride = Object.prototype.hasOwnProperty.call(this, 'getActiveOraclePublishPubkeys') &&
+            !Object.prototype.hasOwnProperty.call(this, 'getArchivePublishPubkeys');
+        if(capability === 'archive_publish' && !legacyOverride)
+            return this.getArchivePublishPubkeys(blockIndex, network);
+        return this.getActiveOraclePublishPubkeys(blockIndex);
+    },
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
     async handleSignReq(envelope){
         let d = envelope.data;
-        if(!this.identity || !d || !d.checkpoint) return;
+        if(!this.identity) return this.noteArchiveSignReqRefusal('signer_unavailable', d);
+        if(!d) return this.noteArchiveSignReqRefusal('request_data_missing', d);
+        if(!d.checkpoint) return this.noteArchiveSignReqRefusal('checkpoint_missing', d);
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let sender   = String(d.sig_pubkey || '').toLowerCase();
-        if(sender === myPubkey) return;
+        if(sender === myPubkey) return this.noteArchiveSignReqRefusal('self_request', d, sender);
 
         let cp = d.checkpoint;
         // The publisher is elected by the CURRENT BTC block (not the checkpoint's
@@ -46,41 +60,69 @@ module.exports = {
         // we verify the SENDER's rank against it, bounded to our own view of the
         // BTC tip (anti-spam; the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
-        if(!Number.isFinite(electionBlock)) return;
+        if(!Number.isFinite(electionBlock)) return this.noteArchiveSignReqRefusal('election_block_invalid', d, sender);
         let myBtc = this.hub.resolveBtcLatestBlock ? await this.hub.resolveBtcLatestBlock() : null;
-        if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
-        let electionPubkeys = await this.getActiveOraclePublishPubkeys(electionBlock);
-        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock)) return;
+        if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks)
+            return this.noteArchiveSignReqRefusal('election_block_out_of_tolerance', d, sender,
+                'election_block=' + electionBlock + ' local_tip=' + myBtc);
+        let cpNet = resolveQuorumNetwork(cp, this.network);
+        let electionPubkeys = await this.archiveFollowerPubkeys(electionBlock, cpNet, 'archive_publish');
+        if(!electionPubkeys.includes(sender)) return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let canonical = this.verifiedArchiveCanonical(d, cp, sender);
-        if(canonical === null) return;
+        if(canonical === null) return this.noteArchiveSignReqRefusal('sender_signature_invalid', d, sender);
+        // Decode only after authenticating an election-set member. A valid body supplies
+        // the content anchor; a missing body retains the wrapper-only admission path long
+        // enough to bind the authenticated leader before the co-sign checks reject it.
+        let archive = this.decodeArchiveProposal(d);
+        if(!this.archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock, archive))
+            return this.noteArchiveSignReqRefusal('sender_not_elected_or_unlocked', d, sender);
         let myNextSeq = await this.getNextBatchSeq();
-        if(this.refusedStaleArchiveSeq(d, sender, myNextSeq)) return;
+        if(this.refusedStaleArchiveSeq(d, sender, myNextSeq))
+            return this.noteArchiveSignReqRefusal('batch_seq_stale', d, sender,
+                'local_next_seq=' + myNextSeq);
         this.bindObservedArchiveLeader(d, sender, cp, electionPubkeys);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
-        // signer holds oracle_publish AT snapshot_block, so a follower present only
-        // in the current election set would contribute a signature that is dropped
-        // on-chain and could drag an otherwise-valid archive below quorum.
-        let signingPubkeys = await this.getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
-        if(!signingPubkeys.includes(myPubkey)) return;
+        // signer holds the gated archive capability AT snapshot_block, so a follower
+        // present only in the current election set would contribute a signature that
+        // is dropped on-chain and could drag an otherwise-valid archive below quorum.
+        let signingPubkeys = await this.archiveFollowerPubkeys(Number(cp.snapshot_block), cpNet, 'archive_publish');
+        if(!signingPubkeys.includes(myPubkey)) return this.noteArchiveSignReqRefusal('signer_not_in_snapshot_set', d, sender);
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
         let local = await this.db.getStateCheckpointByChainAndNetwork(cp.chain, cp.network, Number(cp.block_index));
         let mine = this.ownArchiveWrapper(local, cp);
-        if(!mine) return;
+        if(!mine) return this.noteArchiveSignReqRefusal('local_checkpoint_mismatch', d, sender);
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
-        let archive = this.decodeArchiveProposal(d);
-        if(!archive) return;
+        if(!archive) return this.noteArchiveSignReqRefusal('archive_invalid', d, sender);
         // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
-        // decides which oracle_publish group the completeness check requires, and `mine`
+        // decides which archive signing group the completeness check requires, and `mine`
         // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
-            logger.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
-            return;
+            return this.noteArchiveSignReqRefusal('archive_diverges_from_local', d, sender);
         }
         this.coSignArchive(d, sender, archive, canonical, myPubkey);
+    },
+
+    // Every follower refusal is readable without letting a repeated bad request flood
+    // the log. The reason set is fixed by handleSignReq, so this per-reason map stays
+    // bounded while preserving one independently throttled diagnostic for each guard.
+    noteArchiveSignReqRefusal(reason, d, sender, detail){
+        let loggedAt = this.archiveSignReqRefusalLoggedAt;
+        if(!(loggedAt instanceof Map)) loggedAt = this.archiveSignReqRefusalLoggedAt = new Map();
+        const now = Date.now();
+        const last = loggedAt.get(reason);
+        if(last !== undefined && now - last < SIGN_REQ_REFUSAL_LOG_MS) return;
+        loggedAt.set(reason, now);
+
+        const batchSeq = d && d.batch_seq !== undefined && d.batch_seq !== null
+            ? String(d.batch_seq).slice(0, 32) : 'unknown';
+        let claimedSender = sender || (d && d.sig_pubkey);
+        claimedSender = claimedSender ? String(claimedSender).toLowerCase().slice(0, 128) : 'unknown';
+        logger.warn('StateAnchorPublisher: declining archive SIGN_REQ reason=' + reason +
+            ' batch_seq=' + batchSeq + ' sender=' + claimedSender + (detail ? ' ' + detail : ''));
     },
 
     // Fail CLOSED on an unresolved election set, the same way the LEADER does
@@ -98,20 +140,20 @@ module.exports = {
     // empties the signing set too and this hub was not going to co-sign either way.
     // The residual case (electionBlock unresolvable while snapshot_block is cached)
     // costs one co-signature on one round, which the round timeout re-runs.
-    archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock){
+    archiveSenderUnlocked(electionPubkeys, cp, sender, electionBlock, archive){
         if(electionPubkeys.length === 0) return false;
         {
-            // Same wrapper-anchored key + failover ladder the leader used. Keyed on the
-            // WIRE checkpoint only: the wire batch_seq no longer reaches the key, so a
-            // verifier whose own batch numbering has drifted from the proposer's still
-            // derives the identical rank order.
+            // Same content-anchored key + failover ladder the leader used. The archive
+            // CRC in the verified canonical binds the block from which this is derived.
+            // The wire batch_seq does not reach the key, so a verifier whose own batch
+            // numbering drifted still derives the identical order.
             // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
             // Runs for a single-member set too, so the
             // sole elected leader cannot be impersonated by a non-member.
-            let order = canonicalForms.hashOrder(this.archiveElectionKey(cp), electionPubkeys);
-            let since = electionBlock - Number(cp.snapshot_block);
-            if(!this.rankUnlocked(order, sender, since)) return false;      // not unlocked on the failover ladder
+            const decision = this.archiveElectionDecision(
+                cp, archive, electionPubkeys, sender, electionBlock);
+            if(!decision.unlocked) return false;                            // not unlocked on the failover ladder
         }
         return true;
     },
@@ -154,10 +196,6 @@ module.exports = {
     refusedStaleArchiveSeq(d, sender, myNextSeq){
         if(Number(d.batch_seq) < myNextSeq){
             let consumed = myNextSeq - 1;
-            logger.warn('StateAnchorPublisher: refusing to co-sign archive batch ' + Number(d.batch_seq) +
-                         ' from ' + sender.substring(0, 12) + '...: this hub already holds batch seq ' +
-                         consumed + ' as consumed (our next seq is ' + myNextSeq + '), so the proposer is ' +
-                         'behind on the archive back-fill; answering with a stale-seq refusal');
             this.broadcastSeqRefusal(Number(d.batch_seq), consumed);
             return true;
         }
@@ -196,7 +234,7 @@ module.exports = {
         let json;
         // Bounded decompress: the archive is attacker-supplied bytes decompressed
         // BEFORE any CRC/quorum check, so an unbounded gunzip is a gzip-bomb DoS.
-        // Mirror the committed indexer cap (anchor.js / recovery.js, 16 MiB).
+        // Mirror the committed indexer cap (actions/anchor/index.js archiveCrc / recovery.js, 16 MiB).
         try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url'), { maxOutputLength: 16 * 1024 * 1024 }).toString('utf8'); }
         catch(e){ return null; }
         if(this.crc32Hex(json) !== String(d.batch_crc32)) return null;
@@ -241,20 +279,13 @@ module.exports = {
         let round = this._archiveRound;
         if(!round || round.done || Number(d.batch_seq) !== round.batchSeq) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
-        // Stale-seq convergence, the proposing half. A follower that already holds this
-        // round's seq as consumed answers with a stale-seq refusal instead of a
-        // signature. Learn the floor from it and ABANDON the round: rebuilding the same
-        // batch under the same stale seq every flush is what left the federation stuck
-        // (hub0 batch 38 / hub1 batch 39, neither publishing). Rows stay pending and the
-        // next flush draws above the floor.
-        //
-        // Authenticated against the oracle_publish set at THIS round's own election
-        // block (the same population that elected the round) plus a signature over the
-        // refusal canonical, and only a refusal naming a seq at or above ours can move
-        // anything, so a member cannot walk our numbering backwards or forwards at will.
+        // Accept only signed refusals from archive publishers elected for this round.
+        // A refusal can advance the consumed sequence floor, never lower it.
         if(d.consumed_seq !== undefined && d.consumed_seq !== null){
             if(Number(d.consumed_seq) < round.batchSeq) return;
-            let electionPubkeys = await this.getActiveOraclePublishPubkeys(round.electionBlock);
+            let electionPubkeys = await this.archiveFollowerPubkeys(
+                round.electionBlock, resolveQuorumNetwork(round.cp, this.network),
+                'archive_publish');
             if(!electionPubkeys.includes(pubkey)) return;
             if(!ValidatorIdentity.verify(this.seqRefusalCanonical(round.batchSeq, Number(d.consumed_seq)),
                                          String(d.refusal_sig || ''), pubkey)) return;
@@ -279,7 +310,7 @@ module.exports = {
         if(!round || round.done) return;
         // STAKE_WEIGHTED_QUORUM: fire on distinct-source signer stake > 2/3 of the
         // snapshot when weighted, else legacy signature count. Matches the indexer
-        // anchor.js / recovery verdict so the publisher never dequeues a batch the
+        // quorum.js / recovery verdict so the publisher never dequeues a batch the
         // chain then rejects (or stalls a stake-met-but-count-short batch).
         let met = round.weighted
             ? swq.meetsStakeThreshold(round.validators, round.signatures.keys())

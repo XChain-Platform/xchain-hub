@@ -90,10 +90,16 @@ module.exports = {
 
         let windowMs = Math.max(this.publishedRequestsRetentionMs, this.publishedRetentionFloorMs());
 
-        // Invariant 2. Best-effort read; an unreadable queue returns [] and the window
-        // applies on its own (an unreadable queue file is already loud elsewhere).
+        // Invariant 2. Strict read: an unreadable queue skips the prune, since the
+        // exclusion list cannot name what it must keep (a missing file is empty).
+        let state = this.readQueueState();
+        if (state === null){
+            logger.warn('AttestationPublisher: skipping the published-requests retention sweep; the durable queue at ' +
+                this.queuePath + ' could not be read, so queued requests cannot be excluded');
+            return 0;
+        }
         let queued = [];
-        for (let entry of this.readQueue()){
+        for (let entry of state.entries){
             let rid = String(entry && entry.requestId || '').toLowerCase();
             if (rid) queued.push(rid);
         }

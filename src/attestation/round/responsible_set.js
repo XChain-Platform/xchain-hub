@@ -80,6 +80,8 @@ module.exports = {
         // indexer's ATTEST_ADMISSION flag-day, is rejected at admission and
         // never polled at all).
         if(responsible.length < Math.max(1, redundancy)){
+            const refused = this.consensus && this.consensus.roundAdmissionRefusedCount;
+            if(refused && typeof refused.unfinalizable === 'number') refused.unfinalizable++;
             logger.warn('AttestationRound: skipping unfinalizable ' + rid.substring(0,16) +
                 '... (responsible=' + responsible.length + ' < redundancy=' + Math.max(1, redundancy) +
                 ' at block ' + snapshotBlk +

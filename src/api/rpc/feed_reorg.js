@@ -74,7 +74,9 @@ function priceCallReorgRpc(ctx) {
         // is not wiped (item 5296). Absent => open-ended, the original behavior for live retractions.
         // retraction_generation (optional, item 5308) fences the delete to rows with
         // push_generation <= it; an older indexer omits it and the hub falls back to no-fence.
-        async pushpricereorg({source_chain, from_action_index, to_action_index, retraction_generation}){
+        // batches (optional) names the round window of each PRICE batch rolled back, so the
+        // landing clock is cleared on every round of it (see retractFromActionIndex).
+        async pushpricereorg({source_chain, from_action_index, to_action_index, retraction_generation, batches}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -82,7 +84,7 @@ function priceCallReorgRpc(ctx) {
                 return {error: "from_action_index is required"};
             if(!hub.priceAggregator) return {error: "price aggregator not ready"};
             try {
-                return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index, to_action_index, retraction_generation);
+                return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index, to_action_index, retraction_generation, batches);
             } catch (err) {
                 return {error: err.message || "error retracting prices"};
             }

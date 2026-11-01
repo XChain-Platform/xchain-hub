@@ -48,9 +48,39 @@ function registerAfterEachHook() {
     });
 }
 
-function registerPoolTimeoutErrorsCountTowardCircuitTest() {
+// The driver's queued-acquire timeout: every pooled connection is busy and the
+// request waited out acquireTimeout. The database is up, so this is saturation.
+function poolSaturationError() {
+    const e = new Error('(conn:-1, no: 45028, SQLState: HY000) pool timeout: failed to retrieve a connection ' +
+        'from pool after 10000ms\n    (pool connections: active=10 idle=0 limit=10)');
+    e.code  = 'ER_GET_CONNECTION_TIMEOUT';
+    e.errno = 45028;
+    return e;
+}
 
-    it('pool timeout errors count toward circuit breaker', async function () {
+function registerPoolTimeoutErrorsDoNotCountTowardCircuitTest() {
+
+    it('pool acquire timeouts do not count toward circuit breaker', async function () {
+        poolStub.getConnection = sinon.stub().callsFake(() => Promise.reject(poolSaturationError()));
+        let err;
+        try {
+            await db.getConnection();
+        } catch (e) {
+            err = e;
+        }
+
+        // The caller still gives up at its own attempt bound, but the breaker
+        // stays closed so every other DB caller keeps being served.
+        expect(err).to.exist;
+        expect(err.message).to.include('Could not connect to MariaDB after 30 attempts');
+        expectCircuitState(db, 'closed');
+        expect(db.circuitFailures).to.equal(0);
+    });
+}
+
+function registerUnreachableDbErrorsCountTowardCircuitTest() {
+
+    it('connect failures count toward circuit breaker', async function () {
         let err;
         try {
             await db.getConnection();
@@ -84,6 +114,12 @@ function registerPoolRecoversAfterBriefExhaustionTest() {
 function registerPoolExhaustionFollowedByCompleteFailureTest() {
 
     it('pool exhaustion followed by complete failure opens circuit', async function () {
+        // Saturation first (not counted), then the database goes away: only the
+        // connect failures count, and ten of them open the breaker.
+        poolStub.getConnection = sinon.stub().rejects(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+        for (let i = 0; i < 5; i++)
+            poolStub.getConnection.onCall(i).rejects(poolSaturationError());
+
         let err;
         try {
             await db.doQuery('SELECT 1');
@@ -92,7 +128,9 @@ function registerPoolExhaustionFollowedByCompleteFailureTest() {
         }
 
         expect(err).to.exist;
+        expect(err.message).to.include('Circuit breaker opened after 10 consecutive failures');
         expectCircuitState(db, 'open');
+        expect(poolStub.getConnection.callCount).to.equal(15);
     });
 }
 
@@ -137,7 +175,8 @@ describe('Chaos: DB Pool Exhaustion (DB-3)', function () {
     this.timeout(30000);
     registerBeforeEachHook();
     registerAfterEachHook();
-    registerPoolTimeoutErrorsCountTowardCircuitTest();
+    registerPoolTimeoutErrorsDoNotCountTowardCircuitTest();
+    registerUnreachableDbErrorsCountTowardCircuitTest();
     registerPoolRecoversAfterBriefExhaustionTest();
     registerPoolExhaustionFollowedByCompleteFailureTest();
     registerReleasedConnectionsRestorePoolAvailabilityTest();

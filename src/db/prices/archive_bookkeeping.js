@@ -14,8 +14,8 @@
  *
  * XChain Hub - ANCHOR archive bookkeeping queries for the price tables.
  *
- * Owns src/sql/archive_price_tombstones.sql and the batch_seq, archived_status,
- * archived_batch_block_time and archived_proof_sha columns of src/sql/price_snapshots.sql.
+ * Owns src/sql/archive_price_tombstones.sql and the archive bookkeeping columns
+ * on price_snapshots, including archive_pending from the dated migration.
  * src/db/index.js installs every method below on Database.prototype, so callers keep
  * writing db.<method>().
  *
@@ -26,9 +26,11 @@
  *
  ********************************************************************/
 
-const PENDING_PRICE_PREDICATE =
+const PENDING_PRICE_READ_PREDICATE = 'archive_pending = 1';
+const PENDING_PRICE_STAMP_PREDICATE =
     '(batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time ' +
     'OR archived_proof_sha <> SHA2(consensus_proof, 256))';
+const PENDING_PRICE_INDEX = 'idx_archive_pending_round';
 
 const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'status <> \'skipped\' AND consensus_proof NOT LIKE \'["%\'';
 
@@ -41,8 +43,19 @@ module.exports = {
     // The lowest pending round numbers, a round pending when any one of its pairs is.
     async findPriceSnapshotRoundsByBatchSeq(limit) {
         return this.doQuery(
-            'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + PENDING_PRICE_PREDICATE +
+            'SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (' + PENDING_PRICE_INDEX + ') WHERE ' +
+            PENDING_PRICE_READ_PREDICATE +
             ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' ORDER BY round_number ASC LIMIT ?', [limit]);
+    },
+
+    // The same page from `minRound` up, so pending rounds the archive leader omits below
+    // the federation's common floor do not hold the page's head forever.
+    async findPriceSnapshotRoundsByBatchSeqFromRound(minRound, limit) {
+        return this.doQuery(
+            'SELECT DISTINCT round_number FROM price_snapshots FORCE INDEX (' + PENDING_PRICE_INDEX + ') WHERE ' +
+            PENDING_PRICE_READ_PREDICATE +
+            ' AND ' + ARCHIVABLE_PRICE_PROOF_PREDICATE + ' AND round_number >= ? ORDER BY round_number ASC LIMIT ?',
+            [minRound, limit]);
     },
 
     // Every row of the given rounds, pending or not, so a round is archived whole.
@@ -61,19 +74,23 @@ module.exports = {
         return this.doQuery(
             'UPDATE price_snapshots SET batch_seq = ?, archived_status = ?, archived_batch_block_time = ?, archived_proof_sha = ? ' +
             'WHERE round_number = ? AND coin_pair = ? AND status = ? AND batch_block_time = ? ' +
-            'AND SHA2(consensus_proof, 256) = ? AND ' + PENDING_PRICE_PREDICATE,
+            'AND SHA2(consensus_proof, 256) = ? AND ' + PENDING_PRICE_STAMP_PREDICATE,
             [batchSeq, status, batchBlockTime, proofSha, roundNumber, coinPair, status, batchBlockTime, proofSha]);
     },
 
-    // Records the (round, pair) keys a retraction is about to delete, restricted to rows
-    // an archive already carried: only those need a tombstone. Same WHERE tail as
-    // deletePriceSnapshotsForRetraction, and called immediately before it.
-    async insertPriceTombstonesForRetraction(sourceChain, from, to, gen, bounded, fenced) {
+    // Records the (round, pair) keys a retraction is about to delete. It uses the exact
+    // range, generation and keep-round tail from deletePriceSnapshotsForRetraction, then
+    // narrows it to rows an archive already carried because only those need a tombstone.
+    async insertPriceTombstonesForRetraction(sourceChain, from, to, gen, bounded, fenced, keepRounds) {
         let col = 'source_action_index';
         let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
         let args = [sourceChain, from];
         if (bounded) args.push(to);
         if (fenced) args.push(gen);
+        if (Array.isArray(keepRounds) && keepRounds.length > 0) {
+            where += ' AND round_number NOT IN (' + keepRounds.map(() => '?').join(',') + ')';
+            args.push(...keepRounds);
+        }
         return this.doQuery(
             'INSERT INTO archive_price_tombstones (round_number, coin_pair) ' +
             'SELECT round_number, coin_pair FROM price_snapshots WHERE ' + where + ' AND batch_seq IS NOT NULL ' +

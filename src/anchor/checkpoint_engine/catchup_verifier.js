@@ -8,6 +8,7 @@ const swq = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const canonicalForms = require('./canonical_forms.js');
 const checkpointMethods = require('./sign.js');
+const { refusal, validatorLookupFailure } = require('../../peers/hub_db/catchup_verdicts.js');
 
 function parseSignatures(value){
     if(Array.isArray(value)) return value;
@@ -65,27 +66,46 @@ async function resolveValidators(context, engine, snapshotBlock){
 }
 
 async function verifyStateCheckpointCatchupRow(row, context){
-    if(!row) return false;
+    if(!row) return refusal('malformed state checkpoint row');
     try {
         const engine = checkpointEngine(context);
+        const deploymentNetwork = context && context.network != null ? String(context.network) : '';
         const normalize = engine && typeof engine.normalizeCheckpoint === 'function'
             ? engine.normalizeCheckpoint : checkpointMethods.normalizeCheckpoint;
-        const checkpoint = normalize.call(engine || {}, row);
+        const normalized = normalize.call(engine || {}, row);
         const signatures = parseSignatures(row.validator_signatures);
-        if(!checkpoint || !signatures) return false;
+        if(!normalized) return refusal('malformed state checkpoint row');
+        if(!signatures) return refusal('malformed state checkpoint signatures');
+        const checkpoint = Object.assign({}, normalized, {
+            supersedes_from: row.supersedes_from == null ? null : Number(row.supersedes_from),
+            rules_digest: row.rules_digest == null ? null : String(row.rules_digest).toLowerCase()
+        });
         if(engine && typeof engine.assertCheckpointNetwork === 'function')
             engine.assertCheckpointNetwork(checkpoint, 'catch-up');
-        if(Number(checkpoint.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(checkpoint.snapshot_block)) return false;
-        if(canonicalForms.isRootless(checkpoint)) return false;
-        const validators = await resolveValidators(context, engine, checkpoint.snapshot_block);
-        if(!Array.isArray(validators) || validators.length === 0) return false;
+        else if(deploymentNetwork && checkpoint.network !== deploymentNetwork)
+            return refusal('checkpoint network does not match deployment network');
+        if(Number(checkpoint.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(checkpoint.snapshot_block))
+            return refusal('checkpoint sequence does not match snapshot block');
+        if(canonicalForms.isRootless(checkpoint))
+            return refusal('checkpoint has no required light-client roots');
+        let validators;
+        try {
+            validators = await resolveValidators(context, engine, checkpoint.snapshot_block);
+        } catch(error){
+            return validatorLookupFailure(checkpoint.snapshot_block, error);
+        }
+        if(!Array.isArray(validators) || validators.length === 0)
+            return refusal('no local validator set for snapshot_block ' + Number(checkpoint.snapshot_block));
+        if(validators.truncated === true)
+            return refusal('local validator set is truncated');
         const signers = validSigners(signatures, validators, canonicalForms.canonicalCheckpoint(checkpoint));
-        const quorumNetwork = engine ? engine.network : checkpoint.network;
-        if(swq.isStakeWeightedQuorumActive(checkpoint.snapshot_block, quorumNetwork))
-            return swq.meetsStakeThreshold(validators, signers);
-        return signers.size >= bftQuorumOrSingle(validators.length, 1);
-    } catch(_e){
-        return false;
+        const quorumNetwork = engine ? engine.network : (deploymentNetwork || checkpoint.network);
+        const quorumMet = swq.isStakeWeightedQuorumActive(checkpoint.snapshot_block, quorumNetwork)
+            ? swq.meetsStakeThreshold(validators, signers)
+            : signers.size >= bftQuorumOrSingle(validators.length, 1);
+        return quorumMet ? true : refusal('checkpoint signatures do not meet quorum');
+    } catch(error){
+        return refusal(error && error.message ? error.message : String(error));
     }
 }
 

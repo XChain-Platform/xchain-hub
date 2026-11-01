@@ -21,6 +21,7 @@
 
 'use strict';
 
+const { leaderReplayHoldReason } = require('./replay_gate.js');
 const { noteCheckpointStalled } = require('../../consensus/diagnostics');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -110,9 +111,10 @@ module.exports = {
                     ' (' + this._roundFailuresByChain[chain] + ' failed round(s) for this chain so far)');
     },
 
-    // A round for this chain returned, so its last failure no longer describes it.
+    // A round for this chain returned undeclined, so its last failure and decline no longer describe it.
     clearRoundFailure(chain){
         if(this._lastRoundFailureByChain) delete this._lastRoundFailureByChain[chain];
+        if(this._lastLeaderDeclineByChain) delete this._lastLeaderDeclineByChain[chain];
     },
 
     // Seed the cadence latch from persisted checkpoints so a hub restart does
@@ -154,6 +156,7 @@ module.exports = {
         this._ticking = true;
         try {
             await this.retryFailedSelfAccepts();
+            if(await this.leaderReplayHeld()) return;
             let btcBlock = await this.resolveSnapshotBlock();
             if(btcBlock == null){ this.noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
             if(this.finalizedLatchHolds(btcBlock)){
@@ -172,23 +175,29 @@ module.exports = {
             if(this.signedRoundConflict(btcBlock) != null) return;
             // A new interval supersedes any timed-out round still waiting for a retry.
             if(this._roundRetries) this._roundRetries.clear();
-
-            let validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock);
+            let validators;
+            try { validators = await this.resolveCapabilityValidators('oracle_publish', btcBlock); }
+            catch(e){ this.noteCadenceStall(btcBlock, 'capability validator resolve failed: ' + (e && e.message)); return; }
             if(!this.leadsCadenceSlot(btcBlock, validators)) return;
             await this.leadCadenceRound(btcBlock, validators);
         } finally {
             this._ticking = false;
         }
     },
-
+    // Hold the cadence on an open replay, or when no chain's replay state can be read.
+    async leaderReplayHeld(btcBlock){
+        const reason = await leaderReplayHoldReason(this);
+        if(reason) this.noteCadenceStall(btcBlock, reason);
+        return reason != null;
+    },
     // True while `btcBlock` is inside the interval after the last FINALIZED checkpoint.
     finalizedLatchHolds(btcBlock){
         let last = this._lastCheckpointBtcBlock;
         return last != null && btcBlock < Number(last) + this.intervalBlocks;
     },
-
     // We are the cadence leader (or a single-node set): one round per chain.
     async leadCadenceRound(btcBlock, validators){
+        if(await this.leaderReplayHeld(btcBlock)) return;
         // Mirror the capability snapshot BEFORE the attempt is recorded. This call sits
         // outside the per-chain guard below, so a throw here aborts every chain's round;
         // recorded first, the whole interval was dropped and getcheckpointstats still
@@ -204,7 +213,7 @@ module.exports = {
         this._attemptedCheckpointBtcBlock = btcBlock;
         for(let chain of this.chains){
             if(!this.indexers[chain].url) continue;
-            try { await this.runRound(chain, btcBlock, validators); this.clearRoundFailure(chain); }
+            try { if(!await this.runRound(chain, btcBlock, validators)) this.clearRoundFailure(chain); }
             catch(e){
                 // An indexer blip before the proposal: retryable here on a frozen tip, and
                 // the next block's leader retries the interval since no latch moved. Each
@@ -214,7 +223,6 @@ module.exports = {
             }
         }
     },
-
     // The interval rule every signature this hub gives obeys, as leader or co-signer. A
     // round at `snap` may not start inside the interval after the last FINALIZED
     // checkpoint (a snapshot EQUAL to it is the same round, one SIGN_REQ per chain, and
@@ -314,6 +322,7 @@ module.exports = {
     // retry that times out again re-queues itself up to the round's retry cap.
     async retryTimedOutRounds(){
         if(!this._roundRetries || this._roundRetries.size === 0) return;
+        if(await this.leaderReplayHeld()) return;
         let retries = [...this._roundRetries];
         this._roundRetries.clear();
         for(let [chain, retry] of retries){
@@ -321,8 +330,7 @@ module.exports = {
             try {
                 let validators = await this.resolveCapabilityValidators('oracle_publish', retry.snapshotBlock);
                 if(!this.leadsCadenceSlot(retry.snapshotBlock, validators)) continue;
-                await this.runRound(chain, retry.snapshotBlock, validators, retry);
-                this.clearRoundFailure(chain);
+                if(!await this.runRound(chain, retry.snapshotBlock, validators, retry)) this.clearRoundFailure(chain);
             } catch(e){
                 this.noteRoundFailure(chain, retry.snapshotBlock, e);
             }

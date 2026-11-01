@@ -263,7 +263,7 @@ describe('state checkpoint catch-up verifier', function () {
         expect(await verify(row, hub)).to.equal(true);
         expect(hub.calls).to.deep.equal([{ capability: 'oracle_publish', block: 100 }]);
         row.validator_signatures = JSON.stringify(JSON.parse(row.validator_signatures).slice(0, 2));
-        expect(await verify(row, hub)).to.equal(false);
+        expect(await verify(row, hub)).to.deep.include({ ok: false });
     });
 
     it('rejects checkpoint signature replay, duplication, malformed proof, and network drift', async function () {
@@ -274,11 +274,11 @@ describe('state checkpoint catch-up verifier', function () {
         const signatures = JSON.parse(valid.validator_signatures);
 
         const tampered = Object.assign({}, valid, { block_hash: 'other' });
-        expect(await verify(tampered, hub)).to.equal(false);
+        expect(await verify(tampered, hub)).to.deep.include({ ok: false });
         const duplicated = Object.assign({}, valid, { validator_signatures: JSON.stringify([signatures[0], signatures[0]]) });
-        expect(await verify(duplicated, hub)).to.equal(false);
-        expect(await verify(Object.assign({}, valid, { validator_signatures: '{' }), hub)).to.equal(false);
-        expect(await verify(Object.assign({}, valid, { network: 'testnet' }), hub)).to.equal(false);
+        expect(await verify(duplicated, hub)).to.deep.include({ ok: false });
+        expect(await verify(Object.assign({}, valid, { validator_signatures: '{' }), hub)).to.deep.include({ ok: false });
+        expect(await verify(Object.assign({}, valid, { network: 'testnet' }), hub)).to.deep.include({ ok: false });
     });
 
     it('uses the live stake-weighted checkpoint threshold and fails closed on truncation', async function () {
@@ -291,7 +291,7 @@ describe('state checkpoint catch-up verifier', function () {
 
         expect(await verify(row, hub)).to.equal(true);
         validators.truncated = true;
-        expect(await verify(row, hub)).to.equal(false);
+        expect(await verify(row, hub)).to.deep.include({ ok: false });
     });
 
 });
@@ -365,7 +365,7 @@ describe('signed-row verifiers in the catch-up framework', function () {
 
         expect(await verify(row, { table: 'state_checkpoints', peer: 'peer', db })).to.equal(true);
         expect(db.calls).to.deep.equal([{ block: 100, capability: 'oracle_publish' }]);
-        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer' })).to.equal(false);
+        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer' })).to.deep.include({ ok: false });
 
         const weightedDb = capabilityDb(keys.slice(0, 3), ['70', '20', '10']);
         const weighted = signCheckpoint(

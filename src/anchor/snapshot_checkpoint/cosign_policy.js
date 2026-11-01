@@ -40,7 +40,8 @@ function snapshotCosignRefusal(req, view) {
     const cp = req.cp;
     if(view.gateActive === false) return COSIGN_REFUSAL.GATE_INACTIVE;
     if(cp.block_index !== view.expectedBlock) return COSIGN_REFUSAL.WRONG_BLOCK;
-    if(!(Number(view.btcTip) >= cp.block_index + Number(view.confirmations))) {
+    if(!(Number(view.committedHeight) >= cp.block_index + Number(view.confirmations)) ||
+        !(Number(view.chainHeight) >= cp.block_index + Number(view.confirmations))) {
         return COSIGN_REFUSAL.SHALLOW;
     }
     if(payloadDiffers(view.local, cp)) return COSIGN_REFUSAL.LOCAL_MISMATCH;

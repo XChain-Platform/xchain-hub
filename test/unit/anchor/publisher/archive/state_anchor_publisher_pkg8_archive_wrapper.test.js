@@ -153,6 +153,7 @@ function registerSplitSuitePart1() {
       }
     });
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.getNextBatchSeq = async () => 3;
     let captured = null;
     pub.archiveElectionKey = (cp) => {
@@ -188,6 +189,7 @@ function registerSplitSuitePart2() {
       }
     });
     pub.getActiveOraclePublishPubkeys = async () => [me];
+    pub.getArchivePublishPubkeys = block => pub.getActiveOraclePublishPubkeys(block);   // regtest elects on archive_publish, equal to this set with no rolled epoch
     pub.getNextBatchSeq = async () => 3;
     pub.rankUnlocked = () => false;
     await pub.startArchiveRound({}, 100);

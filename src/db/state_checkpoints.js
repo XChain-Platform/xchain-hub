@@ -24,7 +24,9 @@
  *
  ********************************************************************/
 
-// The newest anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
+const { supersededBySeq } = require('../anchor/checkpoint_engine/superseded_rule.js');
+
+// The newest plain, anchor-eligible, not-yet-anchored checkpoint per (chain, network): its
 // checkpoint ORDINAL (seq divided by the cadence step) is divisible by the anchor stride.
 // Moved here from src/anchor/publisher.js:1065.
 //
@@ -32,12 +34,24 @@
 // `anchor_txid IS NULL` predicate sits OUTSIDE the MAX subquery: pushing it in
 // would resurrect older un-anchored seqs that the chained hashes have already
 // superseded. Do not move it.
+//
+// The superseder predicate applies the reader rule (superseded_rule.js, and
+// findUnsupersededStateCheckpointsInReplayWindow): a plain row at or above a later
+// marker's supersedes_from is never anchored. It also sits OUTSIDE the MAX, so a
+// superseded newest row yields nothing for its chain until a newer plain row exists,
+// rather than falling back to an older seq.
 const PENDING_ANCHOR_CHECKPOINTS_SQL =
     'SELECT sc.* FROM state_checkpoints sc JOIN (' +
     '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
-    '  WHERE MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
+    '  WHERE supersedes_from IS NULL AND MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
     ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
-    'WHERE sc.anchor_txid IS NULL';
+    'WHERE sc.anchor_txid IS NULL ' +
+    'AND NOT EXISTS (' +
+    '  SELECT 1 FROM state_checkpoints superseder' +
+    '  WHERE superseder.chain = sc.chain AND superseder.network = sc.network' +
+    '  AND superseder.checkpoint_seq > sc.checkpoint_seq' +
+    '  AND superseder.supersedes_from IS NOT NULL' +
+    '  AND superseder.supersedes_from <= sc.block_index)';
 
 module.exports = {
     // Checkpoints the ANCHOR archive still owes a batch to. The table is append-only (a
@@ -60,14 +74,56 @@ module.exports = {
 
     // Inserts a row into state_checkpoints.
     // Moved here from src/anchor/checkpoint_engine.js:907.
-    async createStateCheckpoint(chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) {
-        return this.doQuery('INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures]);
+    async createStateCheckpoint(chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, supersedesFrom = null, rulesDigest = null) {
+        return this.doQuery('INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, supersedes_from, rules_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, supersedesFrom, rulesDigest]);
     },
 
-    // Reads rows from state_checkpoints.
-    // Moved here from src/api.js:2174.
+    // Reads one id-ordered page of state_checkpoints for the mirror snapshot.
+    // superseded_by_seq is judged against every superseding row in the table (a superseder
+    // can sit on a later page), and a row nothing supersedes carries no such key.
     async findStateCheckpointsById(since, limit) {
-        return this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit]);
+        const rows = (await this.doQuery('SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, supersedes_from, rules_digest, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures, created_at FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?', [since, limit])) || [];
+        if (rows.length === 0) return [];
+        const superseders = (await this.findSupersedingStateCheckpoints()) || [];
+        return rows.map((row) => {
+            const supersededBy = supersededBySeq(row, superseders);
+            return supersededBy == null ? { ...row } : { ...row, superseded_by_seq: supersededBy };
+        });
+    },
+
+    async findStateCheckpointsByRulesDigest(chain, network, rulesDigest) {
+        if (typeof rulesDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(rulesDigest)) {
+            throw new TypeError('rulesDigest must be a 64-character hexadecimal string');
+        }
+        return this.doQuery(
+            'SELECT checkpoint_seq, block_index, supersedes_from, rules_digest FROM state_checkpoints WHERE chain = ? AND network = ? AND rules_digest = ? ORDER BY checkpoint_seq ASC',
+            [chain, network, rulesDigest.toLowerCase()]);
+    },
+
+    async findUnsupersededStateCheckpointsInReplayWindow(chain, network, target, replayTo) {
+        target = Number(target);
+        replayTo = Number(replayTo);
+        if (!Number.isSafeInteger(target) || target < 0 ||
+            !Number.isSafeInteger(replayTo) || replayTo < target) {
+            throw new TypeError('replay window must contain non-negative safe integers');
+        }
+        return this.doQuery(
+            'SELECT sc.checkpoint_seq, sc.block_index, sc.supersedes_from, sc.rules_digest, (' +
+            '  SELECT epoch.rules_digest FROM state_checkpoints epoch' +
+            '  WHERE epoch.chain = sc.chain AND epoch.network = sc.network' +
+            '  AND epoch.checkpoint_seq <= sc.checkpoint_seq AND epoch.rules_digest IS NOT NULL' +
+            '  AND epoch.supersedes_from <= sc.block_index' +
+            '  ORDER BY epoch.checkpoint_seq DESC LIMIT 1' +
+            ') AS effective_rules_digest FROM state_checkpoints sc ' +
+            'WHERE sc.chain = ? AND sc.network = ? AND sc.block_index BETWEEN ? AND ? ' +
+            'AND NOT EXISTS (' +
+            '  SELECT 1 FROM state_checkpoints superseder' +
+            '  WHERE superseder.chain = sc.chain AND superseder.network = sc.network' +
+            '  AND superseder.checkpoint_seq > sc.checkpoint_seq' +
+            '  AND superseder.supersedes_from IS NOT NULL' +
+            '  AND superseder.supersedes_from <= sc.block_index' +
+            ') ORDER BY sc.checkpoint_seq ASC',
+            [chain, network, target, replayTo]);
     },
 
     // Reads rows from state_checkpoints.
@@ -159,5 +215,29 @@ module.exports = {
     // Moved here from src/anchor/publisher.js:1065, the network-scoped branch.
     async findAnchorEligibleUnanchoredCheckpointsByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
         return this.doQuery(PENDING_ANCHOR_CHECKPOINTS_SQL + ' AND sc.network = ?', [checkpointIntervalBlocks, anchorEveryNCheckpoints, network]);
+    },
+
+    // Per chain of one network, the oldest snapshot_block among the anchor-eligible
+    // checkpoints above the newest anchored one: the content the v0 bundle has owed since
+    // its last anchor. Superseded rows below an anchor are never stamped, so the anchored
+    // seq bounds the age; without an anchor, the first eligible checkpoint starts the age.
+    async findOldestUnanchoredCheckpointBlocksByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
+        return this.doQuery(
+            'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc LEFT JOIN (' +
+            '  SELECT chain, network, MAX(checkpoint_seq) AS anchored_seq FROM state_checkpoints' +
+            '  WHERE anchor_txid IS NOT NULL AND network = ? GROUP BY chain, network' +
+            ') a ON sc.chain = a.chain AND sc.network = a.network ' +
+            'WHERE sc.network = ? AND sc.anchor_txid IS NULL ' +
+            'AND (a.anchored_seq IS NULL OR sc.checkpoint_seq > a.anchored_seq) ' +
+            'AND MOD(FLOOR(sc.checkpoint_seq / ?), ?) = 0 GROUP BY sc.chain',
+            [network, network, checkpointIntervalBlocks, anchorEveryNCheckpoints]);
+    },
+
+    // Every superseding row (supersedes_from set), the columns the reader rule reads.
+    // One scan per snapshot page, not a correlated read per row (supersedes_from has no index).
+    async findSupersedingStateCheckpoints() {
+        return this.doQuery(
+            'SELECT chain, network, checkpoint_seq, supersedes_from FROM state_checkpoints ' +
+            'WHERE supersedes_from IS NOT NULL');
     }
 };

@@ -61,8 +61,26 @@ function makeRpcBatchGuard(maxBatch){
                 error: { code: -32600, message: 'Batch too large (max ' + maxBatch + ' requests per call)' }
             });
         }
+        // The router reads element.id with no null check, so a null element
+        // throws out of its async handler (HTML 500 with a stack trace plus an
+        // unhandledRejection per request), and other non-objects are silently
+        // dropped. Refuse any batch holding a non-object element up front.
+        // JSON-RPC 2.0 also requires a single -32600 for an empty batch and an
+        // Invalid Request for a member with no string method. The router treats
+        // an id-less method-less member as a notification and answers [] with
+        // 200, so such bodies are refused here too.
+        if(Array.isArray(req.body) && (req.body.length === 0 || !req.body.every(isCallObject))){
+            return res.status(400).json({
+                jsonrpc: '2.0', id: null,
+                error: { code: -32600, message: 'Invalid Request' }
+            });
+        }
         next();
     };
+}
+
+function isCallObject(el){
+    return el !== null && typeof el === 'object' && !Array.isArray(el) && typeof el.method === 'string';
 }
 
 module.exports = { resolveMaxBatch, makeRpcBatchGuard };

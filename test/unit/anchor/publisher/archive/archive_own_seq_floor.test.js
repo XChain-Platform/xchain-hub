@@ -18,7 +18,71 @@ const { expect }           = require('chai');
 const sinon                = require('sinon');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../../../../src/validators/identity');
+const archiveSignMethods   = require('../../../../../src/anchor/publisher/archive/sign.js');
+const { getLogger }        = require('../../../../../src/observability');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
+
+const REFUSAL_REASONS = [
+    'signer_unavailable', 'request_data_missing', 'checkpoint_missing', 'self_request',
+    'election_block_invalid', 'election_block_out_of_tolerance',
+    'sender_not_elected_or_unlocked', 'sender_signature_invalid', 'batch_seq_stale',
+    'signer_not_in_snapshot_set', 'local_checkpoint_mismatch', 'archive_invalid',
+    'archive_diverges_from_local'
+];
+
+function refusalHarness(reason){
+    let coSigned = false;
+    const myPubkey = 'aa'.repeat(32);
+    const sender = 'bb'.repeat(32);
+    const data = { checkpoint: { chain: 'doge', network: 'regtest', block_index: 12,
+        snapshot_block: 90 }, election_block: 100, batch_seq: 7, sig_pubkey: sender };
+    const pub = Object.assign(Object.create(archiveSignMethods), {
+        identity: reason === 'signer_unavailable' ? null : { getPubkeyHex: () => myPubkey },
+        hub: { resolveBtcLatestBlock: async () => reason === 'election_block_out_of_tolerance' ? 110 : 100 },
+        electionToleranceBlocks: 5,
+        getActiveOraclePublishPubkeys: async (block) =>
+            reason === 'signer_not_in_snapshot_set' && block === 90 ? [sender] : [sender, myPubkey],
+        archiveSenderUnlocked: () => reason !== 'sender_not_elected_or_unlocked',
+        verifiedArchiveCanonical: () => reason === 'sender_signature_invalid' ? null : 'canonical',
+        getNextBatchSeq: async () => reason === 'batch_seq_stale' ? 8 : 1,
+        broadcastSeqRefusal: () => {}, bindObservedArchiveLeader: () => {},
+        db: { getStateCheckpointByChainAndNetwork: async () => [{}] },
+        ownArchiveWrapper: () => reason === 'local_checkpoint_mismatch' ? null : { snapshot_block: 90 },
+        decodeArchiveProposal: () => reason === 'archive_invalid' ? null : { matches: [{}] },
+        verifyArchiveAgainstLocal: async () => reason !== 'archive_diverges_from_local',
+        coSignArchive: () => { coSigned = true; }
+    });
+    if(reason === 'request_data_missing') return { envelope: {}, pub, coSigned: () => coSigned };
+    if(reason === 'checkpoint_missing') delete data.checkpoint;
+    if(reason === 'self_request') data.sig_pubkey = myPubkey;
+    if(reason === 'election_block_invalid') data.election_block = 'invalid';
+    return { envelope: { data }, pub, coSigned: () => coSigned };
+}
+
+async function expectRefusalDiagnostics(){
+    const logger = getLogger();
+    const originalWarn = logger.warn;
+    try {
+        for(const reason of REFUSAL_REASONS){
+            const { envelope, pub, coSigned } = refusalHarness(reason);
+            const lines = [];
+            logger.warn = (line) => lines.push(line);
+            await pub.handleSignReq(envelope);
+            await pub.handleSignReq(envelope);
+            const seq = reason === 'request_data_missing' ? 'unknown' : 7;
+            const sender = reason === 'request_data_missing' ? 'unknown'
+                : reason === 'self_request' ? 'aa'.repeat(32) : 'bb'.repeat(32);
+            const detail = reason === 'election_block_out_of_tolerance'
+                ? ' election_block=100 local_tip=110'
+                : reason === 'batch_seq_stale' ? ' local_next_seq=8' : '';
+            expect(lines).to.deep.equal(['StateAnchorPublisher: declining archive SIGN_REQ reason=' +
+                reason + ' batch_seq=' + seq + ' sender=' + sender + detail]);
+            expect(coSigned()).to.equal(false);
+        }
+    } finally {
+        logger.warn = originalWarn;
+    }
+}
 
 function mkPub(nextSeq){
     const identity = new ValidatorIdentity('11'.repeat(32));
@@ -85,6 +149,7 @@ describe('StateAnchorPublisher: own archive seq floor', function () {
         await pub.handleSignReq({ data: d });
         expect(refused, 'no stale-seq refusal').to.deep.equal([]);
         expect(bound, 'leader bound for co-signing').to.deep.equal([5]);
+        await expectRefusalDiagnostics();
     });
 
     it('ignores fractional, negative, boolean and empty own seqs and never lowers the floor', function () {

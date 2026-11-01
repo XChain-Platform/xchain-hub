@@ -44,6 +44,8 @@ function harness(options = {}) {
     const rows = new Map();
     const validators = options.validators || [{ pubkey }];
     let tip = options.tip === undefined ? 1000 : options.tip;
+    let committedHeight = options.committedHeight === undefined ? tip : options.committedHeight;
+    let chainHeight = options.chainHeight === undefined ? tip : options.chainHeight;
     let indexerBlock = options.block || null;
 
     for (const cp of options.stored || []) {
@@ -76,6 +78,10 @@ function harness(options = {}) {
         confirmations: options.confirmations === undefined ? 6 : options.confirmations,
         pollMs: 60000,
         resolveSnapshotBlock: sinon.spy(async () => tip),
+        resolveSnapshotCheckpointHeights: sinon.spy(async () => ({
+            committedHeight,
+            chainHeight,
+        })),
         resolveCapabilityValidators: sinon.spy(async () => validators),
         indexerCall: sinon.spy(async (chain, method, params) => {
             const answer = indexerBlock || block(params.block_index);
@@ -93,7 +99,15 @@ function harness(options = {}) {
         rows,
         identity,
         peerManager,
-        setTip(value) { tip = value; },
+        setTip(value) {
+            tip = value;
+            committedHeight = value;
+            chainHeight = value;
+        },
+        setHeights(committed, chain) {
+            committedHeight = committed;
+            chainHeight = chain;
+        },
         setBlock(value) { indexerBlock = value; },
     };
 }

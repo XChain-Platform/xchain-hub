@@ -46,6 +46,9 @@ const VEC_DIR   = path.join(DOCS_DIR, 'protocol', 'test-vectors');
 // Judge the vector directory before loading it, so a lane whose documentation entry
 // links into a live main checkout never reads behaviour vectors no commit holds.
 const VEC_VERDICT = siblingCheckout(__dirname, VEC_DIR);
+// The registry parts this hub authors alone; every other part is shared with the reference impl.
+const HUB_ONLY_PARTS = ['hub_rows.js'];
+const HUB_SHARED_PARTS = registryParts(LOCAL_DIR).filter((f) => !HUB_ONLY_PARTS.includes(f));
 
 let quorumVec = null, equivVec = null, activationVec = null;
 if(VEC_VERDICT.usable){
@@ -165,4 +168,54 @@ describe('consensus-primitive conformance: byte-identity to canonical source @re
                 'edit xchain-indexer/src/consensus/' + f + ' and re-run reconcile-twins.sh to re-vendor every copy.');
         });
     });
+
+    // Compare the activation-registry parts too: this repo owns gate_registry/core.js, so
+    // an unpropagated edit to it must turn this suite red, not only the consumers' suites
+    // that read the reference copy. hub_rows.js is authored here alone and has no copy.
+    it('gate_registry/ holds core.js and the vendored parts', function(){
+        assert.ok(HUB_SHARED_PARTS.includes('core.js'),
+            'src/consensus/gate_registry/ has no core.js, so the per-part byte guard would miss the part this repo owns');
+    });
+
+    it('gate_registry/ file set equals xchain-documentation/protocol/reference-impl', function(){
+        const canonDir = path.join(CANON_DIR, 'consensus', 'gate_registry');
+        if (!skipOrFail(this, siblingCheckout(__dirname, canonDir), 'the sibling parity guard')) return;
+        const canon = registryParts(CANON_DIR);
+        assert.ok(canon.length > 0, 'the canonical gate_registry/ under ' + CANON_DIR + ' is missing or empty');
+        const missing = canon.filter((f) => !HUB_SHARED_PARTS.includes(f));
+        const extra   = HUB_SHARED_PARTS.filter((f) => !canon.includes(f));
+        assert.deepStrictEqual({ missing, extra }, { missing: [], extra: [] },
+            'gate_registry/ file sets differ. Missing from this repo: [' + missing.join(', ') +
+            ']. Present only in this repo: [' + extra.join(', ') +
+            ']. Vendor the part with reconcile-twins.sh, or list a hub-only part in HUB_ONLY_PARTS.');
+    });
+
+    HUB_SHARED_PARTS.forEach(function(f){
+        it('gate_registry/' + f + ' is byte-identical to xchain-documentation/protocol/reference-impl', function(){
+            const canonPath = path.join(CANON_DIR, 'consensus', 'gate_registry', f);
+            if (!skipOrFail(this, siblingCheckout(__dirname, canonPath), 'the sibling parity guard')) return;
+            const local = fs.readFileSync(path.join(LOCAL_DIR, 'consensus', 'gate_registry', f), 'utf8');
+            const canon = fs.readFileSync(canonPath, 'utf8');
+            assert.strictEqual(local, canon, gateRegistryDriftMessage(f));
+        });
+    });
 });
+
+/** List the regular .js files of one side's consensus/gate_registry/, sorted; empty when absent. */
+function registryParts(root){
+    const dir = path.join(root, 'consensus', 'gate_registry');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isFile() && d.name.endsWith('.js')).map((d) => d.name).sort();
+}
+
+/** Name the file to edit for a drifted part: core.js is owned here, the rest by the indexer. */
+function gateRegistryDriftMessage(f){
+    if (f === 'core.js') {
+        return 'this repo owns consensus/gate_registry/core.js and it differs from ' +
+            'xchain-documentation/protocol/reference-impl/consensus/gate_registry/core.js; ' +
+            'run reconcile-twins.sh --write to carry the edit to every copy, or revert it.';
+    }
+    return 'this repo\'s consensus/gate_registry/' + f + ' has drifted from the canonical source; ' +
+        'edit xchain-indexer/src/protocol_changes/' + f + ' and re-run reconcile-twins.sh to re-vendor every copy.';
+}

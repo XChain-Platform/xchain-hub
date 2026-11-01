@@ -54,8 +54,9 @@ module.exports = {
         // no honest peer can ever reproduce. Reconciling here is also what unsticks a
         // window that drifted before the buffer learned to track a re-finalization.
         await this.reconcileBufferedWindow(first, last);
+        await this.shedRetractedWindowCarriedByChain(windowIndex, first, last);
         let rounds = this.bufferedRange(first, last);
-        if (rounds.length === 0) { this.noteAssembled(windowIndex); return; }
+        if (rounds.length === 0) { this.noteAssembled(windowIndex); this.forgetRetractedWindow(windowIndex); return; }
 
         // The window's anchor is the LAST included round's own BTC anchor, matching the
         // batch anchor the wire header carries and the anchor every verifier resolves
@@ -84,6 +85,7 @@ module.exports = {
         if (wires === null) return;
 
         this.noteAssembled(windowIndex);
+        this.forgetRetractedWindow(windowIndex);
         if (wires.length === 0) return;
         await this.enqueueWindowWires(windowIndex, first, last, wires, election, takeover);
     },

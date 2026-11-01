@@ -22,6 +22,9 @@
 'use strict';
 
 const canonicalForms    = require('./canonical_forms.js');
+const { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal } = require('./supersede_fill.js');
+const { checkpointProposalDecline } = require('./replay_hold.js');
+const { hasSupersedeFields } = require('./supersede_suffix.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
@@ -62,9 +65,10 @@ module.exports = {
         // honest leader now derives its seq from the (per-hub-unique-at-a-given-tip)
         // snapshot_block, so a shared seq implies a shared snapshot_block implies one
         // payload. Followers re-derive and refuse a mismatch (handleSignReq).
-        let seq = canonicalForms.deriveCheckpointSeq(snapshotBlock);
-
-        let cp = this.checkpointFromBlockHashes(chain, network, bh, seq, snapshotBlock);
+        let cp = await this.checkpointForRound(chain, network, bh, snapshotBlock);
+        // A decline returns its reason, so the cadence callers keep this chain's failure entry.
+        const proposalDecline = await this.leaderProposalDecline(chain, network, cp, bh);
+        if(proposalDecline) return this.noteLeaderDecline(proposalDecline, cp);
         // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
         // (empty-root) canonical if the indexer hasn't produced them yet (operator must
         // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
@@ -88,7 +92,7 @@ module.exports = {
         if(!this.claimSeqSignature(cp, canonical)) return;
         this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
-        let snapCount = validators.length;   // raw row count (matches handleFinalized + anchor.js:336)
+        let snapCount = validators.length;   // raw row count (matches handleFinalized + the indexer's quorum.js oracleN)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum    = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
@@ -101,6 +105,14 @@ module.exports = {
         }
 
         this.openLeaderRound({ id, cp, canonical, quorum, weighted, validators, myPubkey, mySig, attempt: retry ? retry.attempt : 0 });
+    },
+
+    async leaderProposalDecline(chain, network, cp, bh){
+        let expectedSupersede;
+        if(hasSupersedeFields(cp))
+            expectedSupersede = await this.supersedeFieldsForRound(
+                chain, network, bh);
+        return checkpointProposalDecline(cp, bh, expectedSupersede);
     },
 
     // Checkpoint the chain's tip minus a confirmation margin, so every peer's
@@ -124,7 +136,7 @@ module.exports = {
 
     // The checkpoint record a leader proposes from its own indexer's block hashes `bh` at
     // the target height: hashes lowercased, roots carried only where the indexer served them.
-    checkpointFromBlockHashes(chain, network, bh, seq, snapshotBlock){
+    checkpointFromBlockHashes(chain, network, bh, seq, snapshotBlock, supersedeFields){
         let cp = {
             chain:          chain,
             network:        network,
@@ -141,7 +153,27 @@ module.exports = {
             block_merkle_root:    bh.block_merkle_root    != null ? String(bh.block_merkle_root).toLowerCase() : null,
             block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null
         };
+        if(supersedeFields) Object.assign(cp, supersedeFields);
         return cp;
+    },
+
+    async checkpointForRound(chain, network, bh, snapshotBlock){
+        const seq = canonicalForms.deriveCheckpointSeq(snapshotBlock);
+        const supersedeFields = await this.supersedeFieldsForRound(chain, network, bh);
+        const cp = this.checkpointFromBlockHashes(
+            chain, network, bh, seq, snapshotBlock, supersedeFields);
+        if(supersedeGateRefusal(cp, canonicalForms.isCheckpointSupersedeActive(cp)))
+            throw new Error('checkpoint supersession fields are not active for snapshot_block ' + cp.snapshot_block);
+        return cp;
+    },
+
+    async supersedeFieldsForRound(chain, network, bh){
+        const rules = bh && bh.rules;
+        const replayWindow = replayWindowFor(rules);
+        if(!replayWindow) return null;
+        const finalizedRows = await this.db.findUnsupersededStateCheckpointsInReplayWindow(
+            chain, network, replayWindow.target, replayWindow.replay_to);
+        return supersedeFieldsFor(bh.rules, finalizedRows);
     },
 
     // At/above SWQ the snapshot is one row per (source, pubkey), so a lone validator

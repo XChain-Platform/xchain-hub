@@ -53,7 +53,7 @@ async function fixture() {
         stateCheckpoints: cosigner.stateCheckpoints,
         db: cosigner.db,
         network: NETWORK,
-        confirmations: 0,
+        confirmations: mesh.confirmations,
         gateActive: true,
         expectedBlock: blockIndex,
     }, changes);
@@ -70,8 +70,9 @@ describe('buildSnapshotCosignView accepted requests', function () {
             network: NETWORK,
             gateActive: true,
             expectedBlock: blockIndex,
-            btcTip: 500,
-            confirmations: 0,
+            committedHeight: 500,
+            chainHeight: 500,
+            confirmations: 6,
             local: cp,
             stored: null,
         });
@@ -79,11 +80,13 @@ describe('buildSnapshotCosignView accepted requests', function () {
         expect(reads).to.deep.equal({ indexer: 1, stored: 1 });
     });
 
-    it('normalizes a string tip to a number', async function () {
+    it('normalizes string checkpoint heights to numbers', async function () {
         const { cosigner, req, context } = await fixture();
-        cosigner.btcTip = '500';
+        cosigner.committedTip = '500';
+        cosigner.chainTip = '501';
         const view = await buildSnapshotCosignView(req, context());
-        expect(view.btcTip).to.equal(500);
+        expect(view.committedHeight).to.equal(500);
+        expect(view.chainHeight).to.equal(501);
         expect(snapshotCosignRefusal(req, view)).to.equal(null);
     });
 
@@ -118,8 +121,9 @@ describe('buildSnapshotCosignView early refusals', function () {
     });
 
     it('returns a shallow view without indexer or stored reads', async function () {
-        const { cosigner, req, reads, context, blockIndex } = await fixture();
-        cosigner.btcTip = blockIndex - 1;
+        const { mesh, cosigner, req, reads, context, blockIndex } = await fixture();
+        cosigner.committedTip = blockIndex + mesh.confirmations - 1;
+        cosigner.chainTip = blockIndex + 100;
         const view = await buildSnapshotCosignView(req, context());
         expect(snapshotCosignRefusal(req, view)).to.equal('shallow');
         expect(reads).to.deep.equal({ indexer: 0, stored: 0 });
@@ -127,7 +131,7 @@ describe('buildSnapshotCosignView early refusals', function () {
 
     it('treats a failing tip read as shallow and stops', async function () {
         const { cosigner, req, reads, context } = await fixture();
-        cosigner.hub.resolveBtcLatestBlock = async() => {
+        cosigner.hub.resolveBtcCheckpointHeights = async() => {
             throw new Error('unavailable');
         };
         const view = await buildSnapshotCosignView(req, context());

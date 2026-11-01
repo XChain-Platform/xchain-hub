@@ -38,7 +38,7 @@ const SNAPSHOTS_ARRAY = {
             status:          { type: 'string', enum: ['finalized', 'skipped', 'disputed'] },
             quorum_margin: {
                 type: ['object', 'null'],
-                description: 'Present when with_quorum_margin is truthy. Null when the row is not finalized or its historical validator snapshot is unavailable.',
+                description: 'Present when with_quorum_margin is truthy. Null when the row is not finalized, its historical validator snapshot is unavailable, or its anchor falls beyond the first 16 distinct anchors in the response.',
                 properties: {
                     mode:             { type: 'string', enum: ['count', 'stake'] },
                     met:              { type: 'boolean' },
@@ -200,7 +200,7 @@ const METHODS = [
     ['pushpricebatch', 'Indexer push: a finalized PRICE v2 batch, carrying every round in one window under one signature set.', ['source_chain', 'first_round', 'last_round', 'btc_block_height', 'rounds', 'block_time', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
     ['pushattestbatch', 'Indexer push: an ATTEST v5 response batch parsed off the DOGE rail, carrying every terminal response of one window under one signature set.', ['source_chain', 'network', 'window_start', 'window_end', 'row_count', 'btc_block_height', 'rows', 'sigs', 'action_index', 'block_index', 'block_time', 'push_generation'], { auth: true, internal: true }],
     ['pushoracleprice', 'Indexer push: user-published PRICE v1 oracle row.', ['source_chain', 'source_address', 'coin', 'tick', 'fiat', 'value', 'fee', 'memo', 'block_time', 'action_index', 'push_generation'], { auth: true, internal: true }],
-    ['pushpricereorg', 'Indexer push: price reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
+    ['pushpricereorg', 'Indexer push: price reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation', 'batches'], { auth: true, internal: true }],
     ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushdexreorg', 'Indexer push: cross-chain DEX match reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushbridgereorg', 'Indexer push: XBRIDGE lock/burn reorg rollback. Every bridge_transfers record whose SOURCE leg sits at or above from_action_index is marked retracted and its deletion broadcast so mirrors drop the row. A destination leg already applied stays applied (milestone 1 ships no destination-side unwind), so getbridgeinvariant then reports the deficit; policy_snapshots has no retraction path, being append-only.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],

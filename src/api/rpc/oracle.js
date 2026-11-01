@@ -22,6 +22,9 @@ const { validateLimit, strictInt } = require('../validate');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { computeQuorumMargin } = require('../../oracle/quorum_margin.js');
 
+// Preserve consensus-input capacity by enriching at most 16 historical anchors per public request.
+const MAX_QUORUM_MARGIN_ANCHORS = 16;
+
 function quorumInputs(row) {
     if (!row || row.status !== 'finalized' || typeof row.consensus_proof !== 'string') return null;
     let proof;
@@ -35,11 +38,11 @@ function quorumInputs(row) {
     return { anchor: Number(anchor), signers };
 }
 
-async function quorumMarginFor(hub, inputs) {
+async function quorumSnapshotFor(hub, inputs) {
     if (!inputs || !hub.capabilitySnapshot) return null;
-    let weighted = swq.isStakeWeightedQuorumActive(inputs.anchor, hub.network);
-    let snapshots = hub.capabilitySnapshot;
-    let snapshot = weighted
+    const weighted = swq.isStakeWeightedQuorumActive(inputs.anchor, hub.network);
+    const snapshots = hub.capabilitySnapshot;
+    const snapshot = weighted
         ? (typeof snapshots.getWeightSnapshot === 'function'
             ? await snapshots.getWeightSnapshot('price', inputs.anchor) : null)
         : (typeof snapshots.getSnapshot === 'function'
@@ -50,18 +53,33 @@ async function quorumMarginFor(hub, inputs) {
         validators = validators.slice();
         validators.truncated = true;
     }
-    return computeQuorumMargin({ weighted, validators, signers: inputs.signers });
+    return { weighted, validators };
+}
+
+async function quorumMarginFor(snapshotPromise, inputs) {
+    const snapshot = await snapshotPromise;
+    if (!snapshot) return null;
+    return computeQuorumMargin({
+        weighted: snapshot.weighted,
+        validators: snapshot.validators,
+        signers: inputs.signers,
+    });
 }
 
 async function addQuorumMargins(hub, rows) {
-    let margins = new Map();
+    const snapshots = new Map();
+    const margins = new Map();
     return Promise.all(rows.map(async row => {
-        let inputs = quorumInputs(row);
-        let key = inputs && JSON.stringify([inputs.anchor, inputs.signers]);
-        if (key && !margins.has(key)) {
-            margins.set(key, quorumMarginFor(hub, inputs).catch(() => null));
+        const inputs = quorumInputs(row);
+        const key = inputs && JSON.stringify([inputs.anchor, inputs.signers]);
+        if (inputs && !snapshots.has(inputs.anchor) && snapshots.size < MAX_QUORUM_MARGIN_ANCHORS) {
+            snapshots.set(inputs.anchor, quorumSnapshotFor(hub, inputs));
         }
-        let quorumMargin = key ? await margins.get(key) : null;
+        const snapshot = inputs && snapshots.get(inputs.anchor);
+        if (key && snapshot && !margins.has(key)) {
+            margins.set(key, quorumMarginFor(snapshot, inputs).catch(() => null));
+        }
+        const quorumMargin = key && margins.has(key) ? await margins.get(key) : null;
         return Object.assign({}, row, { quorum_margin: quorumMargin });
     }));
 }

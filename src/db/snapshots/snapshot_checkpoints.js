@@ -28,6 +28,12 @@ const COLUMNS = [
 ];
 
 module.exports = {
+    async deleteSnapshotCheckpointsByChainAndNetwork(chain, network) {
+        return this.doQuery(
+            'DELETE FROM snapshot_checkpoints WHERE chain = ? AND network = ?',
+            [chain, network]);
+    },
+
     async insertSnapshotCheckpoint(cp) {
         const result = await this.doQuery(
             'INSERT IGNORE INTO snapshot_checkpoints (' + COLUMNS.join(', ') + ') VALUES (' +

@@ -134,6 +134,9 @@ module.exports = {
     },
 
     async verifyArchivedPriceSnapshots(rows, archive){
+        // A follower the price batch pushes never reached holds 0 where the leader stamped;
+        // back-fill those clocks from the indexer first, then compare strictly as before.
+        await this.backfillPriceBatchLandings(rows);
         for(const group of priceGroups(rows)){
             if(!(await this.verifyArchivedPriceGroup(group, archive))) return false;
         }

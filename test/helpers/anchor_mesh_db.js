@@ -21,6 +21,7 @@ const eq             = require('../../src/consensus/equivocation_header.js');
 const gateRegistry   = require('../../src/consensus/gate_registry');
 const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const { DB_METHODS } = require('./mockHub.js');
+const { supersededBySeq } = require('../../src/anchor/checkpoint_engine/superseded_rule.js');
 
 // An ANCHOR v0 section is root-bearing by construction (D8), so the base checkpoint
 // row carries the two light-client roots and their version bytes; a row without them is
@@ -149,11 +150,30 @@ function checkpointQuery(sql, params, s) {
         let net    = sql.includes('AND sc.network = ?') ? params[2] : null; // network scope (when configured)
         let latest = {};
         for (let r of checkpoints) {
+            if (r.supersedes_from != null) continue;                          // markers never anchor
             if (Math.floor(r.checkpoint_seq / step) % everyN !== 0) continue; // only anchor-eligible ordinals
             let k = r.chain + '|' + r.network;
             if (!latest[k] || r.checkpoint_seq > latest[k].checkpoint_seq) latest[k] = r;
         }
-        return Object.values(latest).filter(r => r.anchor_txid == null && (net == null || r.network === net));
+        // Drop a newest row a later marker supersedes, after the MAX as the SQL does.
+        return Object.values(latest).filter(r => r.anchor_txid == null && (net == null || r.network === net) &&
+                                                 supersededBySeq(r, checkpoints) == null);
+    }
+    if (sql.startsWith('SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block')) {
+        // Faithful to the SQL: per chain, the oldest eligible unanchored row above the
+        // newest anchored seq; a chain with no anchored row yields nothing.
+        let [net, , step, everyN] = params;
+        let anchored = {}, oldest = {};
+        for (let r of checkpoints)
+            if (r.network === net && r.anchor_txid != null)
+                anchored[r.chain] = Math.max(anchored[r.chain] == null ? -1 : anchored[r.chain], r.checkpoint_seq);
+        for (let r of checkpoints) {
+            if (r.network !== net || r.anchor_txid != null || anchored[r.chain] == null) continue;
+            if (r.checkpoint_seq <= anchored[r.chain]) continue;
+            if (Math.floor(r.checkpoint_seq / (step || 1)) % (everyN || 1) !== 0) continue;
+            if (oldest[r.chain] == null || r.snapshot_block < oldest[r.chain]) oldest[r.chain] = r.snapshot_block;
+        }
+        return Object.keys(oldest).map(chain => ({ chain, oldest_block: oldest[chain] }));
     }
     if (sql.startsWith("SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC")) {
         let sorted = checkpoints.filter(r => r.network === params[0])

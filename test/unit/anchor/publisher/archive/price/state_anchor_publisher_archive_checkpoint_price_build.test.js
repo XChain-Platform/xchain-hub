@@ -16,6 +16,15 @@ const { CHECKPOINT_KEYS, PRICE_KEYS, ARCHIVE_MAX_PRICE_ROUNDS } =
 const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
 const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
 
+// Vectors L and B were recorded with the wrapper group on oracle_publish. Regtest arms the
+// archive_publish gate at 0, so these byte checks pin the wrapper capability below the gate.
+const capabilityWants = require('../../../../../../src/anchor/publisher/archive/capability_wants.js');
+async function belowArchivePublishGate(body){
+    const keep = capabilityWants.archiveWrapperCapability;
+    capabilityWants.archiveWrapperCapability = () => 'oracle_publish';
+    try { return await body(); } finally { capabilityWants.archiveWrapperCapability = keep; }
+}
+
 function buildPub(sets){
     const identity = new ValidatorIdentity('11'.repeat(32));
     const pub = new StateAnchorPublisher({
@@ -56,14 +65,14 @@ describe('archive checkpoint and price build', () => {
         expect(ARCHIVE_MAX_PRICE_ROUNDS).to.equal(288);
     });
 
-    it('vector L stays byte-identical when every added stream is empty', async () => {
+    it('vector L stays byte-identical when every added stream is empty', () => belowArchivePublishGate(async () => {
         const { inputs, json, crc32 } = vectors.L;
         const pub = buildPub(inputs.capability_sets);
         const result = await build(pub, inputs, { bridges: [], policies: [],
             checkpoints: [], prices: [], tombstones: [] });
         expect(result.json).to.equal(json);
         expect(pub.crc32Hex(result.json)).to.equal(crc32);
-    });
+    }));
 
     it('vector C carries sorted rootless and rooted checkpoints exactly', async () => {
         const { inputs, json, crc32 } = vectors.C;

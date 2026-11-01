@@ -63,13 +63,15 @@ function registerPriceaggregatorRetractfromactionindex1Hooks() {
 function registerPriceaggregatorRetractfromactionindex1Tests1() {
 
     it('deletes price_snapshots and oracle_prices for the source chain at/above the action_index', async function () {
-        hub.db.doQuery.resolves({ affectedRows: 2 });
+        hub.db.doQuery.callsFake(async sql =>
+            /^SELECT \* FROM price_snapshots/.test(sql) ? [] : { affectedRows: 2 });
 
         let result = await agg.retractFromActionIndex('BTC', 500);
 
-        // Orphaned-landing reset lookup, tombstone insert, then two DELETE statements
+        // Active-chain retention lookup, orphaned-landing reset, tombstone insert,
+        // then two DELETE statements.
         let calls = hub.db.doQuery.getCalls();
-        expect(calls.length).to.equal(4);
+        expect(calls.length).to.equal(5);
 
         let snapCall = calls.find(c => /^DELETE FROM price_snapshots/.test(c.args[0]));
         let oracleCall = calls.find(c => /^DELETE FROM oracle_prices/.test(c.args[0]));

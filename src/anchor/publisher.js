@@ -120,9 +120,11 @@ const canonicalForms = require('./publisher/canonical_forms.js');
 const stateMethods                 = require('./publisher/state.js');
 const lifecycleMethods             = require('./publisher/lifecycle.js');
 const bundleMethods                = require('./publisher/bundle.js');
+const bundleLadderMethods          = require('./publisher/ladder/bundle_content_age.js');
 const publishBundleMethods         = require('./publisher/publish_bundle.js');
 const rewardMethods                = require('./publisher/reward.js');
 const rewardDeferMethods           = require('./publisher/reward_defer.js');
+const rewardJournalMethods         = require('./publisher/reward_journal/journal.js');
 const attestRoundMethods           = require('./publisher/attest_round.js');
 const archiveAttestMethods         = require('./publisher/archive/attest.js');
 const archiveRoundMethods          = require('./publisher/archive/round.js');
@@ -134,6 +136,8 @@ const archiveListSnapshotVerifyMethods = require('./publisher/archive/list/list_
 const archiveBridgeVerifyMethods   = require('./publisher/archive/bridge_policy/bridge_policy_verify.js');
 const archiveCheckpointPriceMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_rows.js');
 const archiveCheckpointPriceVerifyMethods = require('./publisher/archive/checkpoint_price/checkpoint_price_verify.js');
+const archivePriceFloorMethods     = require('./publisher/archive/checkpoint_price/price_common_floor.js');
+const archivePriceLandingMethods   = require('./publisher/archive/checkpoint_price/batch_ingest.js');
 const bundleDoneMethods            = require('./publisher/bundle_done.js');
 const lookupMethods                = require('./publisher/lookups.js');
 const archiveSignMethods           = require('./publisher/archive/sign.js');
@@ -292,9 +296,11 @@ const PART_METHODS = [
     stateMethods,
     lifecycleMethods,
     bundleMethods,
+    bundleLadderMethods,
     publishBundleMethods,
     rewardMethods,
     rewardDeferMethods,
+    rewardJournalMethods,
     attestRoundMethods,
     archiveAttestMethods,
     archiveRoundMethods,
@@ -306,6 +312,8 @@ const PART_METHODS = [
     archiveBridgeVerifyMethods,
     archiveCheckpointPriceMethods,
     archiveCheckpointPriceVerifyMethods,
+    archivePriceFloorMethods,
+    archivePriceLandingMethods,
     bundleDoneMethods,
     lookupMethods,
     archiveSignMethods,

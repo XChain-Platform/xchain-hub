@@ -77,7 +77,7 @@ function createSnapshotRound({
         return terminal;
     }
 
-    return { add, decide };
+    return { add, decide, status: tally.status };
 }
 
 module.exports = { ROUND_STATE, createSnapshotRound };

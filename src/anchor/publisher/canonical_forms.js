@@ -26,15 +26,26 @@
 const crypto = require('crypto');
 const { MATCH_KEYS, CALL_KEYS } = require('./constants.js');
 const checkpointForms = require('../checkpoint_engine/canonical_forms.js');
+const { hasSupersedeFields } = require('../checkpoint_engine/supersede_suffix.js');
 const eq = require('../../consensus/equivocation_header.js');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { resolveQuorumNetwork } = require('../quorum_network.js');
 const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { foldArchiveSuffix } = require('./fold/wrapper_canonical.js');
+const { foldArchiveSplitter, NO_HEAD_ROOM } = require('./fold/archive_head_budget.js');
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
 
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
+
+async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock, rewards, splitter){
+    try {
+        return await ctx.buildSizedArchive(network, batchSeq, rows, snapshotBlock, rewards, splitter);
+    } catch(error){
+        if(error && error.code === NO_HEAD_ROOM) return null;
+        throw error;
+    }
+}
 
 // The fold height is a DOGE height (the chain ANCHOR is mined on), so the armed
 // 'DOGE:<network>' key the cut writes resolves before the bare network sentinel.
@@ -52,6 +63,11 @@ function isCheckpointAnchorRow(row){
 }
 
 function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
+    // Refuse a supersession marker as the wrapper: the fold canonical has no SUPERSEDE
+    // segment, so its bytes would differ from what the light client rebuilds for that row.
+    if(hasSupersedeFields(checkpoint))
+        throw new Error('fold wrapper checkpoint ' + checkpoint.chain + '/' + checkpoint.network + ' seq ' +
+                        checkpoint.checkpoint_seq + ' carries supersession fields; the fold canonical has no SUPERSEDE segment');
     let raw = checkpointForms.rawCanonicalCheckpoint(checkpoint) +
               checkpointForms.checkpointRootSuffix(checkpoint) + foldArchiveSuffix({
                   MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
@@ -74,21 +90,29 @@ const foldPublisherMethods = {
         if(!ordered[wrapperSectionIndex]) return null;
         let wrapper = ordered[wrapperSectionIndex];
         let cp = this.cpFromRow(wrapper);
+        if(this.archiveRoundIntentHeld(await this.getLiveArchiveIntent(network), network)) return null;
         let batchSeq = await this.getNextBatchSeq();
+        if(this.foldSeqSpentByOwnAddress(batchSeq)) return null;
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return null;
-        let archive = await this.buildSizedArchive(network, batchSeq, rows, cp.snapshot_block, rewardRows);
-        if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
-        let wire = this.archiveWire(archive.json);
-        let canonical = foldArchiveCanonical(wrapper, batchSeq, archive.count, wire.crc, wire.chunks.length);
         let signingSet = await this.archiveSigningSet(cp);
         if(!signingSet || this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return null;
         let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        let splitter = await foldArchiveSplitter(
+            this, ordered, network, batchSeq, wrapperSectionIndex, signingSet, me);
+        if(!splitter) return null;
+        let archive = await buildSizedFoldArchive(
+            this, network, batchSeq, rows, cp.snapshot_block, rewardRows, splitter);
+        if(!archive) return null;
+        if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
+        let wire = this.archiveWire(archive.json, splitter);
+        let canonical = foldArchiveCanonical(wrapper, batchSeq, archive.count, wire.crc, wire.chunks.length);
         let signatures = [];
         if(me && signingSet.some(v => String(v.pubkey).toLowerCase() === me))
             signatures.push({ pubkey: me, sig: this.identity.sign(canonical) });
         return {
             cp, batchSeq, count: archive.count, crc: wire.crc, b64: wire.b64, chunks: wire.chunks,
+            headChars: splitter.headChars,
             wrapperSectionIndex, signatures, canonical, validators: signingSet,
             weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
                                                        resolveQuorumNetwork(cp, this.network)),
@@ -211,6 +235,8 @@ const foldPublisherMethods = {
     },
 
     async collectFoldArchive(group, network){
+        // Refresh the own spent seq before the subdeadline starts, so the read never eats it
+        await this.refreshOwnArchiveSeqFloor();
         let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
                                          Number(this.roundTimeoutMs) || 30000));
         let timer;
@@ -269,6 +295,7 @@ const foldPublisherMethods = {
     async completeFoldArchive(archiveSection, signer, txid){
         if(!archiveSection) return;
         await this.markArchiveSent(String(archiveSection.cp.network), archiveSection.batchSeq, txid);
+        this.noteOwnArchiveSeq(archiveSection.batchSeq);
         let broadcaster = signer && signer.broadcastFn
             ? signer.broadcastFn : ((p) => this.defaultBroadcast(p, signer, { allowUnconfirmed: true }));
         let lostChunks = await this.broadcastArchiveChunks(archiveSection, archiveSection.batchSeq,
@@ -292,6 +319,7 @@ module.exports = {
     isAnchorFoldActive,
     isArchiveAnchorRow,
     isCheckpointAnchorRow,
+    hasSupersedeFields,
     foldArchiveCanonical,
     foldPublisherMethods,
 
@@ -364,10 +392,7 @@ module.exports = {
             block_index:      Number(r.block_index)
         };
     },
-
-    // Reward identity shared by the archive body and the FINALIZED reward list. The
-    // archived record carries no round_qualifier, so the key stops at the three fields
-    // both shapes hold.
+    // Reward identity shared by the archive body and FINALIZED reward list.
     archiveRewardKey(r){
         return String(r.reward_type) + '|' + String(Number(r.round_number)) + '|' +
                String(r.validator_pubkey).toLowerCase();

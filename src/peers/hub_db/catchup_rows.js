@@ -5,7 +5,8 @@
 
 // How catch-up asks whether the hub already holds a peer row, and how it stores one it verified.
 
-const { storePriceSnapshot } = require('./price_round_groups.js');
+const { priceSnapshotAlreadyHeld, storePriceSnapshot } = require('./price_round_groups.js');
+const { hasSupersedeFields } = require('../../anchor/checkpoint_engine/supersede_suffix.js');
 
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
@@ -19,7 +20,7 @@ async function hasRows(promise) {
 const CONTENT_KEY_READERS = Object.freeze({
     price_snapshots: async (db, row) => {
         const rows = await db.findPriceSnapshotsForRound(row.round_number);
-        return Array.isArray(rows) && rows.some(held => held && held.coin_pair === row.coin_pair);
+        return priceSnapshotAlreadyHeld(rows, row);
     },
     oracle_prices: (db, r) => hasRows(db.getOraclePrice(r.source_address, r.source_chain, r.action_index)),
     cross_chain_matches: (db, r) => hasRows(db.getCrossChainMatchByMatchId(r.match_id)),
@@ -49,9 +50,14 @@ const ROW_WRITERS = Object.freeze({
     cross_chain_matches: (db, row) => db.createCrossChainMatch(row, row.btc_chain_id),
     capability_snapshots: (db, row) => db.createCapabilitySnapshots([row], row.btc_chain_id),
     cross_chain_calls: (db, row) => db.setCrossChainCallFinalized(row, row.btc_chain_id),
-    state_checkpoints: (db, r) => db.createStateCheckpoint(r.chain, r.network, r.block_index, r.block_hash,
-        r.ledger_hash, r.actions_hash, r.contract_hash, r.checkpoint_seq, r.snapshot_block, r.state_root,
-        r.state_root_version, r.block_merkle_root, r.block_merkle_version, r.validator_signatures),
+    state_checkpoints: (db, r) => {
+        const args = [r.chain, r.network, r.block_index, r.block_hash, r.ledger_hash, r.actions_hash,
+            r.contract_hash, r.checkpoint_seq, r.snapshot_block, r.state_root, r.state_root_version,
+            r.block_merkle_root, r.block_merkle_version, r.validator_signatures];
+        if (hasSupersedeFields(r))
+            args.push(r.supersedes_from, r.rules_digest);
+        return db.createStateCheckpoint(...args);
+    },
     anchor_reward_attestations: (db, r) => db.createAnchorRewardAttestation(r.chain, r.network,
         r.reward_type, r.round_reference, r.snapshot_block, r.publisher, r.reward_amount,
         r.publisher_attestations, r.doge_anchor_txid),

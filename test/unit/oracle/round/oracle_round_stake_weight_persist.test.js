@@ -128,3 +128,43 @@ function registerMembershipTests() {
         expect(warn.called).to.equal(false);
     });
 }
+
+describe('OracleRound stake-weight audit fallback: round-number anchor', function () {
+
+    let membership;
+
+    beforeEach(function () {
+        hub = createMockHub({ p2pConfig: { HUB_NETWORK: 'testnet' } });
+        hub.network = 'testnet';
+        warn = sinon.stub(console, 'warn');
+        sinon.stub(console, 'log');
+        sinon.stub(console, 'error');
+        oracle = new OracleRound(hub);
+        sinon.stub(oracle, 'persistSubmissions').resolves();
+        membership = sinon.stub().rejects(new Error('block_index ' + ROUND + ' not yet indexed (latest: 22030)'));
+        hub.stakeWeightFeed = { membership: membership };
+    });
+
+    afterEach(function () { sinon.restore(); });
+
+    it('never asks the indexer about a round number standing in for the BTC height', async function () {
+        oracle.chainTipFallbackActive = true;
+        oracle.currentBtcBlockHeight = ROUND;
+        await persist();
+
+        expect(membership.called).to.equal(false);
+        expect(oracle.stakeWeightLookupFailures).to.equal(0);
+        expect(oracle.persistSubmissions.called).to.equal(false);
+        expect(warnLines(UNREGISTERED)).to.deep.equal([]);
+        expect(warnLines(FEED_FAULT)).to.deep.equal([]);
+    });
+
+    it('still looks the peer up at the real BTC height when no fallback is active', async function () {
+        oracle.chainTipFallbackActive = false;
+        oracle.currentBtcBlockHeight = BLOCK;
+        await persist();
+
+        expect(membership.calledOnceWith('price', BLOCK, MEMBER.pubkey)).to.equal(true);
+        expect(oracle.stakeWeightLookupFailures).to.equal(1);
+    });
+});

@@ -21,10 +21,25 @@ const WINDOWS = {
 
 describe('admission chain margin stamp', function () {
     it('stamps each chain with the margin selected for that chain and rail', function () {
-        expect(ah.admitBlocks(['DOGE', 'LTC'], { DOGE: 100, LTC: 100 },
-            'bridge_transfers', 'regtest')).to.deep.equal({ DOGE: 114, LTC: 104 });
+        expect(ah.admitBlocks(['BTC', 'DOGE', 'LTC'], { BTC: 100, DOGE: 100, LTC: 100 },
+            'bridge_transfers', 'regtest')).to.deep.equal({ BTC: 104, DOGE: 114, LTC: 114 });
         expect(ah.admitBlocks(['DOGE'], { DOGE: 100 },
             'price_snapshots', 'regtest')).to.deep.equal({ DOGE: 116 });
+        expect(ah.admitBlocks(['LTC'], { LTC: 100 },
+            'price_snapshots', 'regtest')).to.deep.equal({ LTC: 117 });
+    });
+
+    it('keeps the legacy LTC stamp below its testnet activation and on mainnet', function () {
+        // Shipped on the UNARMED sentinel; a cut replaces it with a sized height.
+        const activation = activationHeight('LTC', 'testnet');
+        expect(activation).to.be.within(4900001, 9999999999);
+        expect(activationHeight('LTC', 'mainnet')).to.equal(null);
+        expect(ah.admitBlocks(['LTC'], { LTC: activation - 18 },
+            'bridge_transfers', 'testnet')).to.deep.equal({ LTC: activation - 14 });
+        expect(ah.admitBlocks(['LTC'], { LTC: activation - 18 },
+            'price_snapshots', 'testnet')).to.deep.equal({ LTC: activation - 14 });
+        expect(ah.admitBlocks(['LTC'], { LTC: 3000000 },
+            'bridge_transfers', 'mainnet')).to.deep.equal({ LTC: 3000004 });
     });
 
     it('switches margins only when the stamped height reaches the activation', function () {

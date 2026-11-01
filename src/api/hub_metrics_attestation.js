@@ -30,6 +30,16 @@ function pollErrorSpec(kind, field){
     };
 }
 
+function admissionRefusalSpec(reason){
+    return {
+        name: 'xchain_attestation_admission_refusals_total',
+        help: 'Attestation rounds refused before consensus opened, by refusal reason',
+        labels: { reason },
+        read: (round) => round.consensus && round.consensus.roundAdmissionRefusedCount &&
+            round.consensus.roundAdmissionRefusedCount[reason]
+    };
+}
+
 // Consensus quorum loss and poll health, read off AttestationRound's fields.
 const ATTESTATION_SERIES = {
     counters: [
@@ -38,6 +48,8 @@ const ATTESTATION_SERIES = {
             help: 'Attestation rounds torn down by the consensus timeout before reaching quorum',
             read: (round) => round.consensus && round.consensus.roundTimeoutCount
         },
+        admissionRefusalSpec('unfinalizable'),
+        admissionRefusalSpec('admission_tip'),
         pollErrorSpec('rpc', 'pollRpcErrorCount'),
         pollErrorSpec('transport', 'pollTransportErrorCount'),
         pollErrorSpec('auth', 'pollAuthErrorCount')

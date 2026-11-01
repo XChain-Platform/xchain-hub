@@ -5,6 +5,8 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+const DUE_SCAN_LIMIT = 10;
+
 function asSnapshotBlock(value) {
     if (value === null || value === undefined) return null;
 
@@ -30,20 +32,29 @@ function asFiniteNumber(value) {
 function pickDueSnapshot(snapshotBlocks, view) {
     if (!Array.isArray(snapshotBlocks) || view.inFlight) return null;
 
+    const newestFirst = snapshotBlocks.length >= DUE_SCAN_LIMIT;
     let snapshotBlock = null;
     for (const value of snapshotBlocks) {
         const candidate = asSnapshotBlock(value);
         if (candidate === null || !view.gateActive(candidate)) continue;
-        if (snapshotBlock === null || candidate < snapshotBlock) snapshotBlock = candidate;
+        const preferred = newestFirst
+            ? candidate > snapshotBlock
+            : candidate < snapshotBlock;
+        if (snapshotBlock === null || preferred) snapshotBlock = candidate;
     }
     if (snapshotBlock === null) return null;
 
     const blockIndex = view.blockOf(snapshotBlock);
     if (!Number.isSafeInteger(blockIndex) || blockIndex < 0) return null;
 
-    const btcTip = asFiniteNumber(view.btcTip);
+    const committedHeight = asFiniteNumber(view.committedHeight);
+    const chainHeight = asFiniteNumber(view.chainHeight);
     const confirmations = asFiniteNumber(view.confirmations);
-    if (btcTip === null || confirmations === null || btcTip < blockIndex + confirmations) return null;
+    // Due-ness keeps the committed burial depth; the chain height only counts
+    // fallback depth, so a frozen committed tip cannot stall a fallback round.
+    if (committedHeight === null || confirmations === null ||
+        committedHeight < blockIndex + confirmations ||
+        chainHeight === null || chainHeight < blockIndex + confirmations) return null;
 
     return { snapshot_block: snapshotBlock, block_index: blockIndex };
 }

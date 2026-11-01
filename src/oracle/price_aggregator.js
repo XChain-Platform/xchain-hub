@@ -57,11 +57,12 @@ const roundIngestPart         = require('./price_aggregator/round_ingest.js');
 const batchIngestPart         = require('./price_aggregator/batch_ingest.js');
 const singleIngestPart        = require('./price_aggregator/single_ingest.js');
 const retractPart             = require('./price_aggregator/retract.js');
+const chainRestorePart        = require('./price_aggregator/chain_restore.js');
 const capabilityDerivationPart = require('./price_aggregator/capability_derivation.js');
 const capabilityPersistPart   = require('./price_aggregator/capability_persist.js');
 
 const PARTS = [ingestGuardsPart, roundIngestPart, batchIngestPart, singleIngestPart,
-               retractPart, capabilityDerivationPart, capabilityPersistPart];
+               retractPart, chainRestorePart, capabilityDerivationPart, capabilityPersistPart];
 
 class PriceAggregator extends EventEmitter {
 
@@ -80,6 +81,17 @@ class PriceAggregator extends EventEmitter {
         // ingest counters here: the log carries the driver line, this is the read tier.
         this.implausibleRoundRejections = 0;
         this.lastImplausibleRound = null;
+        this._priceRestoreTimer = null;
+        this._priceRestoreStopped = false;
+        this._priceRestoreRunning = false;
+        this._priceRestoreQueue = [];
+        this._priceRestoreScheduled = new Set();
+        this._priceRestoreUnsupportedUntil = 0;
+        this._priceRestoreCursor = null;
+        this._priceRestoreRecentStart = null;
+        this._priceRestoreOldestRound = null;
+        this._priceRestoreWalkingOlder = false;
+        this._priceRestoreWarned = null;
         // Derived capability snapshots (chain-only hubs). Timer handle, re-entrancy
         // latch, the BTC heights this process has already covered, and the heights whose
         // last attempt failed loudly (so the failure is named once rather than once per

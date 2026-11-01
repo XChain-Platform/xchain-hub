@@ -65,9 +65,9 @@ function buildSnapshotSignRequest(identity, snapshotBlock, cp) {
     };
 }
 
-// overdueBlocks is how far this co-signer's BTC tip sits past the request's due height;
-// left out, only the turn hub may lead, as before the fallback existed.
-function snapshotSignRequestRefusal(req, validators, verify, overdueBlocks) {
+// chainOverdueBlocks is how far this co-signer's BTC chain height sits past the
+// request's due height. When absent, only the turn hub may lead.
+function snapshotSignRequestRefusal(req, validators, verify, chainOverdueBlocks) {
     let canonical;
     let blockIndex;
     let pubkey;
@@ -91,7 +91,7 @@ function snapshotSignRequestRefusal(req, validators, verify, overdueBlocks) {
     }
 
     try {
-        if (mayLeadSnapshotSlot(blockIndex, validators, pubkey, overdueBlocks) !== true)
+        if (mayLeadSnapshotSlot(blockIndex, validators, pubkey, chainOverdueBlocks) !== true)
             return SIGN_REQUEST_REFUSAL.NOT_LEADER;
     } catch (e) {
         return SIGN_REQUEST_REFUSAL.NOT_LEADER;

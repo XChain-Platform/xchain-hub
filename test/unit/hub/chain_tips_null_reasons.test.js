@@ -103,6 +103,30 @@ describe('chain tips null reasons: BTC latest block', function () {
 
 });
 
+describe('chain tips: BTC checkpoint heights', function () {
+    installFixtures();
+
+    it('reads committed and decoder heights despite indexer lag while the general tip still refuses', async function () {
+        const result = { block_index: 8497, decoder_block: 8510, lag: 100000 };
+        const hub = hubWith('http://indexer.invalid/api', { data: { result } });
+
+        expect(await hub.resolveBtcCheckpointHeights()).to.deep.equal({
+            committedHeight: 8497,
+            chainHeight: 8510,
+        });
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        expect(warned('exceeds MAX_INDEXER_LAG_BLOCKS')).to.equal(true);
+    });
+
+    it('refuses a missing decoder height', async function () {
+        const hub = hubWith('http://indexer.invalid/api', {
+            data: { result: { block_index: 8497, decoder_block: null, lag: 0 } },
+        });
+        expect(await hub.resolveBtcCheckpointHeights()).to.equal(null);
+        expect(warned('unusable checkpoint heights')).to.equal(true);
+    });
+});
+
 describe('chain tips null reasons: DOGE latest block', function () {
     installFixtures();
 

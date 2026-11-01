@@ -10,6 +10,7 @@ const { expect } = require('chai');
 const { buildFeedRpc } = require('../../../src/api/rpc/feed');
 const crossChainDb = require('../../../src/db/cross_chain');
 const capabilityDb = require('../../../src/db/snapshots/capability_snapshots');
+const checkpointDb = require('../../../src/db/snapshots/snapshot_checkpoints');
 
 const OLD_ID = '01'.repeat(32);
 const NEW_ID = '02'.repeat(32);
@@ -25,6 +26,9 @@ function makeDb(storedId = OLD_ID) {
         deleteCrossChainMatchesByNetwork: sinon.stub().callsFake(async () => { order.push('matches'); }),
         deleteCrossChainCallsByNetwork: sinon.stub().callsFake(async () => { order.push('calls'); }),
         deleteAllCapabilitySnapshots: sinon.stub().callsFake(async () => { order.push('snapshots'); }),
+        deleteSnapshotCheckpointsByChainAndNetwork: sinon.stub().callsFake(async () => {
+            order.push('checkpoints');
+        }),
         setChainTip: sinon.stub().callsFake(async () => { order.push('set'); })
     };
 }
@@ -39,11 +43,13 @@ async function push(db, overrides = {}, hubOverrides = {}) {
 }
 
 function registerScopedSqlTest() {
-    it('uses scoped SQL for cross-chain rows and an unfiltered snapshot delete', async function () {
+    it('uses scoped SQL for cross-chain and checkpoint rows and an unfiltered capability delete', async function () {
         const doQuery = sinon.stub().resolves();
         await crossChainDb.deleteCrossChainMatchesByNetwork.call({ doQuery }, 'regtest');
         await crossChainDb.deleteCrossChainCallsByNetwork.call({ doQuery }, 'regtest');
         await capabilityDb.deleteAllCapabilitySnapshots.call({ doQuery });
+        await checkpointDb.deleteSnapshotCheckpointsByChainAndNetwork.call(
+            { doQuery }, 'BTC', 'regtest');
 
         expect(doQuery.getCall(0).args).to.deep.equal([
             'DELETE FROM cross_chain_matches WHERE network = ?', ['regtest']
@@ -52,24 +58,33 @@ function registerScopedSqlTest() {
             'DELETE FROM cross_chain_calls WHERE network = ?', ['regtest']
         ]);
         expect(doQuery.getCall(2).args).to.deep.equal(['DELETE FROM capability_snapshots']);
+        expect(doQuery.getCall(3).args).to.deep.equal([
+            'DELETE FROM snapshot_checkpoints WHERE chain = ? AND network = ?',
+            ['BTC', 'regtest']
+        ]);
     });
 }
 
 function registerPurgeAndFailureTests() {
-    it('purges all three tables before replacing a changed BTC regtest tip', async function () {
+    it('purges all stale chain tables before replacing a changed BTC regtest tip', async function () {
         const db = makeDb();
         expect(await push(db)).to.deep.equal({ status: 'success' });
-        expect(db.order).to.deep.equal(['get', 'matches', 'calls', 'snapshots', 'set']);
+        expect(db.order).to.deep.equal([
+            'get', 'matches', 'calls', 'snapshots', 'checkpoints', 'set'
+        ]);
         expect(db.deleteCrossChainMatchesByNetwork.calledWithExactly('regtest')).to.equal(true);
         expect(db.deleteCrossChainCallsByNetwork.calledWithExactly('regtest')).to.equal(true);
         expect(db.deleteAllCapabilitySnapshots.calledOnceWithExactly()).to.equal(true);
+        expect(db.deleteSnapshotCheckpointsByChainAndNetwork
+            .calledOnceWithExactly('BTC', 'regtest')).to.equal(true);
     });
 
     for (const failedMethod of [
         'getChainTip',
         'deleteCrossChainMatchesByNetwork',
         'deleteCrossChainCallsByNetwork',
-        'deleteAllCapabilitySnapshots'
+        'deleteAllCapabilitySnapshots',
+        'deleteSnapshotCheckpointsByChainAndNetwork'
     ]) {
         it('does not update the tip when ' + failedMethod + ' fails', async function () {
             const db = makeDb();
@@ -95,6 +110,7 @@ function registerNoOpTests() {
             expect(db.deleteCrossChainMatchesByNetwork.called).to.equal(false);
             expect(db.deleteCrossChainCallsByNetwork.called).to.equal(false);
             expect(db.deleteAllCapabilitySnapshots.called).to.equal(false);
+            expect(db.deleteSnapshotCheckpointsByChainAndNetwork.called).to.equal(false);
             expect(db.setChainTip.calledOnce).to.equal(true);
         });
     }
@@ -112,6 +128,7 @@ function registerHubNetworkGuardTests() {
             expect(db.deleteCrossChainMatchesByNetwork.called).to.equal(false);
             expect(db.deleteCrossChainCallsByNetwork.called).to.equal(false);
             expect(db.deleteAllCapabilitySnapshots.called).to.equal(false);
+            expect(db.deleteSnapshotCheckpointsByChainAndNetwork.called).to.equal(false);
             expect(db.setChainTip.calledOnce).to.equal(true);
         });
     }
@@ -119,7 +136,9 @@ function registerHubNetworkGuardTests() {
     it('still purges for a regtest hub, unaffected by the added hub.network guard', async function () {
         const db = makeDb(OLD_ID);
         expect(await push(db, {}, { network: 'regtest' })).to.deep.equal({ status: 'success' });
-        expect(db.order).to.deep.equal(['get', 'matches', 'calls', 'snapshots', 'set']);
+        expect(db.order).to.deep.equal([
+            'get', 'matches', 'calls', 'snapshots', 'checkpoints', 'set'
+        ]);
     });
 }
 

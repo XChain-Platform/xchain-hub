@@ -26,8 +26,12 @@ const {
 const { getLogger } = require('../../observability');
 const { onCapabilitySnapshotWritten } = require('../../lib/capability_snapshot_write.js');
 const { XSNP_SIGN_REQ, XSNP_SIGN, XSNP_FINALIZED } = require('./constants.js');
-const { mayLeadSnapshotSlot, snapshotLeaderRank } = require('./leader.js');
+const {
+    SNAPSHOT_LEADER_SKIP,
+    snapshotLeaderDecision,
+} = require('./leader.js');
 const { pickDueSnapshot } = require('./due.js');
+const { learnBtcChainId } = require('./chain_identity.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
 const snapshotRound = require('./round.js');
@@ -36,6 +40,7 @@ const logger = getLogger();
 const SNAPSHOT_CHECKPOINT_ACTIVATION =
     'anchor/snapshot_checkpoint/engine.SNAPSHOT_CHECKPOINT_ACTIVATION';
 const DUE_LIMIT = 10;
+const REGTEST_FALLBACK_POLL_MS = 1000;
 const HEX_64 = /^[0-9a-f]{64}$/i;
 
 function payloadMatches(left, right) {
@@ -95,7 +100,9 @@ class SnapshotCheckpointEngine {
         this.ticking = false;
         this.tickRequested = false;
         this.pollTimer = null;
+        this.fallbackTimer = null;
         this.stopWrittenListener = null;
+        this.skipLogKeys = new Map();
         snapshotRound.initialize(this);
     }
 
@@ -124,6 +131,8 @@ class SnapshotCheckpointEngine {
         this.stopWrittenListener = null;
         if (this.pollTimer) clearInterval(this.pollTimer);
         this.pollTimer = null;
+        if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+        this.fallbackTimer = null;
         snapshotRound.stop(this);
     }
 
@@ -149,12 +158,20 @@ class SnapshotCheckpointEngine {
             SNAPSHOT_CHECKPOINT_ACTIVATION, this.network, 'BTC', snapshotBlock, 0);
     }
 
-    async btcTip() {
-        if (this.source && typeof this.source.resolveSnapshotBlock === 'function')
-            return this.source.resolveSnapshotBlock();
-        if (this.hub && typeof this.hub.resolveBtcLatestBlock === 'function')
-            return this.hub.resolveBtcLatestBlock();
-        return null;
+    async btcHeights() {
+        if (this.source && typeof this.source.resolveSnapshotCheckpointHeights === 'function')
+            return this.source.resolveSnapshotCheckpointHeights();
+        if (this.hub && typeof this.hub.resolveBtcCheckpointHeights === 'function')
+            return this.hub.resolveBtcCheckpointHeights();
+        const height = this.source && typeof this.source.resolveSnapshotBlock === 'function'
+            ? await this.source.resolveSnapshotBlock()
+            : this.hub && typeof this.hub.resolveBtcLatestBlock === 'function'
+                ? await this.hub.resolveBtcLatestBlock()
+                : null;
+        return height === null ? null : {
+            committedHeight: height,
+            chainHeight: height,
+        };
     }
 
     async indexerCall(method, params) {
@@ -170,6 +187,13 @@ class SnapshotCheckpointEngine {
             'oracle_publish', snapshotBlock));
     }
 
+    localPubkey() {
+        const pubkey = this.identity && typeof this.identity.getPubkeyHex === 'function'
+            ? this.identity.getPubkeyHex()
+            : null;
+        return typeof pubkey === 'string' ? pubkey.toLowerCase() : pubkey;
+    }
+
     // A tick asked for outside the poll. One that arrives while a tick runs is kept and run
     // after it, since the running tick may have scanned before the new set was written.
     requestTick() {
@@ -181,6 +205,48 @@ class SnapshotCheckpointEngine {
             'SnapshotCheckpointEngine: tick error:', error && error.message)));
     }
 
+    noteSkip(reason, fields = {}) {
+        const snapshotBlock = Number.isSafeInteger(fields.snapshotBlock)
+            ? fields.snapshotBlock
+            : 'unknown';
+        const blockIndex = Number.isSafeInteger(fields.blockIndex)
+            ? fields.blockIndex
+            : 'unknown';
+        const sender = typeof fields.sender === 'string' && fields.sender.length > 0
+            ? fields.sender.toLowerCase()
+            : 'local';
+        const key = [reason, snapshotBlock, blockIndex, sender].join('|');
+        if (this.skipLogKeys.has(key)) return false;
+        this.skipLogKeys.set(key, true);
+        while (this.skipLogKeys.size > 512)
+            this.skipLogKeys.delete(this.skipLogKeys.keys().next().value);
+
+        let detail = '';
+        if (Number.isSafeInteger(fields.rank)) detail += ', rank ' + fields.rank;
+        if (Number.isSafeInteger(fields.waitBlocks))
+            detail += ', waits ' + fields.waitBlocks + ' more BTC block' +
+                (fields.waitBlocks === 1 ? '' : 's');
+        logger.info('SnapshotCheckpointEngine: skipped BTC/' + this.network + '/' +
+            blockIndex + ' snapshot ' + snapshotBlock + ': ' + reason + detail +
+            (sender === 'local' ? '' : ', sender ' + sender));
+        return true;
+    }
+
+    // Fast regtest rails can cross the fallback threshold before the ordinary poll or
+    // the next capability-snapshot write. Re-read while work is waiting; the block-based
+    // decision above remains the authority and production networks keep their normal poll.
+    scheduleFallbackTick() {
+        if (this.fallbackTimer || !this.pollTimer) return;
+        const delay = this.network === 'regtest'
+            ? Math.min(this.pollMs, REGTEST_FALLBACK_POLL_MS)
+            : this.pollMs;
+        this.fallbackTimer = setTimeout(() => {
+            this.fallbackTimer = null;
+            this.requestTick();
+        }, delay);
+        if (this.fallbackTimer.unref) this.fallbackTimer.unref();
+    }
+
     // Checkpoints every due snapshot this hub can finish alone, oldest first, up to
     // DUE_LIMIT, and stops at the first that needs a round, belongs to another leader or
     // is refused. One per tick could never clear a backlog: the hub writes a new set each
@@ -189,6 +255,8 @@ class SnapshotCheckpointEngine {
         if (this.ticking || !this.identity || !this.db) return;
         this.ticking = true;
         try {
+            // Before the scan: the scan only lists sets stamped with the stored chain id.
+            await learnBtcChainId(this);
             for (let i = 0; i < DUE_LIMIT; i++) {
                 if (!await this.checkpointNextDue()) break;
             }
@@ -205,21 +273,36 @@ class SnapshotCheckpointEngine {
     async checkpointNextDue() {
         const rows = await this.db.listUncheckpointedSnapshotBlocks(
             this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
-        const btcTip = await this.btcTip();
+        const heights = await this.btcHeights() || {};
         const due = pickDueSnapshot(snapshotBlocks(rows), {
             inFlight: this.snapshotRounds.size > 0,
             gateActive: block => this.gateActive(block),
             blockOf: block => snapshotCheckpointBlock(block, this.network),
-            btcTip,
+            committedHeight: heights.committedHeight,
+            chainHeight: heights.chainHeight,
             confirmations: this.confirmations,
         });
         if (!due) return false;
 
         const validators = await this.resolveValidators(due.snapshot_block);
-        const myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
-        const overdue = Number(btcTip) - due.block_index - this.confirmations;
-        if (!mayLeadSnapshotSlot(due.block_index, validators, myPubkey, overdue)) return false;
-        const rank = snapshotLeaderRank(due.block_index, validators, myPubkey);
+        const myPubkey = this.localPubkey();
+        const overdue = Number(heights.chainHeight) - due.block_index - this.confirmations;
+        const decision = snapshotLeaderDecision(
+            due.block_index, validators, myPubkey, overdue);
+        if (!decision.leads) {
+            this.noteSkip(decision.reason, {
+                snapshotBlock: due.snapshot_block,
+                blockIndex: due.block_index,
+                rank: decision.rank,
+                waitBlocks: decision.waitBlocks,
+            });
+            if (decision.reason === SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT ||
+                decision.reason === SNAPSHOT_LEADER_SKIP.MISSING_DEPTH) {
+                this.scheduleFallbackTick();
+            }
+            return false;
+        }
+        const rank = decision.rank;
         if (rank > 0) {
             logger.info('SnapshotCheckpointEngine: leading BTC/' + this.network + '/' +
                 due.block_index + ' as fallback ' + rank + ', ' + overdue + ' blocks past due');

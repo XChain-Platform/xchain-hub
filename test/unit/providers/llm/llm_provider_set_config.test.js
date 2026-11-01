@@ -106,6 +106,18 @@ describe('llm provider, _setConfig', function () {
         llm._setConfig(undefined);
     });
 
+    it('clears the live vendor map when a full config no longer carries it', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: {
+            model_vendors: { 'llama-3-70b': 'openai' }
+        } });
+        expect(llm._vendorOfModel('llama-3-70b')).to.equal('openai');
+        llm._setConfig({ additional_config: {
+            approved_models: ['claude-sonnet-4-6']
+        } });
+        expect(() => llm._vendorOfModel('llama-3-70b')).to.throw(/cannot infer vendor/);
+    });
+
     // A key nobody reads is the one failure the warn-and-keep validations above miss:
     // a malformed value at least says so, an unread key is silent. Governance can put
     // arbitrary keys in this payload, so the honesty guarantee has to be enforced here.

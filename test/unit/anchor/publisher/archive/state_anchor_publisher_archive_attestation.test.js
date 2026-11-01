@@ -244,7 +244,7 @@ function registerPreFlagDayCase() {
 
 // ── STAKE_WEIGHTED_QUORUM (WI-1, finding #4120): the publisher's archive
 //    quorum + on-chain VALIDITY gate must apply the SAME stake-weighted rule
-//    the indexer (anchor.js) and full-parse recovery verify against. Pre-fix it
+//    the indexer (quorum.js) and full-parse recovery verify against. Pre-fix it
 //    was count-only, so a count-met-but-stake-short batch was published+dequeued
 //    while every indexer rejected it - stranding settled state in an
 //    unrecoverable hole. (The mesh tests above run with hub.network undefined →

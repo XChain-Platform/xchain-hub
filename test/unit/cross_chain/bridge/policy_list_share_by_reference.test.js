@@ -17,6 +17,7 @@ const registry = require('../../../../src/consensus/gate_registry.js');
 const policyPoll = require('../../../../src/cross_chain/bridge/policy_poll.js');
 const validate = require('../../../../src/cross_chain/bridge/validate.js');
 const archiveVerify = require('../../../../src/anchor/publisher/archive/bridge_policy/bridge_policy_verify.js');
+const archiveRows = require('../../../../src/anchor/publisher/archive/bridge_policy/bridge_policy_rows.js');
 const { policyHash } = require('../../../../src/cross_chain/bridge/policy_hash.js');
 
 const SNAPSHOT_BLOCK = 150;
@@ -178,9 +179,12 @@ function registerFollowerTests(){
 
 function registerArchiveTests(){
     it('verifies an armed archived reference and refuses it when unarmed', async function(){
-        const row = rowFor(validate, 'regtest');
+        // Archive the row as the builder does, so the unheld branch sees an emitted row
+        const row = archiveRows.serializePolicySnapshot(Object.assign(rowFor(validate, 'regtest'),
+            { id: 1, validator_signatures: '[]', status: 'finalized' }));
         const ctx = {
             db: { getPolicySnapshotBySnapshotId: async () => [] },
+            serializePolicySnapshot: archiveRows.serializePolicySnapshot,
             policySnapshotCanonical: () => 'canonical',
             verifyArchivedBridgePolicyQuorum: sinon.stub().resolves(true)
         };

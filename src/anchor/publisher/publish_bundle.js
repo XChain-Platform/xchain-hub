@@ -124,13 +124,13 @@ module.exports = {
         // A DEGRADED ROUND DEFERS THE BUNDLE, rather than falling through to publish a
         // v0 carrying ATTEST_SIG_COUNT 0 on the reasoning that "the anchor always
         // lands and only the reward gains the quorum dependency". That reasoning is
-        // false against the wire: the indexer's v0 BUNDLE parser requires
-        // ATTEST_SIG_COUNT >= 1 (actions/anchor.js, the bundle publisher tail), so a
-        // count-0 bundle is not a degraded anchor, it is an INVALID one. The fallback
-        // therefore paid a real DOGE fee to put a permanently invalid row on chain and
-        // still anchored nothing. Count 0 is legal only on the v1 ARCHIVE head, which
-        // has its own `< 0` check and its own degraded path; the two are not
-        // interchangeable and this site had borrowed the archive's rule.
+        // false against the wire: the indexer's v0 and v3 bundle tail parser requires
+        // ATTEST_SIG_COUNT >= 1 at every height (actions/anchor/validate.js,
+        // parseBundleTail), so a count-0 bundle is not a degraded anchor, it is an
+        // INVALID one. Publishing it pays a real DOGE fee to put a permanently invalid
+        // row on chain and still anchors nothing. Count 0 is legal only on the v1
+        // ARCHIVE head, which has its own `< 0` check and its own degraded path; the
+        // two are not interchangeable, and the bundle must never borrow the archive's rule.
         //
         // Deferring is safe: nothing is recorded and no transaction is built, so the
         // checkpoints stay pending and the next cycle republishes them. The failure
@@ -160,7 +160,8 @@ module.exports = {
     },
 
     // The bundle payload this publisher will sign and send, or null when it does not fit.
-    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock, foldActive, archiveSection){
+    buildBundleWire(group, me, attestSigs, chains, network, snapshotBlock, foldActive,
+                    archiveSection, reportOversize = true){
         let payload = foldActive
             ? this.buildV3Payload({ network: network, snapshot_block: snapshotBlock }, group,
                                   archiveSection, me, attestSigs)
@@ -175,11 +176,13 @@ module.exports = {
         // counted, loud, and ahead of the intent loop, with the rows left pending.
         let payloadBytes = Buffer.byteLength(payload, 'utf8');
         if(payloadBytes > ANCHOR_BUNDLE_MAX_BYTES){
-            this._bundlesOversize++;
-            logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') + ' bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
-                          ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
-                          ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
-                          'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
+            if(reportOversize){
+                this._bundlesOversize++;
+                logger.error('StateAnchorPublisher: v' + (foldActive ? '3' : '0') + ' bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                              ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
+                              ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
+                              'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
+            }
             return null;
         }
         return payload;
@@ -270,14 +273,15 @@ module.exports = {
             // Adoption path: we did not pay for THIS bundle in this call (a prior
             // lost-ACK broadcast of ours or a peer did). The on-chain payload names
             // the earner, so only a bundle the indexer binds to this hub earns here.
-            await this.recordAdoptedBundleReward(group, me, attested, attestSigs, network, snapshotBlock,
-                                                 txid, anchorVersion);
+            return this.recordAdoptedBundleReward(group, me, attested, attestSigs, network, snapshotBlock,
+                                                  txid, anchorVersion);
         } else if(attested || !ar.isAnchorRewardActive(snapshotBlock, network)){
             this.recordOwnBundleReward(group, me, attested, attestSigs, network, snapshotBlock, txid, anchorVersion);
         } else {
             logger.info('StateAnchorPublisher: degraded bundle (no attestation) at/above the reward flag-day for ' +
                         network + ' @ ' + snapshotBlock + '; reward withheld (no live indexer derives it)');
         }
+        return null;
     },
 
     // Record the reward for a bundle this hub paid for: the fresh send and the proven
@@ -331,11 +335,7 @@ module.exports = {
         return null;
     },
 
-    // Publish ONE bundle: election, marker check, attestation round, build, broadcast,
-    // per-section stamp, reward, announcement. Split out of the selector so the byte
-    // budget can hand it several bundles for one network in one flush, each electing
-    // independently. Never throws past a mid-flush deferral; every other failure is
-    // logged and leaves the sections pending for the next flush.
+    // Publish one independently elected bundle. Failures leave its sections pending.
     async publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped, fold){
         let chains = group.map(s => String(s.chain)).join(',');
         try {
@@ -343,10 +343,9 @@ module.exports = {
             let foldActive = !!(fold && fold.active);
             let order = await this.bundlePublisherOrder(network, snapshotBlock, chains);
             if(!order) return;
-            // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
-            // defaults), since the newest eligible snapshotBlock tracks the tip, so no rank
-            // above 0 unlocks here unless that product reaches the tolerance. Intended: see
-            // the ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
+            // The caller shifted btcBlock (bundleLadderBlock) so this is the age of the
+            // oldest content the bundle owes since its chains last anchored, which keeps
+            // growing across checkpoint churn until a bundle lands.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             if(this.standsDownFromBundle(order, group, since, failoverOnly, skipped)) return;
             if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
@@ -368,26 +367,27 @@ module.exports = {
             if(archiveSection) archiveSection = await archiveSection.result;
             if(foldActive) this.suppressLegacyArchiveLeg();
             let payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
-                                               snapshotBlock, foldActive, archiveSection);
+                                               snapshotBlock, foldActive, archiveSection,
+                                               archiveSection === null);
             if(payload === null && archiveSection){
-                this._bundlesOversize--;
+                this._foldArchiveDroppedOversize++;
+                logger.error('StateAnchorPublisher: folded archive batch ' + archiveSection.batchSeq + ' exceeded its reserved head room (' + archiveSection.headChars + ' characters); dropping it from this cycle');
                 archiveSection = null;
                 payload = this.buildBundleWire(group, me, attestation.attestSigs, chains, network,
                                                snapshotBlock, foldActive, null);
             }
             if(payload === null) return;
-
             let result = await this.sendBundle(signer, group, payload, archiveSection);
             let txid = this.bundleResultTxid(result, network, snapshotBlock, chains, foldActive);
             if(!txid) return;
             await this.stampBundleSections(group, txid, anchored);
             await this.completeFoldArchive(archiveSection, signer, txid);
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
-            await this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
-                                    network, snapshotBlock, txid, foldActive ? 3 : 0);
-            if(!(result && result.exists &&
-                 activeAt(BUNDLE_DONE_PUBLISHER_BIND_GATE, network, null, snapshotBlock, null)))
-                this.announceBundleDone(group, network, snapshotBlock, txid);
+            let adoptedOwner = await this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
+                network, snapshotBlock, txid, foldActive ? 3 : 0);
+            let suppressPeerAnnouncement = result && result.exists && adoptedOwner === 'peer' &&
+                activeAt(BUNDLE_DONE_PUBLISHER_BIND_GATE, network, null, snapshotBlock, null);
+            if(!suppressPeerAnnouncement) this.announceBundleDone(group, network, snapshotBlock, txid);
         } catch(e){
             // A mid-flush deferral: an earlier anchor in this same pass spent the last
             // confirmed output. Not a failure of anything; the sections stay pending and
@@ -396,5 +396,4 @@ module.exports = {
             else logger.error('StateAnchorPublisher: bundle publish failed for ' + network + ': ' + (e && e.message));
         }
     }
-
 };

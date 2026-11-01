@@ -141,6 +141,11 @@ const CHECKPOINT_KEYS = ['id', 'chain', 'network', 'block_index', 'block_hash',
     'state_root', 'state_root_version', 'block_merkle_root', 'block_merkle_version',
     'validator_signatures'];
 
+// Appended after CHECKPOINT_KEYS only on a superseding checkpoint, which signs them
+// into its canonical. They stay out of the fixed list so every plain checkpoint keeps
+// the archive bytes, and the BATCH_CRC32, it was anchored with.
+const CHECKPOINT_SUPERSEDE_KEYS = ['supersedes_from', 'rules_digest'];
+
 const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block',
     'reference_chain', 'block_timestamp', 'validator_count', 'consensus_round',
     'consensus_proof', 'status', 'source_chain', 'source_action_index', 'batch_block_time',
@@ -182,6 +187,7 @@ module.exports = {
     POLICY_KEYS,
     LIST_SNAPSHOT_KEYS,
     CHECKPOINT_KEYS,
+    CHECKPOINT_SUPERSEDE_KEYS,
     PRICE_KEYS,
     ARCHIVE_MAX_POLICY_ROWS,
     ARCHIVE_MAX_LIST_ROWS,

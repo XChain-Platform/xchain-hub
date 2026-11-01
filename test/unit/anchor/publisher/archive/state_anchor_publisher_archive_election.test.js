@@ -17,13 +17,26 @@
 // The mesh harness lives in test/helpers/anchor_mesh.js.
 
 const { expect }            = require('chai');
+const proxyquire            = require('proxyquire');
 const { waitUntil }         = require('../../../../helpers/waitUntil');
 const { buildMesh, archiveOrder, archiveLeader, startAll, flushAll, pkOf, registerMeshHooks } = require('../../../../helpers/anchor_mesh.js');
+
+const PUBLISH_CONFIG = {
+    HUB_NETWORK: 'mainnet',
+    oracle_publish: { doge_address: 'DGasfpttCnTijuuoAdiJ9sXJjG7vQ5pMkW', doge_wallet: '/test/wallet' }
+};
+
+function oraclePublishCapability(loadSignerHooks) {
+    return proxyquire('../../../../../src/capabilities/oracle_publish', {
+        '../lib/signer_loader.js': { loadSignerHooks }
+    });
+}
 
 describe('StateAnchorPublisher', function () {
     registerMeshHooks();
 
     registerFollowerCoSignCases();
+    registerPublishCapabilityCase();
     registerArchiveLadderCases();
     registerMembershipGateCases();
     registerSnapshotSetCase();
@@ -72,6 +85,51 @@ function registerFollowerCoSignCases() {
         expect(v1s.length, 'archive published despite two late joiners').to.equal(1);
         let v1 = v1s[0].split('|');
         expect(Number(v1[16]), 'sig count').to.be.at.least(3);                          // real quorum
+    });
+}
+
+function registerPublishCapabilityCase() {
+    it('skips a leader without publish capability and replaces it in the same round', async function () {
+        const bus = buildMesh(4, { btcBlock: 100, network: 'mainnet' });
+        const originalOrder = archiveOrder(bus);
+        const incapable = originalOrder[0];
+        const capableCheck = oraclePublishCapability(() => ({
+            source: '/test/signer.js', walletSignFn() {}, broadcastFn() {}
+        }));
+        const incapableCheck = oraclePublishCapability(() => null);
+        const eligible = [];
+        for (const nd of originalOrder) {
+            const check = nd === incapable ? incapableCheck : capableCheck;
+            if ((await check.selfTest(PUBLISH_CONFIG)).ok) eligible.push(nd);
+        }
+        expect(eligible).to.not.include(incapable);
+        const validators = eligible.map(nd => ({ pubkey: nd.pubkey, amount: '1' }));
+        const snapshot = { async getSnapshot() { return { validators }; } };
+
+        // Capability qualification removes a hub with no broadcast hook before
+        // the block-pinned archive election is resolved on every peer.
+        incapable.pub.setBroadcastHook(null);
+        for (const nd of bus.nodes) {
+            nd.pub.capSnapshot = snapshot;
+            nd.pub.hub.capabilitySnapshot = snapshot;
+            nd.pub.hub.capabilityRegistry = {
+                getActiveValidators: async () => validators.map(v => v.pubkey)
+            };
+        }
+        await startAll(bus);
+
+        const skipped = await incapable.pub.flush();
+        expect(skipped.skipped).to.equal('no_pipeline');
+        expect(incapable.published.length).to.equal(0);
+
+        // Removing rank 0 preserves the remaining hash order, so its successor is
+        // rank 0 immediately. No BTC block or ladder interval has to pass.
+        const replacement = eligible[0];
+        expect(await replacement.pub.flush()).to.have.property('archive', 'round_started');
+        await waitUntil(() => replacement.published.some(p => p.split('|')[1] === '1'), {
+            label: 'the publish-capable successor to land the archive in the same round'
+        });
+        expect(replacement.published.filter(p => p.split('|')[1] === '1').length).to.equal(1);
     });
 }
 

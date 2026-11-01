@@ -254,6 +254,50 @@ oraclePublisherTests('oracle_published_rounds retention', function () {
         expect(del.args[1][0]).to.equal(10);
     });
 
+});
+
+oraclePublisherTests('oracle_published_rounds retention', function () {
+
+    afterEach(function () {
+        delete process.env[ENV_KEY];
+    });
+
+    it('skips the prune when the durable queue cannot be read, so no queued round loses its marker', async function () {
+        // An unreadable queue (EIO, EMFILE, a permissions blip) is not an empty queue:
+        // the clamp cannot see which rounds are still queued, so nothing may be deleted.
+        sinon.stub(console, 'warn');
+        sinon.stub(console, 'error');
+        fsMock.readFileSync.throws(Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }));
+        let db  = makeDb(seedMarkers());
+        let pub = new OraclePublisher(makeHub({ db: db, p2pConfig: { [ENV_KEY]: '100' } }));
+
+        let deleted = await pub.prunePublishedRounds(1000);
+
+        expect(deleted).to.equal(0);
+        expect(db.doQuery.getCalls().filter(c => /^\s*DELETE/i.test(c.args[0]))).to.have.length(0);
+        expect(db.markers[10]).to.not.be.undefined;
+        expect(db.markers[12]).to.not.be.undefined;
+    });
+
+    it('still prunes on a missing queue file, which is an empty queue rather than a failed read', async function () {
+        fsMock.readFileSync.throws(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
+        let db  = makeDb(seedMarkers());
+        let pub = new OraclePublisher(makeHub({ db: db, p2pConfig: { [ENV_KEY]: '100' } }));
+
+        let deleted = await pub.prunePublishedRounds(1000);
+
+        expect(deleted).to.equal(2);                   // confirmed rounds 10 and 12
+        expect(db.markers[11]).to.not.be.undefined;    // quarantine row survives
+    });
+
+});
+
+oraclePublisherTests('oracle_published_rounds retention', function () {
+
+    afterEach(function () {
+        delete process.env[ENV_KEY];
+    });
+
     it('sweeps after a publish pass, and not when nothing published', async function () {
         let entry = { round: 30000, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
         fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');

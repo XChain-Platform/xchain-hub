@@ -86,6 +86,7 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
+const { isPoolSaturation } = require('./schema/pool_saturation.js');
 
 // The DDL lives at src/sql/, one level above this db home. Resolved here, against
 // THIS file, because schema/bootstrap.js sits one directory deeper and a path built
@@ -157,6 +158,8 @@ class Database {
         this.user   = user;
         this.pass   = pass;
 
+        const queryTimeout = parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000;
+
         this.connectionPoolParams = {
             host:               this.host,
             user:               this.user,
@@ -186,7 +189,13 @@ class Database {
             // session's UTC pin makes the two agree.
             timezone:           'Z',
             minDelayValidation: 3000,
-            queryTimeout:       parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000
+            queryTimeout:       queryTimeout,
+            // queryTimeout is enforced by the SERVER (SET STATEMENT max_statement_time),
+            // so a frozen or partitioned server leaves an in-flight query with no
+            // client-side bound: it holds its pool slot and HTTP request until the
+            // server returns. socketTimeout cuts the dead socket client-side. It sits
+            // above queryTimeout so a healthy server's own limit always fires first.
+            socketTimeout:      parseInt(hubConfig.DB_SOCKET_TIMEOUT) || (queryTimeout + 15000)
         };
 
         this.pool = mariadb.createPool(this.connectionPoolParams);
@@ -238,7 +247,7 @@ class Database {
         while(connection == null){
             try {
                 connection = await this.pool.getConnection();
-                if(this.circuitState === 'half-open'){
+                if(this.circuitState === 'half-open' || this.circuitState === 'open'){
                     this.circuitState = 'closed';
                     this.circuitFailures = 0;
                     logger.info('Circuit breaker closed: database connection restored');
@@ -246,17 +255,22 @@ class Database {
                 this.circuitFailures = 0;
             } catch (e){
                 attempts++;
-                this.circuitFailures = (this.circuitFailures || 0) + 1;
-                if(this.circuitFailures >= this.circuitThreshold){
+                // Saturation neither counts toward nor resets the breaker's streak: one
+                // busy round fans out more acquires than the pool limit, and counting them
+                // refused every DB caller for the cooldown while the database was serving.
+                const saturated = isPoolSaturation(e);
+                if(!saturated)
+                    this.circuitFailures = (this.circuitFailures || 0) + 1;
+                if(!saturated && this.circuitFailures >= this.circuitThreshold){
+                    if(this.circuitState !== 'open') this.circuitOpenUntil = Date.now() + this.circuitCooldown; // stragglers must not re-arm
                     this.circuitState = 'open';
-                    this.circuitOpenUntil = Date.now() + this.circuitCooldown;
                     throw new Error('Circuit breaker opened after ' + this.circuitFailures + ' consecutive failures');
                 }
                 if(attempts >= maxAttempts)
                     throw new Error('Could not connect to MariaDB after ' + maxAttempts + ' attempts');
                 const delay = Math.min(baseDelay * Math.pow(2, attempts - 1), maxDelay);
                 const jitter = Math.floor(Math.random() * delay * 0.3);
-                logger.info("Can't connect to MariaDB. Retrying in " + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
+                logger.info((saturated ? 'MariaDB pool saturated' : "Can't connect to MariaDB") + '. Retrying in ' + (delay + jitter) + 'ms... (' + attempts + '/' + maxAttempts + ')');
                 connection = null;
                 await this.sleep(delay + jitter);
             }

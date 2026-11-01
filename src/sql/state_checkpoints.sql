@@ -10,6 +10,8 @@ CREATE TABLE state_checkpoints (
     contract_hash        VARCHAR(64)  NOT NULL,                    -- indexer blocks.contract_hash (chained)
     checkpoint_seq       BIGINT UNSIGNED NOT NULL,                 -- monotonic per (chain, network); derived from snapshot_block (StateCheckpointEngine.deriveCheckpointSeq); replay guard + split-brain key
     snapshot_block       BIGINT UNSIGNED NOT NULL,                 -- BTC block selecting the oracle_publish set for sig verification
+    supersedes_from      BIGINT UNSIGNED,                          -- first checkpointed height replaced by a retroactive rules replay
+    rules_digest         CHAR(64),                                 -- digest of the rules map that caused the replay
     state_root           CHAR(64),                                 -- SPV light-client state_root (SMT over balances+stakes); NULL pre CHECKPOINT_COMMITMENT flag-day
     state_root_version   TINYINT UNSIGNED,                         -- merkle.js STATE_ROOT_VERSION the state_root was computed under; NULL pre-flag-day
     block_merkle_root    CHAR(64),                                 -- SPV per-block content Merkle root (§5); NULL pre-flag-day

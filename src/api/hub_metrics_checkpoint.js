@@ -45,6 +45,8 @@ const CHECKPOINT_SERIES = {
             'Checkpoint cadence ticks that were due but this hub could not lead', '_cadenceStalls'),
         countSpec('xchain_checkpoint_round_failures_total',
             'Per-chain checkpoint rounds this hub led that threw before proposing', '_roundFailures'),
+        countSpec('xchain_checkpoint_leader_declines_total',
+            'Checkpoint rounds this hub led that its own proposal check refused', '_leaderDeclinesTotal'),
         countSpec('xchain_checkpoint_self_accept_failures_total',
             'Failed writes of a checkpoint this hub finalized as leader, retries included', '_selfAcceptFailures')
     ],

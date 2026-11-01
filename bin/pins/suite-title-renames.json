@@ -28,9 +28,18 @@
       "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 33 entries, and contains the gates the last three trains append": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 43 entries, and contains the gates the last trains append",
       "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) digests to the pinned value, which moved when the admission encoder was registered": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) digests to the pinned value, which moved when the v0.19.0 cut armed the bridge on testnet (and again at the 16:33Z ladder re-cut, and again when LTC:testnet mirror admission shipped null under dq4 (a))"
     },
+    "test/unit/consensus/rules_digest/consensus_rules_digest_active_gates.test.js": {
+      "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 47 entries, and contains the gates the last trains append": "consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88) is sorted, has 49 entries, and contains the gates the last trains append"
+    },
     "test/unit/cross_chain/bridge/cross_chain_bridge_activation_resolve.test.js": {
       "cross-chain bridge engine activation resolution names all three gates by their registry keys, and each has a row": "cross-chain bridge engine activation resolution names all four gates by their registry keys, and each has a row",
       "cross-chain bridge engine activation resolution holds every mainnet and testnet slot of all three gates unarmed": "cross-chain bridge engine activation resolution holds every mainnet slot of all four gates unarmed, and the cut's bridge, token and list share testnet heights"
+    },
+    "test/unit/db/archive/db_archive_checkpoint_price_columns.test.js": {
+      "price_snapshots pending predicate re-pends a stamped row on: archived_status <> status": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: archived_batch_block_time <> batch_block_time": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: archived_proof_sha <> SHA2(consensus_proof, 256)": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read",
+      "price_snapshots pending predicate re-pends a stamped row on: batch_seq IS NULL": "price_snapshots pending predicate materializes every mutable pending condition behind the indexed read"
     },
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
@@ -41,6 +50,25 @@
     },
     "test/unit/rollcall/rollcall_round_invariants.test.js": {
       "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in CONFIGURATION.md": "RollcallRound publish-tunable invariants (D88) the three tunables have a documented row in the hub configuration page"
+    },
+    "test/unit/rollcall/rollcall_status_rpc.test.js": {
+      "capabilities/oracle_publish broadcast presence check leaves the no-signer-module posture unchanged": "capabilities/oracle_publish broadcast presence check fails when no signer module is configured"
+    },
+    "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": {
+      "buildSnapshotCosignView accepted requests normalizes a string tip to a number": "buildSnapshotCosignView accepted requests normalizes string checkpoint heights to numbers"
+    },
+    "test/unit/anchor/snapshot_checkpoint/due.test.js": {
+      "snapshot checkpoint due selection returns null when the tip is missing": "snapshot checkpoint height guards returns null when the chain height is missing"
+    },
+    "test/chaos/database/db_pool_exhaustion.test.js": {
+      "Chaos: DB Pool Exhaustion (DB-3) pool timeout errors count toward circuit breaker": "Chaos: DB Pool Exhaustion (DB-3) pool acquire timeouts do not count toward circuit breaker"
+    },
+    "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": {
+      "PriceAggregator.retractFromActionIndex() batch marker clear (D28) records tombstones then deletes, with no marker query, when no publisher is wired": "PriceAggregator.retractFromActionIndex() batch marker clear (D28) checks active-chain retention, records tombstones and deletes when no publisher is wired"
+    },
+    "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": {
+      "regtest chain-tip identity purge uses scoped SQL for cross-chain rows and an unfiltered snapshot delete": "regtest chain-tip identity purge uses scoped SQL for cross-chain and checkpoint rows and an unfiltered capability delete",
+      "regtest chain-tip identity purge purges all three tables before replacing a changed BTC regtest tip": "regtest chain-tip identity purge purges all stale chain tables before replacing a changed BTC regtest tip"
     }
   }
 }

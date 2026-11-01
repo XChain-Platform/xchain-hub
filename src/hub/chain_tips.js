@@ -29,6 +29,7 @@ const { selectReading } = require('../peers/hub_db/landing_watermark.js');
 const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
+const { lagRefusal, resolveBtcCheckpointHeights } = require('./btc_checkpoint_heights.js');
 const logger = getLogger();
 
 // One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
@@ -41,13 +42,6 @@ const admissionTipMemo = new AsyncLocalStorage();
 // configurable gap treat the tip as untrustworthy and degrade rather than lock a
 // stale validator set into the consensus round. A missing lag degrades the same way:
 // the indexer sends null until its first decoder poll, and Number(null) reads as 0.
-function lagRefusal(lag){
-    let maxLag = Number(hubConfig.MAX_INDEXER_LAG_BLOCKS);
-    if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
-    if(lag == null || lag === '' || !Number.isFinite(Number(lag))) return 'reported no usable lag (' + JSON.stringify(lag) + '); cannot date the committed tip';
-    return (Number(lag) > maxLag) ? 'lag ' + lag + ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip' : null;
-}
-
 class ChainTips {
 
     // Resolve the latest BTC block index: first hub.db.getChainTip, populated by the
@@ -103,6 +97,11 @@ class ChainTips {
             logger.error(nodeUtil.format('XChainHub: failed to resolve BTC latest block from indexer:', err));
             return null;
         }
+    }
+
+    // Checkpoint scheduling reads committed state availability and chain depth together.
+    async resolveBtcCheckpointHeights(){
+        return resolveBtcCheckpointHeights(this);
     }
     // Return the stored BTC tip only while its timestamp passes the freshness gate.
     async resolveFreshPushedBtcTip(resolvedNetwork){
