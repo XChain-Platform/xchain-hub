@@ -64,7 +64,9 @@ function chainTipFeedRpc(ctx) {
         // and it is what lets a mirror refuse cross-chain rows written by a hub that followed a
         // different chain instance. Absent leaves the stored identity untouched.
         async pushchaintip({coin, network, block_height, block_time, chain_id}){
-            if(!coin) return {error: "coin is required"};
+            // A missing coin throws like an unknown one (below): a returned refusal lands in
+            // the envelope's result slot, where a caller checking only `error` reads it as stored.
+            if(!coin) throw rpcParamError("coin is required");
             // THROWN, not returned: an unknown coin is a refusal, and returned it landed
             // in the envelope's result slot where a caller checking only `error` read it
             // as a stored tip. The chain tip gates staleness checks fleet-wide, so a

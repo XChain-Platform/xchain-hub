@@ -206,6 +206,64 @@ for (const h of HANDLERS) {
     }
 }
 
+// pushchaintip: a missing coin is a refusal of the call's own arguments, so it throws
+// -32602 exactly like an unknown coin and never lands in the envelope's result slot.
+describe('pushchaintip: a missing coin is a JSON-RPC error', function () {
+    this.timeout(15000);
+
+    let tipController, db;
+
+    before(async function () {
+        db = {
+            setChainTip: sinon.stub().resolves(),
+            getChainTip: sinon.stub().resolves(null),
+            stampNullCapabilitySnapshotChainId: sinon.stub().resolves()
+        };
+        tipController = await bootApi({ db });
+    });
+
+    afterEach(function () { db.setChainTip.resetHistory(); });
+
+    after(function () { sinon.restore(); });
+
+    const validRest = { network: 'regtest', block_height: 10, block_time: 1757298240 };
+    const cases = [
+        ['empty string', { coin: '' }],
+        ['zero', { coin: 0 }],
+        ['null', { coin: null }],
+        ['absent', {}]
+    ];
+
+    for (const [label, coinParams] of cases) {
+        it('throws -32602 "coin is required" for ' + label + ' and stores nothing', async function () {
+            let thrown = null;
+            let returned;
+            try {
+                returned = await tipController.pushchaintip(Object.assign({}, validRest, coinParams));
+            } catch (err) { thrown = err; }
+            expect(thrown, 'a missing coin must throw, not return ' + JSON.stringify(returned)).to.be.an('error');
+            expect(thrown.code).to.equal(-32602);
+            expect(thrown.message).to.equal('coin is required');
+            expect(db.setChainTip.called, 'a refused push must not store a tip').to.be.false;
+        });
+    }
+
+    it('still throws -32602 for the unknown coin ZZZ', async function () {
+        let thrown = null;
+        try { await tipController.pushchaintip(Object.assign({ coin: 'ZZZ' }, validRest)); } catch (err) { thrown = err; }
+        expect(thrown).to.be.an('error');
+        expect(thrown.code).to.equal(-32602);
+        expect(thrown.message).to.equal('chain must be one of: BTC, LTC, DOGE');
+        expect(db.setChainTip.called).to.be.false;
+    });
+
+    it('still stores a valid BTC tip', async function () {
+        const result = await tipController.pushchaintip(Object.assign({ coin: 'BTC' }, validRest));
+        expect(result).to.deep.equal({ status: 'success' });
+        expect(db.setChainTip.calledOnce).to.be.true;
+    });
+});
+
 describe('durable push handlers: an unknown chain is a JSON-RPC error', function () {
     this.timeout(15000);
 
