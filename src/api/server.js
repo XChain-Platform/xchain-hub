@@ -27,6 +27,7 @@ const defaultJsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
 const { installMiddleware } = require('./middleware');
+const { withEnvelopeRepair } = require('./jsonrpc_envelope');
 const { buildRpcController } = require('./rpc');
 const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
 const { mountTelemetryRoutes } = require('./rest/telemetry');
@@ -37,7 +38,7 @@ function createApp(ctx) {
     const jsonRouter = ctx.jsonRouter || defaultJsonRouter;
     const app = express();
     const observability = installMiddleware(app, ctx);
-    const jsonRpcController = buildRpcController(ctx);
+    const jsonRpcController = ctx.rpcController || buildRpcController(ctx);
     mountSnapshotRoutes(app, ctx);
     mountTelemetryRoutes(app, ctx);
     mountRegistryRoutes(app, ctx);
@@ -47,7 +48,9 @@ function createApp(ctx) {
     // Body-parser 2.x leaves body undefined for requests without JSON. The router
     // expects an object, so restore the earlier body-parser default before dispatch.
     app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
-    app.use(jsonRouter({ methods: jsonRpcController }));
+    // The router's error envelopes drop a falsy id (0 becomes null) and echo the
+    // caller's jsonrpc member; the wrapper repairs both on the way out.
+    app.use(withEnvelopeRepair(jsonRouter({ methods: jsonRpcController })));
     return { app, observability };
 }
 

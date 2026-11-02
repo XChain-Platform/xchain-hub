@@ -23,6 +23,7 @@
 
 const crypto = require('crypto');
 const configRedaction = require('./config_redaction.js');
+const { requestId } = require('./jsonrpc_envelope.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub:
@@ -167,7 +168,7 @@ function authGate(ctx) {
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let provided = req.headers['x-api-key'] || '';
         let unauthorized = () => res.status(401).json({
-            jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+            jsonrpc: '2.0', id: requestId(req.body),
             error: { code: -32001, message: 'Unauthorized' }
         });
         if (reorgTierRefuses(calls, provided, ctx)) return unauthorized();
@@ -188,7 +189,7 @@ function authGate(ctx) {
         if (bulkTierRefuses(calls, provided, ctx)) return unauthorized();
         if (calls.some(hasInvalidMethod)) {
             return res.status(400).json({
-                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                jsonrpc: '2.0', id: requestId(req.body),
                 error: { code: -32600, message: 'Invalid Request' }
             });
         }
@@ -224,7 +225,7 @@ function feedPortAllowlist() {
         });
         if (!allowed) {
             return res.status(404).json({
-                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                jsonrpc: '2.0', id: requestId(req.body),
                 error: { code: -32601, message: 'Method not available on this port' }
             });
         }
