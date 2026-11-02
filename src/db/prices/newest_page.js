@@ -12,11 +12,14 @@
  *
  ********************************************************************/
 
+// limit reaches `LIMIT ?` binds below; a string binds quoted and MariaDB rejects it
+// (errno 1064), so each finder coerces at entry whatever the caller forwarded.
 module.exports = {
 
     // Find the boundary using the round/pair key in one direction, then supply its
     // literal round to the mixed-direction page read so that read can use a range.
     async findPriceSnapshotsAnyStatus(limit) {
+        limit = Number(limit);
         const boundaryRows = await this.doQuery(
             "SELECT round_number FROM price_snapshots ORDER BY round_number DESC, coin_pair DESC LIMIT 1 OFFSET ?",
             [limit - 1]);
@@ -28,6 +31,7 @@ module.exports = {
     },
 
     async findPriceSnapshotsFinalized(limit) {
+        limit = Number(limit);
         const boundaryRows = await this.doQuery(
             "SELECT round_number FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair DESC LIMIT 1 OFFSET ?",
             [limit - 1]);
