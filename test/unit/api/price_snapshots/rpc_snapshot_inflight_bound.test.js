@@ -28,9 +28,9 @@
  */
 
 const { expect } = require('chai');
-const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
-const { buildSystemRpc } = require('../../../src/api/rpc/system.js');
-const configsQueries = require('../../../src/db/configs.js');
+const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
+const { buildSystemRpc } = require('../../../../src/api/rpc/system.js');
+const configsQueries = require('../../../../src/db/configs.js');
 
 const POOL_SIZE = 10;
 const CALLERS = 48;

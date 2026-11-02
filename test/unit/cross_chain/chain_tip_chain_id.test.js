@@ -185,10 +185,13 @@ function registerChainTipCompatibilityTests() {
             try {
                 await methods.pushchaintip({ coin: bad, network: 'regtest', block_height: 131, block_time: 1757298240 });
             } catch (err) { thrown = err; }
-            // The falsy coins are caught one guard earlier and keep their own
-            // in-result shape; only a PRESENT but unknown coin reaches validateChain.
+            // The falsy coins are caught one guard earlier with their own message;
+            // only a PRESENT but unknown coin reaches validateChain. Both throw, so the
+            // refusal lands in the error slot rather than the result.
             if (!bad) {
-                expect(thrown, 'a missing coin is a returned refusal, not a throw').to.equal(null);
+                expect(thrown, 'a missing coin must throw so the refusal lands in the error slot').to.be.an('error');
+                expect(thrown.code).to.equal(-32602);
+                expect(thrown.message).to.equal('coin is required');
             } else {
                 expect(thrown, 'an unknown coin must throw so the refusal lands in the error slot').to.be.an('error');
                 expect(thrown.code).to.equal(-32602);

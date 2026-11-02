@@ -230,3 +230,142 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
     describe('JSON-RPC batch cap', jsonRpcBatchCapSuite1);
 
 }
+
+// Memory amplification through batched getpricesnapshots pages.
+//
+// The batch cap bounds members per call, not what each member reads: unbounded, one
+// 20-member batch at limit=10000 reads 200,000 rows (about 174 MB of JSON). The bound
+// is the hub-wide in-flight gate on getpricesnapshots, which sheds members past it at
+// admission, so a batch serializes at most the gate's worth of full pages and
+// concurrent batches share that one budget.
+//
+// The full chain is rebuilt from this service's own dependencies: express JSON
+// parsing, the batch guard, the body shim and express-json-rpc-router over the real
+// oracle handlers, with only the hub's page read stubbed.
+{
+    const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
+
+    const BATCH = 20;
+    const PAGE = 10000;
+    const SNAPSHOT_GATE = 3;   // the oracle gate's default in-flight bound
+    const RATE_LIMIT_CODE = -32029;
+
+    // A hub whose page reads build a full PAGE of rows and hold them across a
+    // scheduler turn, the way a pool read keeps its result live until it resolves.
+    // The gate admits or sheds every batch member before its first await, so one
+    // turn is enough to keep the admitted reads in flight together.
+    function rowCountingHub() {
+        const state = { reads: 0, rows: 0, inFlight: 0, peak: 0 };
+        const hub = {
+            network: 'regtest',
+            async getPriceSnapshots(limit) {
+                state.reads++;
+                state.inFlight++;
+                state.peak = Math.max(state.peak, state.inFlight);
+                try {
+                    const rows = Array.from({ length: limit }, (_, i) => ({ id: i, coin_pair: 'BTC/USD', price: '1.00' }));
+                    state.rows += rows.length;
+                    await new Promise((r) => setTimeout(r, 0));
+                    return rows;
+                } finally {
+                    state.inFlight--;
+                }
+            },
+            async oracleMaxAgeSecondsInForce() { return 600; }
+        };
+        return { hub, state };
+    }
+
+    function buildSnapshotApp(hub) {
+        const app = express();
+        app.use(express.json({ limit: '1mb' }));
+        app.use(makeRpcBatchGuard(CAP));
+        app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
+        app.use(jsonRouter({ methods: buildOracleRpc({ hub, hubConfig: {} }) }));
+        return app;
+    }
+
+    async function postMany(app, bodies) {
+        const server = http.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const port = server.address().port;
+        try {
+            return await Promise.all(bodies.map(async (body) => {
+                const res = await fetch(`http://127.0.0.1:${port}/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return { status: res.status, text: await res.text() };
+            }));
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    }
+
+    const snapshotBatch = (limit) => Array.from({ length: BATCH }, (_, i) =>
+        ({ jsonrpc: '2.0', id: i, method: 'getpricesnapshots', params: { limit } }));
+
+    function splitMembers(text) {
+        const members = JSON.parse(text);
+        assert.ok(Array.isArray(members), 'a batch answers with an array');
+        const served = members.filter((m) => Array.isArray(m.result));
+        const shed = members.filter((m) => m.result && m.result.code === RATE_LIMIT_CODE);
+        return { members, served, shed };
+    }
+
+    const boundsOneFullPageBatch = async () => {
+        const { hub, state } = rowCountingHub();
+        const [r] = await postMany(buildSnapshotApp(hub), [snapshotBatch(PAGE)]);
+        assert.strictEqual(r.status, 200);
+        const { members, served, shed } = splitMembers(r.text);
+        assert.strictEqual(members.length, BATCH, 'every member gets an answer');
+        assert.ok(served.length >= 1, 'the batch still serves pages');
+        assert.ok(served.length <= SNAPSHOT_GATE, 'served ' + served.length + ' full pages in one batch');
+        assert.strictEqual(served.length + shed.length, BATCH, 'every unserved member is shed in-band');
+        for (const m of shed) assert.ok(m.result.data.retryAfterSeconds >= 1);
+        assert.ok(state.rows <= SNAPSHOT_GATE * PAGE,
+            'one request materialized ' + state.rows + ' rows (unbounded: ' + BATCH * PAGE + ')');
+        // One full page serializes to roughly 0.5 MB with these rows; the unbounded
+        // batch was 20 of them.
+        const onePage = JSON.stringify(served[0].result).length;
+        assert.ok(r.text.length < (SNAPSHOT_GATE + 1) * onePage,
+            'response was ' + r.text.length + ' bytes for a page of ' + onePage);
+    };
+
+    const boundsConcurrentFullPageBatches = async () => {
+        const clients = 10;
+        const { hub, state } = rowCountingHub();
+        const results = await postMany(buildSnapshotApp(hub), Array.from({ length: clients }, () => snapshotBatch(PAGE)));
+        let servedTotal = 0;
+        for (const r of results) {
+            assert.strictEqual(r.status, 200);
+            const { members, served, shed } = splitMembers(r.text);
+            assert.strictEqual(members.length, BATCH);
+            assert.strictEqual(served.length + shed.length, BATCH);
+            servedTotal += served.length;
+        }
+        assert.ok(state.peak <= SNAPSHOT_GATE,
+            'concurrent batches held ' + state.peak + ' full pages live at once');
+        assert.strictEqual(state.reads, servedTotal, 'a shed member never reaches the page read');
+        assert.ok(servedTotal < clients * BATCH, 'concurrent batches were all served in full');
+    };
+
+    const servesASingleFullPageCall = async () => {
+        const { hub, state } = rowCountingHub();
+        const [r] = await postMany(buildSnapshotApp(hub),
+            [{ jsonrpc: '2.0', id: 1, method: 'getpricesnapshots', params: { limit: PAGE } }]);
+        assert.strictEqual(r.status, 200);
+        const body = JSON.parse(r.text);
+        assert.ok(Array.isArray(body.result));
+        assert.strictEqual(body.result.length, PAGE);
+        assert.strictEqual(state.rows, PAGE);
+    };
+
+    describe('JSON-RPC batched getpricesnapshots memory bound', function () {
+        this.timeout(20000);
+        it('a 20-member batch at limit 10000 materializes at most the in-flight gate of full pages', boundsOneFullPageBatch);
+        it('ten concurrent full-page batches share one in-flight budget', boundsConcurrentFullPageBatches);
+        it('a single call at limit 10000 is still served in full', servesASingleFullPageCall);
+    });
+}

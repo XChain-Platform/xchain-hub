@@ -12,7 +12,7 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
+const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
 
 const sigs = (...pubkeys) => JSON.stringify(pubkeys.map(pubkey => ({ pubkey, sig: 'sig' })));
 const validators = (...pubkeys) => pubkeys.map(pubkey => ({ pubkey }));

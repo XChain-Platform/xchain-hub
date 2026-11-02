@@ -16,8 +16,8 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
-const finders = require('../../../src/db/prices/newest_page.js');
+const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
+const finders = require('../../../../src/db/prices/newest_page.js');
 
 const FORMS = [['50', 50], ['0050', 50], ['050', 50], ['1', 1], ['10000', 10000]];
 

@@ -76,12 +76,17 @@ function envelope(r) {
     return body;
 }
 
-describe('hub JSON body parser errors', () => {
+// Boots the hub transport stack with NODE_ENV cleared (the leak-prone setting) for one describe block.
+function useBootedTransport() {
     before(async () => { savedEnv = process.env.NODE_ENV; delete process.env.NODE_ENV; await boot(); });
     after((done) => {
         if (savedEnv !== undefined) process.env.NODE_ENV = savedEnv;
         server.close(() => done());
     });
+}
+
+describe('hub JSON body parser errors', () => {
+    useBootedTransport();
 
     it('answers malformed JSON with a 400 JSON body and no internals', async () => {
         for (const path of ['/echo', '/hub-db/snapshot/price_snapshots']) {
@@ -115,6 +120,10 @@ describe('hub JSON body parser errors', () => {
         expect(r.status).to.equal(200);
         expect(JSON.parse(r.text)).to.deep.equal({ got: { a: 1 } });
     });
+});
+
+describe('hub JSON body parser errors', () => {
+    useBootedTransport();
 
     it('answers an undecodable gzip or deflate body with a clean JSON 400', async () => {
         for (const enc of ['gzip', 'deflate']) {
