@@ -57,10 +57,14 @@ function bodyParserErrorHandler(err, req, res, next) {
     const status = err && err.status;
     const clientError = Number.isInteger(status) && status > 399 && status < 500;
     if(res.headersSent || !clientError) return next(err);
+    // Every refusal on this endpoint is a JSON-RPC error envelope, so a client reading
+    // error.code never gets undefined: -32700 for undecodable JSON, -32600 for the rest.
+    const parseFailed = status !== 413 && err.type === 'entity.parse.failed';
     const message = status === 413 ? 'request entity too large'
-                  : err.type === 'entity.parse.failed' ? 'invalid JSON body'
+                  : parseFailed ? 'invalid JSON body'
                   : 'invalid request body';
-    res.status(status).json({ error: message });
+    res.status(status).json({ jsonrpc: '2.0', id: null,
+        error: { code: parseFailed ? -32700 : -32600, message } });
 }
 
 function installTransportMiddleware(app, ctx) {

@@ -67,6 +67,15 @@ function post(path, body, extraHeaders) {
     });
 }
 
+// Parses a refusal and asserts the JSON-RPC invariant: error.code is always a number.
+function envelope(r) {
+    const body = JSON.parse(r.text);
+    expect(body.error.code).to.be.a('number');
+    expect(body.error.message).to.be.a('string');
+    expect(r.text).to.not.match(/<html|<pre>|\bat .*\(/);
+    return body;
+}
+
 describe('hub JSON body parser errors', () => {
     before(async () => { savedEnv = process.env.NODE_ENV; delete process.env.NODE_ENV; await boot(); });
     after((done) => {
@@ -81,7 +90,7 @@ describe('hub JSON body parser errors', () => {
             expect(r.type).to.match(/application\/json/);
             expect(r.type).to.not.match(/text\/html/);
             expect(r.text).to.not.match(LEAK);
-            expect(JSON.parse(r.text)).to.have.property('error');
+            expect(envelope(r)).to.deep.equal({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'invalid JSON body' } });
         }
     });
 
@@ -90,7 +99,15 @@ describe('hub JSON body parser errors', () => {
         expect(r.status).to.equal(413);
         expect(r.type).to.match(/application\/json/);
         expect(r.text).to.not.match(LEAK);
-        expect(JSON.parse(r.text)).to.have.property('error');
+        expect(envelope(r)).to.deep.equal({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'request entity too large' } });
+    });
+
+    it('answers a valid-but-non-envelope top level or unsupported encoding with the same envelope', async () => {
+        const r = await post('/echo', '{"a":1}', { 'content-encoding': 'zstd' });
+        expect(r.status).to.be.within(400, 415);
+        expect(envelope(r).error.code).to.equal(-32600);
+        const r2 = await post('/echo', 'x', { 'content-encoding': 'gzip, gzip' });
+        expect(envelope(r2).error.code).to.equal(-32600);
     });
 
     it('still passes a valid JSON body to the route', async () => {
@@ -104,7 +121,7 @@ describe('hub JSON body parser errors', () => {
             const r = await post('/echo', 'notgzip', { 'content-encoding': enc });
             expect(r.status, enc).to.equal(400);
             expect(r.type, enc).to.match(/application\/json/);
-            expect(JSON.parse(r.text)).to.deep.equal({ error: 'invalid request body' });
+            expect(envelope(r)).to.deep.equal({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request body' } });
             expect(r.text).to.not.match(/node:zlib|node:internal|<pre>/);
             expect(r.text).to.not.match(LEAK);
         }
