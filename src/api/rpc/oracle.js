@@ -146,7 +146,10 @@ function priceReadsRpc(ctx) {
             if (status !== undefined && status !== 'finalized' && status !== 'all')
                 return {error: "status must be 'finalized' or 'all'"};
             try {
-                let snapshots = await hub.getPriceSnapshots(limit || 50, status);
+                // validateLimit admits digit strings; hand the DB layer the parsed
+                // number, since a string binds as a quoted `LIMIT ?` and MariaDB
+                // rejects it with a syntax error.
+                let snapshots = await hub.getPriceSnapshots(limit ? Number(limit) : 50, status);
                 if (with_quorum_margin) snapshots = await addQuorumMargins(hub, snapshots);
                 // with_watermark is optional and additive: health consumers (the
                 // dashboard's pairHealth) need a server-clock watermark so row age
