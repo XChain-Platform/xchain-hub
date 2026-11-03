@@ -225,7 +225,9 @@ function requestPath (req) {
  * @returns {boolean} true when the request is under the snapshot prefix
  */
 function isSnapshotRequest (req) {
-    const path = requestPath(req);
+    // Express matches routes case-insensitively, so the prefix must too, or a mixed-case
+    // path reaches the snapshot limiter and is also charged by the general one.
+    const path = requestPath(req).toLowerCase();
     if (!path.startsWith(SNAPSHOT_PATH_PREFIX)) return false;
     const next = path.charAt(SNAPSHOT_PATH_PREFIX.length);
     return next === '' || next === '/';
