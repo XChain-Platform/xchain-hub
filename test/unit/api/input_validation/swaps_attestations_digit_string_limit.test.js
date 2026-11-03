@@ -16,8 +16,8 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const { buildCrossChainRpc } = require('../../../src/api/rpc/cross_chain.js');
-const { buildAttestationRpc } = require('../../../src/api/rpc/attestation.js');
+const { buildCrossChainRpc } = require('../../../../src/api/rpc/cross_chain.js');
+const { buildAttestationRpc } = require('../../../../src/api/rpc/attestation.js');
 
 const FORMS = [['50', 50], ['0050', 50], ['10000', 10000], [50, 50]];
 

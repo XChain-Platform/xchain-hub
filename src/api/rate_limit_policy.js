@@ -76,6 +76,7 @@
  *    `limit` parameter.
  */
 
+const net = require('net');
 const { rateLimitKey } = require('./rate_limit_tiers.js');
 
 // JSON-RPC reserves -32000..-32099 for server-defined errors. -32029 is the
@@ -117,7 +118,9 @@ function v4ToInt (ip) {
     if (parts.length !== 4) return null;
     let n = 0;
     for (const part of parts) {
-        if (!/^\d{1,3}$/.test(part)) return null;
+        // No zero-padded octets: inet_aton reads 010 as octal 8, strict parsers reject it,
+        // and a spelling the parsers disagree on must not be read as private.
+        if (!/^(?:0|[1-9]\d{0,2})$/.test(part)) return null;
         const octet = Number(part);
         if (octet > 255) return null;
         n = (n * 256) + octet;
@@ -139,8 +142,9 @@ function normalizeIp (ip) {
     if (!out) return '';
     const zone = out.indexOf('%');
     if (zone !== -1) out = out.slice(0, zone);
-    // ::ffff:127.0.0.1 and the (rarer) ::127.0.0.1 both carry a v4 address.
-    const mapped = out.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
+    // ::ffff:127.0.0.1 carries a v4 address. The deprecated IPv4-compatible ::a.b.c.d is
+    // deliberately left alone so it falls through to the closed IPv6 branch.
+    const mapped = out.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
     if (mapped) return mapped[1];
     return out;
 }
@@ -173,7 +177,9 @@ function isLocalCaller (ip) {
         return false;
     }
 
-    if (addr.includes(':')) {
+    // net.isIPv6 rejects every non-address string, so trailing junk after a fc/fd/fe8-feb
+    // prefix can no longer ride the prefix test.
+    if (net.isIPv6(addr)) {
         // fc00::/7 unique-local (docker's IPv6 bridges live here) and
         // fe80::/10 link-local. Both are unroutable on the public internet.
         const head = parseInt(addr.split(':')[0] || '', 16);

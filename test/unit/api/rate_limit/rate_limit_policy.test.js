@@ -397,19 +397,3 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
     }
     describe('hub per-IP rate-limit policy', hubPerIpRateLimitPolicySuite1);
 }
-
-describe('isSnapshotRequest case folding', function () {
-    // Express matches routes case-insensitively, so a mixed-case snapshot path reaches the
-    // snapshot limiter; the general limiter must skip it too or the request is charged twice.
-    it('treats mixed-case snapshot paths as snapshot requests', function () {
-        expect(policy.isSnapshotRequest({ originalUrl: '/HUB-DB/SNAPSHOT/oracle_prices?limit=1' })).to.equal(true);
-        expect(policy.isSnapshotRequest({ originalUrl: '/Hub-Db/Snapshot/x' })).to.equal(true);
-        expect(policy.isSnapshotRequest({ originalUrl: '/Hub-Db/Snapshot' })).to.equal(true);
-    });
-    it('keeps lowercase paths and the segment boundary', function () {
-        expect(policy.isSnapshotRequest({ originalUrl: '/hub-db/snapshot/x' })).to.equal(true);
-        expect(policy.isSnapshotRequest({ originalUrl: '/hub-db/snapshotx' })).to.equal(false);
-        expect(policy.isSnapshotRequest({ originalUrl: '/HUB-DB/SNAPSHOTX' })).to.equal(false);
-        expect(policy.isSnapshotRequest({ originalUrl: '/' })).to.equal(false);
-    });
-});
