@@ -257,8 +257,8 @@ function rateLimitMessage (facts) {
 }
 
 // A throttled JSON-RPC request still deserves its id echoed back, so a client
-// correlating responses can retire the right call. express.json() runs before
-// the limiter in api.js, so req.body is already parsed here. A batch array has
+// correlating responses can retire the right call. The limiter runs before
+// the body parser, so the id is only known when a surcharge refuses after parsing. A batch array has
 // no single id; JSON-RPC says use null, and so do we.
 function requestId (req) {
     const body = req && req.body;

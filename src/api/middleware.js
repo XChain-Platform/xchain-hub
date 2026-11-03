@@ -14,9 +14,11 @@
  *
  * XChain Hub - the express middleware stack ahead of every route.
  *
- * Order is the auth boundary and is kept exactly: trust proxy, helmet, the JSON
- * body parser, CORS, the three per-IP rate limits, the observability surface and
- * hub gauges, then the x-api-key tier gate and the public-port allowlist.
+ * Order is the auth boundary and is kept exactly: trust proxy, helmet, CORS, the
+ * three per-IP rate limits, the JSON body parser, the batch surcharges, the
+ * observability surface and hub gauges, then the x-api-key tier gate and the
+ * public-port allowlist. The limits count a request before its body is parsed,
+ * so a malformed or oversize POST that the parser answers is still metered.
  *
  ********************************************************************/
 
@@ -93,10 +95,12 @@ function installTransportMiddleware(app, ctx) {
     app.set('trust proxy', trustProxy);
 
     app.use(helmet());
+    app.use(cors({ origin: CORS_ORIGIN }));
+    // Counting runs ahead of the parser; only the batch surcharge needs the parsed body.
+    const surcharges = installRateCounters(app, ctx);
     app.use(express.json());
     app.use(bodyParserErrorHandler);
-    app.use(cors({ origin: CORS_ORIGIN }));
-    installRateLimits(app, ctx);
+    surcharges.forEach((surcharge) => app.use(surcharge));
 }
 
 // One line per minute at most, per bucket: a throttled client retries hard by definition,
@@ -129,17 +133,24 @@ function throttleReporter(logger, envName) {
 // loopback/private exemption) live in the policy module so they are unit-testable; api.js
 // self-starts on require, so nothing declared inline here could ever be asserted against.
 function installRateLimits(app, ctx) {
+    installRateCounters(app, ctx).forEach((surcharge) => app.use(surcharge));
+}
+
+// Mounts the limiters, which read only the address and headers, and returns the batch
+// surcharges for the caller to mount once the body is parsed.
+function installRateCounters(app, ctx) {
+    const surcharges = [];
     const { hubConfig, logger, rateLimit, HUB_RATE_LIMIT_RPM, HUB_RATE_LIMIT_EXEMPT_LOCAL } = ctx;
     const snapshotRpm = parseSnapshotRpm(hubConfig.HUB_SNAPSHOT_RATE_LIMIT_RPM);
     const authRpm = parseAuthRpm(hubConfig.HUB_AUTH_RATE_LIMIT_RPM, HUB_RATE_LIMIT_RPM);
     const isAuthenticated = authenticatedCaller(ctx);
-    installRpcTier(app, rateLimit, {
+    installRpcTier(app, rateLimit, surcharges, {
         rpm:         HUB_RATE_LIMIT_RPM,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
         skipPath:    (req) => isSnapshotRequest(req) || isAuthenticated(req),
         onLimited:   throttleReporter(logger, 'HUB_RATE_LIMIT_RPM')
     });
-    installRpcTier(app, rateLimit, {
+    installRpcTier(app, rateLimit, surcharges, {
         rpm:         authRpm,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
         skipPath:    (req) => isSnapshotRequest(req) || !isAuthenticated(req),
@@ -162,17 +173,18 @@ function installRateLimits(app, ctx) {
         (HUB_RATE_LIMIT_EXEMPT_LOCAL
             ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
             : ' (enforced for every caller, including loopback and private-range)'));
+    return surcharges;
 }
 
-// One JSON-RPC tier: its limiter over a store the surcharge can charge in bulk, then the
-// surcharge built from the very same options.
-function installRpcTier(app, rateLimit, tier) {
+// One JSON-RPC tier: its limiter over a store the surcharge can charge in bulk. The
+// surcharge is built from the very same options and handed back for later mounting.
+function installRpcTier(app, rateLimit, surcharges, tier) {
     const opts = Object.assign(buildRateLimitOptions(Object.assign({ windowMs: 60 * 1000 }, tier)), {
         store:        new FixedWindowStore(),
         keyGenerator: rateLimitKey
     });
     app.use(rateLimit(opts));
-    app.use(batchSurcharge(opts));
+    surcharges.push(batchSurcharge(opts));
 }
 
 function installMetrics(app, ctx) {
