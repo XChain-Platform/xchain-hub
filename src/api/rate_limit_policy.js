@@ -230,6 +230,31 @@ function isSnapshotRequest (req) {
 }
 
 /**
+ * Does this request get the snapshot budget? Only a bodyless GET or HEAD under the
+ * snapshot prefix does. The prefix alone is not enough: the JSON-RPC router is mounted
+ * at the root after the snapshot routes, so a JSON-RPC body sent to any snapshot path
+ * no page route answers (POST to /hub-db/snapshot/x, or a GET with a body to an unknown
+ * table) is dispatched as JSON-RPC. Judged on the prefix, such a call was charged one
+ * snapshot token per HTTP request with no batch surcharge, escaping the public tier.
+ * A JSON-RPC call always carries a body and a page read never does, so this split
+ * needs no list of table routes that could drift. The limiters run before the body is
+ * parsed, so the body is judged by its headers: any Transfer-Encoding or a non-zero
+ * Content-Length counts as a body.
+ *
+ * @param {*} req - an express request
+ * @returns {boolean} true only for a bodyless GET or HEAD under the snapshot prefix
+ */
+function isSnapshotPageRead (req) {
+    if (!isSnapshotRequest(req)) return false;
+    const method = typeof req.method === 'string' ? req.method.toUpperCase() : '';
+    if (method !== 'GET' && method !== 'HEAD') return false;
+    const headers = req.headers || {};
+    if (headers['transfer-encoding'] !== undefined) return false;
+    const length = headers['content-length'];
+    return length === undefined || String(length).trim() === '0';
+}
+
+/**
  * Read the operator's bootstrap-budget setting. Anything unset, unparseable or
  * non-positive falls back to the measured default above, because the failure this
  * budget exists to prevent is a mirror that never finishes draining.
@@ -333,6 +358,7 @@ module.exports = {
     SNAPSHOT_PATH_PREFIX,
     buildRateLimitOptions,
     isLocalCaller,
+    isSnapshotPageRead,
     isSnapshotRequest,
     normalizeIp,
     parseExemptLocal,

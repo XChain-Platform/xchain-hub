@@ -25,7 +25,7 @@
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults. The mirror
 // bootstrap and key-holding callers are metered separately; see installRateLimits below.
-const { buildRateLimitOptions, isSnapshotRequest, parseSnapshotRpm,
+const { buildRateLimitOptions, isSnapshotPageRead, parseSnapshotRpm,
         SNAPSHOT_PATH_PREFIX } = require('./rate_limit_policy.js');
 const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
 const FixedWindowStore = require('./rate_limit_store.js');
@@ -127,8 +127,11 @@ function throttleReporter(logger, envName) {
 // mirror bootstrap alone at HUB_SNAPSHOT_RATE_LIMIT_RPM (600), sized to the drain that
 // wedged the 2026-09-16 fleet roll; src/api/rate_limit_policy.js has the numbers.
 //
-// The two JSON-RPC tiers skip the snapshot family and each other, so a request charges
-// exactly one bucket. Each is followed by its batch surcharge, so a batch costs one token
+// The two JSON-RPC tiers skip snapshot page reads and each other, and the snapshot bucket
+// skips everything that is not a page read, so a request charges exactly one bucket. A
+// page read is a bodyless GET or HEAD under the prefix (isSnapshotPageRead): anything
+// else sent there, such as a JSON-RPC body the root router would dispatch, is metered
+// by the JSON-RPC tiers with their batch surcharge, never by the larger snapshot budget. Each is followed by its batch surcharge, so a batch costs one token
 // per call rather than one per HTTP request. The options (the 429 body, the
 // loopback/private exemption) live in the policy module so they are unit-testable; api.js
 // self-starts on require, so nothing declared inline here could ever be asserted against.
@@ -147,24 +150,25 @@ function installRateCounters(app, ctx) {
     installRpcTier(app, rateLimit, surcharges, {
         rpm:         HUB_RATE_LIMIT_RPM,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
-        skipPath:    (req) => isSnapshotRequest(req) || isAuthenticated(req),
+        skipPath:    (req) => isSnapshotPageRead(req) || isAuthenticated(req),
         onLimited:   throttleReporter(logger, 'HUB_RATE_LIMIT_RPM')
     });
     installRpcTier(app, rateLimit, surcharges, {
         rpm:         authRpm,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
-        skipPath:    (req) => isSnapshotRequest(req) || !isAuthenticated(req),
+        skipPath:    (req) => isSnapshotPageRead(req) || !isAuthenticated(req),
         envName:     'HUB_AUTH_RATE_LIMIT_RPM',
         onLimited:   throttleReporter(logger, 'HUB_AUTH_RATE_LIMIT_RPM')
     });
     // Answers in the REST `{ error }` shape its routes already use for 401 and 500, not in
-    // a JSON-RPC envelope: nothing on this path speaks JSON-RPC.
+    // a JSON-RPC envelope: it meters only page reads, and none of those speaks JSON-RPC.
     app.use(SNAPSHOT_PATH_PREFIX, rateLimit(buildRateLimitOptions({
         rpm:             snapshotRpm,
         windowMs:        60 * 1000,
         exemptLocal:     HUB_RATE_LIMIT_EXEMPT_LOCAL,
         envName:         'HUB_SNAPSHOT_RATE_LIMIT_RPM',
         jsonRpcEnvelope: false,
+        skipPath:        (req) => !isSnapshotPageRead(req),
         onLimited:       throttleReporter(logger, 'HUB_SNAPSHOT_RATE_LIMIT_RPM')
     })));
     logger.info('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP, ' +

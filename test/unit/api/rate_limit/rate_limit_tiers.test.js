@@ -31,6 +31,7 @@ const sinon     = require('sinon');
 const { installRateLimits } = require('../../../../src/api/middleware.js');
 const { DEFAULT_AUTH_RPM, authenticatedCaller, batchCost, parseAuthRpm } = require('../../../../src/api/rate_limit_tiers.js');
 const FixedWindowStore = require('../../../../src/api/rate_limit_store.js');
+const { isSnapshotPageRead } = require('../../../../src/api/rate_limit_policy.js');
 
 const PUBLIC_IP = '203.0.113.7';
 const HUB_KEY   = 'hub-key-for-tests';
@@ -46,15 +47,19 @@ function boot(opts) {
     app.set('trust proxy', 'loopback');
     app.use(express.json());
     installRateLimits(app, {
-        hubConfig: { HUB_AUTH_RATE_LIMIT_RPM: opts.authRpm },
+        hubConfig: { HUB_AUTH_RATE_LIMIT_RPM: opts.authRpm, HUB_SNAPSHOT_RATE_LIMIT_RPM: opts.snapshotRpm },
         logger: { info() {}, warn() {} },
         rateLimit,
         HUB_API_KEY: opts.keyless ? '' : HUB_KEY,
         HUB_RATE_LIMIT_RPM: opts.rpm === undefined ? 100 : opts.rpm,
         HUB_RATE_LIMIT_EXEMPT_LOCAL: true
     });
-    app.post('/', (req, res) => {
-        const calls = Array.isArray(req.body) ? req.body : [req.body];
+    // As in server.js: the snapshot page routes first, then a JSON-RPC dispatcher mounted
+    // at the root for every method and path, so a JSON-RPC body sent to a snapshot path no
+    // page route answers is dispatched like one sent to /.
+    app.get('/hub-db/snapshot/price_snapshots', (req, res) => res.json({ rows: [], count: 0 }));
+    app.use((req, res) => {
+        const calls = Array.isArray(req.body) ? req.body : [req.body || {}];
         handled += calls.length;
         res.json(calls.map((c) => ({ jsonrpc: '2.0', id: c.id, result: 'ok' })));
     });
@@ -71,22 +76,25 @@ function shutdown() {
 }
 
 function post(payload, headers) {
-    const body = JSON.stringify(payload);
+    return send('POST', '/', payload, headers);
+}
+
+// One request from PUBLIC_IP; payload undefined sends no body at all, as a mirror's page read.
+function send(method, path, payload, headers) {
+    const body = payload === undefined ? null : JSON.stringify(payload);
+    const bodyHeaders = body === null ? {}
+        : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) };
     return new Promise((resolve, reject) => {
         const req = http.request({
-            hostname: '127.0.0.1', port, path: '/', method: 'POST',
-            headers: Object.assign({
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(body),
-                'X-Forwarded-For': PUBLIC_IP
-            }, headers || {})
+            hostname: '127.0.0.1', port, path, method,
+            headers: Object.assign(bodyHeaders, { 'X-Forwarded-For': PUBLIC_IP }, headers || {})
         }, (res) => {
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
             res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
         });
         req.on('error', reject);
-        req.write(body);
+        if (body !== null) req.write(body);
         req.end();
     });
 }
@@ -238,9 +246,85 @@ function storeSuite() {
     });
 }
 
+// The escape these guard: the JSON-RPC tiers skipped every path under /hub-db/snapshot
+// and the 600/min snapshot bucket metered it per HTTP request, so a JSON-RPC body POSTed
+// to /hub-db/snapshot/x was dispatched by the root router at one snapshot token per
+// request, batch or not: 600 x 20 calls a minute per IP against a public tier of 100.
+function snapshotPathSuite() {
+    const PING = { jsonrpc: '2.0', id: 7, method: 'ping', params: [] };
+
+    for (const path of ['/hub-db/snapshot/x', '/hub-db/snapshot', '/hub-db/snapshot/price_snapshots']) {
+        it('meters a JSON-RPC call POSTed to ' + path + ' on the public tier', async function () {
+            await boot({ keyless: true });
+            const res = await send('POST', path, PING);
+            expect(res.status).to.equal(200);
+            expect(res.headers['ratelimit-limit']).to.equal('100');
+            expect(res.headers['ratelimit-remaining']).to.equal('99');
+            expect(handled).to.equal(1);
+            const after = await post(healthCall(1));
+            expect(after.headers['ratelimit-remaining']).to.equal('98');
+        });
+    }
+
+    it('meters a GET with a JSON-RPC body to an unknown snapshot table on the public tier', async function () {
+        await boot({ keyless: true });
+        const res = await send('GET', '/hub-db/snapshot/none', PING);
+        expect(res.headers['ratelimit-limit']).to.equal('100');
+        expect((await post(healthCall(1))).headers['ratelimit-remaining']).to.equal('98');
+    });
+
+    it('charges a batch on a snapshot path per call, and never the snapshot bucket', async function () {
+        await boot({ keyless: true });
+        expect((await send('POST', '/hub-db/snapshot/x', batchOf(20))).status).to.equal(200);
+        expect(handled).to.equal(20);
+        expect((await post(healthCall(1))).headers['ratelimit-remaining']).to.equal('79');
+        const page = await send('GET', '/hub-db/snapshot/price_snapshots?since_id=0&limit=10000');
+        expect(page.headers['ratelimit-limit']).to.equal('600');
+        expect(page.headers['ratelimit-remaining']).to.equal('599');
+    });
+
+    it('refuses the 101st ping on a snapshot path at the shipped public tier', async function () {
+        await boot({ keyless: true });
+        for (let i = 1; i <= 100; i++) {
+            expect((await send('POST', '/hub-db/snapshot/x', healthCall(i))).status, 'call ' + i).to.equal(200);
+        }
+        const refused = await send('POST', '/hub-db/snapshot/x', healthCall(101));
+        expect(refused.status).to.equal(429);
+        expect(JSON.parse(refused.body).error.code).to.equal(-32029);
+        expect(handled).to.equal(100);
+    });
+
+    it('still meters a bodyless page read on the snapshot bucket alone', async function () {
+        await boot({ keyless: true });
+        const page = await send('GET', '/hub-db/snapshot/price_snapshots?since_id=0&limit=10000');
+        expect(page.status).to.equal(200);
+        expect(page.headers['ratelimit-limit']).to.equal('600');
+        expect(page.headers['ratelimit-remaining']).to.equal('599');
+        expect((await post(healthCall(1))).headers['ratelimit-remaining']).to.equal('99');
+    });
+}
+
+function snapshotPageReadSuite() {
+    it('classifies a page read by method, prefix and the absence of a body', function () {
+        const read = (method, originalUrl, headers) => isSnapshotPageRead({ method, originalUrl, headers: headers || {} });
+        expect(read('GET', '/hub-db/snapshot/price_snapshots?since_id=0')).to.equal(true);
+        expect(read('HEAD', '/hub-db/snapshot/oracle_prices')).to.equal(true);
+        expect(read('GET', '/hub-db/snapshot/price_snapshots', { 'content-length': '0' })).to.equal(true);
+        expect(read('POST', '/hub-db/snapshot/x')).to.equal(false);
+        expect(read('GET', '/hub-db/snapshot/none', { 'content-length': '58' })).to.equal(false);
+        expect(read('GET', '/hub-db/snapshot/none', { 'transfer-encoding': 'chunked' })).to.equal(false);
+        expect(read('GET', '/hub-db/snapshotting')).to.equal(false);
+        expect(read('GET', '/')).to.equal(false);
+        expect(isSnapshotPageRead({ originalUrl: '/hub-db/snapshot/x' })).to.equal(false);
+        expect(isSnapshotPageRead(undefined)).to.equal(false);
+    });
+}
+
 describe('hub JSON-RPC rate-limit tiers', function () {
     this.timeout(10000);
     afterEach(shutdown);
+    describe('JSON-RPC sent to a snapshot path', snapshotPathSuite);
+    describe('isSnapshotPageRead', snapshotPageReadSuite);
     describe('batch charging', batchChargingSuite);
     describe('public and authenticated buckets', bucketsSuite);
     describe('rotated hub key', rotatedKeySuite);
