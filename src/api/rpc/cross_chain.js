@@ -19,6 +19,13 @@
 
 const { validateChain, validateLimit, strictInt } = require('../validate');
 
+// validateLimit admits digit strings, but the finders bind the limit into `LIMIT ?`,
+// which MariaDB rejects (errno 1064) when the value is a quoted string. Convert once at
+// the handler, after validation.
+function numericLimit(limit) {
+    return (limit === undefined || limit === null) ? limit : Number(limit);
+}
+
 function buildCrossChainRpc(ctx) {
     return Object.assign({}, crossChainCallRpc(ctx), callListSwapReadsRpc(ctx), swapInitiateRpc(ctx), bridgeInvariantRpc(ctx));
 }
@@ -86,7 +93,7 @@ function callListSwapReadsRpc(ctx) {
             try {
                 return await hub.listCrossChainCalls({
                     sourceChain: source_chain, targetChain: target_chain,
-                    status, phase, limit
+                    status, phase, limit: numericLimit(limit)
                 });
             } catch (err) {
                 return {error: "error fetching cross-chain calls"};
@@ -111,7 +118,7 @@ function callListSwapReadsRpc(ctx) {
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
             try {
-                return await hub.getSwaps(status, limit);
+                return await hub.getSwaps(status, numericLimit(limit));
             } catch (err) {
                 return {error: "error fetching swaps"};
             }

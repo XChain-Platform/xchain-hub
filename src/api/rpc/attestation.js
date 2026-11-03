@@ -100,7 +100,7 @@ function attestationRequestRpc(ctx) {
             try {
                 let cc = hub.getCrossChain();
                 if(!cc) return {error: "cross-chain engine not active"};
-                return await cc.getAttestations(status, limit);
+                return await cc.getAttestations(status, (limit === undefined || limit === null) ? limit : Number(limit));
             } catch (err) {
                 return {error: "error fetching attestations"};
             }
