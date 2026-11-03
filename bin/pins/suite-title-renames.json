@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "test/unit/api/rpc_price_snapshots_quorum_margin.test.js": "test/unit/api/price_snapshots/rpc_price_snapshots_quorum_margin.test.js",
+  "test/unit/api/rpc_price_snapshots_shape.test.js": "test/unit/api/price_snapshots/rpc_price_snapshots_shape.test.js",
   "test/integration/anchor/archive_quorum_tables_recovery.test.js": "test/unit/anchor/archive_quorum_tables_recovery.test.js",
   "note": "Title renames that ride a commit ahead of the deferred at1-suite-titles.json re-pin. Each entry is old title to new title, keyed by the file's current path.",
   "titles": {
