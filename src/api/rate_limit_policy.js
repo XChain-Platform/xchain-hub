@@ -76,6 +76,8 @@
  *    `limit` parameter.
  */
 
+const { rateLimitKey } = require('./rate_limit_tiers.js');
+
 // JSON-RPC reserves -32000..-32099 for server-defined errors. -32029 is the
 // hub's "you are being rate limited" code; clients key retry/backoff on it
 // rather than on the HTTP status, because a proxy can rewrite the status and
@@ -325,6 +327,9 @@ function buildRateLimitOptions (opts) {
         limit,
         standardHeaders: true,
         legacyHeaders: false,
+        // Every bucket keys on the client's canonical address, the snapshot bucket included,
+        // so no limiter built here can fall back to the raw req.ip string.
+        keyGenerator: rateLimitKey,
         skip (req) {
             if (skipPath && skipPath(req)) return true;
             return exemptLocal && isLocalCaller(req && req.ip);
