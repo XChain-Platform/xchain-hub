@@ -25,7 +25,7 @@
  * WHAT THESE TESTS HOLD. Two buckets that cannot starve each other, and a
  * public JSON-RPC surface whose throttle did NOT move as a side effect. The
  * load-bearing assertions drive real express + express-rate-limit through
- * installRateLimits, because the defect was never in an options object: it was
+ * installTransportMiddleware, because the defect was never in an options object: it was
  * in which requests were charged to which budget on the wire.
  *
  **********************************************************************/
@@ -34,9 +34,11 @@
 
 const { expect } = require('chai');
 const express   = require('express');
+const helmet    = require('helmet');
+const cors      = require('cors');
 const rateLimit = require('express-rate-limit');
 const http      = require('http');
-const { installRateLimits } = require('../../../src/api/middleware.js');
+const { installTransportMiddleware } = require('../../../src/api/middleware.js');
 const { buildRateLimitOptions, isSnapshotRequest, parseSnapshotRpm,
         DEFAULT_SNAPSHOT_RPM, RATE_LIMIT_RPC_ERROR_CODE,
         SNAPSHOT_PATH_PREFIX } = require('../../../src/api/rate_limit_policy.js');
@@ -56,12 +58,11 @@ let port   = 0;
 function boot(opts) {
     opts = opts || {};
     const app = express();
-    app.set('trust proxy', 'loopback');
-    app.use(express.json());
-    installRateLimits(app, {
-        hubConfig: { HUB_SNAPSHOT_RATE_LIMIT_RPM: opts.snapshotRpm },
+    installTransportMiddleware(app, {
+        hubConfig: { HUB_TRUST_PROXY: 'loopback', HUB_SNAPSHOT_RATE_LIMIT_RPM: opts.snapshotRpm },
         logger: { info() {}, warn() {} },
-        rateLimit,
+        express, helmet, cors, rateLimit,
+        CORS_ORIGIN: '*',
         HUB_RATE_LIMIT_RPM: opts.rpm === undefined ? 100 : opts.rpm,
         HUB_RATE_LIMIT_EXEMPT_LOCAL: opts.exemptLocal === undefined ? true : opts.exemptLocal
     });
@@ -194,7 +195,7 @@ async function stillThrottlesAPublicJsonRpcCaller() {
     const parsed = JSON.parse(limited.body);
     expect(parsed.error.code).to.equal(RATE_LIMIT_RPC_ERROR_CODE);
     expect(parsed.error.message).to.contain('HUB_RATE_LIMIT_RPM');
-    expect(parsed.id).to.equal(101);
+    expect(parsed.id).to.equal(null);
 }
 
 async function boundsTheSnapshotFamilyToo() {

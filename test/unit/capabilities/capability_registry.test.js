@@ -201,13 +201,13 @@ describe('setQualification()', function () {
     });
 }
 
-function registerRegistryGovernanceSuite() {
-describe('applyGovernanceChange()', function () {
+function registerRegistryBaselineMinStakeSuite() {
+describe('applyMinStakeActivation() at block 0', function () {
         it('updates the in-memory MIN_STAKE for a known capability', function () {
             loadModule();
             let hub = makeHub({ p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: '1000' } } } });
             let reg = new CapabilityRegistry(hub);
-            reg.applyGovernanceChange('price', 'MIN_STAKE', '99999');
+            reg.applyMinStakeActivation('price', 0, '99999');
             expect(reg.getMinStake('price')).to.equal('99999');
         });
 
@@ -215,7 +215,7 @@ describe('applyGovernanceChange()', function () {
             loadModule();
             let hub = makeHub({ p2pConfig: { CAPABILITIES: {} } });
             let reg = new CapabilityRegistry(hub);
-            reg.applyGovernanceChange('cross_chain', 'MIN_STAKE', '5000');
+            reg.applyMinStakeActivation('cross_chain', 0, '5000');
             expect(reg.getMinStake('cross_chain')).to.equal('5000');
         });
 
@@ -223,7 +223,7 @@ describe('applyGovernanceChange()', function () {
             loadModule();
             let hub = makeHub();
             let reg = new CapabilityRegistry(hub);
-            expect(() => reg.applyGovernanceChange('unknown', 'MIN_STAKE', '0')).to.throw('unknown capability');
+            expect(() => reg.applyMinStakeActivation('unknown', 0, '0')).to.throw('unknown capability');
         });
     });
 }
@@ -344,9 +344,9 @@ describe('CapabilityRegistry', function () {
 
     registerRegistryDisabledSuite();
 
-    // ── applyGovernanceChange ───────────────────────────────────────────────
+    // ── applyMinStakeActivation at block 0 ─────────────────────────────────
 
-    registerRegistryGovernanceSuite();
+    registerRegistryBaselineMinStakeSuite();
 
     // ── setQualification ────────────────────────────────────────────────────
 

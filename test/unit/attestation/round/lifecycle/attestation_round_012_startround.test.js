@@ -268,7 +268,13 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             let reg = makeProviderRegistry({
                 getModule: sinon.stub().returns({ fetch: fetchStub }),
                 // Block-anchored config resolved at the request's block.
-                getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' })
+                getAdditionalConfig: sinon.stub().returns({
+                    approved_models: ['claude-opus-4-8'],
+                    judge_model: 'claude-haiku-4-6',
+                    max_completion_tokens: 2048,
+                    default_temperature: 0.25,
+                    prompt_envelope_version: 2
+                })
             });
             let ar  = new AttestationRound(hub, reg);
             sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
@@ -277,6 +283,11 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
             await ar.startRound(makeRequest());
             // fetch() received the block-anchored fetch model (approved_models[0]).
             expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('claude-opus-4-8');
+            expect(fetchStub.firstCall.args[1].pinnedRequestBounds).to.deep.equal({
+                max_completion_tokens: 2048,
+                default_temperature: 0.25,
+                prompt_envelope_version: 2
+            });
             // roundState carries the block-anchored judge model into consensus.
             let state = consensus.propose.firstCall.args[1];
             expect(state.pinnedJudgeModel).to.equal('claude-haiku-4-6');

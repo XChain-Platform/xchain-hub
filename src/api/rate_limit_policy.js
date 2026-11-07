@@ -291,10 +291,8 @@ function rateLimitMessage (facts) {
         '); retry after ' + facts.retryAfterSeconds + 's';
 }
 
-// A throttled JSON-RPC request still deserves its id echoed back, so a client
-// correlating responses can retire the right call. The limiter runs before
-// the body parser, so the id is only known when a surcharge refuses after parsing. A batch array has
-// no single id; JSON-RPC says use null, and so do we.
+// Echo a legal single-call id only when a caller already parsed the body. Production
+// limiters run before parsing and surcharges refuse batches, so wire refusals use null.
 function requestId (req) {
     const body = req && req.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;

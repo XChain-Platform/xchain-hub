@@ -3305,7 +3305,7 @@
       "35f59970f4fe2494c219f489d20432befc9000eeb8a7d574361b1bf33e5ee9fc",
       "d73c7f4f1c5f75183c097735ee71c7b90c6588bc95069b85a6659930ecdd0bb8"
     ],
-    "3be5043f663a62b6": [
+    "f9aedeb1157c5553": [
       "767d729b1ea5e6a36a2696958c7860db48b7f216aca8fac0ee1ce4b1cafaf40d",
       "e15931002503210a47b22fab803158766f46687af21f341d16b863cd6383b236",
       "6d3969f64c0d275b26a53df806865f3bb312f67ce34c4831faa6f80f0a9d9477",
@@ -3322,7 +3322,8 @@
       "d878cf89a642fc9775226007031789a5e98dd2bd10b46f5210787ccc857ee486",
       "ed14ac8f83bca27bc903d7443e696844b024e6e27badb464bffac3a218fab980",
       "15c4d1ac3523462d4f157354b72f712d85a0f55d36ff6cbd253b58f64f7639a0",
-      "e739887d6e31e0471630a0074f2b1cfcc69d5be37ece1ff6f8e2ced2f4c167a0"
+      "e739887d6e31e0471630a0074f2b1cfcc69d5be37ece1ff6f8e2ced2f4c167a0",
+      "b82a87d71c272b02af92180ccba9bdbf5a0832b33d73f12b01aef1d966b25117"
     ],
     "3c371fbaa0366ff7": [
       "f189b61a3c59bbe3c4bac3e9bec11ea8733029ff0dd173b383487db78d63a52c",
@@ -4716,7 +4717,7 @@
       "74153b68e19eb902d277621f6a20d8e72c661dd2a234041a8646b7db2b2ed4bd",
       "111326fb0dcf80c1271bd5c8ff3188a4df8222d72e0cc5be0b9eb1f8e11f3ce1"
     ],
-    "54cf72103339d34e": [
+    "10c47f6112cb7060": [
       "663af96e6adfb8b2e12b2fb3e32544ec28a54209b6b2e50ded4eb834c3d5a821",
       "05cd2910f9f85b0067a3a568496b3e8812e490dcb2c3cee66518105fb6ef37ea",
       "9edbdd0e7e5489c3760b0cb5e6e4fc133fbc7a09ccd0e98f8e7459d2d7b48cd4",
@@ -4727,6 +4728,7 @@
       "ecd17b2b132238c147d5b17fc90ddc75fc9330e66d1d4323ca8d7aa5e1b5904e",
       "f259dbc26a2af93ca32d0d5f3d3fbd2eab5ed7556a12dd3e56f8c1f7e29337f4",
       "bdce4845bccef47b70c552d5fb9a636aef80f973d0b6629386479bc958c4f45a",
+      "5c5f0039137e481a2117c7cfe4767394806115f4dce1b15978fcd27f32411bc2",
       "1b2a5d5e0b1cc7be047724430a0b149ad8301aaf5f6c84949a32b1c58dfc61a3"
     ],
     "558671f16d25e118": [
@@ -12759,10 +12761,14 @@
       "276b3be84c5740265b80fe6860ef45218f49a6c5630f17f7c1acf717231d784f",
       "72ecee9ca6e387d231782c8efe16c016b9dcce7dfeba32540f27c8f9d4cb05c8"
     ],
-    "f3dc382138829f96": [
+    "f991cee7b447797e": [
+      "241351ec948f8e8ac31ef9cbee887f93102feec74ce09e31fb43f72f1d77858e",
+      "7919ef85cd3e2a341b98869652a99e5171715ecd0ff650a6350d1111d342eab4",
       "5361f27adcce571c85e586c062f91016f8315f5f931e8834a5fa50b343cb0094",
       "46afd977b6e4795c2595399d28ce726feccd3864e1eb23fd4a8bec4e3082620b",
       "4cfc2f65b4bd1e366432efaccd2e8960347a8626b243761be1944b24888377dc",
+      "3355907fc3927a35979738a05c509745b32369a15d430f50127ec4baab555c1c",
+      "60d1a889b50e63174a8412d68d18e2c1d310647e7ee28462ca1b20c0e411a68e",
       "8bf5347fd5fc3bb4d6579c682b1755711c4232fac1c892c3df9d0abfa568563a",
       "561f92257d5cfc1be2bff8bb5bed86bf84c7e9efc33acdcaf1ef252a22f85151"
     ],
@@ -13488,7 +13494,7 @@
         "ci:regression"
       ],
       "fileCount": 1110,
-      "titleCount": 9837,
+      "titleCount": 9843,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -13504,7 +13510,7 @@
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
-        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
+        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "10c47f6112cb7060",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
@@ -13558,7 +13564,7 @@
         "test/unit/anchor/publisher/archive/archive_reissue_retry_redraw.test.js": "5c9805f7172fa5a9",
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
-        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "3be5043f663a62b6",
+        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "f9aedeb1157c5553",
         "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "333161467e82fb43",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
@@ -14560,7 +14566,7 @@
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
         "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
-        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f991cee7b447797e",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",
@@ -14657,7 +14663,7 @@
     },
     "test": {
       "fileCount": 1110,
-      "titleCount": 9837,
+      "titleCount": 9843,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14673,7 +14679,7 @@
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
-        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
+        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "10c47f6112cb7060",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
@@ -14727,7 +14733,7 @@
         "test/unit/anchor/publisher/archive/archive_reissue_retry_redraw.test.js": "5c9805f7172fa5a9",
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
-        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "3be5043f663a62b6",
+        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "f9aedeb1157c5553",
         "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "333161467e82fb43",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
@@ -15729,7 +15735,7 @@
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
         "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
-        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f991cee7b447797e",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",
@@ -15773,7 +15779,7 @@
     },
     "test:all": {
       "fileCount": 1196,
-      "titleCount": 10719,
+      "titleCount": 10725,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -15875,7 +15881,7 @@
         "test/unit/activations/xchain_price_activation.test.js": "c9e33737c65cd9e3",
         "test/unit/anchor/anchor_canonical_vectors_vendor.test.js": "d507994c4face7d9",
         "test/unit/anchor/anchor_reward_key_twin_parity.test.js": "f622c5cfc0308da3",
-        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "54cf72103339d34e",
+        "test/unit/anchor/anchor_v3_one_round_fold.test.js": "10c47f6112cb7060",
         "test/unit/anchor/archive_quorum_tables_recovery.test.js": "ea7e5d0a570b1949",
         "test/unit/anchor/checkpoint_cadence_canonical.test.js": "36eda373e198bd6f",
         "test/unit/anchor/checkpoint_engine/archive_publish_writer.test.js": "e106f55cd3316675",
@@ -15929,7 +15935,7 @@
         "test/unit/anchor/publisher/archive/archive_reissue_retry_redraw.test.js": "5c9805f7172fa5a9",
         "test/unit/anchor/publisher/archive/archive_seq_floor_pin.test.js": "850e81fb1e836fbd",
         "test/unit/anchor/publisher/archive/archive_seq_floor_read.test.js": "c049ed4623d599fb",
-        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "3be5043f663a62b6",
+        "test/unit/anchor/publisher/archive/archive_unheld_row_log.test.js": "f9aedeb1157c5553",
         "test/unit/anchor/publisher/archive/archive_wrapper_capability_seam.test.js": "333161467e82fb43",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_build.test.js": "befe10890b297cf9",
         "test/unit/anchor/publisher/archive/bridge_policy/state_anchor_publisher_archive_bridge_policy_verify.test.js": "96beaf6464228024",
@@ -16931,7 +16937,7 @@
         "test/unit/shared/spend/two_phase_guard.test.js": "1408cc922594529b",
         "test/unit/shared/spend/utxo_balance.test.js": "0a89620a527bdc0d",
         "test/unit/validators/capability_snapshot/quorum_margin_anchor_cap.test.js": "974ebb179283fd25",
-        "test/unit/validators/capability_snapshot/single_flight.test.js": "f3dc382138829f96",
+        "test/unit/validators/capability_snapshot/single_flight.test.js": "f991cee7b447797e",
         "test/unit/validators/consensus_input_429_backoff.test.js": "1d6cf4fb4e7d1ebf",
         "test/unit/validators/governance/bounds.test.js": "8355eabd69ba56ba",
         "test/unit/validators/governance/governance.test.js": "bae1dc4aabe8abde",

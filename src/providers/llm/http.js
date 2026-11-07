@@ -23,6 +23,13 @@
 
 const https = require('https');
 
+const VENDOR_CONFIG_ERROR_TYPES = new Set([
+    'authentication_error',
+    'permission_error',
+    'not_found_error',
+    'billing_error'
+]);
+
 // Classify an HTTP status / transport failure as transient (429 rate-limit,
 // 5xx overloaded/gateway, network timeout/reset) vs hard (4xx config/auth/bad
 // request). Two consumers read the verdict, and only one ignores it. On the
@@ -30,12 +37,23 @@ const https = require('https');
 // to provider_error and there is NO in-round retry, so round timing and verdict
 // derivation are unchanged. On the agree() path it is LOAD-BEARING: the judge
 // fallback chain branches on it, where transient=false stops the chain and defers
-// to no_quorum while transient/undefined advances to the next judge model (see
-// the transport-only invariant in agree()). Moving the 429/5xx boundary here
-// therefore changes which vendor errors earn a same-round judge fallback.
+// to no_quorum while transient/undefined advances to the next judge model.
+// Vendor config failures form a separate no-verdict class that also advances;
+// moving either boundary changes which errors earn a same-round fallback.
 function isTransientStatus(status) {
     let s = Number(status);
     return s === 429 || (s >= 500 && s <= 599);
+}
+
+// Identify failures that prevent a vendor from reaching the model at all.
+function isVendorConfigFailure(status, json) {
+    const s = Number(status);
+    if ([401, 402, 403, 404].includes(s)) return true;
+    const detail = json && json.error && typeof json.error === 'object' ? json.error : {};
+    const type = String(detail.type || (json && json.type) || '').toLowerCase();
+    if (VENDOR_CONFIG_ERROR_TYPES.has(type)) return true;
+    const message = String(detail.message || (json && json.message) || '');
+    return s === 400 && /credit balance/i.test(message);
 }
 
 // Mask credentials a vendor or a proxy can echo in an error body (the literal key
@@ -72,6 +90,7 @@ function httpStatusError(res, vendorLabel, json, str, secret) {
     let err = new Error('llm: ' + vendorLabel + ': ' + detail);
     err.httpStatus = res.statusCode;
     err.transient  = isTransientStatus(res.statusCode);
+    if (isVendorConfigFailure(res.statusCode, json)) err.kind = 'vendor_config';
     return err;
 }
 
@@ -161,6 +180,7 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
                         let err = new Error('llm: OpenAI API: ' + redactVendorText(msg, apiKey));
                         err.httpStatus = res.statusCode;
                         err.transient  = isTransientStatus(res.statusCode);
+                        if (isVendorConfigFailure(res.statusCode, json)) err.kind = 'vendor_config';
                         safeReject(err);
                         return;
                     }
@@ -173,6 +193,7 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
                     let err = new Error('llm: OpenAI API: malformed response (' + redactVendorText(str, apiKey).substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
                     err.transient  = isTransientStatus(res.statusCode);
+                    if (isVendorConfigFailure(res.statusCode, null)) err.kind = 'vendor_config';
                     safeReject(err);
                 }
             });
@@ -184,4 +205,4 @@ async function callOpenAi(apiPath, body, apiKey, options, _tokenUsage) {
     });
 }
 
-module.exports = { isTransientStatus, redactVendorText, httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };
+module.exports = { isTransientStatus, isVendorConfigFailure, redactVendorText, httpStatusError, settleOnce, armRequestFailures, tallyTokens, callOpenAi };

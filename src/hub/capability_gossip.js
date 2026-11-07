@@ -110,8 +110,6 @@ class CapabilityGossip {
                 return;
             }
             this.capabilityRegistry.applyMinStakeActivation(parsed.capability, Number(ev.activationBlock), String(ev.newValue));
-        } else {
-            this.capabilityRegistry.applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
         }
         // Drop cached validator-set snapshots for this capability so the next consensus
         // read re-queries the indexer under the new threshold. The cache key already folds

@@ -195,9 +195,9 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
 
         // Classification contract shared with the HTTP transports (providers/llm.js):
         // err.transient=true marks a TRANSPORT-or-VENDOR-availability failure the judge
-        // fallback chain may retry on a different model; err.transient=false marks a
-        // REACHED-MODEL outcome (a verdict, a refusal, a hard vendor error) that must NOT trigger
-        // re-judging, and err.kind='refusal' marks a model refusal, mirroring the
+        // fallback chain may retry on a different model; err.transient=false normally marks a
+        // reached-model outcome that must not trigger re-judging. A vendor_config kind
+        // marks the no-verdict exception, and kind='refusal' mirrors the
         // anthropic_api/openai_api paths so refusal reporting is symmetric across
         // vendors. Without this every bare-Error rejection fell through agree()'s
         // gate and wrongly advanced the chain past a reached-judge outcome.

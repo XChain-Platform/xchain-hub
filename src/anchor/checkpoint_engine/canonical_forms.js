@@ -57,7 +57,7 @@ const forms = {
     // copy and no other repo imports it: the SDK and sync checkpoint.js, the explorer's
     // proofs.js and the indexer's bin/recovery.js re-type the same gate and join inline,
     // and the indexer's ANCHOR FORMAT 0 parse and bridge checkpoint_source.js append the
-    // suffix ungated by design, so an edit here must be mirrored in every one of them.
+    // suffix ungated by design. Keep checkpoint_canonical.json aligned with every edit.
     checkpointRootSuffix(cp){
         if(!forms.isCheckpointCommitmentActive(cp)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine

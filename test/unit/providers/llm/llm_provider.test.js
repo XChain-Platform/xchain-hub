@@ -95,7 +95,7 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
 
     afterEach(function () { nock.cleanAll(); sinon.restore(); });
 
-    async function anthropicMaxTokensFor(additionalConfig) {
+    async function anthropicMaxTokensFor(additionalConfig, fetchOptions) {
         return await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
             const llm = _reloadProvider();
             const warn = sinon.stub(console, 'warn');
@@ -105,7 +105,7 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
             nock('https://api.anthropic.com')
                 .post('/v1/messages', (body) => { capturedBody = body; return true; })
                 .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
-            await llm.fetch(JSON.stringify({ prompt: 'q' }), {});
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), fetchOptions || {});
             return capturedBody.max_tokens;
         });
     }
@@ -116,6 +116,14 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
 function registerMaxTokensBoundTests(anthropicMaxTokensFor) {
     it('installs a valid positive-integer budget', async function () {
         expect(await anthropicMaxTokensFor({ max_completion_tokens: 2048 })).to.equal(2048);
+        expect(await anthropicMaxTokensFor(
+            { max_completion_tokens: 256 },
+            { pinnedRequestBounds: { max_completion_tokens: 2048 } }
+        )).to.equal(2048);
+        expect(await anthropicMaxTokensFor(
+            { max_completion_tokens: 256 },
+            { pinnedRequestBounds: { max_completion_tokens: -1 } }
+        )).to.equal(1024);
     });
 
     it('ignores a negative budget instead of sending it to the vendor', async function () {
@@ -337,7 +345,7 @@ describe('llm provider, governance default_temperature bounds', function () { th
 
     afterEach(function () { nock.cleanAll(); });
 
-    async function anthropicBodyFor(additionalConfig) {
+    async function anthropicBodyFor(additionalConfig, fetchOptions) {
         return await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
             const llm = _reloadProvider();
             llm._setConfig({ additional_config: additionalConfig });
@@ -345,7 +353,7 @@ describe('llm provider, governance default_temperature bounds', function () { th
             nock('https://api.anthropic.com')
                 .post('/v1/messages', (body) => { capturedBody = body; return true; })
                 .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
-            await llm.fetch(JSON.stringify({ prompt: 'q' }), {});
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), fetchOptions || {});
             return capturedBody;
         });
     }
@@ -353,6 +361,11 @@ describe('llm provider, governance default_temperature bounds', function () { th
     it('applies an in-range governance default to a fetch that omits temperature', async function () {
         const body = await anthropicBodyFor({ default_temperature: 0.4 });
         expect(body.temperature).to.equal(0.4);
+        const pinned = await anthropicBodyFor(
+            { default_temperature: 0.4 },
+            { pinnedRequestBounds: { default_temperature: 0.7 } }
+        );
+        expect(pinned.temperature).to.equal(0.7);
     });
 
     it('ignores an above-range governance default instead of 400ing every anthropic fetch', async function () {
@@ -1405,6 +1418,20 @@ describe('llm provider, judge fallback chain', function () { this.timeout(20000)
     registerJudgeChainBudgetTests(PROPOSALS);
 });
 
+async function expectVendorConfigFallback(PROPOSALS, status, error) {
+    await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+        const messagesApi = nock(/^https:\/\/api\.(?!openai\.)[^.]+\.com:443$/).post('/v1/messages').reply(status, { error });
+        const openai = nock('https://api.openai.com').post('/v1/chat/completions')
+            .reply(200, { choices: [{ message: { content: '{"equivalent": true, "canonical_index": 1}' } }] });
+        const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5' });
+        expect(winner).to.exist;
+        expect(messagesApi.isDone()).to.equal(true);
+        expect(openai.isDone()).to.equal(true);
+    });
+}
+
 function registerJudgeChainFallbackTests(PROPOSALS) {
     it('falls back to an alternate-vendor judge when the pinned judge vendor is down', async function () {
         await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
@@ -1419,6 +1446,10 @@ function registerJudgeChainFallbackTests(PROPOSALS) {
             expect(winner).to.exist;
             expect(winner.body.toString('utf8')).to.equal('answer A');
         });
+        await expectVendorConfigFallback(PROPOSALS, 401, { type: 'authentication_error', message: 'bad key' });
+        await expectVendorConfigFallback(PROPOSALS, 404, { type: 'not_found_error', message: 'unknown model' });
+        await expectVendorConfigFallback(PROPOSALS, 400,
+            { type: 'invalid_request_error', message: 'Your credit balance is too low' });
     });
 
     it('returns null when the whole judge chain is unreachable', async function () {
@@ -1470,6 +1501,20 @@ function registerJudgeChainUnreachableTests(PROPOSALS) {
             expect(winner).to.equal(null);
             expect(outcome.inconclusive).to.equal(true);
             expect(outcome.reason).to.equal('unreachable');
+        });
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            const messagesApi = nock(/^https:\/\/api\.(?!openai\.)[^.]+\.com:443$/).post('/v1/messages')
+                .reply(401, { error: { type: 'authentication_error', message: 'bad key' } });
+            const openai = nock('https://api.openai.com').post('/v1/chat/completions')
+                .reply(401, { error: { type: 'authentication_error', message: 'bad key' } });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5', outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.reason).to.equal('unreachable');
+            expect(messagesApi.isDone()).to.equal(true);
+            expect(openai.isDone()).to.equal(true);
         });
     });
 }

@@ -224,7 +224,7 @@ const batch = (n) => Array.from({ length: n }, (_, i) => ({ jsonrpc: '2.0', id: 
         it('leaves a single (non-array) call untouched',leavesASingleNonArrayCallTest5);
         it('leaves a bodiless GET to the req.body shim (no 500, no 400)', leavesABodilessGetToTheTest6);
         registerresolvemaxbatch7();
-        it('src/api.js mounts the guard before the jsonRouter mount', srcApiJsMountsTheGuardTest11);
+        it('createApp mounts the guard before the jsonRouter mount', srcApiJsMountsTheGuardTest11);
     }
 
     describe('JSON-RPC batch cap', jsonRpcBatchCapSuite1);

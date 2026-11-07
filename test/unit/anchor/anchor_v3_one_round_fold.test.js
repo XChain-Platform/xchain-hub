@@ -10,6 +10,7 @@ const StateAnchorPublisher = require('../../../src/anchor/publisher');
 const ar = require('../../../src/consensus/gates/anchor_reward_gate.js');
 const { XANC_SIGN_REQ, XANCPUB_SIGN_REQ } = require('../../../src/anchor/publisher/constants.js');
 const { CP_ROW, buildMesh, v0Order, startAll, registerMeshHooks } = require('../../helpers/anchor_mesh.js');
+const canonicalVectors = require('../../fixtures/anchor_canonical_vectors.json');
 
 function section(chain, sig){
     return Object.assign({}, CP_ROW, {
@@ -36,6 +37,27 @@ function walkSections(wire){
 function archiveCount(wire){
     let parsed = walkSections(wire);
     return Number(parsed.fields[parsed.next]);
+}
+
+function vectorSections(bundle, decoyWrapper){
+    return bundle.sections.map(row => ({
+        ...row,
+        validator_signatures: JSON.stringify(decoyWrapper && row.chain === 'BTC'
+            ? [{ pubkey: 'decoy-pubkey', sig: 'decoy-signature' }]
+            : row.validator_signatures)
+    }));
+}
+
+function vectorArchive(bundle, crc){
+    const wrapper = bundle.sections.find(row => row.chain === 'BTC');
+    return {
+        wrapperSectionIndex: bundle.wrapper_section_index,
+        batchSeq: bundle.match_batch_seq,
+        count: bundle.match_count,
+        crc,
+        chunks: [bundle.archive_b64],
+        signatures: wrapper.validator_signatures
+    };
 }
 
 async function publishFoldedGroups(groups, archiveBody = 'body'){
@@ -161,6 +183,26 @@ describe('ANCHOR v3 one-round archive fold wire', function () {
             ids.bridgeIds, ids.policyIds, ids.checkpointIds, ids.priceIds, ids.tombstoneIds,
             ids.listIds
         ]);
+    });
+});
+
+describe('ANCHOR v3 one-round archive fold wire', function () {
+    it('matches both canonical v3 vectors through the live builder', function () {
+        const pub = Object.create(StateAnchorPublisher.prototype);
+        const bundle = canonicalVectors.fixture.bundle_v3;
+        const sections = vectorSections(bundle, false);
+        const header = { network: bundle.network, snapshot_block: bundle.snapshot_block };
+        expect(pub.buildV3Payload(header, sections, null, bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3_no_archive);
+        expect(pub.buildV3Payload(null, sections, null, bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3_no_archive);
+
+        const decoySections = vectorSections(bundle, true);
+        expect(pub.buildV3Payload(header, decoySections, vectorArchive(bundle, bundle.batch_crc32),
+            bundle.publisher, bundle.attest_sigs)).to.equal(canonicalVectors.vectors.v3);
+        expect(pub.buildV3Payload(header, decoySections,
+            vectorArchive(bundle, bundle.batch_crc32.toUpperCase()), bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3);
     });
 });
 

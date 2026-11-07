@@ -21,6 +21,7 @@ const eq   = require('../../../src/consensus/equivocation_header.js');
 const gateRegistry = require('../../../src/consensus/gate_registry');   // the checkpoint flag day is a row (W5)
 const SCE  = require('../../../src/anchor/checkpoint_engine.js');
 const SAP  = require('../../../src/anchor/publisher.js');
+const { assertCheckpointVectors, keyOf } = require('./equiv_checkpoint_canonical.test/helpers/checkpoint_assertions.js');
 // The frozen ANCHOR v0 wire vector, vendored byte-identically from
 // xchain-documentation/protocol/test-vectors/anchor_canonical.json and guarded by
 // anchor_golden_vectors.test.js. Driving the section parity off these bytes means the
@@ -83,11 +84,6 @@ const dBase = { CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
 const dV1 = Object.assign({}, dBase, { FORMAT:1, MATCH_BATCH_SEQ:3, MATCH_COUNT:10,
               BATCH_CRC32:'cc', TOTAL_CHUNKS:2 });
 const RAW_V1 = RAW_ON + '|3|10|cc|2';
-// key = the slice between the literal "EQUIV|" and the "||" boundary.
-function keyOf(canon){
-    expect(canon.startsWith('EQUIV|')).to.equal(true);
-    return canon.slice('EQUIV|'.length, canon.indexOf('||'));
-}
 function registerGateBehaviorTests() {
     describe('gate behavior (per-block checkpoint)', function () {
         it('below the flag-day → bare raw bytes (regression-safe)', function () {
@@ -177,6 +173,7 @@ function registerAnchorRootTests() {
             // Same construction as xchain-sync/test/unit/checkpoint.twin.test.js.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON +
                 '|' + SR + '|1|' + BMR + '|1');
+            assertCheckpointVectors(SCE.canonicalCheckpoint);
         });
         it('mainnet at/above 961000: rooted AND header-wrapped, all three agree', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsMain);

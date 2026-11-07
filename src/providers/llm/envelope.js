@@ -22,15 +22,17 @@
 
 // Parse and validate the requester's prompt envelope (spec §4) against the provider's
 // LlmSettings. Returns the parsed envelope; throws on the first rule it breaks.
-function parseEnvelope(settings, payload, options) {
+function parseEnvelope(settings, payload, options, envelopeVersion) {
     let envelope;
     try { envelope = JSON.parse(payload); }
     catch (_) { throw new Error('llm: payload must be a JSON envelope'); }
 
     if (!envelope.prompt || typeof envelope.prompt !== 'string')
         throw new Error('llm: envelope.prompt (string) is required');
-    if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > settings.PROMPT_ENVELOPE_VERSION)
-        throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + settings.PROMPT_ENVELOPE_VERSION + ')');
+    const maxEnvelopeVersion = envelopeVersion === undefined
+        ? settings.PROMPT_ENVELOPE_VERSION : envelopeVersion;
+    if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > maxEnvelopeVersion)
+        throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + maxEnvelopeVersion + ')');
 
     // Reject an out-of-shape requester numeric at this boundary rather than forwarding it.
     // A negative max_tokens survives the clamp below - Number(-1) is truthy,

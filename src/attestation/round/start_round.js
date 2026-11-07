@@ -166,7 +166,7 @@ module.exports = {
     // empty meta) so the round can quorum-sign an explicit non-ok ATTEST v1
     // (Phase 4) instead of stalling every peer until deadline expiry.
     async fetchOwnProposal(rid, request, providerId, providerModule, providerDef, pins){
-        let { pinnedFetchModel, pinnedVendors, modelIdx } = pins;
+        const { pinnedFetchModel, pinnedVendors, pinnedRequestBounds, modelIdx } = pins;
         // Durable, request_id-keyed twin of the in-memory `seen`
         // window. Both guards above die with the process (`seen` is cleared on
         // stop(), isRoundActive reads live consensus state), so a restart inside
@@ -197,6 +197,8 @@ module.exports = {
                     pinnedModel:      pinnedFetchModel,
                     // Block-anchored model->vendor map for the pinned id.
                     pinnedVendors:    pinnedVendors,
+                    // Block-anchored request shape for the pinned provider config.
+                    pinnedRequestBounds: pinnedRequestBounds,
                     // Rank of the pinned model on the fallback ladder; providers
                     // enforce request-level fallback policy on it (llm 'strict').
                     modelRank:        modelIdx,

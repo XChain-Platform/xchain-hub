@@ -216,13 +216,13 @@ describe('llm provider, governance prompt_envelope_version bounds', function () 
     // No getter: probe the installed ceiling through fetch()'s envelope_version gate.
     // Hermetic env: no credential resolves, so an accepted version fails later at the
     // transport rather than dialing anything.
-    function ceilingAccepts(additionalConfig, version) {
+    function ceilingAccepts(additionalConfig, version, fetchOptions) {
         return _withEnv({}, async () => {
             const llm = _reloadProvider();
             const warn = sinon.stub(console, 'warn');
             llm._setConfig({ additional_config: additionalConfig });
             warn.restore();
-            try { await llm.fetch(JSON.stringify({ prompt: 'q', envelope_version: version }), {}); }
+            try { await llm.fetch(JSON.stringify({ prompt: 'q', envelope_version: version }), fetchOptions || {}); }
             catch (e) { return !/unsupported envelope_version/.test(e.message); }
             return true;
         });
@@ -231,6 +231,14 @@ describe('llm provider, governance prompt_envelope_version bounds', function () 
     it('installs a valid positive-integer ceiling', async function () {
         expect(await ceilingAccepts({ prompt_envelope_version: 2 }, 2)).to.equal(true);
         expect(await ceilingAccepts({ prompt_envelope_version: 2 }, 3)).to.equal(false);
+        expect(await ceilingAccepts(
+            { prompt_envelope_version: 1 }, 2,
+            { pinnedRequestBounds: { prompt_envelope_version: 2 } }
+        )).to.equal(true);
+        expect(await ceilingAccepts(
+            { prompt_envelope_version: 2 }, 2,
+            { pinnedRequestBounds: { prompt_envelope_version: 1 } }
+        )).to.equal(false);
     });
 
     for (const bad of [-3, 1.5, Number.POSITIVE_INFINITY, 0, 'abc']) {

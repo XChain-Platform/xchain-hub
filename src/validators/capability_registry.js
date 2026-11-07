@@ -218,16 +218,6 @@ class CapabilityRegistry {
         }
     }
 
-    // Back-compat shim (test-only / non-block-anchored callers): set the baseline (block-0)
-    // MIN_STAKE for a capability. The real governance path is applyMinStakeActivation with a
-    // proposer-declared activation_block, driven from XChainHub.applyCapabilityGovernanceChange.
-    applyGovernanceChange(capability, parameterKey, newValue) {
-        if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
-            throw new Error('unknown capability: ' + capability);
-        if (parameterKey === 'MIN_STAKE') return this.applyMinStakeActivation(capability, 0, newValue);
-        return null;
-    }
-
     async setQualification(pubkey, capability, qualified, blockIndex) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);

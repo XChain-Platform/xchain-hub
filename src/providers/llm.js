@@ -66,7 +66,7 @@ const SpendAudit = require('./llm/spend');
 const MetaGates = require('./llm/meta_gates');
 const JudgeAgreement = require('./llm/agree');
 const { parseEnvelope, resolveFetchModel, responseBody } = require('./llm/envelope');
-const { httpStatusError, isTransientStatus, redactVendorText, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
+const { httpStatusError, isTransientStatus, isVendorConfigFailure, redactVendorText, settleOnce, armRequestFailures, tallyTokens } = require('./llm/http');
 const { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn } = require('./llm/transports');
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
@@ -146,10 +146,21 @@ exports.fetch = async (payload, options) => {
     options = options || {};
     // Kill switch: refuse to dial any billed vendor while paused.
     if (!settings.llmEnabled()) throw settings.pausedError();
-    let envelope = parseEnvelope(settings, payload, options);
-    let model = resolveFetchModel(settings, options);
+    // Resolve anchored calls against spec defaults so live reload timing cannot
+    // change the vendor request; keep live settings for callers without a pin.
+    const hasPinnedBounds = options.pinnedRequestBounds &&
+        typeof options.pinnedRequestBounds === 'object' && !Array.isArray(options.pinnedRequestBounds);
+    const requestBounds = hasPinnedBounds
+        ? LlmSettings.resolveRequestBounds(options.pinnedRequestBounds, LlmSettings.REQUEST_BOUND_DEFAULTS)
+        : {
+            maxTokens: settings.MAX_TOKENS_DEFAULT,
+            temperature: settings.DEFAULT_TEMPERATURE,
+            envelopeVersion: settings.PROMPT_ENVELOPE_VERSION
+        };
+    const envelope = parseEnvelope(settings, payload, options, requestBounds.envelopeVersion);
+    const model = resolveFetchModel(settings, options);
 
-    let maxTokens   = Math.min(Number(envelope.max_tokens) || settings.MAX_TOKENS_DEFAULT, settings.MAX_TOKENS_DEFAULT);
+    let maxTokens   = Math.min(Number(envelope.max_tokens) || requestBounds.maxTokens, requestBounds.maxTokens);
     // Reasoning-family fetch models (o-series / gpt-5 not gpt-5-chat, and the
     // always-thinking Claude ids) bill reasoning
     // tokens against the completion budget, so the governance-tuned content bound
@@ -159,7 +170,7 @@ exports.fetch = async (payload, options) => {
     // fallback can actually finalize; add headroom rather than replace so the
     // governance content budget is preserved. Chat-family models are unchanged.
     if (needsFetchReasoningHeadroom(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
-    let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : settings.DEFAULT_TEMPERATURE;
+    const temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : requestBounds.temperature;
     // Bound against the vendor that will actually receive the request: Anthropic caps
     // temperature at 1 where OpenAI chat allows 2, and the model is already pinned here,
     // so the split verdict is deterministic (same pinned model, same pinned vendor map).
@@ -171,7 +182,7 @@ exports.fetch = async (payload, options) => {
     // 'json_object' constrains the request per-vendor (OpenAI response_format, plus a
     // JSON system instruction that also satisfies OpenAI's "json" keyword requirement
     // and shapes the Anthropic/CLI paths, which have no hard response_format switch).
-    let format = (envelope.format === undefined) ? 'text' : String(envelope.format);
+    const format = (envelope.format === undefined) ? 'text' : String(envelope.format);
     if (format !== 'text' && format !== 'json_object')
         throw new Error('llm: envelope.format must be "text" or "json_object"');
 
@@ -355,6 +366,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                         let err = new Error('llm: Anthropic API: ' + redactVendorText(msg, apiKey));
                         err.httpStatus = res.statusCode;
                         err.transient  = isTransientStatus(res.statusCode);
+                        if (isVendorConfigFailure(res.statusCode, json)) err.kind = 'vendor_config';
                         safeReject(err);
                         return;
                     }
@@ -367,6 +379,7 @@ async function callAnthropic(apiPath, body, apiKey, options) {
                     let err = new Error('llm: Anthropic API: malformed response (' + redactVendorText(str, apiKey).substring(0, 200) + ')');
                     err.httpStatus = res.statusCode;
                     err.transient  = isTransientStatus(res.statusCode);
+                    if (isVendorConfigFailure(res.statusCode, null)) err.kind = 'vendor_config';
                     safeReject(err);
                 }
             });

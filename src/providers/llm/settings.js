@@ -25,9 +25,8 @@
  *
  ********************************************************************/
 
-// Per-call spend ceiling for the claude_spawn transport. The callee
-// (lib/claude-spawn.js) fully plumbs --max-budget-usd but no caller ever supplied
-// it, so the guard was dead. Resolve a positive number from env or governance;
+// Enforce a per-call spend ceiling for the claude_spawn transport. The dispatch
+// path supplies the --max-budget-usd value resolved here from env or governance;
 //   - LLM_MAX_BUDGET_USD (env)          : operator-local per-call cap
 //   - additional_config.max_budget_usd  : governance per-call cap
 //   - DEFAULT_MAX_BUDGET_USD            : built-in fail-safe floor
@@ -43,6 +42,35 @@
 // every other effector gate here already leans (spend_guard's USD budget is
 // likewise default-ON rather than default-disabled).
 const DEFAULT_MAX_BUDGET_USD = 5;
+const REQUEST_BOUND_DEFAULTS = Object.freeze({
+    maxTokens: 1024,
+    temperature: 0,
+    envelopeVersion: 1
+});
+
+function positiveInteger(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function boundedTemperature(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+        ? value : null;
+}
+
+// Resolve request-shaping settings against a caller-selected deterministic fallback.
+function resolveRequestBounds(ac, fallback) {
+    const source = ac && typeof ac === 'object' ? ac : {};
+    const base = fallback && typeof fallback === 'object' ? fallback : REQUEST_BOUND_DEFAULTS;
+    const maxTokens = positiveInteger(source.max_completion_tokens);
+    const temperature = boundedTemperature(source.default_temperature);
+    const envelopeVersion = positiveInteger(source.prompt_envelope_version);
+    return {
+        maxTokens: maxTokens === null ? base.maxTokens : maxTokens,
+        temperature: temperature === null ? base.temperature : temperature,
+        envelopeVersion: envelopeVersion === null ? base.envelopeVersion : envelopeVersion
+    };
+}
 
 // Keys setConfig below actually reads. Kept adjacent to it so a new key added there
 // without a line here warns on its own first install, which is the cheap direction to
@@ -77,9 +105,9 @@ class LlmSettings {
         // on the fetch + judge chains (self-test enforcement of fallback readiness).
         // Governance flips this once the federation has provisioned fallback keys.
         this.REQUIRE_ALL_VENDORS = false;
-        this.MAX_TOKENS_DEFAULT  = 1024;
-        this.DEFAULT_TEMPERATURE = 0;
-        this.PROMPT_ENVELOPE_VERSION = 1;
+        this.MAX_TOKENS_DEFAULT  = REQUEST_BOUND_DEFAULTS.maxTokens;
+        this.DEFAULT_TEMPERATURE = REQUEST_BOUND_DEFAULTS.temperature;
+        this.PROMPT_ENVELOPE_VERSION = REQUEST_BOUND_DEFAULTS.envelopeVersion;
         // Governance kill switch (see llmEnabled) and per-call CLI budget
         // (see DEFAULT_MAX_BUDGET_USD above).
         this.LLM_ENABLED_CONFIG = true;      // governance additional_config.enabled (default on)
@@ -118,10 +146,10 @@ class LlmSettings {
         let envVal = parseFloat(this.hubConfig.LLM_MAX_BUDGET_USD);
         if (Number.isFinite(envVal) && envVal > 0) return envVal;
         if (Number.isFinite(this.MAX_BUDGET_USD_CONFIG) && this.MAX_BUDGET_USD_CONFIG > 0) return this.MAX_BUDGET_USD_CONFIG;
-        // Sized so it cannot cut off legitimate work: one attestation call is a
-        // single --print turn with tools disabled, bounded by fetchTimeoutMs (10s
-        // stock, 60s ceiling in runLlm), which is orders of magnitude under $5. It
-        // bounds the runaway shape instead, and env/governance can widen it.
+        // Bound subscription spend independently of timeoutMs: callers pass
+        // ATTESTATION_FETCH_TIMEOUT (20s stock); only an omitted timeout falls
+        // back to 60s.
+        // Keep this cap because no layer clamps an explicitly raised timeout.
         return DEFAULT_MAX_BUDGET_USD;
     }
 
@@ -141,6 +169,12 @@ class LlmSettings {
 
     // The numeric bounds half of an install, each validated before it is installed.
     installBounds(ac) {
+        const current = {
+            maxTokens: this.MAX_TOKENS_DEFAULT,
+            temperature: this.DEFAULT_TEMPERATURE,
+            envelopeVersion: this.PROMPT_ENVELOPE_VERSION
+        };
+        const resolved = resolveRequestBounds(ac, current);
         // Validate before installing. A bare truthy check admitted -1, 1.5
         // and Infinity as the federation-wide token budget: the clamp in fetch() is a
         // min() against this same value so a negative survives it, chat/Claude API then
@@ -151,10 +185,7 @@ class LlmSettings {
         // bad key holds the prior default instead of aborting the whole config install,
         // matching the sibling default_temperature handling directly below.
         if (ac.max_completion_tokens !== undefined) {
-            let mt = Number(ac.max_completion_tokens);
-            if (Number.isInteger(mt) && mt > 0)
-                this.MAX_TOKENS_DEFAULT = mt;
-            else
+            if (positiveInteger(ac.max_completion_tokens) === null)
                 this.logger.warn('llm: ignoring additional_config.max_completion_tokens ' + ac.max_completion_tokens +
                     ' (must be a positive integer); keeping ' + this.MAX_TOKENS_DEFAULT);
         }
@@ -168,10 +199,7 @@ class LlmSettings {
         // identical default. A caller that genuinely wants an OpenAI temperature above 1
         // still has the per-request envelope, which is bounded to [0, 2] in fetch().
         if (typeof ac.default_temperature === 'number') {
-            if (Number.isFinite(ac.default_temperature) &&
-                ac.default_temperature >= 0 && ac.default_temperature <= 1)
-                this.DEFAULT_TEMPERATURE = ac.default_temperature;
-            else
+            if (boundedTemperature(ac.default_temperature) === null)
                 this.logger.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
                     ' (must be a number in [0, 1]); keeping ' + this.DEFAULT_TEMPERATURE);
         }
@@ -182,13 +210,13 @@ class LlmSettings {
         // Infinity disables the ceiling entirely, both from one governance key with no
         // code deploy behind it.
         if (ac.prompt_envelope_version !== undefined) {
-            let ev = Number(ac.prompt_envelope_version);
-            if (Number.isInteger(ev) && ev > 0)
-                this.PROMPT_ENVELOPE_VERSION = ev;
-            else
+            if (positiveInteger(ac.prompt_envelope_version) === null)
                 this.logger.warn('llm: ignoring additional_config.prompt_envelope_version ' + ac.prompt_envelope_version +
                     ' (must be a positive integer); keeping ' + this.PROMPT_ENVELOPE_VERSION);
         }
+        this.MAX_TOKENS_DEFAULT = resolved.maxTokens;
+        this.DEFAULT_TEMPERATURE = resolved.temperature;
+        this.PROMPT_ENVELOPE_VERSION = resolved.envelopeVersion;
     }
 
     // Allow ProviderRegistry to inject the registered provider def at load time
@@ -233,5 +261,7 @@ class LlmSettings {
 
 LlmSettings.DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
 LlmSettings.CONSUMED_CONFIG_KEYS   = CONSUMED_CONFIG_KEYS;
+LlmSettings.REQUEST_BOUND_DEFAULTS = REQUEST_BOUND_DEFAULTS;
+LlmSettings.resolveRequestBounds   = resolveRequestBounds;
 
 module.exports = LlmSettings;

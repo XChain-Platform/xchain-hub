@@ -15,14 +15,14 @@
  * XChain Hub - llm provider: how a finished `claude --print` run settles
  *
  * The classification llm/claude_spawn.js applies once the CLI exits: a sound
- * answer, a vendor-availability failure the judge chain may retry on another
- * model, or a reached-model outcome (refusal, truncation, hard error) that must
- * not be re-asked. Pure functions over the exit code and the captured streams,
+ * answer, a vendor failure before any verdict that may try another model, or a
+ * reached-model outcome (refusal, truncation, hard error) that must not be
+ * re-asked. Pure functions over the exit code and the captured streams,
  * so the spawn itself stays the only thing llm/claude_spawn.js owns.
  *
  ********************************************************************/
 
-const { isTransientStatus, redactVendorText } = require('./http');
+const { isTransientStatus, isVendorConfigFailure, redactVendorText } = require('./http');
 
 // A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
 // an outcome the model actually produced. The boundary is the one providers/llm/http.js
@@ -104,9 +104,29 @@ function cliFailureIsTransient(stdout, stderr) {
     return textNamesTransientStatus(text) || AVAILABILITY_TEXT_RE.test(text);
 }
 
+// Identify CLI failures that reached the vendor but not a model verdict.
+function cliFailureIsVendorConfig(stdout, stderr) {
+    let json = null;
+    try { json = JSON.parse(stdout); } catch { /* free-form output; text scan below */ }
+    const envelope = (json && typeof json === 'object') ? json : {};
+    const err = (envelope.error && typeof envelope.error === 'object') ? envelope.error : {};
+    const errorsText = Array.isArray(envelope.errors)
+        ? envelope.errors.filter((v) => typeof v === 'string').join('\n')
+        : '';
+    const text = [stderr, err.message, envelope.message, envelope.subtype, errorsText]
+        .map((v) => (typeof v === 'string' ? v : '')).join('\n');
+    if (REFUSAL_TEXT_RE.test(text)) return false;
+    for (const status of [envelope.api_error_status, err.api_error_status,
+                          envelope.status, err.status, err.code]) {
+        if (isVendorConfigFailure(status, null)) return true;
+    }
+    if (isVendorConfigFailure(null, { error: { type: err.type || envelope.type || envelope.subtype } })) return true;
+    return /authentication[_ ]error|permission[_ ]error|not[_ ]found[_ ]error|billing[_ ]error|credit balance/i.test(text);
+}
+
 // An availability failure: the judge chain may retry it on a different model.
 const transient = (message) => ({ transient: true, message });
-// A reached-model outcome: never re-judged, optionally typed 'refusal' or 'truncation'.
+// A non-transient outcome, typed when callers need a distinct fallback rule.
 const hard = (message, kind) => ({ transient: false, message, kind });
 
 // A clean exit with no result text.
@@ -133,6 +153,10 @@ function emptyResultOutcome(json, stdout) {
         return transient('claude-spawn: CLI returned no result text' +
             (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
     }
+    if (!isRefusal && cliFailureIsVendorConfig(stdout, '')) {
+        return hard('claude-spawn: CLI returned no result text' +
+            (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''), 'vendor_config');
+    }
     return hard('claude-spawn: CLI returned no result text' +
         (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
         isRefusal ? 'refusal' : undefined);
@@ -150,6 +174,10 @@ function errorFlagOutcome(json, stdout) {
     if (!isRefusal && cliFailureIsTransient(stdout, '')) {
         return transient('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
             (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''));
+    }
+    if (!isRefusal && cliFailureIsVendorConfig(stdout, '')) {
+        return hard('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
+            (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''), 'vendor_config');
     }
     return hard('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
         (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
@@ -171,11 +199,12 @@ function closeOutcome(code, stdout, stderr) {
         // no verdict behind it: the HTTP transports classify exactly that as
         // transient and fall over to the next judge, so a hub whose transport
         // happens to be the CLI must not lose the round to the same outage.
-        // Everything unrecognized -- auth, 4xx, an exhausted --max-budget-usd,
+        // Everything unrecognized, including request-invalid 4xx and an exhausted --max-budget-usd,
         // a refusal -- keeps the hard classification.
         const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + redactVendorText(stderr.trim()).slice(0, 400) : '');
         if (cliFailureIsTransient(stdout, stderr)) return transient(msg);
-        else                                        return hard(msg);
+        if (cliFailureIsVendorConfig(stdout, stderr)) return hard(msg, 'vendor_config');
+        return hard(msg);
     }
     let json;
     try { json = JSON.parse(stdout); }

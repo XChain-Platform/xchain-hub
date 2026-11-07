@@ -24,14 +24,8 @@ const { policyHash } = require('../../../../cross_chain/bridge/policy_hash.js');
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
+const { comparable, unheldRowRefusal } = require('../unheld_row.js');
 const logger = getLogger();
-
-function comparable(row){
-    const out = Object.assign({}, row);
-    delete out.id;
-    delete out.validator_signatures;
-    return out;
-}
 
 const LIST_SHARE_PRODUCER_GATE = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
 
@@ -53,17 +47,6 @@ function rowShapeRefusal(row, idKey, otherKey){
     // Refuse a row that also carries the other kind's id
     const other = row[otherKey];
     if(other !== undefined && other !== null && other !== '') return 'also carries ' + otherKey;
-    return null;
-}
-
-// Return why an unheld row is not the shape the archive builder emits, or null. The
-// XBRIDGE and XPOLICY canonicals leave status and the key list unsigned, so a row with
-// no held twin must re-serialize unchanged and carry a status its table can hold.
-function unheldRowRefusal(row, serialized, statuses){
-    if(JSON.stringify(comparable(serialized)) !== JSON.stringify(comparable(row)))
-        return 'does not re-serialize unchanged with no held row';
-    if(!statuses.includes(row.status))
-        return 'is ' + row.status + ' with no held row';
     return null;
 }
 

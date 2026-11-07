@@ -74,10 +74,10 @@ async function listen(app) {
     return server;
 }
 
-async function call(server, { method = 'POST', headers = {}, body } = {}) {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/`, { method, headers, body });
+async function call(server, { method = 'POST', path = '/', headers = {}, body } = {}) {
+    const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers, body });
     const text = await res.text();
-    return { status: res.status, text, json: text ? JSON.parse(text) : undefined };
+    return { status: res.status, headers: res.headers, text, json: text ? JSON.parse(text) : undefined };
 }
 
 function postJson(server, payload, headers) {
@@ -115,6 +115,21 @@ describe('JSON-RPC router errors keep id and jsonrpc', function () {
     it('keeps id 0 on a handler error', async () => {
         const r = await postJson(srv(), { jsonrpc: '2.0', method: 'fail', id: 0 });
         expect(r.json).to.deep.equal({ jsonrpc: '2.0', error: { code: -32000, message: 'boom' }, id: 0 });
+
+        const logged = [];
+        const logger = { info() {}, warn() {}, debug() {}, error: (message) => logged.push(message) };
+        const jsonRouter = () => (req, res, next) => next(new Error('router failure /secret/path.js:1'));
+        const terminalServer = await listen(createApp(buildCtx({ logger, jsonRouter })).app);
+        try {
+            const terminal = await postJson(terminalServer, { jsonrpc: '2.0', method: 'ping', id: 0 });
+            expect(terminal.status).to.equal(500);
+            expect(terminal.json).to.deep.equal({ jsonrpc: '2.0', id: null,
+                error: { code: -32603, message: 'internal error' } });
+            expect(terminal.text).to.not.match(/secret|node_modules|<html|<pre>|\.js:\d+/);
+            expect(logged).to.have.length(1);
+        } finally {
+            await new Promise((resolve) => terminalServer.close(resolve));
+        }
     });
 
     it('keeps a string id on an error', async () => {
@@ -151,6 +166,10 @@ describe('JSON-RPC router errors on versionless, bodyless and batch requests', f
             expect(r.json, c.method).to.include({ jsonrpc: '2.0', id: null });
             expect(r.json.error.code, c.method).to.equal(-32600);
         }
+        const telemetry = await call(srv(), { method: 'GET', path: '/telemetry/summary' });
+        expect(telemetry.status).to.equal(200);
+        expect(telemetry.json).to.deep.equal({ enabled: false });
+        expect(telemetry.headers.get('x-content-type-options')).to.equal('nosniff');
     });
 
     it('pairs batch errors with their own ids, 0 included', async () => {
@@ -166,6 +185,11 @@ describe('JSON-RPC router errors on versionless, bodyless and batch requests', f
         expect(r.json[1].error.code).to.equal(-32601);
         expect(r.json[2]).to.include({ jsonrpc: '2.0', id: 'x' });
         expect(r.json[2].error.code).to.equal(-32600);
+
+        const overCap = await postJson(srv(), Array.from({ length: 21 }, (_, id) =>
+            ({ jsonrpc: '2.0', method: 'ping', id })));
+        expect(overCap.status).to.equal(400);
+        expect(overCap.json.error.code).to.equal(-32600);
     });
 });
 
@@ -177,6 +201,12 @@ describe('JSON-RPC key gate refusals keep id 0', function () {
         const r = await postJson(srv(), { jsonrpc: '2.0', method: 'updateconfig', id: 0 });
         expect(r.status).to.equal(401);
         expect(r.json).to.deep.equal({ jsonrpc: '2.0', id: 0, error: { code: -32001, message: 'Unauthorized' } });
+
+        const batch = Array.from({ length: 21 }, (_, id) =>
+            ({ jsonrpc: '2.0', method: id === 20 ? 'updateconfig' : 'ping', id }));
+        const overCap = await postJson(srv(), batch);
+        expect(overCap.status).to.equal(401);
+        expect(overCap.json.error.code).to.equal(-32001);
     });
 
     it('answers a non-string method with id 0 as a 400 carrying id 0', async () => {

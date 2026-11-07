@@ -29,7 +29,7 @@ const helmet     = require('helmet');
 const cors       = require('cors');
 const rateLimit  = require('express-rate-limit');
 const http       = require('http');
-const { installTransportMiddleware } = require('../../../src/api/middleware.js');
+const { installTransportMiddleware, terminalErrorHandler } = require('../../../src/api/middleware.js');
 
 const LEAK = /node_modules|body-parser|raw-body|\bat .*\(|SyntaxError|PayloadTooLargeError|\.js:\d+/;
 
@@ -49,6 +49,7 @@ function boot() {
     });
     app.post('/echo', (req, res) => res.json({ got: req.body }));
     app.post('/boom', () => { throw new Error('route failure /secret/path.js:1'); });
+    app.use(terminalErrorHandler({ error() {} }));
     return new Promise((resolve) => {
         server = app.listen(0, '127.0.0.1', () => { port = server.address().port; resolve(); });
     });
@@ -146,6 +147,8 @@ describe('hub JSON body parser errors', () => {
     it('does not swallow a route error into the parser error shape', async () => {
         const r = await post('/boom', '{"a":1}');
         expect(r.status).to.equal(500);
-        expect(r.type).to.not.match(/application\/json/);
+        expect(r.type).to.match(/application\/json/);
+        expect(envelope(r).error.code).to.equal(-32603);
+        expect(r.text).to.not.match(LEAK);
     });
 });

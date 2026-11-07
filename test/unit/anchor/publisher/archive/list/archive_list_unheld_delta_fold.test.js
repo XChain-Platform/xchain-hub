@@ -97,8 +97,9 @@ describe('archive list follower unheld delta rows', function () {
         const pub = publisher([first]);
 
         expect(await pub.verifyArchivedListSnapshot(second, archiveOf([second]))).to.equal(true);
+        // Refuse a type the archive builder normalizes instead of emitting.
         expect(await pub.verifyArchivedListSnapshot({ ...second, seq: '2' }, archiveOf([second])))
-            .to.equal(true);
+            .to.equal(false);
     });
 
     it('refuses an unheld delta whose added or removed array was rewritten after signing', async function () {

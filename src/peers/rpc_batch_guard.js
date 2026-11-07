@@ -23,9 +23,9 @@
  * per call (src/api/rate_limit_tiers.js); this still caps the CARDINALITY
  * before dispatch, so no single request can fan out that far.
  *
- * Lives in its own module rather than inline in api.js because the hub's whole
- * middleware stack is built inside async function startApi(), which exports
- * nothing, so an inline guard could not be unit-tested without booting the API.
+ * Mounted once by createApp in src/api/server.js ahead of the JSON-RPC router,
+ * this standalone factory stays directly unit-testable without building the
+ * shared app used by production boot and the e2e cluster helper.
  *
  * Mirrors the same guard already shipping in xchain-encoder (src/api.js),
  * xchain-decoder and xchain-utxo-tracker; the error shape is kept identical so

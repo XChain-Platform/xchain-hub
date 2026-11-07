@@ -15,8 +15,9 @@
  * XChain Hub - Attestation Round Pins
  *
  * Everything a round must fix before it fetches. Read at the REQUEST's own block:
- * the model it fetches with, the model-vendor map and approved list that travel
- * with that id, and the PBFT strategy the round will run. Two hubs whose
+ * the model it fetches with, the model-vendor map, request bounds and approved
+ * list that travel with that id, and the PBFT strategy the round will run. Two
+ * hubs whose
  * governance reloads raced still pin the same values for those, because each is
  * read at the request's block.
  *
@@ -87,12 +88,22 @@ module.exports = {
             ? null
             : (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object' &&
                !Array.isArray(pinnedAc.model_vendors) ? pinnedAc.model_vendors : {});
+        // Carry raw values so the provider owns validation while every hub reads
+        // the same request-block snapshot.
+        const pinnedRequestBounds = anchoredAc === null || anchoredAc === undefined
+            ? null
+            : {
+                max_completion_tokens: pinnedAc.max_completion_tokens,
+                default_temperature: pinnedAc.default_temperature,
+                prompt_envelope_version: pinnedAc.prompt_envelope_version
+            };
         return {
             approvedModels:   approvedModels,
             modelIdx:         modelIdx,
             pinnedFetchModel: pinnedFetchModel,
             pinnedJudgeModel: pinnedJudgeModel,
-            pinnedVendors:    pinnedVendors
+            pinnedVendors:    pinnedVendors,
+            pinnedRequestBounds: pinnedRequestBounds
         };
     },
 

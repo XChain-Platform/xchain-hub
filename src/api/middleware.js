@@ -24,7 +24,7 @@
 
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults. The mirror
-// bootstrap and key-holding callers are metered separately; see installRateLimits below.
+// bootstrap and key-holding callers are metered separately; see installRateCounters below.
 const { buildRateLimitOptions, isSnapshotPageRead, parseSnapshotRpm,
         SNAPSHOT_PATH_PREFIX } = require('./rate_limit_policy.js');
 const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
@@ -67,6 +67,29 @@ function bodyParserErrorHandler(err, req, res, next) {
                   : 'invalid request body';
     res.status(status).json({ jsonrpc: '2.0', id: null,
         error: { code: parseFailed ? -32700 : -32600, message } });
+}
+
+// Keep unhandled middleware and route errors out of Express's HTML finalhandler.
+function terminalErrorHandler(logger) {
+    return function handleTerminalError(err, req, res, next) {
+        if (res.headersSent) return next(err);
+        const rawStatus = err && (err.status || err.statusCode);
+        const clientError = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus < 500;
+        const status = clientError ? rawStatus : 500;
+        if (!clientError && logger && typeof logger.error === 'function') {
+            const requestPath = String(req && (req.path || req.url) || '/').split('?')[0];
+            const location = (req && req.method ? req.method : 'REQUEST') + ' ' +
+                requestPath;
+            logger.error('Hub API request failed at ' + location + ': ' +
+                (err && (err.stack || err.message) ? (err.stack || err.message) : 'unknown error'));
+        }
+        return res.status(status).json({
+            jsonrpc: '2.0', id: null,
+            error: clientError
+                ? { code: -32600, message: 'invalid request' }
+                : { code: -32603, message: 'internal error' }
+        });
+    };
 }
 
 function installTransportMiddleware(app, ctx) {
@@ -131,13 +154,11 @@ function throttleReporter(logger, envName) {
 // skips everything that is not a page read, so a request charges exactly one bucket. A
 // page read is a bodyless GET or HEAD under the prefix (isSnapshotPageRead): anything
 // else sent there, such as a JSON-RPC body the root router would dispatch, is metered
-// by the JSON-RPC tiers with their batch surcharge, never by the larger snapshot budget. Each is followed by its batch surcharge, so a batch costs one token
-// per call rather than one per HTTP request. The options (the 429 body, the
+// by the JSON-RPC tiers with their batch surcharge, never by the larger snapshot budget.
+// installTransportMiddleware mounts each returned surcharge after parsing, so a batch
+// costs one token per call rather than one per HTTP request. The options (the 429 body, the
 // loopback/private exemption) live in the policy module so they are unit-testable; api.js
 // self-starts on require, so nothing declared inline here could ever be asserted against.
-function installRateLimits(app, ctx) {
-    installRateCounters(app, ctx).forEach((surcharge) => app.use(surcharge));
-}
 
 // Mounts the limiters, which read only the address and headers, and returns the batch
 // surcharges for the caller to mount once the body is parsed.
@@ -229,4 +250,4 @@ function installMetrics(app, ctx) {
     return observability;
 }
 
-module.exports = { installMiddleware, installRateLimits, installTransportMiddleware, bodyParserErrorHandler };
+module.exports = { installMiddleware, installTransportMiddleware, bodyParserErrorHandler, terminalErrorHandler };

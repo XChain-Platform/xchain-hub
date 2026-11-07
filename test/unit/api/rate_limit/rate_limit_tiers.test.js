@@ -20,15 +20,17 @@
  * The defect these guard: a validator hub shipped HUB_RATE_LIMIT_RPM=60000 for every
  * caller, and a 20-call batch cost one token, so one keyless client could drive about
  * 1.2M `health` handlers a minute. Driven over a socket against the real
- * installRateLimits stack, as rate_limit_snapshot_route.test.js drives the drain.
+ * production transport stack, as rate_limit_snapshot_route.test.js drives the drain.
  */
 
 const { expect } = require('chai');
 const express   = require('express');
+const helmet    = require('helmet');
+const cors      = require('cors');
 const rateLimit = require('express-rate-limit');
 const http      = require('http');
 const sinon     = require('sinon');
-const { installRateLimits } = require('../../../../src/api/middleware.js');
+const { installTransportMiddleware } = require('../../../../src/api/middleware.js');
 const { DEFAULT_AUTH_RPM, authenticatedCaller, batchCost, parseAuthRpm } = require('../../../../src/api/rate_limit_tiers.js');
 const FixedWindowStore = require('../../../../src/api/rate_limit_store.js');
 const { isSnapshotPageRead } = require('../../../../src/api/rate_limit_policy.js');
@@ -44,12 +46,12 @@ function boot(opts) {
     opts = opts || {};
     handled = 0;
     const app = express();
-    app.set('trust proxy', 'loopback');
-    app.use(express.json());
-    installRateLimits(app, {
-        hubConfig: { HUB_AUTH_RATE_LIMIT_RPM: opts.authRpm, HUB_SNAPSHOT_RATE_LIMIT_RPM: opts.snapshotRpm },
+    installTransportMiddleware(app, {
+        hubConfig: { HUB_TRUST_PROXY: 'loopback', HUB_AUTH_RATE_LIMIT_RPM: opts.authRpm,
+            HUB_SNAPSHOT_RATE_LIMIT_RPM: opts.snapshotRpm },
         logger: { info() {}, warn() {} },
-        rateLimit,
+        express, helmet, cors, rateLimit,
+        CORS_ORIGIN: '*',
         HUB_API_KEY: opts.keyless ? '' : HUB_KEY,
         HUB_RATE_LIMIT_RPM: opts.rpm === undefined ? 100 : opts.rpm,
         HUB_RATE_LIMIT_EXEMPT_LOCAL: true

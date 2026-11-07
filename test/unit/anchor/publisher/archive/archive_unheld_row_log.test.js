@@ -193,3 +193,29 @@ describe('archive verifiers refuse an unheld bridge or policy row the builder co
         expect(await buildPub({ bridge: held }).verifyArchivedBridgeTransfer(bridgeRow())).to.equal(false);
     });
 });
+
+describe('archive verifiers refuse an unheld list row the builder could not emit', () => {
+    const listArchiveRow = over => Object.assign(
+        StateAnchorPublisher.prototype.serializeListSnapshot(listRow()), over);
+
+    it('checks the unsigned status and complete builder shape before quorum acceptance', async () => {
+        expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow())).to.equal(true);
+        for(const status of ['retracted', 'bogus']){
+            expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow({ status })), status)
+                .to.equal(false);
+        }
+        expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow({ extra: 1 }))).to.equal(false);
+        expect(await buildPub({}).verifyArchivedListSnapshot(
+            listArchiveRow({ snapshot_block: String(160000) }))).to.equal(false);
+        const missing = listArchiveRow();
+        delete missing.finalizing_view;
+        expect(await buildPub({}).verifyArchivedListSnapshot(missing)).to.equal(false);
+        const missingName = listArchiveRow();
+        delete missingName.name;
+        expect(await buildPub({}).verifyArchivedListSnapshot(missingName)).to.equal(false);
+
+        expect(await buildPub({ list: listRow() }).verifyArchivedListSnapshot(listArchiveRow())).to.equal(true);
+        expect(await buildPub({ list: listRow() }).verifyArchivedListSnapshot(
+            listArchiveRow({ status: 'retracted' }))).to.equal(false);
+    });
+});

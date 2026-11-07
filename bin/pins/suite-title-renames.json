@@ -17,6 +17,11 @@
     "test/unit/cross_chain/dex/cross_chain_dex_engine_07_write_finalized_match_fail_closed_snapshot_persist.test.js": {
       "_insertMatchRow(): retracted-row revive": "insertMatchRow(): retracted-row revive"
     },
+    "test/unit/capabilities/capability_registry.test.js": {
+      "CapabilityRegistry applyGovernanceChange() updates the in-memory MIN_STAKE for a known capability": "CapabilityRegistry applyMinStakeActivation() at block 0 updates the in-memory MIN_STAKE for a known capability",
+      "CapabilityRegistry applyGovernanceChange() creates a new config entry if the capability had none": "CapabilityRegistry applyMinStakeActivation() at block 0 creates a new config entry if the capability had none",
+      "CapabilityRegistry applyGovernanceChange() throws for an unknown capability": "CapabilityRegistry applyMinStakeActivation() at block 0 throws for an unknown capability"
+    },
     "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": {
       "_enqueue()": "enqueue()"
     },
@@ -55,6 +60,9 @@
     },
     "test/unit/rollcall/rollcall_status_rpc.test.js": {
       "capabilities/oracle_publish broadcast presence check leaves the no-signer-module posture unchanged": "capabilities/oracle_publish broadcast presence check fails when no signer module is configured"
+    },
+    "test/unit/peers/rpc_batch_guard.test.js": {
+      "JSON-RPC batch cap src/api.js mounts the guard before the jsonRouter mount": "JSON-RPC batch cap createApp mounts the guard before the jsonRouter mount"
     },
     "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": {
       "buildSnapshotCosignView accepted requests normalizes a string tip to a number": "buildSnapshotCosignView accepted requests normalizes string checkpoint heights to numbers"

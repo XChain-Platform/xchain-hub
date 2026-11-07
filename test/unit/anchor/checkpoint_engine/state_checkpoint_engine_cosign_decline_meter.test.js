@@ -51,7 +51,7 @@ function buildFollower(opts) {
     engine.resolveSnapshotBlock = async () => (opts.tip !== undefined ? opts.tip : SNAP);
     engine.resolveCapabilityValidators = async () => [leader, follower].map(id => ({ pubkey: pk(id), amount: '1' }));
     engine.followsCadenceLeader = () => true;
-    engine.getMaxCheckpointSeq = async () => null;
+    engine.getMaxCheckpointSeq = async () => (opts.maxSeq !== undefined ? opts.maxSeq : null);
     if (opts.latch !== undefined) engine._lastCheckpointBtcBlock = opts.latch;
     engine.indexerCall = opts.indexerCall || (async () => Object.assign({}, TIP));
     engine.cosigned = [];
@@ -59,9 +59,10 @@ function buildFollower(opts) {
     return engine;
 }
 
-function signReq() {
-    let cp = Object.assign({ chain: 'BTC', snapshot_block: SNAP, checkpoint_seq: canonicalForms.deriveCheckpointSeq(SNAP) }, TIP);
-    let sig = leader.sign(StateCheckpointEngine.canonicalCheckpoint(cp));
+function signReq(overrides) {
+    const cp = Object.assign({ chain: 'BTC', snapshot_block: SNAP,
+        checkpoint_seq: canonicalForms.deriveCheckpointSeq(SNAP) }, TIP, overrides);
+    const sig = leader.sign(StateCheckpointEngine.canonicalCheckpoint(cp));
     return { type: 'XCHK_SIGN_REQ', sender: pk(leader), data: { checkpoint: cp, sig_pubkey: pk(leader), sig: sig } };
 }
 
@@ -80,6 +81,26 @@ const DECLINE_CASES = [
     ['snapshot_out_of_tolerance', { tip: SNAP + 10000 }, /proposed 500, our tip 10500/],
     ['off_cadence',         { latch: SNAP - 2 }, /proposed 500, last checkpoint 498, interval 6/],
 ];
+
+async function expectSequenceDeclinesAreMetered() {
+    const cases = [
+        ['seq_not_derived', {}, { checkpoint_seq: SNAP + 1 }, /seq 501, derived 500/],
+        ['seq_at_or_below_max', { maxSeq: SNAP }, {}, /max recorded seq 500/],
+    ];
+    for(const [reason, opts, overrides, detail] of cases){
+        const engine = buildFollower(opts);
+        const lines = await warnsDuring(async () => {
+            await engine.handleSignReq(signReq(overrides));
+            await engine.handleSignReq(signReq(overrides));
+        });
+        expect(engine.cosigned, reason + ' stays fail-closed').to.have.lengthOf(0);
+        const stats = await engine.getStats();
+        expect(stats.cosign_declines[reason], reason).to.equal(2);
+        expect(stats.last_cosign_decline_reason, reason).to.equal(reason);
+        expect(lines.filter(line => line.includes(reason)), reason).to.have.lengthOf(1);
+        expect(lines.join('\n'), reason).to.match(detail);
+    }
+}
 
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     for (let [reason, opts, detail] of DECLINE_CASES) {
@@ -151,7 +172,8 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
         expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
-            'indexer_read_failed', 'indexer_no_block', 'indexer_replaying', 'supersede_no_replay',
+            'seq_not_derived', 'seq_at_or_below_max', 'indexer_read_failed', 'indexer_no_block',
+            'indexer_replaying', 'supersede_no_replay',
             'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
             'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',
             'indexer_divergence', 'rootless');
@@ -160,6 +182,7 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         let stats = await engine.getStats();
         expect(stats.cosign_declines.indexer_no_block).to.equal(1);
         expect(stats.last_cosign_decline_reason).to.equal('indexer_no_block');
+        await expectSequenceDeclinesAreMetered();
     });
 });
 

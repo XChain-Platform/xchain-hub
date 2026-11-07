@@ -26,9 +26,11 @@
 
 const { expect } = require('chai');
 const express   = require('express');
+const helmet    = require('helmet');
+const cors      = require('cors');
 const rateLimit = require('express-rate-limit');
 const http      = require('http');
-const { installRateLimits } = require('../../../../src/api/middleware.js');
+const { installTransportMiddleware } = require('../../../../src/api/middleware.js');
 const { batchSurcharge, rateLimitKey } = require('../../../../src/api/rate_limit_tiers.js');
 const FixedWindowStore = require('../../../../src/api/rate_limit_store.js');
 const { buildRateLimitOptions } = require('../../../../src/api/rate_limit_policy.js');
@@ -104,17 +106,16 @@ function surchargeSuite() {
     });
 }
 
-// Driven over a socket against the real installRateLimits stack, as the repro drove it.
+// Drive a socket through the production transport stack, as the repro drove it.
 function forwardedSuite() {
     let server = null;
     let port = 0;
 
     before(() => new Promise((resolve) => {
         const app = express();
-        app.set('trust proxy', 'loopback');
-        app.use(express.json());
-        installRateLimits(app, {
-            hubConfig: {}, logger: { info() {}, warn() {} }, rateLimit,
+        installTransportMiddleware(app, {
+            hubConfig: { HUB_TRUST_PROXY: 'loopback' }, logger: { info() {}, warn() {} },
+            express, helmet, cors, rateLimit, CORS_ORIGIN: '*',
             HUB_API_KEY: '', HUB_RATE_LIMIT_RPM: 3, HUB_RATE_LIMIT_EXEMPT_LOCAL: true
         });
         app.use((req, res) => res.json({ jsonrpc: '2.0', id: 1, result: 'ok' }));

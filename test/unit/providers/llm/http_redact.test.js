@@ -52,6 +52,17 @@ describe('LLM vendor error text redaction at each error path', function () {
         expect(err.message).to.not.contain('sk-proj');
         expect(err.httpStatus).to.equal(401);
         expect(err.transient).to.equal(false);
+        expect(err.kind).to.equal('vendor_config');
+        for (const status of [402, 403, 404]) {
+            expect(httpStatusError({ statusCode: status }, 'vendor', null, '').kind)
+                .to.equal('vendor_config');
+        }
+        const requestError = httpStatusError({ statusCode: 400 }, 'OpenAI API',
+            { error: { type: 'invalid_request_error', message: 'bad request' } }, '');
+        expect(requestError.kind).to.equal(undefined);
+        const billingError = httpStatusError({ statusCode: 400 }, 'Messages API',
+            { error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } }, '');
+        expect(billingError.kind).to.equal('vendor_config');
         const raw = httpStatusError({ statusCode: 502 }, 'OpenAI API', null,
             '<html>' + 'x'.repeat(175) + ' Bearer abcdefgh12345678</html>', 'unused-secret');
         expect(raw.message).to.not.contain('abcdefgh');
@@ -127,6 +138,9 @@ describe('LLM vendor error text redaction at the CLI and audit sinks', function 
         expect(out.transient).to.equal(true);
         expect(out.message).to.not.contain('sk-ant');
         expect(out.message).to.contain('[redacted]');
+        const auth = closeOutcome(1, JSON.stringify({ error: { type: 'authentication_error' } }), '');
+        expect(auth.transient).to.equal(false);
+        expect(auth.kind).to.equal('vendor_config');
     });
 
     it('writes a redacted error into the spend-audit settle record', function () {

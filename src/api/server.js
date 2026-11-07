@@ -26,7 +26,7 @@ const nodeUtil = require('node:util');
 const defaultJsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
-const { installMiddleware } = require('./middleware');
+const { installMiddleware, terminalErrorHandler } = require('./middleware');
 const { withEnvelopeRepair } = require('./jsonrpc_envelope');
 const { buildRpcController } = require('./rpc');
 const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
@@ -51,6 +51,7 @@ function createApp(ctx) {
     // The router's error envelopes drop a falsy id (0 becomes null) and echo the
     // caller's jsonrpc member; the wrapper repairs both on the way out.
     app.use(withEnvelopeRepair(jsonRouter({ methods: jsonRpcController })));
+    app.use(terminalErrorHandler(ctx.logger));
     return { app, observability };
 }
 

@@ -33,7 +33,9 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 // Co-sign declines handleSignReq reaches before it authenticates the sender.
-const PRE_AUTH_COSIGN_DECLINES = new Set(['own_tip_unresolved', 'snapshot_out_of_tolerance']);
+const PRE_AUTH_COSIGN_DECLINES = new Set([
+    'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived'
+]);
 // Fallback pre-auth decline log window when the engine has no stall-log window set.
 const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
 
@@ -77,7 +79,7 @@ module.exports = {
         // reach leader-selection (grinding), the validator-set resolve, or the flag-
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
-        // Both declines here run before the sender is authenticated, so any peer can
+        // These guards run before the sender is authenticated, so any peer can
         // trigger them: noteCheckpointDecline throttles their warning per reason for that.
         let myBtc = await this.resolveSnapshotBlock();
         if(!Number.isFinite(myBtc)) return this.noteCosignDecline('own_tip_unresolved', cp);   // no own tip -> fail closed
@@ -90,7 +92,10 @@ module.exports = {
         // This closes seq-grinding (a leader picking an arbitrary seq to dodge the
         // replay guard below or fork the anchor/reward bookkeeping) and makes the
         // tightened (chain, network, checkpoint_seq) unique key a true split-brain fence.
-        if(Number(cp.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(cp.snapshot_block)) return;
+        const derivedSeq = canonicalForms.deriveCheckpointSeq(cp.snapshot_block);
+        if(Number(cp.checkpoint_seq) !== derivedSeq)
+            return this.noteCosignDecline('seq_not_derived', cp,
+                'seq ' + cp.checkpoint_seq + ', derived ' + derivedSeq);
 
         let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         if(!this.followsCadenceLeader(validators, sender, myPubkey, cp)) return;
@@ -102,7 +107,8 @@ module.exports = {
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
         let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
-        if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
+        if(maxSeq != null && cp.checkpoint_seq <= maxSeq)
+            return this.noteCosignDecline('seq_at_or_below_max', cp, 'max recorded seq ' + maxSeq);
 
         await this.coSignConfirmedCheckpoint(cp, canonical, myPubkey);
     },

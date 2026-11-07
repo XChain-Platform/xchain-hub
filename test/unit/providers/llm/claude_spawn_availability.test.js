@@ -150,6 +150,17 @@ describe('claude-spawn runClaudePrint()', function () {
     });
 
     it('keeps an unrecognised non-zero exit hard', async function () {
+        const authStdout = JSON.stringify({
+            type: 'error', status: 401,
+            error: { type: 'authentication_error', message: 'bad key' }
+        });
+        const authRun = loadClaudeSpawn({ exitCode: 1, stdout: authStdout });
+        let authErr;
+        try { await authRun.runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { authErr = e; }
+        expect(authErr.transient).to.equal(false);
+        expect(authErr.kind).to.equal('vendor_config');
+
         let { runClaudePrint } = loadClaudeSpawn({ exitCode: 2, stderr: 'exceeded --max-budget-usd' });
         let err;
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }

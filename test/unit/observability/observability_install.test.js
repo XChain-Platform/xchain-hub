@@ -138,6 +138,7 @@ function registerObservabilityInstallObservabilitySuite1Part2() {
       expect(res.headers.get('content-type')).to.include('version=0.0.4');
       expect(res.headers.get('cache-control')).to.equal('no-store');
       const body = await res.text();
+      expect(body).to.include('# HELP http_requests_total HTTP requests handled, by method, route and status code');
       expect(body).to.include('http_requests_total{method="GET",route="/health",status="200"} 2');
       expect(body).to.include('http_request_duration_seconds_count{method="GET",route="/health"} 2');
       expect(body).to.include('http_requests_in_flight 0');
