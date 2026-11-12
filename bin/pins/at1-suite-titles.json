@@ -5036,16 +5036,6 @@
       "3c649c9973e3fbe2cd2cbe850959b5fd09769fec562ca9a28d752201b196612a",
       "f63c8716fd392ee1de94b61e675a4ce646984ade8e4e17b8a4ad90f473303543"
     ],
-    "5abcaface7553e76": [
-      "b5dd56edc233d4b2aeb8c1380c8a5ecf5cc2f5a98aec4cf92e1e38531d0e3d04",
-      "5ae573b54688d56dd66eb1e30c1217bb8b84617197c34600b4cacba2ae3ed244",
-      "905bdb9e80995ed997ace00e4c400709a141562f896b5c97676499122851cd87",
-      "9d2177c9b48a53dfa8c37422e37c2ceeba2888bd50841a32e0de214dbb9891cc",
-      "55b7a9f5a24e0c1de4a771cfcf68bf6a175e33f6a00ded3b575ecdf075c69d32",
-      "da6cc7068e0939d10c3740c9bf7de5a08f4d2a662111408bcfd5ab80da8d8b8f",
-      "4834b13c0aad98e73be27dc5e496109be5896958e53ad5c9b6ec3c72be041717",
-      "5bf347402a1c22a805e1fd49cbb85fc14710b271b6e5baf472fb0b814875089c"
-    ],
     "5acd625434f56237": [
       "29bc51528ca5821af9f37a22dc8841a9dbeeba589fd950c4ac3d15a85b473c21",
       "6d1c57017090d4882a80b6f0a18b5617f3ee325e6ef341c8691fae4bca8cc9ed",
@@ -12220,6 +12210,24 @@
       "614d1395c211fde6dd91411a2503f13e1615c0e8a3f26110f74c603a916d3220",
       "0cf24e5030806fd11feab5edaa356d0d702e9df429ac79f6bb38c7b0a0ac39e3"
     ],
+    "e71234ace26720b0": [
+      "b5dd56edc233d4b2aeb8c1380c8a5ecf5cc2f5a98aec4cf92e1e38531d0e3d04",
+      "150823904a9cc3f27559e61f2aca2e53117d40f1f9cfb35c9564c7209587aa12",
+      "fda76109dd9d622fb75f27e2f4c81751dbea21a95f8a01a694d39ea9f527da75",
+      "5ae573b54688d56dd66eb1e30c1217bb8b84617197c34600b4cacba2ae3ed244",
+      "df63fcb5a78c9f88143d26a598ea5fa5cadc077fed15c2454f4da8519edfe3c1",
+      "905bdb9e80995ed997ace00e4c400709a141562f896b5c97676499122851cd87",
+      "9d2177c9b48a53dfa8c37422e37c2ceeba2888bd50841a32e0de214dbb9891cc",
+      "55b7a9f5a24e0c1de4a771cfcf68bf6a175e33f6a00ded3b575ecdf075c69d32",
+      "706fe3c3bca7d57988c296480845108af27466964c0539799316015540d3002c",
+      "018f76ad252f9c86a9c41d2d89657358ecb47a5b372f95d2794860219cd537d2",
+      "da6cc7068e0939d10c3740c9bf7de5a08f4d2a662111408bcfd5ab80da8d8b8f",
+      "03897308836c5595e155ecee2a075153bcc45ea9a4773d8ef9e4afe4af45c206",
+      "c34057671174d733958c6230b6d5ae56b590a10955227222fb057d9bd916133a",
+      "4834b13c0aad98e73be27dc5e496109be5896958e53ad5c9b6ec3c72be041717",
+      "281d4fc4896d6a70b28dffc7b0e39ba97da12de73238fa603781b69b8eefee7f",
+      "5bf347402a1c22a805e1fd49cbb85fc14710b271b6e5baf472fb0b814875089c"
+    ],
     "e72c6c5b72735299": [
       "067fd47d46fa198ac1b195b5e509378e88467fa3d50da3989b652c6ca3cbddba",
       "0ec303d03da8f1118563246160f2c85bc0d6e084dc66cb98c1cd80d73923317f",
@@ -13557,7 +13565,7 @@
         "ci:regression"
       ],
       "fileCount": 1118,
-      "titleCount": 9890,
+      "titleCount": 9898,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14515,7 +14523,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "5abcaface7553e76",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "e71234ace26720b0",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
@@ -14734,7 +14742,7 @@
     },
     "test": {
       "fileCount": 1118,
-      "titleCount": 9890,
+      "titleCount": 9898,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15692,7 +15700,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "5abcaface7553e76",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "e71234ace26720b0",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
@@ -15858,7 +15866,7 @@
     },
     "test:all": {
       "fileCount": 1204,
-      "titleCount": 10772,
+      "titleCount": 10780,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16902,7 +16910,7 @@
         "test/unit/peers/hub_db/peer_catchup_feed_backoff.test.js": "7d53857de1eea0c1",
         "test/unit/peers/hub_db/peer_catchup_harness.test.js": "790dca78158bc4c2",
         "test/unit/peers/hub_db/peer_catchup_lifecycle.test.js": "abde33e5e65888ff",
-        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "5abcaface7553e76",
+        "test/unit/peers/hub_db/peer_catchup_refusal_memo.test.js": "e71234ace26720b0",
         "test/unit/peers/hub_db/peer_catchup_schema_version.test.js": "243e6c8cd7ead3d7",
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
