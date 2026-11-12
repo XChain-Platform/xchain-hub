@@ -27,7 +27,9 @@ function hubWith(url) {
     return hub;
 }
 
-describe('chain tips: BTC tip failures reach the consensus-input monitor', function () {
+// The stubs every case shares: a proxied XChainHub over a stubbed axios and db, a fresh
+// monitor, and silenced console output.
+function registerStubHooks() {
     before(function () {
         this.timeout(30000);
         axiosStub = { post: sinon.stub() };
@@ -50,6 +52,10 @@ describe('chain tips: BTC tip failures reach the consensus-input monitor', funct
     });
 
     afterEach(function () { sinon.restore(); });
+}
+
+describe('chain tips: BTC tip failures reach the consensus-input monitor', function () {
+    registerStubHooks();
 
     it('counts an unreachable indexer and alerts after repeated nulls', async function () {
         const hub = hubWith('http://idx');
