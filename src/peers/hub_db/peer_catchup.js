@@ -240,9 +240,11 @@ class HubDbPeerCatchup {
             this.warnIfNoPeer();
             return this.caughtUpState();
         }
-        this.bootGraceUntil = 0;
         const fetchablePeers = peers.filter(peer => peer.feedUrl || (this.warnIfNoFeedUrl(peer) && false));
         this.lastUsablePeerCount = fetchablePeers.length;
+        // Only a peer this hub can page from ends the boot grace: a signer peer whose feed URL is
+        // not known yet leaves the count at zero, which must not read as caught up during boot.
+        if (fetchablePeers.length > 0) this.bootGraceUntil = 0;
         const reads = createIndexerReadMemo(this.db, this.indexerReadIntervalMs);
         const unserved = [];
         for (const table of this.tables) {
