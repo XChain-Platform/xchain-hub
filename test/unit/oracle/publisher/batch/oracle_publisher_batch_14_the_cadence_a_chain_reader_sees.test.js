@@ -30,6 +30,7 @@ const {
     readJsonl,
     cleanupPublisherBatch
 } = require('./oracle_publisher_batch.test.js');
+const { createWindowPlan } = require('../../../../../src/oracle/publisher/window_plan');
 
 let logs;
 
@@ -125,7 +126,48 @@ const testCase2 = async function () {
             expect(peakSnapshotAge(sixRoundWires)).to.be.above(BOUND_S);
         };
 
+// The boot line exists so a cadence too slow for the fee gate is visible, so it must
+// report the window plan the scheduler actually uses, not the small-window default
+// that the plan has already superseded (hourly plan in force from round 0).
+function cadenceLine() {
+            let line = logs.log.concat(logs.warn).find(l => l.indexOf('PRICE batch cadence') !== -1);
+            expect(line, 'a PRICE batch cadence line was logged').to.be.a('string');
+            return line;
+        }
+
+function planInForce(h, round) {
+            h.p.batchWindowRounds = 20;
+            h.p.windowPlan = createWindowPlan({ firstRound: 0, smallRounds: 20, largeRounds: 6, alignmentRounds: 6 });
+            h.hub.getOracle = () => ({ getCurrentRound: () => round });
+        }
+
+const testCase3 = async function () {
+            let h = makePublisher({ fleetCadence: true });
+            planInForce(h, 7);
+            let stats = h.p.getStats();
+            expect(stats.batchCadenceSeconds).to.equal(6 * ROUND_S);
+            h.p.logBatchCadence();
+            let line = cadenceLine();
+            expect(line).to.contain('6 round(s)/batch = one wire per ' + stats.batchCadenceSeconds + 's');
+            expect(line).to.contain('peaks at ' + stats.batchWorstCaseSnapshotAgeSeconds + 's');
+            expect(line).to.not.contain('20 round(s)/batch');
+            expect(line).to.not.contain('one wire per ' + (20 * ROUND_S) + 's');
+        };
+
+const testCase4 = async function () {
+            let h = makePublisher({ fleetCadence: true });
+            planInForce(h, 7);
+            h.hub.getOracle = () => null;
+            let stats = h.p.getStats();
+            h.p.logBatchCadence();
+            let line = cadenceLine();
+            expect(line).to.contain('round(s)/batch = one wire per ' + stats.batchCadenceSeconds + 's');
+            expect(line).to.contain('peaks at ' + stats.batchWorstCaseSnapshotAgeSeconds + 's');
+        };
+
 function registerSuite1() {
+    it('logs the in-force plan window, not the small-window default', testCase3);
+    it('logs the same cadence the status reports when the round is unknown', testCase4);
     it('keeps the newest snapshot inside the fee-price bound for every second of the hour', testCase1);
     it('measures the pre-fix 6-round window failing the same walk', testCase2);
 }

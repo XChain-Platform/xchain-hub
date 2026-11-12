@@ -109,13 +109,16 @@ module.exports = {
     // that is publishing perfectly on a cadence too slow for the fee gate looks
     // healthy in every other line this class logs.
     logBatchCadence() {
-        let peakMs = worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+        // The window the scheduler runs, the same figure the status reports, never the
+        // small-window default the hourly plan may already have superseded.
+        let rounds = this.windowRoundsInForce();
+        let peakMs = worstCaseSnapshotAgeMs(rounds, {
             roundIntervalMs:  this.roundIntervalMs,
             graceMs:          this.batchGraceMs,
             landingReserveMs: this.batchLandingReserveMs });
-        logger.info('OraclePublisher PRICE batch cadence: ' + this.batchWindowRounds +
+        logger.info('OraclePublisher PRICE batch cadence: ' + rounds +
             ' round(s)/batch = one wire per ' +
-            Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000) + 's' +
+            Math.round((rounds * this.roundIntervalMs) / 1000) + 's' +
             (this.batchWindowRoundsCeiling === null
                 ? ' (no staleness bound resolved; window not capped)'
                 : ', ceiling ' + this.batchWindowRoundsCeiling + '; newest snapshot peaks at ' +
