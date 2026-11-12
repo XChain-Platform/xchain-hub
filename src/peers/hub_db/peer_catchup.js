@@ -16,15 +16,12 @@ const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_r
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
 const DEFAULT_PAGE_SIZE = 10000;
 const DEFAULT_WARN_INTERVAL_MS = 60000;
-const DEFAULT_RETRY_INTERVAL_MS = 5000;
-const DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
+const DEFAULT_RETRY_INTERVAL_MS = 5000, DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
-const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000, DEFAULT_BOOT_GRACE_MS = 30000;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
-// How a table walk ended: every row served, served with a failed indexer read, or no peer served it.
-const WALK_COMPLETE = 'complete';
-const WALK_LEFT_BEHIND = 'left_behind';
-const WALK_UNSERVED = 'unserved';
+// How a table walk ended: complete, served with a failed indexer read, or served by no peer.
+const WALK_COMPLETE = 'complete', WALK_LEFT_BEHIND = 'left_behind', WALK_UNSERVED = 'unserved';
 const KNOWN_REFUSAL = Object.freeze({ ok: false, reason: 'refused on an earlier walk' });
 
 function positiveOr(value, fallback) {
@@ -73,18 +70,12 @@ function requestJson(url, feedKey, timeoutMs) {
             const chunks = [];
             res.on('data', (chunk) => {
                 size += chunk.length;
-                if (size > MAX_RESPONSE_BYTES) {
-                    req.destroy(new Error('Hub DB catch-up response exceeded byte limit'));
-                    return;
-                }
-                chunks.push(chunk);
+                if (size > MAX_RESPONSE_BYTES) req.destroy(new Error('Hub DB catch-up response exceeded byte limit'));
+                else chunks.push(chunk);
             });
             res.on('end', () => {
                 const body = Buffer.concat(chunks).toString('utf8');
-                if (res.statusCode < 200 || res.statusCode >= 300) {
-                    reject(refusedRequestError(res));
-                    return;
-                }
+                if (res.statusCode < 200 || res.statusCode >= 300) return reject(refusedRequestError(res));
                 try { resolve(JSON.parse(body)); }
                 catch (e) { reject(new Error('Snapshot response was not valid JSON')); }
             });
@@ -123,14 +114,11 @@ function countRefusal(walk, verdict) {
 }
 
 function verifierAccepted(verdict) {
-    if (verdict === false || verdict === null) return false;
-    if (verdict && typeof verdict === 'object' && verdict.ok === false) return false;
-    return true;
+    return !(verdict === false || verdict === null || (verdict && typeof verdict === 'object' && verdict.ok === false));
 }
 
 function refusalReason(verdict) {
-    if (verdict && typeof verdict === 'object' && verdict.reason) return String(verdict.reason);
-    return 'verifier refused row';
+    return verdict && typeof verdict === 'object' && verdict.reason ? String(verdict.reason) : 'verifier refused row';
 }
 
 class HubDbPeerCatchup {
@@ -149,8 +137,7 @@ class HubDbPeerCatchup {
         this.currentRetryIntervalMs = this.retryIntervalMs;
         this.feedBackoff = createPeerFeedBackoff({ retryIntervalMs: this.retryIntervalMs,
             maxRetryIntervalMs: this.maxRetryIntervalMs, now: () => Date.now() });
-        this.refusals = createRefusalMemo({ maxEntries: opts.refusalMemoEntries });
-        this.nextRetryAt = 0;
+        this.refusals = createRefusalMemo({ maxEntries: opts.refusalMemoEntries }); this.nextRetryAt = 0;
         this.requestTimeoutMs = positiveOr(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
         this.logger = opts.logger || getLogger();
         this.fetchPage = opts.fetchPage || ((peer, table, cursor, limit) =>
@@ -160,15 +147,19 @@ class HubDbPeerCatchup {
         this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
         this.state = createCatchupState(this.tables);
-        // Usable peers seen by the last run. Zero means no signer-set peer this hub can
-        // fetch from, so there is nothing to catch up against; the hub then serves as
-        // v0.21.3 did (always caught up) rather than freezing admission for every reader.
+        // Usable peers seen by the last run. Zero means no signer-set peer to fetch from, so the hub
+        // serves as v0.21.3 did (always caught up) rather than freezing admission for every reader.
         this.lastUsablePeerCount = 0;
-        this.lastUngatedWarnAt = null;
-        this.runningPromise = null;
-        this.rerunRequested = false;
-        this.warnTimer = this.retryTimer = this.lastNoPeerWarnAt = null;
+        // Peers dial in after the API opens, so for bootGraceMs after start() "no peer yet" is not
+        // "no peer to catch up against": not caught up until a peer connects or the grace ends.
+        this.bootGraceMs = opts.bootGraceMs === 0 ? 0 : positiveOr(opts.bootGraceMs, DEFAULT_BOOT_GRACE_MS);
+        this.bootGraceUntil = 0;
+        this.lastUngatedWarnAt = this.runningPromise = null;
+        this.rerunRequested = false; this.warnTimer = this.retryTimer = this.lastNoPeerWarnAt = null;
         this.lastNoFeedUrlWarnAt = new Map();
+        this.lastUnservedWarnAt = null;
+        // Tables the last walk found no peer to serve, with the last refusal each peer gave.
+        this.unserved = new Map();
         this.started = false;
         this.onPeerConnect = peerAddr => this.isListedSignerPeer(peerAddr) && this.schedule();
     }
@@ -176,6 +167,7 @@ class HubDbPeerCatchup {
     start() {
         if (this.started) return this.runningPromise || Promise.resolve();
         this.started = true;
+        this.bootGraceUntil = Date.now() + this.bootGraceMs;
         if (this.peerManager && typeof this.peerManager.on === 'function') this.peerManager.on('peer:connect', this.onPeerConnect);
         this.warnTimer = setInterval(() => this.warnIfNoPeer(), this.warnIntervalMs).unref();
         this.retryTimer = setInterval(() => this.onRetryTick(), this.retryIntervalMs).unref();
@@ -185,7 +177,7 @@ class HubDbPeerCatchup {
     stop() {
         clearInterval(this.warnTimer);
         clearInterval(this.retryTimer);
-        this.warnTimer = this.retryTimer = null;
+        this.warnTimer = this.retryTimer = null; this.bootGraceUntil = 0;
         if (this.peerManager && typeof this.peerManager.removeListener === 'function') {
             this.peerManager.removeListener('peer:connect', this.onPeerConnect);
         }
@@ -224,8 +216,7 @@ class HubDbPeerCatchup {
             this.rerunRequested = true;
             return this.runningPromise;
         }
-        // Log a failed run here so runningPromise always resolves: the retry tick, the
-        // peer:connect listener and the rerun below all drop or only .then() it.
+        // Log a failed run here so runningPromise always resolves (callers drop or .then() it).
         this.runningPromise = this.run(options).catch((e) => {
             this.logger.warn(nodeUtil.format('Hub DB peer catch-up run failed:', e && e.message ? e.message : e));
         }).finally(() => {
@@ -242,8 +233,20 @@ class HubDbPeerCatchup {
     caughtUpState() { return this.state.status(); }
     allCaughtUp() { return this.state.isCaughtUp(); }
 
+    // Health telemetry. Gives the same answer isCaughtUp() gives but never logs, so a health poll
+    // cannot emit the ungated warning. A table no peer can serve stays not caught up forever, so
+    // the refusal each peer gave is named here instead of living only in a periodic warn line.
+    getStats() {
+        const ungated = this.lastUsablePeerCount === 0 && Date.now() >= this.bootGraceUntil;
+        const caughtUp = this.lastUsablePeerCount === 0 ? ungated : this.state.isCaughtUp();
+        const unserved = [...this.unserved].map(([table, peers]) => ({
+            table, reason: peers.map(p => p.reason).join('; '), peers }));
+        return { caught_up: caughtUp, ungated, tables: this.caughtUpState(), unserved };
+    }
+
     isCaughtUp() {
         if (this.lastUsablePeerCount === 0) {
+            if (Date.now() < this.bootGraceUntil) return false;
             this.warnIfUngated();
             return true;
         }
@@ -266,33 +269,54 @@ class HubDbPeerCatchup {
             this.warnIfNoPeer();
             return this.caughtUpState();
         }
+        this.bootGraceUntil = 0;
         const fetchablePeers = peers.filter(peer => peer.feedUrl || (this.warnIfNoFeedUrl(peer) && false));
         this.lastUsablePeerCount = fetchablePeers.length;
         const reads = createIndexerReadMemo(this.db, this.indexerReadIntervalMs);
+        const unserved = [];
         for (const table of this.tables) {
             if (onlyBehind && this.state.isTableCaughtUp(table)) continue;
             const verifier = this.getVerifier(table);
             if (!verifier) continue;
-            await this.walkTable(fetchablePeers, table, verifier, reads);
+            if (await this.walkTable(fetchablePeers, table, verifier, reads) === WALK_UNSERVED) unserved.push(table);
         }
+        this.warnIfUnserved(unserved, fetchablePeers);
         return this.caughtUpState();
     }
 
+    // Backed-off peers are skipped silently, so name every unserved table and peer once per interval.
+    warnIfUnserved(tables, peers) {
+        const now = Date.now();
+        if (tables.length === 0 || peers.length === 0) return false;
+        if (this.lastUnservedWarnAt !== null && now - this.lastUnservedWarnAt < this.warnIntervalMs) return false;
+        this.lastUnservedWarnAt = now;
+        this.logger.warn('Hub DB peer catch-up: no peer served ' + tables.join(', ') +
+            ' (peers: ' + peers.map(peer => peer.feedUrl).join(', ') + '); not caught up');
+        return true;
+    }
+
     async walkTable(peers, table, verifier, reads) {
+        const refusals = [];
         for (const peer of peers) {
             if (this.feedBackoff.isBackedOff(peer.feedUrl)) continue;
             try {
                 const left = await this.catchUpTable(peer.feedUrl, table, verifier, peer.identity, reads);
                 this.feedBackoff.noteSuccess(peer.feedUrl);
-                this.finishTableWalk(table, left === true ? WALK_LEFT_BEHIND : WALK_COMPLETE);
-                return;
+                const outcome = left === true ? WALK_LEFT_BEHIND : WALK_COMPLETE;
+                this.unserved.delete(table);
+                this.finishTableWalk(table, outcome);
+                return outcome;
             } catch (e) {
                 this.feedBackoff.noteFailure(peer.feedUrl, e);
+                refusals.push({ peer: peer.feedUrl, reason: e && e.message ? e.message : String(e) });
                 this.logger.warn(nodeUtil.format('Hub DB peer catch-up failed for ' + table +
                     ' from ' + peer.feedUrl + ':', e && e.message ? e.message : e));
             }
         }
+        // Peers skipped as backed off leave no new refusal: keep the last reasons rather than blank them.
+        if (refusals.length > 0 || !this.unserved.has(table)) this.unserved.set(table, refusals);
         this.finishTableWalk(table, WALK_UNSERVED);
+        return WALK_UNSERVED;
     }
 
     // A table changes state only when its walk ends, so readers never see it flip mid-walk.
@@ -323,11 +347,8 @@ class HubDbPeerCatchup {
     }
 
     async verifyRow(verifier, row, context) {
-        try {
-            return await verifier(row, context);
-        } catch (e) {
-            return { ok: false, reason: e && e.message ? e.message : String(e) };
-        }
+        try { return await verifier(row, context); }
+        catch (e) { return { ok: false, reason: e && e.message ? e.message : String(e) }; }
     }
 
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
@@ -335,9 +356,7 @@ class HubDbPeerCatchup {
             refused: 0, knownRefused: 0 };
         for (;;) {
             const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
-            if (!page || page.table !== table || !Array.isArray(page.rows)) {
-                throw new Error('Invalid snapshot page for ' + table);
-            }
+            if (!page || page.table !== table || !Array.isArray(page.rows)) throw new Error('Invalid snapshot page for ' + table);
             // A stale or newer peer's rows may carry columns this hub cannot interpret; the throw
             // lands in walkTable's catch, which backs the feed off and tries the next peer.
             if (page.schema_version !== HUB_SCHEMA_VERSION) {
@@ -354,10 +373,8 @@ class HubDbPeerCatchup {
     }
 
     endWalk(walk) {
-        if (walk.refused > 0) {
-            this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table + ' row(s) from ' +
-                walk.peer + ' refused (' + walk.knownRefused + ' already known)');
-        }
+        if (walk.refused > 0) this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table +
+            ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)');
         return walk.leftBehind;
     }
 

@@ -314,6 +314,10 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, batchS
     // is not by itself a reason to 503 a hub whose DB and oracle are fine.
     if (hub.hubDbBroadcaster && typeof hub.hubDbBroadcaster.getWatermarkStats === 'function')
         healthResult.hub_db_stream = hub.hubDbBroadcaster.getWatermarkStats();
+    // Peer catch-up state, telemetry only: a hub whose peers all refuse its walk stays caught_up
+    // false with its published heights held, and nothing else on this body shows it.
+    if (hub.peerCatchup && typeof hub.peerCatchup.getStats === 'function')
+        healthResult.peer_catchup = hub.peerCatchup.getStats();
     return healthResult;
 }
 
