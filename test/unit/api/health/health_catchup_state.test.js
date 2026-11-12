@@ -9,7 +9,7 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { buildSystemRpc } = require('../../../src/api/rpc/system.js');
+const { buildSystemRpc } = require('../../../../src/api/rpc/system.js');
 
 function healthFor(hub) {
     const res = { status: sinon.stub().returnsThis() };

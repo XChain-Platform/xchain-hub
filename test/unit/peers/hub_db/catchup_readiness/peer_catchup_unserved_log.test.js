@@ -1,7 +1,7 @@
 'use strict';
 const sinon = require('sinon');
 const { expect } = require('chai');
-const { PEER, PEER_B, peerManager, makeCatchup } = require('./helpers/peer_catchup_harness.js');
+const { PEER, PEER_B, peerManager, makeCatchup } = require('../helpers/peer_catchup_harness.js');
 
 const TABLES = ['price_snapshots', 'capability_snapshots', 'slash_proposals'];
 

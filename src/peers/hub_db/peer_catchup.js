@@ -12,6 +12,7 @@ const { createRefusalMemo } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
 const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
+const { connectedSignerPeers } = require('./signer_peers.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
 const DEFAULT_PAGE_SIZE = 10000;
@@ -42,14 +43,6 @@ function peerFeedUrl(peerAddr, table, cursor, limit) {
     url.searchParams.set('since_id', String(cursor));
     url.searchParams.set('limit', String(limit));
     return url;
-}
-
-function dialableAnnouncedFeedUrl(value) {
-    if (typeof value !== 'string' || !/^(?:wss?|https?):\/\//i.test(value)) return null;
-    try {
-        const url = new URL(value);
-        return url.hostname && !url.username && !url.password ? value : null;
-    } catch (e) { return null; }
 }
 
 // Keeps the status and Retry-After so the caller can back off a refusing peer.
@@ -84,28 +77,6 @@ function requestJson(url, feedKey, timeoutMs) {
         req.on('error', reject);
         req.end();
     });
-}
-
-function connectedSignerPeers(peerManager) {
-    if (!peerManager || !peerManager.peers || !peerManager.validatorPubkeys) return [];
-    const signerSet = peerManager.effectiveSignerSet;
-    const peers = [];
-    for (const [addr, peer] of peerManager.peers) {
-        if (!peer || (peer.state !== 'open' && peer.state !== 'connected')) continue;
-        const identity = peer.validatorAddr || addr;
-        const pubkey = peerManager.validatorPubkeys.get(identity) || peer.signing_pubkey;
-        if (!pubkey) continue;
-        const normalizedPubkey = String(pubkey).toLowerCase();
-        const inSignerSet = signerSet && signerSet.has(normalizedPubkey);
-        const inRegistry = typeof peerManager.registryHasPubkey === 'function' &&
-            peerManager.registryHasPubkey(normalizedPubkey);
-        if (!inSignerSet && !inRegistry) continue;
-        const feedUrl = peer.feedUrl ||
-            (peerManager.validatorFeedUrls && peerManager.validatorFeedUrls.get(identity)) ||
-            (peer.inbound ? dialableAnnouncedFeedUrl(identity) : addr);
-        peers.push({ addr, identity, feedUrl });
-    }
-    return peers;
 }
 
 function countRefusal(walk, verdict) {

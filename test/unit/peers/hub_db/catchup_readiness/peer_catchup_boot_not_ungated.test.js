@@ -6,8 +6,8 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const { EventEmitter } = require('events');
-const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
-const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
+const HubDbPeerCatchup = require('../../../../../src/peers/hub_db/peer_catchup.js');
+const { HUB_SCHEMA_VERSION } = require('../../../../../src/hub_schema_version.js');
 
 function make(extra) {
     const logger = { warn: sinon.stub(), error: sinon.stub() };

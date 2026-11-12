@@ -10,9 +10,9 @@
 
 const { expect } = require('chai');
 const sinon = require('sinon');
-const { buildSystemRpc } = require('../../../src/api/rpc/system.js');
-const { HUB_SCHEMA_VERSION } = require('../../../src/hub_schema_version.js');
-const { makeCatchup } = require('../peers/hub_db/helpers/peer_catchup_harness.js');
+const { buildSystemRpc } = require('../../../../src/api/rpc/system.js');
+const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
+const { makeCatchup } = require('../../peers/hub_db/helpers/peer_catchup_harness.js');
 
 const RES = { status() { return this; } };
 
