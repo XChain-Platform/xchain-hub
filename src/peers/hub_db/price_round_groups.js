@@ -54,11 +54,15 @@ function sameSignedRoundFields(rows) {
 }
 
 // A producer round is one finalized, unsourced BTC-anchored round whose pair rows share a signature set.
+// The producer insert names no source_chain, so a stored row carries the column default ('DOGE')
+// beside reference_chain 'BTC', never NULL. Every pushed or batch writer stores source_chain equal
+// to reference_chain and names a source action, so those two tests keep the forms apart.
 function isProducerRoundRow(row) {
     return Boolean(row) && typeof row === 'object' && row.status === 'finalized' &&
-        (row.source_chain === null || row.source_chain === undefined) &&
-        row.reference_chain === 'BTC' && typeof row.consensus_proof === 'string' &&
-        row.consensus_proof.startsWith('[');
+        row.reference_chain === 'BTC' && row.source_chain !== row.reference_chain &&
+        (row.source_action_index === null || row.source_action_index === undefined) &&
+        (row.push_generation === null || row.push_generation === undefined || Number(row.push_generation) === 0) &&
+        typeof row.consensus_proof === 'string' && row.consensus_proof.startsWith('[');
 }
 
 function groupKey(row) {
@@ -114,6 +118,12 @@ function storePriceSnapshot(db, row) {
     if (row.status === 'skipped') {
         return db.setSkippedPriceSnapshotRound(
             row.round_number, [row.coin_pair], row.reference_block, row.block_timestamp);
+    }
+    // A missed producer round is stored as its producer stored it. The landing clock is not
+    // signed, so it stays 0 here and this hub's own batch ingest stamps it.
+    if (isProducerRoundRow(row)) {
+        return db.setFinalizedPriceSnapshotRound(row.round_number, [{ coinPair: row.coin_pair, price: row.price }],
+            row.reference_block, row.block_timestamp, row.validator_count, row.consensus_proof, admissionBlocks(row));
     }
     const common = [row.round_number, pairs, row.reference_block, row.reference_chain, row.block_timestamp,
         row.validator_count, row.consensus_proof, row.source_action_index, row.push_generation, row.created_at];
