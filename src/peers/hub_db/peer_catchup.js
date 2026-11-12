@@ -20,6 +20,8 @@ const DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000, DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000, DEFAULT_BOOT_GRACE_MS = 30000;
+// Per-walk cap on individual refusal lines; the walk summary carries the full count, so a restart with an empty memo stays bounded.
+const MAX_REFUSAL_LINES_PER_WALK = 10;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 // How a table walk ended: complete, served with a failed indexer read, or served by no peer.
 const WALK_COMPLETE = 'complete', WALK_LEFT_BEHIND = 'left_behind', WALK_UNSERVED = 'unserved';
@@ -83,6 +85,10 @@ function countRefusal(walk, verdict) {
     walk.refused += 1;
     if (verdict === KNOWN_REFUSAL) walk.knownRefused += 1;
 }
+
+// Refused rows that got no individual line (not already known, past the cap).
+const suppressedNote = w => (w.refused - w.knownRefused - w.refusalLines > 0
+    ? '; ' + (w.refused - w.knownRefused - w.refusalLines) + ' per-row refusal line(s) suppressed' : '');
 
 function verifierAccepted(verdict) {
     return !(verdict === false || verdict === null || (verdict && typeof verdict === 'object' && verdict.ok === false));
@@ -326,7 +332,7 @@ class HubDbPeerCatchup {
 
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
         const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [],
-            refused: 0, knownRefused: 0 };
+            refused: 0, knownRefused: 0, refusalLines: 0 };
         for (;;) {
             const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
             if (!page || page.table !== table || !Array.isArray(page.rows)) throw new Error('Invalid snapshot page for ' + table);
@@ -347,7 +353,7 @@ class HubDbPeerCatchup {
 
     endWalk(walk) {
         if (walk.refused > 0) this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table +
-            ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)');
+            ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)' + suppressedNote(walk));
         return walk.leftBehind;
     }
 
@@ -376,8 +382,11 @@ class HubDbPeerCatchup {
             network: this.network, readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
         });
         if (verifierAccepted(verdict)) return verdict;
-        this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
-            ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
+        if (walk.refusalLines < MAX_REFUSAL_LINES_PER_WALK) {
+            walk.refusalLines += 1;
+            this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
+                ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
+        }
         if (verdict && (verdict.retry === true || verdict.retryable === true)) walk.leftBehind = true;
         else if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
         else this.refusals.remember(memoKey);

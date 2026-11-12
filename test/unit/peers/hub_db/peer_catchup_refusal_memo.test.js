@@ -108,6 +108,23 @@ function registerRefusalReportingTests() {
         ]);
     });
 
+    it('bounds the per-row refusal lines of one walk and reports the true count in the summary', async function () {
+        const lines = {};
+        for (const n of [50, 500]) {
+            const rows = Array.from({ length: n }, (_, i) => ({ id: i + 1, round_number: i + 1, coin_pair: 'BTC/USD', status: 'skipped' }));
+            // A fresh instance has an empty memo, as after a restart.
+            const { catchup, logger } = memoCatchup(refusingVerifier(), servingRows(() => rows), { pageSize: 100000 });
+            await catchup.run();
+            lines[n] = warnLines(logger, 'verifier refused').length;
+            expect(lines[n]).to.be.at.most(10);
+            const summaries = warnLines(logger, 'price_snapshots row(s) from ' + PEER + ' refused');
+            expect(summaries).to.have.length(1);
+            expect(summaries[0]).to.include('' + n + ' price_snapshots row(s)');
+            expect(summaries[0]).to.include((n - lines[n]) + ' per-row refusal line(s) suppressed');
+        }
+        expect(lines[500]).to.equal(lines[50]);
+    });
+
     it('evicts the oldest refusal once the memo is full', function () {
         const memo = createRefusalMemo({ maxEntries: 2 });
         const keys = SKIPPED.concat([{ id: 13, status: 'skipped' }]).map(row => memo.keyFor('peer', 'price_snapshots', row));
