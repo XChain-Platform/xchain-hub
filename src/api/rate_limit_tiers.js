@@ -148,9 +148,31 @@ function rateLimitKey(req) {
     return found.family === 4 ? found.address : ipKeyGenerator(found.address);
 }
 
+// The limiter advertised its Remaining after charging one token; the surcharge then
+// takes extra more, so the advertised figure is rewritten to match the bucket. Every
+// spelling the library can emit is covered: the draft-6 and legacy single headers and the
+// draft-7 combined "RateLimit: limit=, remaining=, reset=" field. A header the limiter did
+// not set (headers disabled) is left absent.
+function rewriteRemaining(res, extra) {
+    if (!res || typeof res.getHeader !== 'function' || typeof res.setHeader !== 'function') return;
+    for (const name of ['RateLimit-Remaining', 'X-RateLimit-Remaining']) {
+        const current = res.getHeader(name);
+        if (current === undefined) continue;
+        const left = parseInt(String(current), 10);
+        if (Number.isFinite(left)) res.setHeader(name, String(Math.max(0, left - extra)));
+    }
+    const combined = res.getHeader('RateLimit');
+    if (typeof combined === 'string') {
+        res.setHeader('RateLimit', combined.replace(/remaining=(\d+)/, (m, left) =>
+            'remaining=' + Math.max(0, parseInt(left, 10) - extra)));
+    }
+}
+
 // Charges the rest of a batch against the tier whose limiter just passed the request.
 // `opts` is that limiter's own options object, so skip, key, store, limit and the 429
-// body can never disagree with the limiter it follows.
+// body can never disagree with the limiter it follows. The headers are rewritten before
+// the request moves on, so a served batch, the surcharge's own 429 and a later 400 from
+// the batch guard all advertise the bucket as it stands.
 function batchSurcharge(opts) {
     return function rpcBatchSurcharge(req, res, next) {
         const extra = batchCost(req) - 1;
@@ -161,6 +183,7 @@ function batchSurcharge(opts) {
         } catch (err) {
             return next(err);
         }
+        rewriteRemaining(res, extra);
         if (totalHits > opts.limit) return opts.handler(req, res);
         return next();
     };

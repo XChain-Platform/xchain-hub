@@ -151,6 +151,40 @@ function batchChargingSuite() {
     });
 }
 
+// The advertised RateLimit-Remaining must match the bucket after the batch surcharge.
+function batchHeaderSuite() {
+    it('advertises the bucket after a served batch: Remaining drops by the call count', async function () {
+        await boot({ keyless: true });
+        const served = await post(batchOf(20));
+        expect(served.status).to.equal(200);
+        expect(served.headers['ratelimit-limit']).to.equal('100');
+        expect(served.headers['ratelimit-remaining']).to.equal('80');
+        expect((await post(healthCall(1))).headers['ratelimit-remaining']).to.equal('79');
+    });
+
+    it('advertises Remaining 0 on the surcharge 429 and keeps it consistent after', async function () {
+        await boot({ keyless: true });
+        for (let i = 1; i <= 81; i++) await post(healthCall(i));
+        const refused = await post(batchOf(20));
+        expect(refused.status).to.equal(429);
+        expect(JSON.parse(refused.body).error.code).to.equal(-32029);
+        expect(refused.headers['ratelimit-remaining']).to.equal('0');
+        expect(refused.headers['retry-after']).to.be.a('string');
+        const next = await post(healthCall(99));
+        expect(next.status).to.equal(429);
+        expect(next.headers['ratelimit-remaining']).to.equal('0');
+    });
+
+    it('advertises the cost on the batch-guard 400 for an oversized batch', async function () {
+        await boot({ keyless: true });
+        // The guard itself is not mounted in this harness, so assert the header the
+        // surcharge leaves for whatever answers next: a 21-call batch costs 21.
+        const res = await post(batchOf(21));
+        expect(res.headers['ratelimit-remaining']).to.equal('79');
+        expect((await post(healthCall(1))).headers['ratelimit-remaining']).to.equal('78');
+    });
+}
+
 function bucketsSuite() {
     it('keeps the public tier conservative while a key-holder on the same IP carries on', async function () {
         await boot({ rpm: 3, authRpm: 50 });
@@ -328,6 +362,7 @@ describe('hub JSON-RPC rate-limit tiers', function () {
     describe('JSON-RPC sent to a snapshot path', snapshotPathSuite);
     describe('isSnapshotPageRead', snapshotPageReadSuite);
     describe('batch charging', batchChargingSuite);
+    describe('batch RateLimit headers', batchHeaderSuite);
     describe('public and authenticated buckets', bucketsSuite);
     describe('rotated hub key', rotatedKeySuite);
     describe('FixedWindowStore', storeSuite);
