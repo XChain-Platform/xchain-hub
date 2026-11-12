@@ -8,7 +8,7 @@ const registry = require('./catchup_verifiers.js');
 const { createIndexerReadMemo } = require('../../oracle/price_aggregator/capability_catchup_verifier.js');
 const { createCatchupState } = require('./catchup_state.js');
 const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
-const { createRefusalMemo } = require('./refusal_memo.js');
+const { createRefusalMemo, DEFAULT_REFUSAL_MEMO_PATH } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
 const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
@@ -111,10 +111,11 @@ class HubDbPeerCatchup {
         this.maxRetryIntervalMs = positiveOr(opts.maxRetryIntervalMs, DEFAULT_MAX_RETRY_INTERVAL_MS);
         this.indexerReadIntervalMs = opts.indexerReadIntervalMs === 0
             ? 0 : positiveOr(opts.indexerReadIntervalMs, DEFAULT_INDEXER_READ_INTERVAL_MS);
-        this.currentRetryIntervalMs = this.retryIntervalMs;
+        this.currentRetryIntervalMs = this.retryIntervalMs; this.nextRetryAt = 0;
         this.feedBackoff = createPeerFeedBackoff({ retryIntervalMs: this.retryIntervalMs,
             maxRetryIntervalMs: this.maxRetryIntervalMs, now: () => Date.now() });
-        this.refusals = createRefusalMemo({ maxEntries: opts.refusalMemoEntries }); this.nextRetryAt = 0;
+        this.refusals = createRefusalMemo({ maxEntries: opts.refusalMemoEntries, filePath: opts.refusalMemoPath,
+            store: opts.refusalStore, warn: line => this.logger.warn(line) });
         this.requestTimeoutMs = positiveOr(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
         this.logger = opts.logger || getLogger();
         this.fetchPage = opts.fetchPage || ((peer, table, cursor, limit) =>
@@ -354,6 +355,7 @@ class HubDbPeerCatchup {
     endWalk(walk) {
         if (walk.refused > 0) this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table +
             ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)' + suppressedNote(walk));
+        this.refusals.flush();
         return walk.leftBehind;
     }
 
@@ -395,5 +397,4 @@ class HubDbPeerCatchup {
 }
 
 module.exports = Object.assign(HubDbPeerCatchup, {
-    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow, DEFAULT_PAGE_SIZE
-});
+    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow, DEFAULT_PAGE_SIZE, DEFAULT_REFUSAL_MEMO_PATH });

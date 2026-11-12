@@ -131,7 +131,9 @@ class HubDbAdmissionSampling {
                 db: this.db,
                 peerManager: hub.peerManager,
                 network: hub.network || '',
-                feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || ''
+                feedKey: hubConfig.HUB_FEED_API_KEY || hubConfig.HUB_API_KEY || '',
+                // Persist peer rows already refused, so a restart does not re-verify and re-log them.
+                refusalMemoPath: HubDbPeerCatchup.DEFAULT_REFUSAL_MEMO_PATH
             });
             startPeerCatchup = true;
         }
