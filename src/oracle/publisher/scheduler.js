@@ -271,7 +271,10 @@ module.exports = {
     // protected nothing and cost the fleet a backlog it could not walk.
     startBufferCatchupSweep() {
         if (this._catchupSweepTimer) return;
-        this.armCatchupSweep(this.batchCatchupIntervalMs);
+        // The first arm picks its cadence the same way every later one does: a hub
+        // restarting into a backlog deeper than one sweep must not idle a full idle
+        // interval before the second sweep.
+        this.armCatchupSweep(this.nextCatchupSweepDelayMs());
     },
 
     armCatchupSweep(delayMs) {
