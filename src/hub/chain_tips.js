@@ -30,7 +30,9 @@ const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
 const { lagRefusal, resolveBtcCheckpointHeights } = require('./btc_checkpoint_heights.js');
-const logger = getLogger();
+const logger = getLogger(); const { REASONS, classifyFetchError } = require('../validators/consensus_input_monitor.js');
+// A null tip ends rounds before any snapshot fetch, so only this feeds the gate monitor; failures only (the stake-share watcher reads this path too).
+const tipFailed = (hub, reason, why) => { const m = hub.capabilitySnapshot && hub.capabilitySnapshot.monitor; if(m && m.recordFailure) try { m.recordFailure('getlatestblock', reason, why); } catch (_) { /* observability only */ } };
 
 // One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
 // isolated even when tests or embedded callers deliberately use more than one in a scope.
@@ -70,7 +72,7 @@ class ChainTips {
         let url = await this.resolveBtcIndexerUrl();
         if(!url){
             logger.warn('XChainHub: no BTC indexer URL resolves; no BTC latest block');
-            return null;
+            tipFailed(this, REASONS.NO_INDEXER, 'no BTC indexer URL resolves'); return null;
         }
         try {
             let res = await axiosFor(this).post(url, {
@@ -81,13 +83,13 @@ class ChainTips {
             if(!result || result.error){
                 logger.warn('XChainHub: BTC indexer getlatestblock returned ' +
                     (result ? 'an error (' + JSON.stringify(result.error) + ')' : 'no result') + '; no BTC latest block');
-                return null;
+                tipFailed(this, REASONS.RPC_ERROR, 'getlatestblock returned no usable result'); return null;
             }
             let directHeight = Number(result.block_index) || null;
             if(!directHeight){
                 logger.warn('XChainHub: BTC indexer getlatestblock returned no usable block_index (' +
                     JSON.stringify(result.block_index) + '); no BTC latest block');
-                return null;
+                tipFailed(this, REASONS.MALFORMED, 'getlatestblock returned no usable block_index'); return null;
             }
             let lagWhy = lagRefusal(result.lag);
             if(lagWhy){ logger.warn('XChainHub: BTC indexer ' + lagWhy); return null; }
@@ -95,7 +97,7 @@ class ChainTips {
             return directHeight;
         } catch (err) {
             logger.error(nodeUtil.format('XChainHub: failed to resolve BTC latest block from indexer:', err));
-            return null;
+            tipFailed(this, classifyFetchError(err), 'getlatestblock: ' + (err && err.message)); return null;
         }
     }
 
