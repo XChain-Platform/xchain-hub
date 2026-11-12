@@ -79,6 +79,49 @@ module.exports = {
         return 0;
     },
 
+    // Ask the signer to fill every round of [first, last] this hub does not hold, in
+    // place in `rounds`. Rounds already on chain are exempt: shed after landing, or
+    // carried by a batch the landing chain's indexer reports. True when the proposal
+    // may go ahead, false when the window must be withheld.
+    async fillWindowToBounds(signer, first, last, rounds, anchor) {
+        // A signer without the bounds fill still runs its in-span fill at signing.
+        if (typeof signer.fillWindowBounds !== 'function') return true;
+        let held = new Set(rounds.map(r => parseInt(r.round)));
+        let gaps = [];
+        let exempt = new Set();
+        for (let n = first; n <= last; n++) {
+            if (held.has(n)) continue;
+            if (this.isRoundLanded(n)) exempt.add(n); else gaps.push(n);
+        }
+        if (gaps.length === 0) return true;
+        let carried = new Set();
+        try { carried = await this.roundsCarriedByChain(gaps); } catch (e) { /* fails open: fill them */ }
+        for (let n of carried) exempt.add(n);
+        if (gaps.every(n => exempt.has(n))) return true;
+
+        let ok = false;
+        try {
+            ok = await signer.fillWindowBounds(first, last, rounds, anchor, exempt);
+        } catch (e) {
+            logger.warn(nodeUtil.format('OraclePublisher: filling window [' + first + ',' + last +
+                '] threw; window stays unpublished: ', e && e.message));
+            return false;
+        }
+        let filled = rounds.map(r => parseInt(r.round)).filter(n => !held.has(n));
+        if (!ok) {
+            logger.warn('OraclePublisher: window [' + first + ',' + last + '] lacks round(s) ' +
+                gaps.filter(n => !exempt.has(n)).join(', ') + ' this hub does not hold, and the peers ' +
+                'could not show they are absent; withholding the window (a later pass re-proposes it) ' +
+                'rather than publishing only the held span');
+            return false;
+        }
+        if (filled.length > 0) {
+            logger.info('OraclePublisher: window [' + first + ',' + last + '] filled round(s) ' +
+                filled.join(', ') + ' it did not hold (own rows or peers) before proposing');
+        }
+        return true;
+    },
+
     // Run the signing round for a range, then measure the wire the signatures actually
     // produced. Shrinks and re-signs while the real wire overflows, because the sig set
     // is only known after quorum and a bigger-than-estimated set can push a range over.

@@ -67,16 +67,25 @@ module.exports = {
         let election = await this.electWindowPublisher(windowIndex, first, last, anchor, takeover);
         if (!election) return;
 
-        // The self-check. A window published with a hole in it puts a signed, permanent
-        // claim on chain that the missing round did not finalize.
-        if (!(await this.windowCoverageComplete(first, last, rounds))) return;
-
         let signer = this.getBatchSigner();
         if (!signer) {
             logger.warn('OraclePublisher: no OracleBatchSigner available; window [' + first + ',' +
                 last + '] stays unpublished');
             return;
         }
+
+        // The proposal covers the WINDOW, not the span this hub happens to hold. A hub
+        // that restarted inside its own window holds only part of it, and everything
+        // downstream (packing, the anchor, the signing round's own gap fill, every
+        // co-signer's re-derivation) keys on the held span, so without this the rounds
+        // its peers finalized meanwhile are left off chain for good. Not memoized on
+        // failure, so a later pass re-proposes the whole window.
+        if (!(await this.fillWindowToBounds(signer, first, last, rounds, anchor))) return;
+        anchor = parseInt(rounds[rounds.length - 1].btcBlockHeight);
+
+        // The self-check. A window published with a hole in it puts a signed, permanent
+        // claim on chain that the missing round did not finalize.
+        if (!(await this.windowCoverageComplete(first, last, rounds))) return;
 
         let wires = await this.signWindowWires(signer, rounds, anchor, election.publisherCount);
         // Quorum was not reached. Nothing publishes for this window and it is

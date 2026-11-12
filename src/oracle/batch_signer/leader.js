@@ -114,13 +114,53 @@ module.exports = {
         return true;
     },
 
+    // Fill a proposal across the WINDOW's bounds before the publisher packs, anchors or
+    // splits it. collectBatchSignatures only fills inside the span the caller already
+    // holds, and that span is derived from the held rounds themselves, so a leader that
+    // restarted inside its own window (holding only its first rounds, or only its last)
+    // would propose a narrowed range: every co-signer re-derives that same narrowed
+    // range and signs it, and the rounds its peers finalized while it was down are
+    // never published by anyone. `exempt` names rounds that need no filling because the
+    // chain already carries them.
+    //
+    // Resolves true when `rounds` now holds every round any reachable hub finalized in
+    // [first, last] (filled in place, ascending), false when it cannot be shown, which
+    // the caller treats as "withhold and retry", never as "publish what is held".
+    async fillWindowBounds(firstRound, lastRound, rounds, btcBlockHeight, exempt){
+        let first  = parseInt(firstRound);
+        let last   = parseInt(lastRound);
+        let anchor = parseInt(btcBlockHeight);
+        if(!Number.isFinite(first) || !Number.isFinite(last) || !Number.isFinite(anchor) ||
+           first < 0 || last < first) return false;
+        if(!Array.isArray(rounds) || rounds.length === 0) return false;
+        // Peers drop a fill request wider than one batch can carry, so asking would only
+        // time out; such a window is packed into several wires and each one keeps the
+        // in-span fill collectBatchSignatures already runs.
+        if((last - first + 1) > PRICE_BATCH_MAX_ROUND_COUNT) return true;
+        if(!this.identity) return false;
+
+        let signingSet;
+        try {
+            signingSet = await this.resolvePriceSet(anchor);
+        } catch(e){
+            logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
+                         ' (' + (e && e.message) + '); cannot fill window [' + first + ',' + last + ']');
+            return false;
+        }
+        let me = this.leaderInSigningSet(signingSet, anchor, first, last);
+        if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return false;
+        return (await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt)) !== null;
+    },
+
     // Add every missing round finalized here or by an answering peer to the proposal
     // in place. Returns the numbers the proposal must hold, or null when a peer-held
-    // round cannot be obtained. A round no answering hub holds is a legitimate absence.
-    async fillWindowGaps(first, last, rounds, signingSet, me){
+    // round cannot be obtained. A round no answering hub holds is a legitimate absence,
+    // and so is one in `exempt` or one this hub holds only as a landed batch's copy:
+    // both are already on chain, and the latter's anchor is not recoverable here.
+    async fillWindowGaps(first, last, rounds, signingSet, me, exempt){
         let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
-        for(let n = first; n <= last; n++) if(!held.has(n)) gaps.add(n);
+        for(let n = first; n <= last; n++) if(!held.has(n) && !(exempt && exempt.has(n))) gaps.add(n);
         if(gaps.size === 0) return held;
 
         let local;
@@ -132,6 +172,7 @@ module.exports = {
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
+            if(r.batchSourced){ gaps.delete(n); continue; }
             let { batchSourced, ...proposalRound } = r;
             rounds.push(proposalRound);
             held.add(n);
