@@ -263,7 +263,8 @@ function noteLandedBatchToPublisher(sourceChain, batchData, head) {
     if (landedPublisher && typeof landedPublisher.noteBatchLanded === 'function') {
         try {
             landedPublisher.noteBatchLanded(head.firstRound, head.lastRound,
-                { sourceChain: sourceChain, actionIndex: batchData.action_index });
+                { sourceChain: sourceChain, actionIndex: batchData.action_index,
+                    rounds: batchData.rounds.map(round => round.round) });
         } catch (e) {
             logger.warn(nodeUtil.format('PriceAggregator: could not hand the landed batch [' + head.firstRound + '..' +
                 head.lastRound + '] to the publisher; its rounds stay buffered:', e && e.message));

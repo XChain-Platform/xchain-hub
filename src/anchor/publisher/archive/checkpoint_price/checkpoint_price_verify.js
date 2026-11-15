@@ -114,6 +114,15 @@ function checkpointInteger(value){
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+// Mirrors validateTombstone in xchain-indexer/bin/recovery/checkpoint_price.js.
+function priceTombstoneRefusal(row){
+    if(!row || typeof row !== 'object' || Array.isArray(row)) return 'has malformed shape';
+    if(!checkpointInteger(row.round_number)) return 'has malformed round_number';
+    if(typeof row.coin_pair !== 'string' || row.coin_pair.length === 0)
+        return 'has malformed coin_pair';
+    return null;
+}
+
 // Mirrors the recovery contract in xchain-indexer/bin/recovery/checkpoint_price.js.
 function checkpointRecoveryRefusal(row, archiveNetwork){
     if(!row || typeof row !== 'object' || Array.isArray(row)) return 'has malformed shape';
@@ -247,6 +256,15 @@ module.exports = {
     // A tombstone carries no signature, so it cannot be proven when our lookup is empty.
     // Refuse one that conflicts with this archive's price rows or with a live local row.
     async verifyArchivedPriceTombstone(row, archive){
+        let refusal = priceTombstoneRefusal(row);
+        if(!refusal && JSON.stringify(row) !== JSON.stringify(this.serializePriceTombstone(row)))
+            refusal = 'does not re-serialize unchanged';
+        if(refusal){
+            logger.warn('StateAnchorPublisher: archive price tombstone ' +
+                        (row && row.round_number) + '/' + (row && row.coin_pair) + ' ' +
+                        refusal + '; NOT signing');
+            return false;
+        }
         const archived = archive && archive.price_snapshots || [];
         const key = priceKeyFold(row);
         if(archived.some(price => priceKeyFold(price) === key)){

@@ -163,3 +163,59 @@ oraclePublisherTests('rebuildQueueAfterPass() over an unreadable or corrupt queu
         expect(pub.corruptQueueLines).to.equal(0);
     });
 });
+
+oraclePublisherTests('hydrateBuffer() over a corrupt round buffer file', function () {
+    const round3 = JSON.stringify({ round: 3, timestamp: 30, btcBlockHeight: 300, pairs: [] });
+    const deadLetterWrites = (pub) => fsMock.openSync.getCalls().filter(c => c.args[0] === pub.deadLetterPath);
+
+    it('moves an unparseable line to the dead-letter file before the rewrite drops it', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns('GARBAGE{"round":2\n' + round3 + '\n');
+        pub.hydrateBuffer();
+        expect(deadLetterWrites(pub)).to.have.length(1);
+        let record = JSON.parse(fsMock.writeSync.firstCall.args[1]);
+        expect(record.raw).to.equal('GARBAGE{"round":2');
+        expect(record.reason).to.equal('unparseable round buffer line');
+        expect(pub.getStats().corruptBufferLines).to.equal(1);
+        expect(Array.from(pub._buffer.keys())).to.deep.equal([3]);
+        expect(lastWrite()).to.equal(round3 + '\n');
+    });
+
+    it('keeps an unparseable line verbatim in the buffer when the dead-letter write fails', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns('GARBAGE\n' + round3 + '\n');
+        fsMock.openSync.callsFake((file) => { if (file === pub.deadLetterPath) throw ioError('EACCES'); return 99; });
+        pub.hydrateBuffer();
+        expect(lastWrite()).to.equal(round3 + '\nGARBAGE\n');
+        pub.rewriteBufferFile(pub.bufferedRange(-Infinity, Infinity));
+        expect(lastWrite(), 'a later compaction keeps it too').to.equal(round3 + '\nGARBAGE\n');
+    });
+
+    it('rewrites a file whose last line has no newline so the next append cannot glue onto it', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns(round3 + '\n{"round":4,"timest');
+        pub.hydrateBuffer();
+        expect(deadLetterWrites(pub)).to.have.length(1);
+        expect(lastWrite()).to.equal(round3 + '\n');
+    });
+
+    it('leaves a clean file alone', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.returns(round3 + '\n');
+        pub.hydrateBuffer();
+        expect(fsMock.renameSync.called).to.equal(false);
+        expect(deadLetterWrites(pub)).to.have.length(0);
+        expect(pub.getStats().corruptBufferLines).to.equal(0);
+    });
+});
+
+oraclePublisherTests('hydrateBuffer() over a buffer whose last round lacks its newline', function () {
+    it('terminates the file even though every line parses', function () {
+        let pub = new OraclePublisher(makeHub());
+        let round5 = JSON.stringify({ round: 5, timestamp: 50, btcBlockHeight: 500, pairs: [] });
+        fsMock.readFileSync.returns(round5);
+        pub.hydrateBuffer();
+        expect(pub.getStats().corruptBufferLines).to.equal(0);
+        expect(lastWrite()).to.equal(round5 + '\n');
+    });
+});

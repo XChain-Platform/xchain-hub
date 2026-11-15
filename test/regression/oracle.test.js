@@ -57,8 +57,10 @@ function registerSuitePart1() {
                 let digest = oc.digest(1, prices);
 
                 oc.pendingRounds.set(1, {
-                    prices, digest,
-                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    round: 1, prices, digest, btcBlockHeight: 900000,
+                    quorum: 3, weighted: false,
+                    memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+                    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                     commits: new Set(),
                     finalized: false, timer: null,
                     signatures: new Map()
@@ -82,9 +84,11 @@ function registerSuitePart1() {
                 oracleRound.getSubmissions.returns(new Map());
 
                 oc.pendingRounds.set(1, {
-                    prices, digest,
-                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-                    commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    round: 1, prices, digest, btcBlockHeight: 900000,
+                    quorum: 3, weighted: false,
+                    memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+                    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+                    commits:  new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                     finalized: false, timer: null, _commitSent: true,
                     signatures: new Map()
                 });

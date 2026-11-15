@@ -23,6 +23,26 @@
 
 const { worstCaseSnapshotAgeMs } = require('../price_batch_cadence.js');
 
+// The round the window plan is read at: the oracle's current round, else the last
+// one the publisher ranked on, else null. A function and not a method so a caller
+// that borrows only windowRoundsInForce keeps working.
+function currentRoundOf(publisher) {
+    let round = null;
+    try {
+        let oracle = publisher.hub && typeof publisher.hub.getOracle === 'function'
+            ? publisher.hub.getOracle() : (publisher.hub && publisher.hub.oracle);
+        if (oracle && typeof oracle.getCurrentRound === 'function') {
+            round = Number(oracle.getCurrentRound());
+        } else if (oracle) {
+            round = Number(oracle.currentRound);
+        }
+    } catch (e) { round = null; }
+    if (!Number.isFinite(round) && publisher._lastRankState) {
+        round = Number(publisher._lastRankState.round);
+    }
+    return round;
+}
+
 module.exports = {
 
     // Snapshot of the publish rail's health for operator diagnostics. Intended to
@@ -43,6 +63,7 @@ module.exports = {
             abandoned:           this.abandonedCount,
             corruptQueueLines:   this.corruptQueueLines,
             bufferUnread:        this._bufferUnread === true,
+            corruptBufferLines:  this.corruptBufferLines,
             oversizedDrops:      this.oversizedDrops,
             quarantined:         this._quarantinedRounds.size,
             // Marker-table retention: the configured window plus the lifetime prune
@@ -222,7 +243,7 @@ module.exports = {
             // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
             // native-coin fees go unpriceable between batches, which is invisible in
             // every other field here: the rail reports perfect health while it happens.
-            batchWindowRoundsCeiling:         this.batchWindowRoundsCeiling,
+            batchWindowRoundsCeiling:         this.cadenceBoundsInForce().ceiling,
             batchCadenceSeconds:              Math.round((windowRounds * this.roundIntervalMs) / 1000),
             batchWorstCaseSnapshotAgeSeconds: (() => {
                 let ms = worstCaseSnapshotAgeMs(windowRounds, {
@@ -258,20 +279,22 @@ module.exports = {
             .then(() => { this._inForceRefreshing = false; });
     },
 
-    windowRoundsInForce() {
-        let round = null;
-        try {
-            let oracle = this.hub && typeof this.hub.getOracle === 'function'
-                ? this.hub.getOracle() : (this.hub && this.hub.oracle);
-            if (oracle && typeof oracle.getCurrentRound === 'function') {
-                round = Number(oracle.getCurrentRound());
-            } else if (oracle) {
-                round = Number(oracle.currentRound);
-            }
-        } catch (e) { round = null; }
-        if (!Number.isFinite(round) && this._lastRankState) {
-            round = Number(this._lastRankState.round);
+    // The ceiling and staleness bound the window in force was sized against. The
+    // large window is clamped to its own, looser bound, so reading the small-window
+    // pair against it would report an overrun on a correctly sized rail.
+    cadenceBoundsInForce() {
+        let plan = this.windowPlan;
+        let round = currentRoundOf(this);
+        let large = Number.isFinite(round) && plan && typeof plan.largeAt === 'function' && plan.largeAt(round);
+        if (large && Number.isFinite(this.oracleHourlyMaxPriceAgeMs) &&
+            this.oracleHourlyWindowRoundsCeiling !== undefined) {
+            return { ceiling: this.oracleHourlyWindowRoundsCeiling, maxPriceAgeMs: this.oracleHourlyMaxPriceAgeMs };
         }
+        return { ceiling: this.batchWindowRoundsCeiling, maxPriceAgeMs: this.oracleMaxPriceAgeMs };
+    },
+
+    windowRoundsInForce() {
+        let round = currentRoundOf(this);
         return Number.isFinite(round) ? this.windowPlan.sizeAt(round) : this.batchWindowRounds;
     },
 

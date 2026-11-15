@@ -48,7 +48,8 @@
  * drift apart again: the ceiling moves on its own if the round cadence, the
  * grace, or the pinned staleness bound ever changes.
  *
- * Non-consensus, deliberately. Batch validation is range-agnostic
+ * Non-consensus, deliberately. Batch validation is range-agnostic apart from
+ * refusing a range that straddles the hourly activation round
  * (OracleBatchSigner derives its own window for whatever [first,last] a leader
  * proposes), so hubs running different window sizes elect different leaders and
  * may double-cover a range, which is idempotent at ingest. That is what makes

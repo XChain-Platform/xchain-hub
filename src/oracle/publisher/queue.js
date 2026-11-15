@@ -102,9 +102,9 @@ module.exports = {
         return kept;
     },
 
-    // Append one raw queue line to the dead-letter file. True once it is fsync'd there.
-    quarantineQueueLine(raw) {
-        let record = JSON.stringify({ raw: raw, reason: 'unparseable queue line', deadLetteredAt: Date.now() }) + '\n';
+    // Append one raw JSONL line to the dead-letter file. True once it is fsync'd there.
+    quarantineQueueLine(raw, reason) {
+        let record = JSON.stringify({ raw: raw, reason: reason || 'unparseable queue line', deadLetteredAt: Date.now() }) + '\n';
         try {
             this.appendDurableLine(this.deadLetterPath, record);
             return true;
@@ -182,6 +182,10 @@ module.exports = {
 
         for (let r of list) {
             this._publishedRounds.delete(r);
+            // A retracted round is no longer carried, so the shed-after-landing record
+            // must not keep exempting it from the bounds fill and the coverage check
+            // when the restore below cannot put it back in the buffer.
+            this.unmarkRoundLanded(r);
             // The window memo is the third suppressor: an assembled window is never
             // re-assembled, so a retracted window would never be rebuilt without this.
             this._assembledWindows.delete(this.windowIndexOf(r));

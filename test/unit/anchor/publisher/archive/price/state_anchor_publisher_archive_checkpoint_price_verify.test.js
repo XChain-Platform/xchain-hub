@@ -164,6 +164,30 @@ describe('archive checkpoint and price follower verification', () => {
 });
 
 describe('archive checkpoint and price follower verification', () => {
+    it('refuses malformed tombstones before database lookup', async () => {
+        const malformed = [
+            null, 7, 'BTC/USD', [],
+            { round_number: '12', coin_pair: 'BTC/USD' },
+            { round_number: 12.5, coin_pair: 'BTC/USD' },
+            { round_number: -1, coin_pair: 'BTC/USD' },
+            { coin_pair: 'BTC/USD' },
+            { round_number: 12, coin_pair: '' },
+            { round_number: 12, coin_pair: 7 },
+            { round_number: 12, coin_pair: 'BTC/USD', x: 1 },
+            { round_number: 12, coin_pair: 'BTC/USD', id: 5 },
+            { round_number: 12, coin_pair: 'BTC/USD', validator_signatures: '[]' },
+            { coin_pair: 'BTC/USD', round_number: 12 }
+        ];
+        for(const row of malformed){
+            const pub = buildPub();
+            let lookups = 0;
+            pub.db.findPriceSnapshotsForRound = async () => { lookups++; return []; };
+            expect(await pub.verifyArchiveAgainstLocal(archive({ price_tombstones: [row] })))
+                .to.equal(false);
+            expect(lookups).to.equal(0);
+        }
+    });
+
     it('refuses a tombstone over a live local row', async () => {
         const live = copy(vectors.P.inputs.prices.find(row => row.round_number === 12));
         const pub = buildPub({ prices: [live] });

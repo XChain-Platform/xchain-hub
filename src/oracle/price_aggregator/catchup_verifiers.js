@@ -12,7 +12,7 @@ const { validateOraclePriceIdentity, validateOraclePriceValue,
         validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
-const { isProducerRoundRow, groupKey } = require('../../peers/hub_db/price_round_groups.js');
+const { isProducerRoundRow, groupKey, ROUND_AGREEMENT_KEYS } = require('../../peers/hub_db/price_round_groups.js');
 const admissionHeight = require('../../lib/admission_height.js');
 
 const SOURCE_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
@@ -135,9 +135,6 @@ async function verifyBatchRow(row, context, proof) {
     return { ok: true };
 }
 
-const ROUND_AGREEMENT_KEYS = ['round_number', 'reference_block', 'block_timestamp',
-    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof'];
-
 function groupAgrees(first, group) {
     const pairs = new Set();
     for (const member of group) {
@@ -192,9 +189,15 @@ async function verifyProducerRound(row, context, proof) {
     return verified.accepted ? { ok: true } : refuse(verified.reason);
 }
 
+// A skipped row is a hub's own record of a round it lost, and a disputed row is its own retraction of a
+// finalized row after a reorg. The status is local state the signers never signed, and another hub that
+// never saw the round has no basis to claim the same outcome, so only finalized rows are mirrored and
+// the walk passes the rest by without counting them as refusals.
 async function verifyPriceSnapshot(row, context) {
     if (!row || typeof row !== 'object' || row.status !== 'finalized') {
-        return refuse('price snapshot is not finalized');
+        const local = row && (row.status === 'skipped' || row.status === 'disputed');
+        return local ? { ok: false, reason: 'price snapshot is not finalized', notMirrored: true }
+            : refuse('price snapshot is not finalized');
     }
     const proof = parseProof(row.consensus_proof);
     if (Array.isArray(proof) && isProducerRoundRow(row)) return verifyProducerRound(row, context, proof);

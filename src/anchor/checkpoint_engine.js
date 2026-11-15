@@ -40,9 +40,14 @@
  *      row (mirroring writeFinalizedMatch's everyone-writes pattern), then
  *      streams it to its indexer subscribers and emits checkpoint:finalized.
  *
- * Canonical signing string (must stay byte-identical to the indexer's ANCHOR
+ * Canonical signing grammar (must stay byte-identical to the indexer's ANCHOR
  * verifier and the SDK CheckpointVerifier; see spec protocol/actions/ANCHOR.md):
- *   XCHECKPOINT|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|LEDGER_HASH|ACTIONS_HASH|CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK
+ * checkpoint_engine/canonical_forms.js builds the 10-field XCHECKPOINT base, then
+ * appends the gated four-field root commitment and the gated SUPERSEDE pair before
+ * the EQUIV wrap. Its round id is CHAIN|NETWORK|BLOCK_INDEX|CHECKPOINT_SEQ.
+ * anchor/publisher/canonical_forms.js builds a fold archive from the same base and
+ * root commitment, appends MATCH_BATCH_SEQ|MATCH_COUNT|BATCH_CRC32|TOTAL_CHUNKS,
+ * rejects supersession fields, and adds MATCH_BATCH_SEQ to the EQUIV round id.
  *
  * Single-node fallback: oracle_publish set <= 1 (e.g. single-operator regtest)
  * collapses to immediate self-sign + write, like the other consensus engines.

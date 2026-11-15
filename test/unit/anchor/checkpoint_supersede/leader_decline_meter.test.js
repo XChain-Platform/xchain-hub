@@ -107,6 +107,27 @@ function registerLeaderAndCosignDeclineTest() {
     });
 }
 
+function registerSecondPayloadRefusalTest() {
+    it('keeps a leader second-payload refusal in the per-chain decline state', async function () {
+        const { engine, db } = buildEngine();
+        const seq = canonicalForms.deriveCheckpointSeq(100);
+        engine._signedAtSeq.set('LTC|regtest|' + seq, 'a different canonical payload');
+        const originalError = console.error;
+        console.error = () => {};
+        try {
+            await warnsDuring(() => engine.tick());
+        } finally {
+            console.error = originalError;
+        }
+        const stats = await engine.getStats();
+        expect(stats.leader_declines.seq_second_payload).to.equal(1);
+        expect(stats.last_leader_decline_by_chain.LTC.reason).to.equal('seq_second_payload');
+        expect(stats.seq_double_sign_refusals).to.equal(1);
+        expect(stats.cosign_declines.seq_second_payload).to.equal(0);
+        expect(db.checkpoints.map(r => r.chain)).to.deep.equal(['BTC']);
+    });
+}
+
 describe('StateCheckpointEngine leader proposal declines', function () {
     afterEach(async function () {
         for (let e of engines) await e.stop();
@@ -152,6 +173,7 @@ describe('StateCheckpointEngine leader proposal declines', function () {
     });
 
     registerLeaderAndCosignDeclineTest();
+    registerSecondPayloadRefusalTest();
 });
 
 describe('StateCheckpointEngine pre-authentication co-sign decline log', function () {

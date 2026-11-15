@@ -67,6 +67,8 @@ module.exports = {
     // late arrival would let a steady trickle of stragglers postpone an hour of price
     // data indefinitely.
     armWindowTimer(windowIndex) {
+        // An onRoundFinalized already past its await when stop() ran reaches here.
+        if (this._stopped) return;
         let state = this._windows.get(windowIndex);
         if (!state) { state = { timer: null }; this._windows.set(windowIndex, state); }
         if (state.timer) return;

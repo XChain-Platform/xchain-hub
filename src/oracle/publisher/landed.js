@@ -26,6 +26,7 @@ const axios = require('axios');
 const hubConfig = require('../../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { resolveBatchRounds } = require('./batch_round_membership');
 const logger = getLogger();
 
 // The chain every PRICE batch lands on, and therefore the indexer the backlog
@@ -61,9 +62,11 @@ module.exports = {
     noteBatchLanded(first, last, info) {
         let f = parseInt(first), l = parseInt(last);
         if (!Number.isFinite(f) || !Number.isFinite(l) || l < f) return 0;
+        let exact = info && Array.isArray(info.rounds)
+            ? new Set(info.rounds.map(Number).filter(Number.isSafeInteger)) : null;
         let pruned = 0;
         for (let r of Array.from(this._buffer.keys())) {
-            if (r >= f && r <= l && this._buffer.delete(r)) {
+            if (r >= f && r <= l && (!exact || exact.has(r)) && this._buffer.delete(r)) {
                 pruned++;
                 // Remember WHY the round has no buffered copy, so the pre-publish
                 // self-check does not read a shed round as a coverage hole.
@@ -73,6 +76,9 @@ module.exports = {
         for (let w = this.windowIndexOf(f); w <= this.windowIndexOf(l); w++) {
             let range = this.windowPlan.rangeOf(w);
             if (this.bufferedRange(range.first, range.last).length > 0) continue;
+            // An exact list can have holes. A window the batch does not wholly carry
+            // stays unmemoized, so a hole round this hub finalizes later still publishes.
+            if (exact && !this.spanFullyLanded(exact, Math.max(f, range.first), Math.min(l, range.last))) continue;
             this.noteAssembled(w);
             let state = this._windows.get(w);
             if (state && state.timer) clearTimeout(state.timer);
@@ -107,6 +113,20 @@ module.exports = {
         return !!(this._landedRounds && this._landedRounds.has(round));
     },
 
+    // Every round in [first,last] is in `exact` or already recorded as landed.
+    spanFullyLanded(exact, first, last) {
+        for (let r = first; r <= last; r++) {
+            if (!exact.has(r) && !this.isRoundLanded(r)) return false;
+        }
+        return true;
+    },
+
+    // A retracted batch no longer carries its rounds, so they stop being exempt from
+    // the bounds fill and the coverage self-check.
+    unmarkRoundLanded(round) {
+        if (this._landedRounds) this._landedRounds.delete(round);
+    },
+
     // Of `rounds` (finalized locally, not buffered), those a valid PRICE batch on the
     // landing chain already carries. Covers a restart or a window-size change, where
     // the in-memory record of shed rounds is gone. Fails open to "none carried": the
@@ -116,8 +136,13 @@ module.exports = {
         let answer = await this.fetchLandedBatches(Math.min(...rounds), Math.max(...rounds));
         let carried = new Set();
         if (!answer) return carried;
-        for (let r of rounds) {
-            if (answer.batches.some(b => r >= b.first_round && r <= b.last_round)) carried.add(r);
+        let cache = new Map();
+        for (let batch of answer.batches) {
+            let batchRounds = await resolveBatchRounds(batch, action => {
+                if (!cache.has(action)) cache.set(action, this.fetchLandedBatchPayload(action));
+                return cache.get(action);
+            });
+            for (let r of rounds) if (batchRounds.has(r)) carried.add(r);
         }
         return carried;
     },
@@ -144,7 +169,14 @@ module.exports = {
         if (!answer) return 0;
         this.chainReconcileRuns++;
         let pruned = 0, windowsBefore = pending.length;
-        for (let b of answer.batches) pruned += this.noteBatchLanded(b.first_round, b.last_round, null);
+        let cache = new Map();
+        for (let b of answer.batches) {
+            let rounds = await resolveBatchRounds(b, action => {
+                if (!cache.has(action)) cache.set(action, this.fetchLandedBatchPayload(action));
+                return cache.get(action);
+            });
+            pruned += this.noteBatchLanded(b.first_round, b.last_round, { rounds: Array.from(rounds) });
+        }
         if (pruned > 0) {
             this.chainReconcilePrunedRounds += pruned;
             let remaining = this.pendingCatchupWindows().length;

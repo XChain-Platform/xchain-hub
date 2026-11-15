@@ -23,6 +23,7 @@
 'use strict';
 
 const nodeUtil = require('node:util');
+const { splitJsonLines } = require('../../lib/fs/durable_file.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -119,6 +120,9 @@ module.exports = {
             .join('|');
     },
 
+    // The buffer file split into usable round entries and the raw lines that are not
+    // (a torn append, a hand edit), plus whether the last line lacks its newline, which
+    // would let the next append glue onto it. Null when the file could not be read.
     readBufferFile() {
         let raw;
         try {
@@ -128,10 +132,23 @@ module.exports = {
                 this.bufferPath + ':', e));
             return null;
         }
-        if (raw === null) return [];
-        return raw.split('\n').filter(l => l.trim().length > 0).map(l => {
-            try { return JSON.parse(l); } catch (e) { return null; }
-        }).filter(e => e !== null && Number.isFinite(Number(e.round)));
+        if (raw === null) return { entries: [], rejected: [], unterminated: false };
+        let split = splitJsonLines(raw, e => Number.isFinite(Number(e.round)));
+        split.unterminated = raw.length > 0 && !raw.endsWith('\n');
+        return split;
+    },
+
+    // Copy the buffer lines that are not usable rounds into the dead-letter file before
+    // a rewrite drops them. Returns the lines that could not be copied, which every
+    // rewrite keeps verbatim, so none leaves the disk unrecorded.
+    quarantineBufferLines(lines) {
+        if (!lines || lines.length === 0) return [];
+        let kept = lines.filter(raw => !this.quarantineQueueLine(raw, 'unparseable round buffer line'));
+        this.corruptBufferLines = (this.corruptBufferLines || 0) + lines.length;
+        logger.error('OraclePublisher: ' + lines.length + ' unparseable line(s) in the v2 round buffer at ' +
+            this.bufferPath + '; moved ' + (lines.length - kept.length) + ' to ' + this.deadLetterPath +
+            ' and kept ' + kept.length + ' in the buffer. Operator: inspect them for a round to restore.');
+        return kept;
     },
 
     // Atomic rewrite (rewriteDurableFile), used by the pruning paths. An unread
@@ -143,7 +160,8 @@ module.exports = {
                 this.bufferPath + '; restart after the read fault is fixed');
             return false;
         }
-        let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
+        let all   = entries.map(e => JSON.stringify(e)).concat(this._bufferKeptRaw || []);
+        let lines = all.join('\n') + (all.length > 0 ? '\n' : '');
         try {
             this.rewriteDurableFile(this.bufferPath, lines);
             return true;
@@ -160,17 +178,23 @@ module.exports = {
     // the stale copy the batch rail can no longer get co-signed.
     hydrateBuffer() {
         this._buffer = new Map();
-        let entries = this.readBufferFile();
-        this._bufferUnread = entries === null;
+        let state = this.readBufferFile();
+        this._bufferUnread = state === null;
         if (this._bufferUnread) {
             logger.error('OraclePublisher: rewrites are suspended because the v2 round buffer at ' +
                 this.bufferPath + ' could not be read; fix the fault and restart to recover its rounds');
             return;
         }
-        for (let e of entries) {
+        for (let e of state.entries) {
             let r = parseInt(e.round);
             if (!Number.isFinite(r)) continue;
             this._buffer.set(r, e);
+        }
+        // The quarantine copy is fsync'd before any rewrite can drop the lines. A torn
+        // tail is rewritten away at once, so the next append cannot glue a good round onto it.
+        this._bufferKeptRaw = this.quarantineBufferLines(state.rejected);
+        if (state.rejected.length > 0 || state.unterminated) {
+            this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
         }
         if (this._buffer.size > 0) {
             logger.info('OraclePublisher: reloaded ' + this._buffer.size +

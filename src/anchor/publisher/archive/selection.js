@@ -102,7 +102,7 @@ module.exports = {
             : this.db.findPriceSnapshotRoundsByBatchSeq(limit);
     },
 
-    // Every pending archive stream, with sentinel reads for the two protocol caps.
+    // Every pending archive stream, with sentinel reads for the three protocol caps.
     async gatherArchiveRows(){
         if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
             let [matches, calls, rewards] = await Promise.all([

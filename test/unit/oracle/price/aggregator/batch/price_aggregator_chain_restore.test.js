@@ -266,6 +266,32 @@ function registerPresenceReadCase() {
     });
 }
 
+function registerCarriedRoundCases() {
+    it('uses exact payload membership for a holed batch without a publisher reader', async function () {
+        delete hub.oraclePublisher;
+        sinon.stub(agg, 'fetchPriceBatchesForRestore').resolves({ batches: [{ first_round: 20,
+            last_round: 23, round_count: 3, action_index: 91 }], truncated: false });
+        sinon.stub(agg, 'fetchPriceBatchPayloadForRestore').resolves({ payload: {
+            rounds: [{ round: 20 }, { round: 22 }, { round: 23 }], sigs: []
+        } });
+
+        let carried = await agg.priceRoundsCarriedByChain([20, 21, 22, 23]);
+
+        expect(carried).to.deep.equal(new Set([20, 22, 23]));
+        expect(agg.fetchPriceBatchPayloadForRestore.calledOnceWithExactly(91)).to.equal(true);
+    });
+
+    it('uses the span fast path only when round_count fills it', async function () {
+        delete hub.oraclePublisher;
+        sinon.stub(agg, 'fetchPriceBatchesForRestore').resolves({ batches: [{ first_round: 20,
+            last_round: 23, round_count: 4, action_index: 91 }], truncated: false });
+        sinon.stub(agg, 'fetchPriceBatchPayloadForRestore').throws(new Error('must not read payload'));
+
+        expect(await agg.priceRoundsCarriedByChain([20, 21, 22, 23]))
+            .to.deep.equal(new Set([20, 21, 22, 23]));
+    });
+}
+
 describe('PriceAggregator active-chain PRICE repair', function () {
     installHooks();
     registerValidationCases();
@@ -273,4 +299,5 @@ describe('PriceAggregator active-chain PRICE repair', function () {
     registerStopCases();
     registerBackgroundWalkCases();
     registerPresenceReadCase();
+    registerCarriedRoundCases();
 });

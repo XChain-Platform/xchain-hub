@@ -54,6 +54,11 @@ module.exports = {
         // Set when the durable round buffer could not be read at startup. While set,
         // compaction is blocked so unread finalized rounds remain recoverable.
         this._bufferUnread      = false;
+        // Lifetime count of unparseable round buffer lines found on reload, each copied
+        // to the dead-letter file before a rewrite can drop it. Lines that could not be
+        // copied ride every buffer rewrite verbatim in _bufferKeptRaw.
+        this.corruptBufferLines = 0;
+        this._bufferKeptRaw     = [];
         // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
         // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
         // so operators can tell an oversized drop apart from an attempts-exhausted abandon.

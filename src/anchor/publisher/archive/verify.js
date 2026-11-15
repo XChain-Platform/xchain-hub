@@ -14,9 +14,14 @@
  *
  * ANCHOR publisher - archive verification against local rows
  *
- * Byte-comparison of a proposed archive against this hub's own matches, calls,
- * rewards and capability snapshots. A Byzantine leader cannot collect a quorum
- * for rows no honest hub holds.
+ * Verifies matches, calls, rewards, capability_snapshots, bridge_transfers,
+ * policy_snapshots, list_snapshots, state_checkpoints, price_snapshots and
+ * price_tombstones against local rows, re-derived fields or cryptographic proof.
+ * Checkpoints retain validator_signatures in comparisons, proofed price comparisons
+ * omit consensus_proof and validator_count, and unsigned tombstones may pass on absence.
+ * Per-kind rules live in bridge_policy/bridge_policy_verify.js,
+ * list/list_snapshot_verify.js and checkpoint_price/checkpoint_price_verify.js.
+ * A Byzantine leader cannot collect a quorum for rows honest hubs refuse.
  *
  ********************************************************************/
 

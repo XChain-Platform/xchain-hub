@@ -19,6 +19,7 @@
 const nodeUtil = require('node:util');
 const axios = require('axios');
 const hubConfig = require('../../config');
+const { resolveBatchRounds } = require('../publisher/batch_round_membership');
 const {
     PRICE_RESTORE_ROUND_CAP,
     PRICE_LANDING_COIN,
@@ -95,9 +96,14 @@ module.exports = {
         if (!Array.isArray(rounds) || rounds.length === 0) return new Set();
         let answer = await this.fetchPriceBatchesForRestore(Math.min(...rounds), Math.max(...rounds));
         let carried = new Set();
-        for (let round of rounds)
-            if (answer.batches.some(batch => round >= Number(batch.first_round) &&
-                round <= Number(batch.last_round))) carried.add(round);
+        let cache = new Map();
+        for (let batch of answer.batches) {
+            let batchRounds = await resolveBatchRounds(batch, action => {
+                if (!cache.has(action)) cache.set(action, this.fetchPriceBatchPayloadForRestore(action));
+                return cache.get(action);
+            });
+            for (let round of rounds) if (batchRounds.has(round)) carried.add(round);
+        }
         return carried;
     },
 

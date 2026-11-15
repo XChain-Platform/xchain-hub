@@ -16,10 +16,13 @@ function buildPub(){
         db: { ...DB_METHODS }, network: 'regtest', getIdentity: () => null,
         getPeerManager: () => ({ broadcast() {} }), p2pConfig: {}
     });
-    const calls = { policy: 0, list: 0, price: 0 };
+    const calls = { bridge: 0, policy: 0, list: 0, checkpoint: 0, price: 0, tombstone: 0 };
+    pub.verifyArchivedBridgeTransfer = async () => { calls.bridge++; return true; };
     pub.verifyArchivedPolicySnapshot = async () => { calls.policy++; return true; };
     pub.verifyArchivedListSnapshot = async () => { calls.list++; return true; };
+    pub.verifyArchivedStateCheckpoint = async () => { calls.checkpoint++; return true; };
     pub.verifyArchivedPriceSnapshots = async () => { calls.price++; return true; };
+    pub.verifyArchivedPriceTombstone = async () => { calls.tombstone++; return true; };
     pub.archivedSnapshotGroups = () => new Map();
     pub.seedRequiredSnapshotGroups = () => true;
     pub.verifyArchivedSnapshotGroups = async () => true;
@@ -32,6 +35,29 @@ function archive(over){
 
 function rows(count, prefix){
     return Array.from({ length: count }, (_, i) => ({ snapshot_id: prefix + i }));
+}
+
+function registerRowKindTests(){
+    it('refuses every non-array row kind before per-row verification', async () => {
+        const keys = ['matches', 'calls', 'rewards', 'capability_snapshots',
+            'bridge_transfers', 'state_checkpoints', 'price_tombstones'];
+        for(const key of keys){
+            for(const value of [{}, 1]){
+                const { pub, calls } = buildPub();
+                expect(await pub.verifyArchiveAgainstLocal(archive({ [key]: value }), 1), key)
+                    .to.equal(false);
+                expect(calls.bridge + calls.checkpoint + calls.tombstone, key).to.equal(0);
+            }
+        }
+    });
+
+    it('accepts every optional row kind as an empty array', async () => {
+        expect(await buildPub().pub.verifyArchiveAgainstLocal(archive({
+            calls: [], rewards: [], capability_snapshots: [], bridge_transfers: [],
+            policy_snapshots: [], list_snapshots: [], state_checkpoints: [],
+            price_snapshots: [], price_tombstones: []
+        }), 1)).to.equal(true);
+    });
 }
 
 describe('archive verifier row caps', () => {
@@ -85,6 +111,8 @@ describe('archive verifier row caps', () => {
             expect(await buildPub().pub.verifyArchiveAgainstLocal(archive(over), 1)).to.equal(false);
         }
     });
+
+    registerRowKindTests();
 
     it('allows an archive with none of the capped keys', async () => {
         expect(await buildPub().pub.verifyArchiveAgainstLocal(archive({}), 1)).to.equal(true);

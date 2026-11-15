@@ -11,12 +11,11 @@ const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
 const { createRefusalMemo, DEFAULT_REFUSAL_MEMO_PATH } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
-const { withoutWireId, verifiedRowOr, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
+const { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
 const { connectedSignerPeers } = require('./signer_peers.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
-const DEFAULT_PAGE_SIZE = 10000;
-const DEFAULT_WARN_INTERVAL_MS = 60000;
+const DEFAULT_PAGE_SIZE = 10000, DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000, DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000, DEFAULT_BOOT_GRACE_MS = 30000;
@@ -105,7 +104,7 @@ class HubDbPeerCatchup {
         this.peerManager = opts.peerManager;
         this.feedKey = opts.feedKey || '';
         this.network = opts.network != null ? String(opts.network) : '';
-        this.pageSize = positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE);
+        this.pageSize = Math.min(positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE);
         this.warnIntervalMs = positiveOr(opts.warnIntervalMs, DEFAULT_WARN_INTERVAL_MS);
         this.retryIntervalMs = positiveOr(opts.retryIntervalMs, DEFAULT_RETRY_INTERVAL_MS);
         this.maxRetryIntervalMs = positiveOr(opts.maxRetryIntervalMs, DEFAULT_MAX_RETRY_INTERVAL_MS);
@@ -369,7 +368,7 @@ class HubDbPeerCatchup {
             if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
             const verdict = verdicts.get(key);
             if (verifierAccepted(verdict)) await this.storeRow(walk.table, verifiedRowOr(verdict, localRow));
-            else countRefusal(walk, verdict);
+            else if (!notMirrored(verdict)) countRefusal(walk, verdict);
         }
     }
 
@@ -383,7 +382,7 @@ class HubDbPeerCatchup {
             table, peer, peerIdentity: walk.peerIdentity, db: this.db, authenticated: true, signerSetPeer: true,
             network: this.network, readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
         });
-        if (verifierAccepted(verdict)) return verdict;
+        if (verifierAccepted(verdict) || notMirrored(verdict)) return verdict;
         if (walk.refusalLines < MAX_REFUSAL_LINES_PER_WALK) {
             walk.refusalLines += 1;
             this.logger.warn('Hub DB peer catch-up verifier refused ' + table +

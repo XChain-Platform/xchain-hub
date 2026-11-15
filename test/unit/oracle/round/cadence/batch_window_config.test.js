@@ -10,8 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The batch signer refuses proposals by its window plan and the publisher proposes
-// by its own, so both must come from the one resolver or they can drift apart.
+// The batch signer reads its window plan (refusing only a range that straddles the
+// hourly activation round) and the publisher proposes by its own, so both must come
+// from the one resolver or they can drift apart.
 
 const { expect } = require('chai');
 const sinon = require('sinon');

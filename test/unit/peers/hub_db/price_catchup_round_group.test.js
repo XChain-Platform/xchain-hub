@@ -9,6 +9,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const PriceAggregator = require('../../../../src/oracle/price_aggregator.js');
 const { verifyPriceSnapshot } = require('../../../../src/oracle/price_aggregator/catchup_verifiers.js');
+const { storePriceSnapshot, ROUND_AGREEMENT_KEYS } = require('../../../../src/peers/hub_db/price_round_groups.js');
 const { rememberCatchupHub } = require('../../../../src/peers/hub_db/catchup_context.js');
 const { createMockHub } = require('../../../helpers/mockHub.js');
 const { priceDb, makeCatchup } = require('./helpers/peer_catchup_harness.js');
@@ -141,5 +142,93 @@ describe('price catch-up of producer round groups', function () {
         expect(env.db.setFinalizedPriceSnapshotRound.called).to.equal(false);
         expect(logger.warn.calledWithMatch('complete signed round unavailable')).to.equal(true);
         expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
+    });
+});
+
+function localRecordRow(id, round, status) {
+    return Object.assign(producerRows({ aggregator: { buildPriceV0Payload: () => '' }, validators: [] }, round, id)[0], {
+        id, coin_pair: 'DOGE/USD', price: null, validator_count: 0, consensus_proof: '[]', status
+    });
+}
+
+describe('price catch-up agreement of a round group', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('refuses a group whose rows disagree on any field the round signs', async function () {
+        const env = setup();
+        for (const key of ROUND_AGREEMENT_KEYS) {
+            const rows = producerRows(env, 7, 1);
+            rows[1][key] = key === 'consensus_proof' ? '[]' : 99;
+            const verdict = await verifyPriceSnapshot(rows[0], { peer: 'ws://peer', db: env.db, priceRoundRows: rows });
+            expect(verdict, key).to.deep.equal({ ok: false, reason: 'price round rows disagree on the signed round' });
+        }
+        const agreed = producerRows(env, 7, 1);
+        expect(await verifyPriceSnapshot(agreed[0], { peer: 'ws://peer', db: env.db, priceRoundRows: agreed }))
+            .to.deep.equal({ ok: true });
+    });
+
+    it('refuses a group that repeats a coin pair', async function () {
+        const env = setup();
+        const rows = producerRows(env, 7, 1);
+        rows[1].coin_pair = rows[0].coin_pair;
+        const verdict = await verifyPriceSnapshot(rows[0], { peer: 'ws://peer', db: env.db, priceRoundRows: rows });
+        expect(verdict.reason).to.equal('price round rows disagree on the signed round');
+    });
+});
+
+describe('price catch-up holding of the round that ends a full page', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('verifies a round whole when its pair rows are not adjacent on the page', async function () {
+        const env = setup();
+        const [sevenBtc, sevenLtc] = producerRows(env, 7, 1);
+        const [eightBtc, eightLtc] = producerRows(env, 8, 3);
+        Object.assign(sevenBtc, { id: 1 });
+        Object.assign(eightBtc, { id: 2 });
+        Object.assign(eightLtc, { id: 3 });
+        Object.assign(sevenLtc, { id: 4 });
+        const { catchup, logger } = walkOf(env, [sevenBtc, eightBtc, eightLtc, sevenLtc], 4);
+        await catchup.run();
+        expect(storedPairs(env.db)).to.deep.equal(['BTC/USD', 'BTC/USD', 'LTC/USD', 'LTC/USD']);
+        expect(logger.warn.called).to.equal(false);
+    });
+});
+
+describe('price catch-up of rows another hub recorded as its own outcome', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('marks a skipped or disputed row as not mirrored instead of refusing it as unsigned', async function () {
+        for (const status of ['skipped', 'disputed']) {
+            const verdict = await verifyPriceSnapshot(localRecordRow(1, 5, status), { peer: 'ws://peer' });
+            expect(verdict).to.deep.equal({ ok: false, reason: 'price snapshot is not finalized', notMirrored: true });
+        }
+    });
+
+    it('stores the finalized rounds of a walk without counting, logging or remembering skipped rows', async function () {
+        const env = setup();
+        const rows = [localRecordRow(1, 5, 'skipped'), localRecordRow(2, 6, 'disputed')]
+            .concat(producerRows(env, 7, 3));
+        const { catchup, logger } = walkOf(env, rows, 10);
+        await catchup.run();
+        expect(storedPairs(env.db)).to.deep.equal(['BTC/USD', 'LTC/USD']);
+        expect(logger.warn.called).to.equal(false);
+        expect(catchup.refusals.size()).to.equal(0);
+        expect(catchup.tableCaughtUp('price_snapshots')).to.equal(true);
+    });
+
+    it('still counts and remembers a row the verifier refuses for a lasting reason', async function () {
+        const env = setup();
+        const { catchup, logger } = walkOf(env, producerRows(env, 7, 1, { forged: true }), 10);
+        await catchup.run();
+        expect(logger.warn.calledWithMatch('refused (0 already known)')).to.equal(true);
+        expect(catchup.refusals.size()).to.equal(1);
+    });
+
+    it('refuses to write a skipped or disputed row if a verifier ever lets one through', function () {
+        const db = priceDb();
+        for (const status of ['skipped', 'disputed']) {
+            expect(() => storePriceSnapshot(db, localRecordRow(1, 5, status))).to.throw('finalized');
+        }
+        expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
     });
 });

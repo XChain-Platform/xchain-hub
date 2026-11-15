@@ -139,8 +139,10 @@ function registerPbftMessageFlow2Tests3() {
 
             // N=4, quorum=3. Start with 2 prepares.
             oc.pendingRounds.set(1, {
-                prices, digest,
-                prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                round: 1, prices, digest, btcBlockHeight: 900000,
+                quorum: 3, weighted: false,
+                memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+                prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                 commits: new Set(),
                 signatures: new Map(),
                 finalized: false, timer: null
@@ -169,9 +171,11 @@ function registerPbftMessageFlow2Tests4() {
 
             // N=4, quorum=3. Start with 2 commits.
             oc.pendingRounds.set(1, {
-                prices, digest,
-                prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-                commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                round: 1, prices, digest, btcBlockHeight: 900000,
+                quorum: 3, weighted: false,
+                memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+                prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+                commits:  new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                 signatures: new Map(),
                 finalized: false, timer: null, _commitSent: true
             });

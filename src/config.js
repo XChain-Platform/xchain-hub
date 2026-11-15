@@ -166,6 +166,7 @@ const config = {
     get HUB_RATE_LIMIT_EXEMPT_LOCAL() { return process.env.HUB_RATE_LIMIT_EXEMPT_LOCAL; },
     get HUB_RATE_LIMIT_RPM() { return process.env.HUB_RATE_LIMIT_RPM; },
     get HUB_REORG_API_KEY() { return process.env.HUB_REORG_API_KEY; },
+    get HUB_RPC_SNAPSHOT_MAX_INFLIGHT() { return process.env.HUB_RPC_SNAPSHOT_MAX_INFLIGHT; },
     get HUB_SENSITIVE_READ_AUTH() { return process.env.HUB_SENSITIVE_READ_AUTH; },
     get HUB_SNAPSHOT_MAX_INFLIGHT() { return process.env.HUB_SNAPSHOT_MAX_INFLIGHT; },
     get HUB_SNAPSHOT_RATE_LIMIT_RPM() { return process.env.HUB_SNAPSHOT_RATE_LIMIT_RPM; },

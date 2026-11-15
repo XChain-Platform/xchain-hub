@@ -7,7 +7,9 @@ const { expect } = require('chai');
 const {
     priceRoundKey,
     splitRoundGroups,
-    sameSignedRoundFields
+    sameSignedRoundFields,
+    holdTrailingGroup,
+    ROUND_AGREEMENT_KEYS
 } = require('../../../../src/peers/hub_db/price_round_groups.js');
 
 function row(round, proof, pair, extra = {}) {
@@ -76,5 +78,24 @@ describe('price round groups', function () {
         splitRoundGroups(carried, page, true);
         splitRoundGroups(carried, page, false);
         expect(JSON.stringify([carried, page])).to.equal(before);
+    });
+});
+
+describe('price round group keys and holding', function () {
+    it('names one list of signed round fields for the signed-field check and the verifier', function () {
+        expect(ROUND_AGREEMENT_KEYS).to.deep.equal(['round_number', 'reference_block', 'block_timestamp',
+            'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof']);
+        expect(Object.isFrozen(ROUND_AGREEMENT_KEYS)).to.equal(true);
+    });
+
+    it('holds every row of the round that ends a full page, adjacent or not', function () {
+        const live = (id, round, pair) => Object.assign(row(round, '[' + round + ']', pair), {
+            id, status: 'finalized', reference_chain: 'BTC', source_chain: 'DOGE', source_action_index: null });
+        const rows = [live(1, 7, 'x'), live(2, 8, 'x'), live(3, 8, 'y'), live(4, 7, 'y')];
+        const { ready, held } = holdTrailingGroup(rows, true);
+        expect(held.map(r => r.id)).to.deep.equal([1, 4]);
+        expect(ready.map(r => r.id)).to.deep.equal([2, 3]);
+        expect(holdTrailingGroup(rows, false)).to.deep.equal({ ready: rows, held: [] });
+        expect(holdTrailingGroup([], true)).to.deep.equal({ ready: [], held: [] });
     });
 });

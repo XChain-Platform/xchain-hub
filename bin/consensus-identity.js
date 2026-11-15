@@ -96,6 +96,7 @@
  *                                                     flag or no flag
  *   node bin/consensus-identity.js --compare <pin>    diff a tree against a pin,
  *                                                     exit 1 on any difference
+ *   node bin/consensus-identity.js --help             print this usage banner
  *
  ********************************************************************/
 

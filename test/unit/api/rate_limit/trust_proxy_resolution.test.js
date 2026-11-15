@@ -78,10 +78,6 @@ describe('hub trust proxy resolution', () => {
         expect(trust('172.17.0.1', 0)).to.equal(false);
     });
 
-    it.skip('refuses trust-all at boot with an actionable error', () => {
-        expect(() => boot('true')).to.throw(/HUB_TRUST_PROXY=true.*hop count.*address\/CIDR/);
-    });
-
     it('warns at boot when trust-all leaves client addresses spoofable', () => {
         const app = boot('true');
         expect(app.get('trust proxy')).to.equal(true);

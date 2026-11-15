@@ -379,9 +379,6 @@ for (const Part of [HubDbAdmissionSampling, HubDbDeletionReplay, HubDbSubscriber
 }
 
 module.exports = Object.assign(HubDbBroadcaster, {
-    // Re-exported for callers that already hold this class; the definition itself lives in
-    // lib/bigint_replacer.js, which has no requires and so cannot be half-loaded by a cycle.
-    bigIntReplacer,
     // The height watermark's producer and its table map, exported so the advance rule, the
     // round-abandon timeout and the relay republish rule are drivable without a hub.
     AdmissionHeightWatermark,

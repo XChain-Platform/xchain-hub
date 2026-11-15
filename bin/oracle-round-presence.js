@@ -34,7 +34,7 @@
 'use strict';
 
 const axios = require('axios');
-const { comparePresence } = require('../src/lib/oracle_round_presence.js');
+const { comparePresence, comparePairCounts } = require('../src/lib/oracle_round_presence.js');
 
 // The URL string is the only hub identity there is: presence answers carry no hub id,
 // so two DNS aliases of one host stay indistinguishable and this does not pretend
@@ -190,12 +190,22 @@ async function main(opts) {
 
     const comparison = comparePresence(answers);
     if (JSON_OUT) {
-        console.log(JSON.stringify({ range, unreachable, comparison,
+        console.log(JSON.stringify({ range, unreachable, comparison, pairAdvisory: comparePairCounts(answers),
             digests: answers.map(a => ({ hub: a.hub, digest: a.presence.digest,
                                          missing: a.presence.missing })) }, null, 2));
         return comparison.agreed ? 0 : 1;
     }
     return printVerdict(range, answers, unreachable, comparison);
+}
+
+// Pair counts never gate the verdict: they are listed so a hub holding a short round is seen.
+function printPairAdvisory(differing) {
+    if (differing.length === 0) return;
+    console.log('\nPair counts differ on ' + differing.length + ' round(s) (advisory, does not change the verdict):');
+    for (const d of differing) {
+        const parts = Object.keys(d.finalized_pairs).map(h => h + '=' + d.finalized_pairs[h]);
+        console.log('  round ' + d.round + ': ' + parts.join('  '));
+    }
 }
 
 // The human report. Returns the exit code the verdict carries.
@@ -210,6 +220,7 @@ function printVerdict(range, answers, unreachable, comparison) {
 
     if (comparison.agreed) {
         console.log('\nAgreed: every hub reports the same outcome for every round in range.');
+        printPairAdvisory(comparePairCounts(answers));
         return 0;
     }
     console.log('\nDIVERGENT on ' + comparison.divergent.length + ' round(s):');
@@ -217,6 +228,7 @@ function printVerdict(range, answers, unreachable, comparison) {
         const parts = Object.keys(d.statuses).map(h => h + '=' + d.statuses[h]);
         console.log('  round ' + d.round + ': ' + parts.join('  '));
     }
+    printPairAdvisory(comparePairCounts(answers));
     return 1;
 }
 

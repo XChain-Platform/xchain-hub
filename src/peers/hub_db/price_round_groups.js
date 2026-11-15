@@ -7,8 +7,9 @@
 // share a round number and consensus proof, and a page that ends mid-round
 // must not release that round until the rows after it have arrived.
 
-const SIGNED_FIELDS = ['round_number', 'reference_block', 'block_timestamp',
-    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof'];
+// The row fields a signed round fixes: every row of one round must agree on all of them.
+const ROUND_AGREEMENT_KEYS = Object.freeze(['round_number', 'reference_block', 'block_timestamp',
+    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof']);
 
 function priceRoundKey(row) {
     return JSON.stringify([Number(row.round_number), row.consensus_proof]);
@@ -50,7 +51,7 @@ function sameSignedRoundFields(rows) {
     if (!Array.isArray(rows) || rows.length === 0) return false;
     const first = rows[0];
     return rows.every(row =>
-        SIGNED_FIELDS.every(key => signedValue(first[key]) === signedValue(row[key])));
+        ROUND_AGREEMENT_KEYS.every(key => signedValue(first[key]) === signedValue(row[key])));
 }
 
 // A producer round is one finalized, unsourced BTC-anchored round whose pair rows share a signature set.
@@ -82,12 +83,12 @@ function indexGroups(rows) {
 }
 
 // Splits off the group that ends a full page, since its remaining pair rows may start the next page.
+// Every row of that round is held, adjacent or not: an upsert that upgrades an older placeholder keeps
+// its earlier id, so a round's rows need not sit together.
 function holdTrailingGroup(rows, pageIsFull) {
     const key = rows.length > 0 ? groupKey(rows[rows.length - 1]) : null;
     if (!pageIsFull || key === null) return { ready: rows, held: [] };
-    let start = rows.length;
-    while (start > 0 && groupKey(rows[start - 1]) === key) start -= 1;
-    return { ready: rows.slice(0, start), held: rows.slice(start) };
+    return { ready: rows.filter(row => groupKey(row) !== key), held: rows.filter(row => groupKey(row) === key) };
 }
 
 function advanceCursor(start, rows) {
@@ -115,9 +116,8 @@ function priceSnapshotAlreadyHeld(rows, row) {
 
 function storePriceSnapshot(db, row) {
     const pairs = [{ pair: row.coin_pair, coinPair: row.coin_pair, price: row.price }];
-    if (row.status === 'skipped') {
-        return db.setSkippedPriceSnapshotRound(
-            row.round_number, [row.coin_pair], row.reference_block, row.block_timestamp);
+    if (row.status === 'skipped' || row.status === 'disputed') {
+        throw new Error('Only finalized price snapshots are mirrored by catch-up');
     }
     // A missed producer round is stored as its producer stored it. The landing clock is not
     // signed, so it stays 0 here and this hub's own batch ingest stamps it.
@@ -140,7 +140,7 @@ function storePriceSnapshot(db, row) {
 }
 
 module.exports = {
-    priceRoundKey, splitRoundGroups, sameSignedRoundFields,
+    priceRoundKey, splitRoundGroups, sameSignedRoundFields, ROUND_AGREEMENT_KEYS,
     advanceCursor, storePriceSnapshot, priceSnapshotAlreadyHeld,
     isProducerRoundRow, groupKey, indexGroups, holdTrailingGroup
 };

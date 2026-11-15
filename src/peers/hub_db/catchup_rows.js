@@ -19,6 +19,11 @@ function verifiedRowOr(verdict, wireRow) {
     return verified && typeof verified === 'object' ? withoutWireId(verified) : wireRow;
 }
 
+// A verdict that names a row as the peer's own local record, passed by without a refusal.
+function notMirrored(verdict) {
+    return Boolean(verdict) && typeof verdict === 'object' && verdict.notMirrored === true;
+}
+
 async function hasRows(promise) {
     const rows = await promise;
     return Array.isArray(rows) ? rows.length > 0 : Boolean(rows);
@@ -81,4 +86,4 @@ function storeVerifiedRow(db, table, row) {
     return writer(db, withoutWireId(row));
 }
 
-module.exports = { withoutWireId, verifiedRowOr, rowAlreadyHeld, storeVerifiedRow };
+module.exports = { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow };

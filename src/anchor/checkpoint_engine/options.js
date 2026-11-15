@@ -238,7 +238,8 @@ module.exports = {
         // reason. Zero-filled with every reason that check returns so the stats shape is fixed.
         this._leaderDeclines = { indexer_replaying: 0, supersede_no_replay: 0, supersede_unwitnessed: 0,
                                  supersede_no_disagreement: 0, supersede_target_mismatch: 0,
-                                 supersede_digest_mismatch: 0, checkpoint_disagreement: 0, checkpoint_reorged: 0 };
+                                 supersede_digest_mismatch: 0, checkpoint_disagreement: 0, checkpoint_reorged: 0,
+                                 seq_second_payload: 0 };
         this._leaderDeclinesTotal      = 0;
         this._lastLeaderDeclineByChain = {};
     }

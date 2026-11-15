@@ -70,7 +70,8 @@ async function publishedAndLanded(answers, cfg) {
 }
 
 const relandedBeforeTheRetraction = async function () {
-    let { h, db, rpc } = await publishedAndLanded([[{ first_round: 0, last_round: 5 }]], { ORACLE_BATCH_GRACE_MS: 1 });
+    let { h, db, rpc } = await publishedAndLanded([[{ first_round: 0, last_round: 5,
+        round_count: 6 }]], { ORACLE_BATCH_GRACE_MS: 1 });
 
     expect(await h.p.clearPublishedMarkers(WINDOW)).to.equal(0);
 
@@ -91,7 +92,7 @@ const relandedBeforeTheRetraction = async function () {
 const relandedBetweenClearAndAssembly = async function () {
     // The clear finds nothing on chain yet; by the time the window assembles the new
     // branch carries it.
-    let { h, db } = await publishedAndLanded([[], [{ first_round: 0, last_round: 5 }]]);
+    let { h, db } = await publishedAndLanded([[], [{ first_round: 0, last_round: 5, round_count: 6 }]]);
 
     expect(await h.p.clearPublishedMarkers(WINDOW)).to.equal(6);
     expect(Object.keys(db.markers)).to.have.length(0);
@@ -118,7 +119,7 @@ const notCarriedRepublishesOnce = async function () {
 };
 
 const partlyCarriedRepublishesTheRest = async function () {
-    let { h, db } = await publishedAndLanded([[{ first_round: 0, last_round: 2 }]]);
+    let { h, db } = await publishedAndLanded([[{ first_round: 0, last_round: 2, round_count: 3 }]]);
 
     expect(await h.p.clearPublishedMarkers(WINDOW)).to.equal(3);
     expect(Object.keys(db.markers).map(Number).sort()).to.deep.equal([0, 1, 2]);

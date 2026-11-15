@@ -77,6 +77,24 @@ function missingRowPreload() {
     return file;
 }
 
+function registerHelpFlagTest() {
+    it('documents every long flag parseArgs accepts', function () {
+        const res = run(['--help']);
+        expect(res.status, res.stderr).to.equal(0);
+        expect(res.stderr).to.equal('');
+        const source = fs.readFileSync(BIN, 'utf8');
+        const start = source.indexOf('function parseArgs');
+        const end = source.indexOf('function main', start);
+        expect(start).to.be.at.least(0);
+        expect(end).to.be.greaterThan(start);
+        const flags = new Set(Array.from(source.slice(start, end).matchAll(/arg === '(--[^']+)'/g), m => m[1]));
+        expect(flags.size).to.be.at.least(6);
+        for (const flag of flags)
+            expect(res.stdout, '--help omits ' + flag).to.include(flag);
+        expect(res.stdout).to.include('print this usage banner');
+    });
+}
+
 describe('bin/consensus-identity.js: top-level error handling', function () {
     this.timeout(20000);
 
@@ -88,6 +106,8 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_RELAY_RESPONSE_DEADLINE_KEY);
         expect(identity.consensus_rules_gates).to.not.have.property(BRIDGE_ROW_FIELDS_TERMINAL_KEY);
     });
+
+    registerHelpFlagTest();
 
     it('keeps the committed identity pinned when a registry-only row is added', function () {
         const res = run(['--compare', PIN]);

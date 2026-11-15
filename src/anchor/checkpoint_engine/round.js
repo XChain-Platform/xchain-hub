@@ -89,7 +89,8 @@ module.exports = {
         if(this.declinesOwnRound(cp)) return;
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
-        if(!this.claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical))
+            return this.noteLeaderDecline('seq_second_payload', cp);
         this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches handleFinalized + the indexer's quorum.js oracleN)

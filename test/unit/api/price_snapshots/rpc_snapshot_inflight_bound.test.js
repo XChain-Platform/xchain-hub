@@ -31,6 +31,7 @@ const { expect } = require('chai');
 const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
 const { buildSystemRpc } = require('../../../../src/api/rpc/system.js');
 const configsQueries = require('../../../../src/db/configs.js');
+const config = require('../../../../src/config.js');
 
 const POOL_SIZE = 10;
 const CALLERS = 48;
@@ -119,6 +120,18 @@ async function ping(rpc) {
     return { statusCode, body };
 }
 
+async function peakWithConfig(hubConfig) {
+    const { hub, state, releaseAll } = starvableHub(fakePool(POOL_SIZE));
+    const oracle = buildOracleRpc({ hub, hubConfig });
+    const calls = Array.from({ length: 12 }, () => oracle.getpricesnapshots({ limit: 10000 }));
+    let settled = 0;
+    for (const call of calls) call.then(() => { settled++; });
+    await waitFor(() => state.inFlight + settled === calls.length);
+    releaseAll();
+    await Promise.all(calls);
+    return state.peak;
+}
+
 function boundSuite() {
     it('caps in-flight page reads below the pool, sheds the excess in-band, and keeps ping answering db:true', async function () {
         const { hub, state, releaseAll } = starvableHub(fakePool(POOL_SIZE));
@@ -150,6 +163,20 @@ function boundSuite() {
             expect(r.error).to.be.a('string');
             expect(r.data.retryAfterSeconds).to.be.at.least(1);
             expect(r.data.limit).to.equal(state.peak);
+        }
+    });
+}
+
+function configBoundSuite() {
+    it('reads the configured bound through the production config object', async function () {
+        const envName = 'HUB_RPC_SNAPSHOT_MAX_INFLIGHT';
+        const previous = process.env[envName];
+        process.env[envName] = '2';
+        try {
+            expect(await peakWithConfig(config)).to.equal(2);
+        } finally {
+            if (previous === undefined) delete process.env[envName];
+            else process.env[envName] = previous;
         }
     });
 }
@@ -207,5 +234,6 @@ function releaseSuite() {
 
 describe('JSON-RPC getpricesnapshots in-flight bound', function () {
     boundSuite();
+    configBoundSuite();
     releaseSuite();
 });

@@ -178,7 +178,7 @@ function installPublisher(carried) {
         _assembledWindows: new Set([0]),
         _landed: [],
         roundsCarriedByChain: async (rounds) => new Set(rounds.filter(r => carried.includes(r))),
-        markRoundLanded(r) { this._landed.push(r); },
+        markRoundLanded(r) { this._landed.push(r); }, unmarkRoundLanded(r) { this._landed = this._landed.filter(x => x !== r); },
         windowIndexOf: () => 0,
         restoreBufferedRounds: async () => {},
         db: { deleteOraclePublishedRoundsByRounds: async (rounds) => { markerDeletes.push(rounds); return { affectedRows: rounds.length }; } }
