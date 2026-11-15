@@ -34,7 +34,11 @@ module.exports = {
     async validateProposedMatch(row){
         if(!row || !ALLOWED_CHAINS.includes(row.source_chain) || !ALLOWED_CHAINS.includes(row.target_chain)) return false;
         if(row.source_chain === row.target_chain) return false;
-        if(String(row.round_id).toLowerCase() !== this.roundId(row.phase, String(row.call_id).toLowerCase())) return false;
+        // call_id is signed verbatim and re-hashed into the EQUIV round id and the reorg
+        // retraction key, so only the canonical 64-lowercase-hex spelling the leader path
+        // builds is co-signable, and round_id must be its exact derivation.
+        if(!/^[0-9a-f]{64}$/.test(String(row.call_id))) return false;
+        if(String(row.round_id) !== this.roundId(row.phase, String(row.call_id))) return false;
 
         // Canonical integer spellings. These fields are signed verbatim but
         // re-derived from a BIGINT round-trip by xexec.js and the archive verifier, so

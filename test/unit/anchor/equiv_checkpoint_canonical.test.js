@@ -96,6 +96,9 @@ function registerGateBehaviorTests() {
         it('rawCanonicalCheckpoint is always the bare bytes (used nested by the v1 archive)', function () {
             expect(SCE.rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
         });
+        it('hub canonicalCheckpoint meets every shared checkpoint vector (no sibling needed)', function () {
+            assertCheckpointVectors(SCE.canonicalCheckpoint);
+        });
     });
 }
 function registerCrossServiceTests() {
@@ -173,7 +176,6 @@ function registerAnchorRootTests() {
             // Same construction as xchain-sync/test/unit/checkpoint.twin.test.js.
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON +
                 '|' + SR + '|1|' + BMR + '|1');
-            assertCheckpointVectors(SCE.canonicalCheckpoint);
         });
         it('mainnet at/above 961000: rooted AND header-wrapped, all three agree', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsMain);

@@ -344,10 +344,33 @@ function registerFeature4independentPeerReVerificationValidateProposedMatchFragm
     expect(await engine.validateProposedMatch(resultRow)).to.equal(false);
   });
 }
+function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part3() {
+  // call_id is signed verbatim and re-hashed into the EQUIV round id and the retraction key,
+  // while the source indexer's lookup is case-insensitive, so only the canonical spelling
+  // may collect a quorum; round_id must be its exact derivation.
+  it('refuses a call_id or round_id outside the canonical lowercase spelling', async function () {
+    const { engine } = makeEngine();
+    sinon.stub(engine, 'indexerCall').resolves({
+      exists: true, network: 'regtest', latest_block_index: 200, call: pendingCall()
+    });
+    const row = feature4independentPeerReVerificationValidateProposedMatchFragment3DispatchRow;
+    expect(await engine.validateProposedMatch(row())).to.equal(true);
+    const upper = CALL_ID.toUpperCase();
+    expect(await engine.validateProposedMatch(row({ call_id: upper })), 'upper-case call_id').to.equal(false);
+    expect(await engine.validateProposedMatch(row({
+      call_id: upper, round_id: sha256('XCALLROUND|dispatch|' + upper)
+    })), 'upper-case call_id with its own round id').to.equal(false);
+    expect(await engine.validateProposedMatch(row({
+      round_id: sha256('XCALLROUND|dispatch|' + CALL_ID).toUpperCase()
+    })), 'upper-case round_id').to.equal(false);
+    expect(await engine.validateProposedMatch(row({ call_id: 'c'.repeat(63) })), 'short call_id').to.equal(false);
+  });
+}
 function registerFeature4independentPeerReVerificationValidateProposedMatchFragment3() {
   describe('independent peer re-verification (validateProposedMatch)', function () {
     registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part1();
     registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part2();
+    registerFeature4independentPeerReVerificationValidateProposedMatchFragment3Part3();
   });
 }
 describe('CrossChainCallEngine', function () {

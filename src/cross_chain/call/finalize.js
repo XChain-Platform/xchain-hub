@@ -283,7 +283,9 @@ module.exports = {
         if(!rows.length) return;
         await this.db.updateCrossChainCallsRetractedInRange(chain, bounds);
         for(let r of rows){
-            let rid = this.roundId(r.phase, String(r.call_id));
+            // Consensus and _inflight key on the lowercase spelling, so a stored row
+            // signed with any other case must release under that same id.
+            const rid = this.roundId(r.phase, String(r.call_id).toLowerCase());
             this._inflight.delete(rid);
             // Clear the consensus finalized-ring entry too (M-13): without this the
             // round can never re-run, so a call re-confirmed after this reorg stays

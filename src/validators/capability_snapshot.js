@@ -79,7 +79,9 @@ async function postWith429Retry(url, body, config) {
 class CapabilitySnapshot {
     constructor(hub) {
         this.hub = hub;
-        // (capability:blockIndex) → { validators: [{pubkey, amount}], count, blockIndex, capability, expiresAt }
+        // Keys: net:cap:buried:minStake (count), w:net:cap:buried:minStake (weight), *:net:buried and wa:net:buried
+        // (whole federation), buried = buriedBlockIndex(). net and minStake must stay in the key (min_stake.js) and
+        // flushCapability deletes by the first two prefixes. Values: { capability, blockIndex, count, truncated, validators, expiresAt }.
         this.cache = new Map();
         // How long to keep a snapshot. 60s default, enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
@@ -95,8 +97,7 @@ class CapabilitySnapshot {
         // tier as ORACLE_EPOCH_START). HUB_SNAPSHOT_REORG_BUFFER is limited to
         // isolated standalone tests; every declared network refuses a divergent
         // value because external verifiers use the shared protocol constant.
-        // Default 6 = the BTC confirmation depth the
-        // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
+        // Default 6 = the BTC confirmation depth the platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this.resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
         // Truncation is alarm-and-PROCEED (the snapshot is still usable and
@@ -116,18 +117,17 @@ class CapabilitySnapshot {
     // Network qualifier folded into every cache key. A standalone hub may adopt
     // one recognized network through learnNetworkFromConfig, which rechecks the
     // canonical reorg buffer before changing the hub. It is bound explicitly so
-    // the network-safety of the key is stated by construction rather than inferred:
-    // a future change that lets
-    // one CapabilitySnapshot instance straddle networks (multi-network reader, a
-    // test harness swapping hub.network, reuse across two indexer targets) can no
-    // longer serve a mainnet snapshot for a testnet (capability, blockIndex) query.
+    // the network-safety of the key is stated by construction rather than inferred: a future
+    // change that lets one CapabilitySnapshot instance straddle networks (multi-network reader, a
+    // test harness swapping hub.network, reuse across two indexer targets) can no longer serve a
+    // mainnet snapshot for a testnet (capability, blockIndex) query.
     netKey() {
         return (this.hub && this.hub.network) || '';
     }
 
     // Fetch (or read from cache) the deterministic validator set for the given
     // capability at the given block boundary. Returns:
-    //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
+    //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability, truncated }
     // Returns null when the indexer can't be reached or returns an error.
     async getSnapshot(capability, blockIndex) {
         blockIndex = this.buriedBlockIndex(blockIndex);

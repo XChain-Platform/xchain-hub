@@ -56,11 +56,17 @@ describe('anchor_reward_activation parity (hub copy)', function () {
     it('is value-identical to the canonical constants.js for every export canon carries', function () {
         if (!skipOrFail(this, siblingCheckout(__dirname, CANON_PATH), 'the canonical constants check')) return;
         const canon = require(CANON_PATH);
-        const PINNED = [
+        // The compared set is every non-function hub export canon also carries; the required
+        // floor makes a rename or removal on either side fail instead of shrinking the set.
+        const REQUIRED = [
             'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_AMOUNT',
+            'ARCHIVE_REWARD_ACTIVATION',
             'ANCHOR_REWARD_DERIVE_ACTIVATION', 'ANCHOR_REWARD_MIRROR_MATURITY',
             'ANCHOR_ATTEST_ARRIVAL_MARGIN_S', 'ANCHOR_ATTEST_BARRIER_ACTIVATION'
         ];
+        const shared = Object.keys(local).filter((k) => typeof local[k] !== 'function' &&
+            Object.prototype.hasOwnProperty.call(canon, k));
+        const PINNED = [...new Set([...REQUIRED, ...shared])].sort();
         for (const name of PINNED) {
             expect(local[name], 'the hub copy must export ' + name).to.not.equal(undefined);
             expect(canon[name], 'constants.js must export ' + name + ' (the canonical authority)').to.not.equal(undefined);
