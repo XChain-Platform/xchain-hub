@@ -11,7 +11,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 const { presenceDigest, comparePresence, comparePairCounts } =
-    require('../../../../src/lib/oracle_round_presence.js');
+    require('../../../../../src/lib/oracle_round_presence.js');
 
 const HUB_A = 'http://hub-a:4000';
 const HUB_B = 'http://hub-b:4000';
@@ -27,7 +27,7 @@ function answer(counts, statuses) {
 
 function loadCli(answers) {
     const post = sinon.stub().callsFake(async url => ({ data: { result: answers[url] } }));
-    return proxyquire('../../../../bin/oracle-round-presence.js', { axios: { post } });
+    return proxyquire('../../../../../bin/oracle-round-presence.js', { axios: { post } });
 }
 
 describe('round presence pair-count advisory', function () {

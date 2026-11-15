@@ -5,9 +5,9 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
-const HubDbPeerCatchup = require('../../../../src/peers/hub_db/peer_catchup.js');
-const { makeCatchup } = require('./helpers/peer_catchup_harness.js');
+const { HUB_SCHEMA_VERSION } = require('../../../../../src/hub_schema_version.js');
+const HubDbPeerCatchup = require('../../../../../src/peers/hub_db/peer_catchup.js');
+const { makeCatchup } = require('../helpers/peer_catchup_harness.js');
 
 const SERVER_PAGE_CAP = 10000;
 
