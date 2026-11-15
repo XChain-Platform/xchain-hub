@@ -21,16 +21,32 @@ function parseSignatures(value){
     }
 }
 
-function validSigners(signatures, validators, canonical){
+// The verified, deduplicated member signatures in wire order, shaped exactly as the
+// finalize path persists them.
+function verifiedSignatures(signatures, validators, canonical){
     const members = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
     const seen = new Set();
+    const verified = [];
     for(const signature of signatures){
         const pubkey = String(signature && signature.pubkey || '').toLowerCase();
         if(!pubkey || seen.has(pubkey) || !members.has(pubkey)) continue;
         if(!ValidatorIdentity.verify(canonical, String(signature.sig || ''), pubkey)) continue;
         seen.add(pubkey);
+        verified.push({ pubkey, sig: String(signature.sig) });
     }
-    return seen;
+    return verified;
+}
+
+// The row to persist: the normalized checkpoint the signatures were verified against
+// plus only the verified signatures, so a catch-up row is byte-identical to the row the
+// finalize path writes for the same checkpoint and carries nothing the quorum did not sign.
+function canonicalRow(row, checkpoint, verified){
+    return Object.assign({}, row, checkpoint, {
+        state_root: checkpoint.state_root || null,
+        block_merkle_root: checkpoint.block_merkle_root || null,
+        rules_digest: checkpoint.rules_digest || null,
+        validator_signatures: JSON.stringify(verified)
+    });
 }
 
 function hubFromContext(context){
@@ -98,12 +114,15 @@ async function verifyStateCheckpointCatchupRow(row, context){
             return refusal('no local validator set for snapshot_block ' + Number(checkpoint.snapshot_block));
         if(validators.truncated === true)
             return refusal('local validator set is truncated');
-        const signers = validSigners(signatures, validators, canonicalForms.canonicalCheckpoint(checkpoint));
-        const quorumNetwork = engine ? engine.network : (deploymentNetwork || checkpoint.network);
+        const verified = verifiedSignatures(signatures, validators, canonicalForms.canonicalCheckpoint(checkpoint));
+        const signers = new Set(verified.map(entry => entry.pubkey));
+        // Catch-up gates quorum on the record's network when the hub has none, the rule the indexer
+        // applies; the engine only supplies the network guard and the validator set here.
+        const quorumNetwork = (engine ? String(engine.network || '') : deploymentNetwork) || checkpoint.network;
         const quorumMet = swq.isStakeWeightedQuorumActive(checkpoint.snapshot_block, quorumNetwork)
             ? swq.meetsStakeThreshold(validators, signers)
             : signers.size >= bftQuorumOrSingle(validators.length, 1);
-        return quorumMet ? true : refusal('checkpoint signatures do not meet quorum');
+        return quorumMet ? { ok: true, row: canonicalRow(row, checkpoint, verified) } : refusal('checkpoint signatures do not meet quorum');
     } catch(error){
         return refusal(error && error.message ? error.message : String(error));
     }

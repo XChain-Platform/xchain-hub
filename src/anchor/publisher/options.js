@@ -220,6 +220,7 @@ module.exports = {
         this.confirmStaleMs = parseInt(hubConfig.ANCHOR_CONFIRM_STALE_MS || cfg.ANCHOR_CONFIRM_STALE_MS, 10);
         if(!Number.isFinite(this.confirmStaleMs) || this.confirmStaleMs < 0) this.confirmStaleMs = 1800000;   // 30 min
         this._confirmTimer            = null;
+        this._confirmChecking         = false;
         this.confirmedPublishes       = 0;
         this.confirmationCheckFailures = 0;
         this.lastConfirmationCheckAt  = null;

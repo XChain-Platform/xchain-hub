@@ -334,27 +334,49 @@ function checkPin(pin, pinPath, nowEnv) {
     }
 }
 
+const EXPANDED_FIELDS = new Set(['consensus_rules_gates', 'hub_only_rules_gates', 'coin_consensus_pins']);
+
+function sameIdentityValue(before, after) {
+    if ((before !== null && typeof before === 'object') || (after !== null && typeof after === 'object')) {
+        return JSON.stringify(before) === JSON.stringify(after);
+    }
+    return before === after;
+}
+
+function compareTopLevelFields(pin, fresh) {
+    const differences = [];
+    const fields = Array.from(new Set(Object.keys(pin).concat(Object.keys(fresh)))).sort();
+    for (const field of fields) {
+        if (field === 'env') continue;
+        if (EXPANDED_FIELDS.has(field)) {
+            const pinKeys = isPlainObject(pin[field]) ? Object.keys(pin[field]) : [];
+            const freshKeys = isPlainObject(fresh[field]) ? Object.keys(fresh[field]) : [];
+            if (pinKeys.length || freshKeys.length) continue;
+        }
+        const pinHas = Object.prototype.hasOwnProperty.call(pin, field);
+        const freshHas = Object.prototype.hasOwnProperty.call(fresh, field);
+        if (pinHas && freshHas && sameIdentityValue(pin[field], fresh[field])) continue;
+        differences.push({
+            kind: pinHas && freshHas ? 'value' : (freshHas ? 'field_added' : 'field_dropped'),
+            field,
+            before: pinHas ? pin[field] : null,
+            after: freshHas ? fresh[field] : null,
+        });
+    }
+    return differences;
+}
+
 /**
- * Pin against tree, value by value. The gates map is compared gate by gate
- * rather than as one blob, because "the digest moved" is not actionable and
- * "these three gates stopped resolving" is.
+ * Pin against tree, value by value. Every field either side carries is checked
+ * except env, which checkPin handles. The three maps are expanded key by key so
+ * "the digest moved" becomes a difference an operator can act on.
  *
  * @param {object} pin a previously written identity
  * @param {object} fresh the identity of the tree under test
  * @returns {object[]} one entry per difference, empty when they agree
  */
 function compare(pin, fresh) {
-    const differences = [];
-    const scalars = [
-        'consensus_rules_digest', 'gates_field', 'gates_field_hash',
-        'coin_consensus_pin_hash', 'hub_schema_version', 'gate_key_count', 'carrier_logic_digest',
-        'hub_only_rules_digest', 'hub_only_gate_key_count',
-    ];
-    for (const key of scalars) {
-        if (pin[key] !== fresh[key]) {
-            differences.push({ kind: 'value', field: key, before: pin[key], after: fresh[key] });
-        }
-    }
+    const differences = compareTopLevelFields(pin, fresh);
     const gateKeys = Array.from(new Set(
         Object.keys(pin.consensus_rules_gates || {}).concat(Object.keys(fresh.consensus_rules_gates || {})),
     )).sort();
@@ -413,7 +435,7 @@ function parseArgs(argv) {
         else if (arg === '--help' || arg === '-h') opts.help = true;
         // A misspelt flag would otherwise run as the default reading and exit 0,
         // which a caller checking --assert-no-absent would take as a pass.
-        else throw new Error(`unknown flag ${argv[i]}`);
+        else throw new Error(`unknown flag: ${arg}`);
     }
     return opts;
 }
@@ -437,7 +459,10 @@ function main() {
             return;
         }
         console.log(`${differences.length} difference(s) against ${opts.compare}:`);
-        for (const d of differences) console.log(`  ${d.kind} ${d.field}: ${d.before} -> ${d.after}`);
+        const printable = (value) => typeof value === 'string' ? value : JSON.stringify(value);
+        for (const d of differences) {
+            console.log(`  ${d.kind} ${d.field}: ${printable(d.before)} -> ${printable(d.after)}`);
+        }
         process.exitCode = 1;
         return;
     }
@@ -479,8 +504,8 @@ function main() {
 
 if (require.main === module) {
     // Caught here rather than left to Node's default uncaught-exception handler,
-    // which exits 1 with a raw stack. The indexer's copy of this tool already gives
-    // a caller the contract this one now matches: exit 2, one clean line on stderr.
+    // which exits 1 with a raw stack. Both copies share the exit-2 contract: one
+    // clean stderr line prefixed "consensus-identity: ".
     try { main(); } catch (e) { console.error(`consensus-identity: ${e.message}`); process.exit(2); }
 }
 

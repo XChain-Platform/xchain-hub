@@ -163,7 +163,7 @@ module.exports = {
 
         // A fresh round for this rid is opening; allow its envelopes to buffer
         // again after any prior torn-down attempt (item 2640).
-        this.tornDown.delete(rid);
+        this.clearTornDown(rid);
         this.pending.set(rid, pending);
 
         if(this.peerManager && !myBodyOverCap){

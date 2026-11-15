@@ -24,7 +24,7 @@ const SAP  = require('../../../src/anchor/publisher.js');
 const { assertCheckpointVectors, keyOf } = require('./equiv_checkpoint_canonical.test/helpers/checkpoint_assertions.js');
 // The frozen ANCHOR v0 wire vector, vendored byte-identically from
 // xchain-documentation/protocol/test-vectors/anchor_canonical.json and guarded by
-// anchor_golden_vectors.test.js. Driving the section parity off these bytes means the
+// test/unit/anchor/anchor_canonical_vectors_vendor.test.js. Driving the section parity off these bytes means the
 // three canonical builders meet a real bundle, not three transcriptions of one literal.
 const GOLDEN = require('../../fixtures/anchor_canonical_vectors.json');
 

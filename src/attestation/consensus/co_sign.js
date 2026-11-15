@@ -142,9 +142,11 @@ module.exports = {
         return true;
     },
 
-    // byte_equality's safety rule: our independently-fetched body and meta ARE
-    // the winner's, compared by body hash.
+    // byte_equality's safety rule: an ok independently-fetched body and meta ARE
+    // the winner's, compared by body hash. A failed fetch has an empty body and
+    // meta, but must never authorize an ok signature over matching empty bytes.
     ownBodyMatchesWinner(body, meta, myProposal){
+        if((myProposal.status || 'ok') !== 'ok') return false;
         let winnerHash = crypto.createHash('sha256').update(body).digest();
         let myHash     = crypto.createHash('sha256').update(myProposal.body).digest();
         return Buffer.compare(winnerHash, myHash) === 0 && myProposal.meta === meta;

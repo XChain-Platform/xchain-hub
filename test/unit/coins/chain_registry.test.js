@@ -155,6 +155,10 @@ describe('GET /api/v1/chain-registry', function () {
     });
 });
 
+// Snapshot consistency: the vendored snapshot is checked against the canonical coin
+// registry (one entry per coin and network kind, matching WIF version bytes, required
+// endpoint objects) so a wallet bootstrapping from it never receives a descriptor that
+// disagrees with what the hub itself runs.
 describe('chain-registry snapshot consistency', function () {
 
     const TICK_BY_COIN = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };

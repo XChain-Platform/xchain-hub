@@ -92,10 +92,10 @@ class CapabilitySnapshot {
         // blocks below the tip pins the set to a buried, reorg-stable height.
         // CONSENSUS-CRITICAL: the buffer is part of what every hub folds into
         // the same round height, so it must be identical federation-wide (same
-        // tier as ORACLE_EPOCH_START). Override via HUB_SNAPSHOT_REORG_BUFFER
-        // only as a coordinated fleet change; on mainnet/testnet a divergent
-        // value now refuses boot rather than forking silently (#4167, see
-        // resolveReorgBuffer). Default 6 = the BTC confirmation depth the
+        // tier as ORACLE_EPOCH_START). HUB_SNAPSHOT_REORG_BUFFER is limited to
+        // isolated standalone tests; every declared network refuses a divergent
+        // value because external verifiers use the shared protocol constant.
+        // Default 6 = the BTC confirmation depth the
         // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this.resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
@@ -113,11 +113,11 @@ class CapabilitySnapshot {
         });
     }
 
-    // Network qualifier folded into every cache key. HUB_NETWORK is read once at
-    // process start, validated, and frozen onto the hub (XChainHub.js), so it is
-    // invariant across every entry today and this prefix changes nothing for a
-    // single-network process. It is bound explicitly so the network-safety of the
-    // key is stated by construction rather than inferred: a future change that lets
+    // Network qualifier folded into every cache key. A standalone hub may adopt
+    // one recognized network through learnNetworkFromConfig, which rechecks the
+    // canonical reorg buffer before changing the hub. It is bound explicitly so
+    // the network-safety of the key is stated by construction rather than inferred:
+    // a future change that lets
     // one CapabilitySnapshot instance straddle networks (multi-network reader, a
     // test harness swapping hub.network, reuse across two indexer targets) can no
     // longer serve a mainnet snapshot for a testnet (capability, blockIndex) query.

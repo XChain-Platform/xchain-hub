@@ -37,6 +37,8 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+const GENERATED_COLUMN = /\bGENERATED\s+ALWAYS\s+AS\b|\bAS\s*\([\s\S]*\)\s*(?:STORED|VIRTUAL|PERSISTENT)\b/i;
+
 module.exports = {
 
     // Throw immediately on errors that retrying will never fix (bad credentials,
@@ -249,6 +251,9 @@ module.exports = {
     //   2. Nullability: only relaxes NOT NULL -> NULL (the safe direction; never
     //      strengthens to NOT NULL since live rows might hold NULLs that would
     //      block the ALTER).
+    // A generated column is never added or altered here: a STORED one rebuilds the whole
+    // table, which a boot must not start under the runtime statement limit. A dated
+    // migration adds it, and a boot logs the gap.
     // Doesn't touch types, defaults of existing columns, or indexes. Each applied
     // ALTER is loudly logged. Reuses the caller's connection (`db`).
     async alterTableForDrift(file, db){
@@ -266,6 +271,10 @@ module.exports = {
         const liveByName = new Map(live.map(c => [c.COLUMN_NAME.toLowerCase(), c]));
         for(const exp of expected){
             const cur = liveByName.get(exp.name.toLowerCase());
+            if(GENERATED_COLUMN.test(exp.definition)){
+                if(!cur) logger.info('Schema drift on ' + table + '.' + exp.name + ': generated column missing live. Not added at boot; a dated migration adds it (npm run migrate).');
+                continue;
+            }
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
                     logger.info('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT (cannot backfill existing rows safely). Skipping; add manually.');

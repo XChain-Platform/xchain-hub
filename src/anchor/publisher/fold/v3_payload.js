@@ -35,9 +35,12 @@ function compareText(a, b){
 }
 
 function sectionParts(section){
-    const sigs = parseSignatures(section.validator_signatures).slice()
+    const sigs = parseSignatures(section.validator_signatures).map(signature => ({
+        pubkey: String(signature.pubkey).toLowerCase(),
+        sig: String(signature.sig).toLowerCase()
+    }))
         .sort((a, b) => compareText(a.pubkey, b.pubkey));
-    const parts = [String(section.chain), String(section.block_index), section.block_hash,
+    const parts = [String(section.chain).toUpperCase(), String(section.block_index), section.block_hash,
         section.ledger_hash, section.actions_hash, section.contract_hash,
         String(section.checkpoint_seq), String(section.snapshot_block),
         String(section.state_root || '').toLowerCase(), String(section.state_root_version),
@@ -73,7 +76,7 @@ function attestationParts(bundle){
 
 function buildAnchorV3Payload(bundle){
     const sections = (bundle.sections || []).slice()
-        .sort((a, b) => compareText(a.chain, b.chain));
+        .sort((a, b) => compareText(String(a.chain).toUpperCase(), String(b.chain).toUpperCase()));
     const parts = ['ANCHOR', '3', String(bundle.network), String(bundle.snapshot_block),
         String(sections.length)];
     for(const section of sections) parts.push(...sectionParts(section));

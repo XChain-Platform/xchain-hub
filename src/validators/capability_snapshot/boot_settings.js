@@ -36,6 +36,7 @@ const { CANONICAL_REORG_BUFFER } = require('../../consensus/snapshot_reorg_buffe
 const hubConfig = require('../../config');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
+const CONSENSUS_NETWORKS = new Set(['mainnet', 'testnet', 'regtest']);
 
 module.exports = {
 
@@ -61,17 +62,10 @@ module.exports = {
     // falls back to the default rather than silently forking the federation on
     // a typo'd env value.
     //
-    // A VALID but non-canonical value is the sharper hazard and is why this is
-    // more than a parse (#4167): the buffer is subtracted before the cache key
-    // and the indexer RPC are formed, so two hubs handed the same requested
-    // height resolve DIFFERENT blocks, and their validator sets and quorum N
-    // diverge with nothing logged. Mainnet/testnet therefore refuse the value
-    // outright (throws out of the constructor, halting boot fail-closed);
-    // regtest/standalone warn and accept so test venues can run deliberate
-    // depths. XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 is the loud one-off bypass
-    // for a coordinated fleet-wide change. Same shape and same reasoning as
-    // XChainHub.assertCanonicalMinStakes, which guards the identical fork
-    // class for MIN_STAKE.
+    // A valid but non-canonical value resolves a different validator set than
+    // indexer, SDK and hub checkpoint verifiers, which always use the shared
+    // constant. Every declared consensus network therefore refuses a mismatch.
+    // Standalone mode accepts one only for isolated hub tests.
     resolveReorgBuffer() {
         let raw = hubConfig.HUB_SNAPSHOT_REORG_BUFFER;
         if (raw === undefined || raw === '') return CANONICAL_REORG_BUFFER;
@@ -82,27 +76,29 @@ module.exports = {
                 'is CONSENSUS-CRITICAL and must match across the federation.');
             return CANONICAL_REORG_BUFFER;
         }
+        const network = (this.hub && this.hub.network) || '';
+        return this.assertCanonicalReorgBuffer(n, network);
+    },
+
+    // Apply the same invariant at construction and when a standalone hub learns
+    // its network from config. Changing the depth requires changing the shared
+    // protocol constant used by every verifier, not a hub-local override.
+    assertCanonicalReorgBuffer(n, network) {
         if (n === CANONICAL_REORG_BUFFER) return n;
-        let detail = 'HUB_SNAPSHOT_REORG_BUFFER is ' + n + ' but the canonical federation value is ' +
-            CANONICAL_REORG_BUFFER + '. Every hub subtracts this buffer before resolving a snapshot, ' +
-            'so a hub running a different value locks a different block for the same round: divergent ' +
-            'validator sets and quorum N across the federation. Change it fleet-wide or not at all ' +
-            '(XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 to bypass on a venue where every hub runs the SAME override).';
-        if (hubConfig.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
-            logger.warn('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1: skipping the canonical reorg-buffer ' +
-                'assertion. ' + detail);
-            return n;
-        }
-        // Strict only on a declared consensus network: standalone ('' - no
-        // consensus runs) and regtest venues warn instead of refusing.
-        let network = (this.hub && this.hub.network) || '';
-        if (network === 'mainnet' || network === 'testnet') {
-            let err = new Error('CapabilitySnapshot: ' + detail);
+        const detail = 'HUB_SNAPSHOT_REORG_BUFFER is ' + n + ' but the canonical federation value is ' +
+            CANONICAL_REORG_BUFFER + '. Indexer, SDK and hub checkpoint verifiers use the shared ' +
+            'constant, so a hub-only override resolves a different validator set even when every hub uses it.';
+        if (CONSENSUS_NETWORKS.has(network)) {
+            if (hubConfig.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
+                logger.error('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 is ignored on ' + network +
+                    ' because no hub-only reorg-buffer override is safe.');
+            }
+            const err = new Error('CapabilitySnapshot: ' + detail);
             err.code = 'REORG_BUFFER_MISMATCH';
             throw err;
         }
-        logger.warn('CapabilitySnapshot: reorg-buffer mismatch (non-strict on ' +
-            (network || 'standalone') + '): ' + detail);
+        logger.warn('CapabilitySnapshot: reorg-buffer mismatch (non-strict on standalone): ' +
+            detail + ' Use this only in an isolated hub test with no consensus verifier.');
         return n;
     }
 };

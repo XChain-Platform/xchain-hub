@@ -23,6 +23,7 @@
 const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
         refuseUnanchoredOrStraddlingBatch, validateBatchSigs } = require('./batch_validation.js');
 const { verifyBatchQuorum } = require('./batch_verification.js');
+const { isProducerRoundRow } = require('../../peers/hub_db/price_round_groups.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -150,9 +151,17 @@ async function orphanedBatchLandingOf(sourceChain, rows, fence) {
 // canonical landing, so the generation fence of the late retraction spares it. Emits
 // what the hub now HOLDS (the upsert keeps the earlier landing clock), re-read rather
 // than built, so a mirror never receives a value this hub does not store.
-async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt) {
+//
+// A pair this hub finalized itself (a producer row, BTC-anchored and carrying a signature
+// array) keeps its row: the retraction never deletes it, so there is nothing to move, and the
+// upsert would replace its BTC anchor and proof with the batch's landing height and proof. The
+// round is decided per round but its pairs can differ in origin.
+async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt, existing) {
     let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
-    await batchRoundInsert.call(this, r, sourceChain, head, verified, fence, createdAt, admitCols);
+    let selfFinalized = new Set((existing || []).filter(isProducerRoundRow).map(row => row.coin_pair));
+    let pairs = r.pairs.filter(p => !selfFinalized.has(p.pair));
+    if (pairs.length > 0)
+        await batchRoundInsert.call(this, Object.assign({}, r, { pairs }), sourceChain, head, verified, fence, createdAt, admitCols);
     let rows = await this.db.findPriceSnapshotsForRound(r.round);
     for (let row of (Array.isArray(rows) ? rows : [])) {
         if (row && row.status !== 'skipped') {
@@ -176,7 +185,7 @@ async function handleDuplicateBatchRound(sourceChain, r, head, verified, fence, 
         let relanded = !!targetRounds ||
             await orphanedBatchLandingOf.call(this, sourceChain, existing, fence);
         if (relanded)
-            await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt);
+            await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt, existing);
     } catch (err) {
         // The round is still finalized here; a failed move leaves it on the old
         // landing, which is what the dedupe did before, so it is never a reject.

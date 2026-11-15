@@ -182,41 +182,48 @@ module.exports = {
     // and nothing here throws, blocks publishing, or spends.
     async checkPublishedConfirmations() {
         if (this._pendingConfirmations.size === 0) return;
-        let summary;
+        if (this._confirmChecking) return;
+        this._confirmChecking = true;
+        const pendingEntries = Array.from(this._pendingConfirmations.values());
         try {
-            summary = await this.readUtxoReserve();
-        } catch (e) {
-            summary = null;
-        }
-        if (!summary || !summary.known) {
-            this.confirmationCheckFailures++;
-            return;
-        }
-        this.lastConfirmationCheckAt = Date.now();
+            let summary;
+            try {
+                summary = await this.readUtxoReserve();
+            } catch (e) {
+                summary = null;
+            }
+            if (!summary || !summary.known) {
+                this.confirmationCheckFailures++;
+                return;
+            }
+            this.lastConfirmationCheckAt = Date.now();
 
-        for (let entry of Array.from(this._pendingConfirmations.values())) {
-            let depth = summary.byTxid.get(entry.txid);
-            if (depth !== undefined) {
-                if (depth >= CONFIRMED_DEPTH) {
+            for (let entry of pendingEntries) {
+                let depth = summary.byTxid.get(entry.txid);
+                if (depth !== undefined) {
+                    if (depth >= CONFIRMED_DEPTH) {
+                        this._pendingConfirmations.delete(entry.txid);
+                        this.confirmedPublishes++;
+                    }
+                    continue;
+                }
+                if (summary.confirmed > 0) {
                     this._pendingConfirmations.delete(entry.txid);
                     this.confirmedPublishes++;
                 }
-                continue;
             }
-            if (summary.confirmed > 0) {
-                this._pendingConfirmations.delete(entry.txid);
-                this.confirmedPublishes++;
-            }
-        }
 
-        let oldest = this.oldestUnconfirmedPublish();
-        if (oldest && oldest.ageMs >= this.confirmStaleMs) {
-            logger.warn('OraclePublisher: UNCONFIRMED_PUBLISH - ' + this._pendingConfirmations.size +
-                ' broadcast(s) have never been seen confirmed; oldest is round ' + oldest.round +
-                ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
-                'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
-                summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
-                'automatically; an operator decides how to unstick the package.');
+            let oldest = this.oldestUnconfirmedPublish();
+            if (oldest && oldest.ageMs >= this.confirmStaleMs) {
+                logger.warn('OraclePublisher: UNCONFIRMED_PUBLISH - ' + this._pendingConfirmations.size +
+                    ' broadcast(s) have never been seen confirmed; oldest is round ' + oldest.round +
+                    ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
+                    'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
+                    summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
+                    'automatically; an operator decides how to unstick the package.');
+            }
+        } finally {
+            this._confirmChecking = false;
         }
     },
 

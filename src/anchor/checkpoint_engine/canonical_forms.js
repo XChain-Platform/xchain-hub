@@ -45,6 +45,14 @@ const forms = {
                 String(cp.checkpoint_seq), String(cp.snapshot_block)].join('|');
     },
 
+    checkpointRoundId(cp){
+        return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq;
+    },
+
+    archiveRoundId(cp, batchSeq){
+        return forms.checkpointRoundId(cp) + '|' + batchSeq;
+    },
+
     // Is CHECKPOINT_COMMITMENT active at this checkpoint's own network and snapshot_block?
     // The one reader of the flag-day key, shared by the suffix, the rootless guard and
     // the ANCHOR bundle selector's floor.
@@ -96,7 +104,7 @@ const forms = {
                   forms.checkpointSupersedeSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
+                forms.checkpointRoundId(cp), 0, raw);
         return raw;
     },
 

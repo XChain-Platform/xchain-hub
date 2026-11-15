@@ -135,6 +135,9 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager, bus) 
         },
         resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
     };
+    // The fold gate is keyed on the DOGE tip and defers when a hub cannot resolve one,
+    // so suites that publish folded v3 opt in to a DOGE tip; the rest keep the absent resolver.
+    if (opts.dogeBlock != null) hub.resolveDogeLatestBlock = async () => opts.dogeBlock;
     return hub;
 }
 

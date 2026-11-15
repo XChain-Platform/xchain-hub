@@ -87,6 +87,7 @@ const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
 const { isPoolSaturation } = require('./schema/pool_saturation.js');
+const { buildPoolParams } = require('./schema/pool_params.js');
 
 // The DDL lives at src/sql/, one level above this db home. Resolved here, against
 // THIS file, because schema/bootstrap.js sits one directory deeper and a path built
@@ -158,46 +159,7 @@ class Database {
         this.user   = user;
         this.pass   = pass;
 
-        const queryTimeout = parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000;
-
-        this.connectionPoolParams = {
-            host:               this.host,
-            user:               this.user,
-            password:           this.pass,
-            database:           this.dbName,
-            port:               this.port,
-            connectionLimit:    10,
-            connectTimeout:     parseInt(hubConfig.DB_CONNECT_TIMEOUT) || 10000,
-            acquireTimeout:     parseInt(hubConfig.DB_ACQUIRE_TIMEOUT) || 10000,
-            idleTimeout:        60000,
-            insertIdAsNumber:   true,
-            bigIntAsNumber:     true,
-            // Pin BOTH halves of datetime handling to UTC. The driver
-            // otherwise binds a JS Date using the Node process's LOCAL timezone while
-            // the server evaluates NOW() / CURRENT_TIMESTAMP / FROM_UNIXTIME in the
-            // session's own, so a hub whose host is not on UTC writes and compares
-            // datetimes that are hours apart. Two real consequences, both silent:
-            // Governance.propose() wrote a voting_end already in the past, so a
-            // proposal expired the instant it was created, and ReorgHandler's rollback
-            // DELETE matched nothing because the attestation rows it was meant to
-            // remove appeared to predate the reorg bound. This option makes the driver
-            // serialize/parse Dates as UTC and issue `SET time_zone='+00:00'` per
-            // connection, so both sides agree no matter where the hub runs - which
-            // also keeps a geographically-spread federation comparing like with like.
-            // Safe for existing data: every temporal column in src/sql is TIMESTAMP
-            // (UTC-normalized in storage) or DATETIME (stores the literal), and the
-            // session's UTC pin makes the two agree.
-            timezone:           'Z',
-            minDelayValidation: 3000,
-            queryTimeout:       queryTimeout,
-            // queryTimeout is enforced by the SERVER (SET STATEMENT max_statement_time),
-            // so a frozen or partitioned server leaves an in-flight query with no
-            // client-side bound: it holds its pool slot and HTTP request until the
-            // server returns. socketTimeout cuts the dead socket client-side. It sits
-            // above queryTimeout so a healthy server's own limit always fires first.
-            socketTimeout:      parseInt(hubConfig.DB_SOCKET_TIMEOUT) || (queryTimeout + 15000)
-        };
-
+        this.connectionPoolParams = buildPoolParams(this.host, this.port, this.dbName, this.user, this.pass);
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
 

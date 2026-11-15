@@ -32,6 +32,13 @@ const { planListVersion } = require('./version_plan.js');
 const logger = getLogger();
 const foldCacheKey = Symbol('listFoldCache');
 const LIST_META_GATE_KEY = 'list_meta_activation.LIST_META_ACTIVATION';
+const LIST_POLL_WARN_MS = 5 * 60 * 1000;
+
+function safePollCause(cause) {
+    return String((cause && cause.message) || cause || 'unknown failure')
+        .replace(/https?:\/\/\S+/gi, '[indexer]')
+        .replace(/bearer\s+\S+/gi, 'Bearer [redacted]');
+}
 
 function installListMetaActivation(engine) {
     if (typeof engine.activation.listMeta === 'function') return;
@@ -74,6 +81,7 @@ async function readListAt(engine, chain, rootIndex, originBlock) {
             list_index: rootIndex,
             block: originBlock
         });
+        engine.noteListPollOk(chain, 'getlistat');
         if (!answer || answer.error) return null;
         return {
             type: answer.type,
@@ -83,7 +91,8 @@ async function readListAt(engine, chain, rootIndex, originBlock) {
             description: answer.description,
             meta_hash: answer.meta_hash
         };
-    } catch (_) {
+    } catch (error) {
+        engine.noteListPollFailure(chain, 'getlistat', error);
         return null;
     }
 }
@@ -150,11 +159,30 @@ async function proposeListRow(engine, row, snapshotBlock, network) {
 }
 
 module.exports = {
+    noteListPollFailure(chain, method, cause) {
+        this._listPollFailures = (this._listPollFailures || 0) + 1;
+        if (!this._listPollWarnAt) this._listPollWarnAt = new Map();
+        const key = chain + ':' + method;
+        const now = Date.now();
+        const warnedAt = this._listPollWarnAt.get(key);
+        if (warnedAt !== undefined && now - warnedAt < LIST_POLL_WARN_MS) return;
+        this._listPollWarnAt.set(key, now);
+        logger.warn('ListShare: ' + method + ' on ' + chain + ' failed (' +
+            safePollCause(cause) + '); shared-list snapshots for that chain are not being produced ' +
+            '(list poll failures so far: ' + this._listPollFailures + ')');
+    },
+
+    noteListPollOk(chain, method) {
+        if (this._listPollWarnAt) this._listPollWarnAt.delete(chain + ':' + method);
+    },
+
     async listOriginBlock(chain) {
         let latest;
         try {
             latest = await this.indexerCall(chain, 'getlatestblock', {});
-        } catch (_) {
+            this.noteListPollOk(chain, 'getlatestblock');
+        } catch (error) {
+            this.noteListPollFailure(chain, 'getlatestblock', error);
             return null;
         }
         return listOriginBlockFrom(latest, this.confirmations[chain]);
@@ -172,10 +200,15 @@ module.exports = {
             let sharedLists;
             try {
                 sharedLists = await this.indexerCall(chain, 'getsharedlists', { network });
-            } catch (_) {
+            } catch (error) {
+                this.noteListPollFailure(chain, 'getsharedlists', error);
                 continue;
             }
-            if (!Array.isArray(sharedLists)) continue;
+            if (!Array.isArray(sharedLists)) {
+                this.noteListPollFailure(chain, 'getsharedlists', 'non-array result');
+                continue;
+            }
+            this.noteListPollOk(chain, 'getsharedlists');
 
             for (const entry of listsDue(sharedLists, originBlock)) {
                 try {

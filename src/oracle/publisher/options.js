@@ -51,6 +51,9 @@ module.exports = {
         // Lifetime count of unparseable queue lines moved to the dead-letter file
         // before a rewrite, kept apart from abandonedCount (those are whole rounds).
         this.corruptQueueLines  = 0;
+        // Set when the durable round buffer could not be read at startup. While set,
+        // compaction is blocked so unread finalized rounds remain recoverable.
+        this._bufferUnread      = false;
         // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
         // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
         // so operators can tell an oversized drop apart from an attempts-exhausted abandon.

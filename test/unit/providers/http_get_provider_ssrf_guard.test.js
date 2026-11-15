@@ -86,6 +86,13 @@ function registerHttpGetFetchSSRFGuardSuite1Part1() {
     await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[64:ff9b::a00:5]/'); // NAT64 of 10.0.0.5
     await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[::7f00:1]/'); // ::127.0.0.1
   });
+  it('refuses 6to4 and Teredo literals that can carry internal IPv4 targets', async function () {
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[2002:a00:1::]/');
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[2002:a9fe:a9fe::]/');
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[2002:7f00:1::]/');
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[2001::1]/');
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/');
+  });
   it('allows public IP literals adjacent to blocked ranges (boundary check)', async function () {
     // 172.32.0.1 is just past 172.16/12; 100.128.0.1 just past 100.64/10.
     // nock intercepts so no real connection is made.
@@ -95,13 +102,6 @@ function registerHttpGetFetchSSRFGuardSuite1Part1() {
     nock('https://100.128.0.1').get('/').reply(200, 'ok');
     const r2 = await httpGet.fetch('https://100.128.0.1/', {});
     expect(r2.meta).to.equal('200');
-  });
-  it('refuses a hostname that resolves to a private address', async function () {
-    sinon.stub(dns.promises, 'lookup').resolves([{
-      address: '10.1.2.3',
-      family: 4
-    }]);
-    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://internal.example.com/');
   });
 }
 function registerHttpGetFetchSSRFGuardSuite1Part2() {
@@ -188,6 +188,20 @@ function registerHttpGetFetchSSRFGuardSuite1Part3() {
       family: 4
     }]);
     await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://internal.example.com/');
+  });
+  it('refuses a hostname that resolves to a private address', async function () {
+    sinon.stub(dns.promises, 'lookup').resolves([{
+      address: '10.1.2.3',
+      family: 4
+    }]);
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://internal.example.com/');
+  });
+  it('refuses a hostname that resolves to a 6to4 address', async function () {
+    sinon.stub(dns.promises, 'lookup').resolves([{
+      address: '2002:a9fe:a9fe::',
+      family: 6
+    }]);
+    await httpGetFetchSSRFGuardSuite1ExpectGuardReject('https://tunnel.example.com/');
   });
 }
 describe('http_get.fetch: SSRF guard', function () {

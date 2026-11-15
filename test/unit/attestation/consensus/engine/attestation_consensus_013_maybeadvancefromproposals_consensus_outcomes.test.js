@@ -117,12 +117,13 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta, stra
 // it does not fork, so refusing to run would be the worse failure.
 
 {
-let me, p1, p2, hub, c;
+let me, p1, p2, p3, hub, c;
 
 const hookAt61754 = () => {
         me  = mkIdentity();
         p1  = mkIdentity();
         p2  = mkIdentity();
+        p3  = mkIdentity();
         hub = createMockHub({ identity: me });
     };
 
@@ -207,6 +208,38 @@ describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', f
         let reg = makeRealProviderRegistry(async (proposals) => proposals[0], 'judge_model');
         let pending = await seedThreeProposals(reg);
         expect(pending.winner).to.not.equal(null);
+    }); });
+
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); it('does not re-run agreement for a duplicate after a throttled no-winner verdict', async function () {
+        const agree = sinon.spy(() => null);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agree, 'judge_model'));
+        c.recordNonOkPublished(RID, 'no_quorum');
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 3));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, BODY));
+        await flush();
+        expect(agree.callCount).to.equal(1);
+        expect(c.pending.get(RID).winner).to.equal(null);
+
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(agree.callCount).to.equal(1);
+    }); });
+
+describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); it('re-runs agreement when the ok proposal set grows after no winner', async function () {
+        const agree = sinon.spy(() => null);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agree, 'judge_model'));
+        c.recordNonOkPublished(RID, 'no_quorum');
+        await c.propose(RID, roundState(me, [me, p1, p2, p3], BODY, 'llm', 3));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, BODY));
+        await flush();
+        expect(agree.callCount).to.equal(1);
+
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p3, BODY));
+        await flush();
+        expect(agree.callCount).to.equal(2);
+        expect(agree.secondCall.args[0]).to.have.length(4);
     }); });
 
 describe('AttestationConsensus: maybeAdvanceFromProposals consensus outcomes', function () { beforeEach(hookAt61754); afterEach(hookAt61916); it('records a slash candidate for a byte_equality divergence', async function () {

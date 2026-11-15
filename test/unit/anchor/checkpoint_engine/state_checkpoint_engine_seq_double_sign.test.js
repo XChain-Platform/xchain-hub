@@ -211,8 +211,10 @@ function registerSequenceSigningTests() {
 
         expect(signs.length, 'exactly one signature left the hub for this sequence').to.equal(1);
         expect(follower.engine._seqDoubleSignRefusals, 'the second is counted').to.equal(1);
-        expect((await follower.engine.getStats()).seq_double_sign_refusals,
-            'and is operator-visible').to.equal(1);
+        const stats = await follower.engine.getStats();
+        expect(stats.seq_double_sign_refusals, 'and is operator-visible').to.equal(1);
+        expect(stats.cosign_declines.seq_second_payload).to.equal(1);
+        expect(stats.last_cosign_decline_reason).to.equal('seq_second_payload');
     });
 
     it('re-delivery of the SAME payload still co-signs (idempotent, not an equivocation)', async function () {
@@ -228,6 +230,7 @@ function registerSequenceSigningTests() {
 
         expect(signs.length, 'a duplicate gossip delivery is answered, not refused').to.equal(2);
         expect(follower.engine._seqDoubleSignRefusals, 'nothing is metered').to.equal(0);
+        expect((await follower.engine.getStats()).cosign_declines.seq_second_payload).to.equal(0);
     });
 }
 

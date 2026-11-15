@@ -128,6 +128,8 @@ function registerFrozenWireVectors() {
             expect(parseV7Sections(build(sections)).map(x => x.chain)).to.deep.equal(['BTC', 'DOGE', 'LTC']);
             // Reversing the input cannot change one byte.
             expect(build(sections.slice().reverse())).to.equal(GOLDEN.vectors.v0);
+            const mixed = sections.map(sec => Object.assign({}, sec, { chain: sec.chain.toLowerCase() }));
+            expect(build(mixed)).to.equal(GOLDEN.vectors.v0);
         });
 
         it('orders (PUBKEY, SIG) pairs by PUBKEY ascending within every section', function () {
@@ -138,6 +140,13 @@ function registerFrozenWireVectors() {
                 let keys = sec.sigs.map(x => x.pubkey);
                 expect(keys, 'section ' + sec.chain).to.deep.equal(keys.slice().sort());
             }
+            const mixed = sections.map(sec => Object.assign({}, sec, {
+                validator_signatures: JSON.stringify(JSON.parse(sec.validator_signatures).map((sig, index) => ({
+                    pubkey: index === 0 ? sig.pubkey.toUpperCase() : sig.pubkey,
+                    sig: sig.sig.toUpperCase()
+                })))
+            }));
+            expect(build(mixed)).to.equal(GOLDEN.vectors.v0);
         });
 
         it('takes SNAPSHOT_BLOCK as the MAX over the sections, not the first section', function () {

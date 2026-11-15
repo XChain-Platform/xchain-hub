@@ -109,8 +109,8 @@ module.exports = {
                 consensusProof:    JSON.stringify(this.countedVoters(pending, pending.commits))
             };
 
-            this.storeWithRetry(attestation)
-                .then(() => {
+            this.storeWithRetry(attestation).then(
+                () => {
                     if (pending.timer) clearTimeout(pending.timer);
                     if (pending.storeRedriveTimer) clearTimeout(pending.storeRedriveTimer);
                     this.markFinalized(attestationId);
@@ -119,14 +119,18 @@ module.exports = {
                     logger.info('CrossChain: Attestation finalized: ' + attestationId +
                         ' (' + pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits)');
 
-                    // Emit for downstream processing
-                    this.emit('attestation:finalized', attestation);
-
                     if (pending.resolve) pending.resolve(attestation);
                     // Callers that joined this round settle with the same stored attestation.
                     this.settleWaiters(pending, null, attestation);
-                })
-                .catch(err => {
+
+                    try {
+                        this.emit('attestation:finalized', attestation);
+                    } catch (err) {
+                        logger.error('CrossChain: attestation:finalized listener threw for ' +
+                            attestationId + ': ' + (err && err.message ? err.message : err));
+                    }
+                },
+                err => {
                     // Retain the round and re-drive the store on our own timer: peers send
                     // COMMIT once, and the round timer may already have fired, so nothing
                     // else is guaranteed to retry a quorum-signed attestation peers persisted.
@@ -134,7 +138,11 @@ module.exports = {
                         this.storeRetryAttempts + ' attempt(s), retaining round for retry: ' + err.message);
                     pending.finalized = false;
                     this.armStoreRedrive(attestationId, pending);
-                });
+                }
+            ).catch(err => {
+                logger.error('CrossChain: post-store bookkeeping failed for ' +
+                    attestationId + ': ' + (err && err.message ? err.message : err));
+            });
         }
     },
 

@@ -24,13 +24,16 @@
 
 const canonicalForms = require('../canonical_forms.js');
 const { archiveCapabilityWants } = require('./capability_wants.js');
+const { archiveWithinRowCaps } = require('./archive_row_caps.js');
+const { unheldRowRefusal } = require('./unheld_row.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
-const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const ark = require('../../anchor_reward_key.js');
-const { legacyAnchorRewardAmount } = require('../../reward_tracker.js');
+const { legacyAnchorRewardAmount, frozenAnchorRewardAmount } = require('../../reward_tracker.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
+const UNHELD_MATCH_STATUSES = Object.freeze(['finalized', 'retracted']);
+const UNHELD_CALL_STATUSES = Object.freeze(['finalized', 'retracted']);
 
 module.exports = {
 
@@ -49,6 +52,7 @@ module.exports = {
     // completeness check below has to know which oracle_publish group buildArchive
     // was obliged to emit for the wrapper itself.
     async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
+        if(!archiveWithinRowCaps(archive, logger)) return false;
         for(let am of archive.matches){
             if(!(await this.verifyArchivedMatch(am))) return false;
         }
@@ -65,11 +69,11 @@ module.exports = {
             if(!(await this.verifyArchivedListSnapshot(list, archive))) return false;
         }
         for(const checkpoint of (archive.state_checkpoints || [])){
-            if(!(await this.verifyArchivedStateCheckpoint(checkpoint))) return false;
+            if(!(await this.verifyArchivedStateCheckpoint(checkpoint, archive))) return false;
         }
         if(!(await this.verifyArchivedPriceSnapshots(archive.price_snapshots || [], archive))) return false;
         for(const tombstone of (archive.price_tombstones || [])){
-            if(!(await this.verifyArchivedPriceTombstone(tombstone))) return false;
+            if(!(await this.verifyArchivedPriceTombstone(tombstone, archive))) return false;
         }
         // Reward rows carry no per-row signatures (they are unilateral local
         // writes), so they verify by RE-DERIVATION: every field must equal what
@@ -121,6 +125,12 @@ module.exports = {
             // OUR OWN resolved cross_chain set at the row's snapshot_block)
             // is the same proof full-parse recovery accepts, so absence is
             // not divergence. A forged row cannot carry those signatures.
+            const refusal = unheldRowRefusal(am, canonicalForms.serializeMatch(am), UNHELD_MATCH_STATUSES);
+            if(refusal){
+                logger.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                            '... ' + refusal + '; NOT signing');
+                return false;
+            }
             logger.info('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                         '... predates our local history; accepting on signature quorum alone');
         }
@@ -152,6 +162,12 @@ module.exports = {
                 return false;
             }
         } else {
+            const refusal = unheldRowRefusal(ac, canonicalForms.serializeCall(ac), UNHELD_CALL_STATUSES);
+            if(refusal){
+                logger.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                            '... (' + ac.phase + ') ' + refusal + '; NOT signing');
+                return false;
+            }
             logger.info('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                         '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
         }
@@ -219,24 +235,11 @@ module.exports = {
     // The amount this hub expects on the row, or null when neither a frozen constant
     // nor a configured reward applies.
     expectedArchivedRewardAmount(rr, recordNetwork){
-        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rr.reward_type || '')) &&
-                               ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
-        // anchor_bundle is the ONLY per-anchor reward the v0 bundle rail records, and it takes the
-        // per-chain form's frozen amount and flag-day (RewardTracker isDerivedBundle). Omit
-        // it here and every bundle row falls through to the operator-tunable
-        // ANCHOR_REWARD_PER_PUBLISH, so a hub carrying that override refuses to co-sign a
-        // correct archive (quorum stalls) or signs a non-frozen amount into COLLECT
-        // bookkeeping. Keep this branch in lockstep with RewardTracker.
-        let isDerivedBundle  = String(rr.reward_type || '') === 'anchor_bundle' &&
-                               ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
-        let isDerivedArchive = String(rr.reward_type || '') === 'anchor_archive' &&
-                               ar.isArchiveRewardActive(Number(rr.block_index), recordNetwork);
-        let expectedAmount = (isDerivedChain || isDerivedBundle)
-            ? ar.ANCHOR_REWARD_AMOUNT
-            : isDerivedArchive
-            ? ar.ARCHIVE_REWARD_AMOUNT
-            : (this.hub.rewardTracker ? legacyAnchorRewardAmount(this.hub.rewardTracker.anchorReward) : null);
-        return expectedAmount;
+        const frozen = frozenAnchorRewardAmount(rr.reward_type, rr.block_index, recordNetwork);
+        if(frozen !== null) return frozen;
+        return this.hub.rewardTracker
+            ? legacyAnchorRewardAmount(this.hub.rewardTracker.anchorReward)
+            : null;
     },
 
     // Cross-check against ALL our own local rows for this (reward_type,

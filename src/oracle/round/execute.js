@@ -118,8 +118,8 @@ module.exports = {
         try {
             let network = await this.hub.resolveBtcNetwork();
             // Remembered for the derived-pair composition gate below, which needs the network
-            // synchronously. Left UNSET when this resolve throws, so a hub that could
-            // not determine its own network fails the gate closed rather than guessing.
+            // synchronously. A throw keeps the last successful value; only a hub that never
+            // resolved its network leaves it undefined and fails the gate closed.
             this.currentBtcNetwork = network;
             let btcTip = typeof this.hub.resolveFreshPushedBtcTip === 'function'
                 ? await this.hub.resolveFreshPushedBtcTip(network)

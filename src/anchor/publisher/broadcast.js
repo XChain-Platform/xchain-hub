@@ -22,25 +22,10 @@
 'use strict';
 
 const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
-const { classifyAnchorSendFailure, deadLetterAnchorSend, sdkRetryAfterMs } = require('./send_failure.js');
+const { classifyAnchorSendFailure, deadLetterAnchorSend, sdkRetryAfterMs, parseRetryAfterMs } = require('./send_failure.js');
 const { sumUtxosCoins } = require('../../lib/utxo_balance.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-
-// Parse an RFC 7231 Retry-After value to milliseconds, or null when absent or
-// unparseable. Both forms are in play: the encoder's per-IP limiter sends
-// delta-seconds and a proxy in front of it may rewrite that to an HTTP-date.
-// A past date yields 0 (retry now), never a negative wait.
-function parseRetryAfterMs(raw){
-    if(raw === null || raw === undefined) return null;
-    let value = Array.isArray(raw) ? raw[0] : raw;
-    let text = String(value).trim();
-    if(text === '') return null;
-    if(/^\d+$/.test(text)) return Number(text) * 1000;
-    let at = Date.parse(text);
-    if(Number.isNaN(at)) return null;
-    return Math.max(0, at - Date.now());
-}
 
 module.exports = {
 
@@ -331,26 +316,33 @@ module.exports = {
     // to end: nothing here throws, blocks publishing, re-broadcasts, or spends.
     async checkPublishedConfirmations(){
         if(this._pendingConfirmations.size === 0) return;
-        let summary = null;
-        try { summary = await this.readUtxoReserve(); } catch(e){ summary = null; }
-        if(!summary || !summary.known){ this.confirmationCheckFailures++; return; }
-        this.lastConfirmationCheckAt = Date.now();
-        for(let entry of Array.from(this._pendingConfirmations.values())){
-            let depth = summary.byTxid.get(entry.txid);
-            if(depth !== undefined){
-                if(depth >= 1){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
-                continue;
+        if(this._confirmChecking) return;
+        this._confirmChecking = true;
+        const pendingEntries = Array.from(this._pendingConfirmations.values());
+        try {
+            let summary = null;
+            try { summary = await this.readUtxoReserve(); } catch(e){ summary = null; }
+            if(!summary || !summary.known){ this.confirmationCheckFailures++; return; }
+            this.lastConfirmationCheckAt = Date.now();
+            for(let entry of pendingEntries){
+                let depth = summary.byTxid.get(entry.txid);
+                if(depth !== undefined){
+                    if(depth >= 1){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
+                    continue;
+                }
+                if(summary.confirmed > 0){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
             }
-            if(summary.confirmed > 0){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
-        }
-        let oldest = this.oldestUnconfirmedPublish();
-        if(oldest && oldest.ageMs >= this.confirmStaleMs){
-            logger.warn('StateAnchorPublisher: UNCONFIRMED_ANCHOR - ' + this._pendingConfirmations.size +
-                         ' broadcast(s) have never been seen confirmed; oldest is ' + oldest.kind + ' ' + oldest.ref +
-                         ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
-                         'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
-                         summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
-                         'automatically; an operator decides how to unstick the transaction.');
+            let oldest = this.oldestUnconfirmedPublish();
+            if(oldest && oldest.ageMs >= this.confirmStaleMs){
+                logger.warn('StateAnchorPublisher: UNCONFIRMED_ANCHOR - ' + this._pendingConfirmations.size +
+                             ' broadcast(s) have never been seen confirmed; oldest is ' + oldest.kind + ' ' + oldest.ref +
+                             ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
+                             'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
+                             summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
+                             'automatically; an operator decides how to unstick the transaction.');
+            }
+        } finally {
+            this._confirmChecking = false;
         }
     },
 

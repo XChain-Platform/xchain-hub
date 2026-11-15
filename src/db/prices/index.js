@@ -312,7 +312,9 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // A skipped placeholder upgrades to the batch-backed row, whose reference_block is its
     // landing height. A disputed row keeps its status while canonical landing metadata moves.
     // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push the
-    // fee-pricing bound later. The admission columns are bound AFTER created_at so positional
+    // fee-pricing bound later. A skipped placeholder always holds 0, so its upgrade takes the
+    // fill branch and needs no status test (status is assigned first, so one would read the new
+    // value). The admission columns are bound AFTER created_at so positional
     // readers keep their index. `referenceChain` fills reference_chain and source_chain.
     async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                      sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {

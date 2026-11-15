@@ -35,7 +35,8 @@ module.exports = {
         // still parked in its awaits owns no row yet, so the retraction passes it by and the
         // resumed write inserts and mirrors an executable dispatch the reorg already removed.
         // Each entry carries a monotonic sequence, each pending write remembers the sequence
-        // it started at, and the write re-checks this list immediately before its insert.
+        // it started at, and the write checks this list before and after its insert. A
+        // retraction waits for covered writes before selecting the rows it must retract.
         // Entries older than every pending write serve no one and are pruned, so the list
         // needs no expiry knob. It is per process: a crash takes the pending write with it.
         this._retractionFence = [];
@@ -51,11 +52,13 @@ module.exports = {
         // The token is an object, not the number: concurrent writes share a start sequence
         // and a Set of numbers would let one write's completion unregister the other.
         this.ensureRetractionFence();
-        let token = { seq: this._retractionSeq };
+        let token = { seq: this._retractionSeq, row };
+        token.done = new Promise(resolve => { token.finish = resolve; });
         this._pendingWrites.add(token);
         try {
             await this.writeFinalizedRowFenced(ev, row, token.seq);
         } finally {
+            token.finish();
             this._pendingWrites.delete(token);
             this.pruneRetractionFence();
         }
@@ -70,7 +73,7 @@ module.exports = {
         // The XCALL canonical enumerates its fields explicitly, so this value has no path
         // into a signed preimage.
         let btcChainId = await this.resolveBtcChainId(row.network);
-        // Last gate before the insert, after every await on this path. A retraction that
+        // Gate before the insert. A retraction that
         // landed while this write was parked owns no row to flip, so the fence is the only
         // record of it. Take the same fail-closed exit the persist failures take: no insert,
         // no mirror, round released, so a later poll re-proposes only if the source chain
@@ -97,6 +100,12 @@ module.exports = {
         } catch(e){
             logger.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
                           String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this.deferFinalize(row);
+            return;
+        }
+        if(this.retractedSince(startSeq, row)){
+            logger.warn('CrossChainCall: retraction landed during finalized ' + row.phase + ' row write for ' +
+                        String(row.call_id).substring(0, 16) + '...; skipping the mirror and event');
             this.deferFinalize(row);
             return;
         }
@@ -161,13 +170,15 @@ module.exports = {
     // and the SQL predicate in retractCallsForReorg read the same fields the same way.
     recordRetraction(chain, bounds){
         this.ensureRetractionFence();
-        this._retractionFence.push({
+        const entry = {
             seq: ++this._retractionSeq,
             chain: String(chain),
             from: bounds.from, to: bounds.to, gen: bounds.gen,
             bounded: bounds.bounded, fenced: bounds.fenced
-        });
+        };
+        this._retractionFence.push(entry);
         this.pruneRetractionFence();
+        return entry;
     },
 
     // Drop fence entries no pending write can still consult: a write only reads entries
@@ -180,20 +191,26 @@ module.exports = {
         this._retractionFence = this._retractionFence.filter(e => e.seq > floor);
     },
 
-    // True when a retraction recorded after `sinceSeq` covers this row. The predicate
-    // mirrors retractCallsForReorg's SQL tail: same source chain, index at or above the
-    // lower bound, within the closed upper bound when the retraction is bounded, and at or
-    // below the fenced generation when it is generation-fenced.
-    retractedSince(sinceSeq, row){
-        this.ensureRetractionFence();
+    retractionCovers(entry, row){
         let idx = Number(row.source_action_index);
         let gen = Number(row.push_generation || 0);
-        return this._retractionFence.some(e =>
-            e.seq > sinceSeq &&
-            e.chain === String(row.source_chain) &&
-            idx >= e.from &&
-            (!e.bounded || idx <= e.to) &&
-            (!e.fenced  || gen <= e.gen));
+        return entry.chain === String(row.source_chain) && idx >= entry.from &&
+            (!entry.bounded || idx <= entry.to) && (!entry.fenced || gen <= entry.gen);
+    },
+
+    // True when a retraction recorded after `sinceSeq` covers this row.
+    retractedSince(sinceSeq, row){
+        this.ensureRetractionFence();
+        return this._retractionFence.some(entry =>
+            entry.seq > sinceSeq && this.retractionCovers(entry, row));
+    },
+
+    async waitForCoveredWrites(entry){
+        const waits = [];
+        for(const token of this._pendingWrites){
+            if(token.seq < entry.seq && this.retractionCovers(entry, token.row)) waits.push(token.done);
+        }
+        await Promise.all(waits);
     },
 
     // Release a round that finalized in PBFT but whose fail-closed precondition refused
@@ -260,7 +277,8 @@ module.exports = {
         // Fence the in-process writes FIRST, before the select decides whether any persisted
         // row matches. A round whose row is not inserted yet is invisible to the SQL below,
         // and the early return on an empty select leaves no other trace of this retraction.
-        this.recordRetraction(chain, bounds);
+        const entry = this.recordRetraction(chain, bounds);
+        await this.waitForCoveredWrites(entry);
         let rows = await this.db.findFinalizedCrossChainCallsInRetractionRange(chain, bounds);
         if(!rows.length) return;
         await this.db.updateCrossChainCallsRetractedInRange(chain, bounds);

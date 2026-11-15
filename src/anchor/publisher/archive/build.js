@@ -312,7 +312,7 @@ module.exports = {
             MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq + '|' + batchSeq, 0, raw);
+                StateCheckpointEngine.archiveRoundId(cp, batchSeq), 0, raw);
         return raw;
     },
 

@@ -200,3 +200,20 @@ oraclePublisherTests('oversized PRICE v0 wire drop (item 2402)', function () {
 
 });
 
+oraclePublisherTests('durable buffer read failures', function () {
+    it('latches an unread buffer and refuses a destructive rewrite', function () {
+        let error = sinon.stub(console, 'error');
+        let ioError = Object.assign(new Error('injected read fault'), { code: 'EIO' });
+        fsMock.readFileSync.throws(ioError);
+        let pub = new OraclePublisher(makeHub());
+
+        pub.hydrateBuffer();
+
+        expect(pub._buffer.size).to.equal(0);
+        expect(pub.getStats().bufferUnread).to.equal(true);
+        expect(pub.rewriteBufferFile([])).to.equal(false);
+        expect(fsMock.renameSync.called).to.equal(false);
+        expect(error.calledWithMatch(/rewrites are suspended/)).to.equal(true);
+    });
+});
+

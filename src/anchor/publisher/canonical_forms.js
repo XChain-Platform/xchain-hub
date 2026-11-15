@@ -47,8 +47,9 @@ async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock
     }
 }
 
-// The fold height is a DOGE height (the chain ANCHOR is mined on), so the armed
-// 'DOGE:<network>' key the cut writes resolves before the bare network sentinel.
+// The fold height is the current DOGE tip, while the indexer checks the mined
+// DOGE height. A reorg below activation after broadcast can therefore reject an
+// already-sent v3 action. Missing DOGE height resolution defers the decision.
 function isAnchorFoldActive(blockIndex, network){
     return activeAt(ANCHOR_FOLD_GATE, String(network || ''), 'DOGE', blockIndex, null);
 }
@@ -73,8 +74,7 @@ function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
                   MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
     if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-            checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +
-            checkpoint.checkpoint_seq + '|' + batchSeq, 0, raw);
+            checkpointForms.archiveRoundId(checkpoint, batchSeq), 0, raw);
     return raw;
 }
 
@@ -92,7 +92,7 @@ const foldPublisherMethods = {
         let cp = this.cpFromRow(wrapper);
         if(this.archiveRoundIntentHeld(await this.getLiveArchiveIntent(network), network)) return null;
         let batchSeq = await this.getNextBatchSeq();
-        if(this.foldSeqSpentByOwnAddress(batchSeq)) return null;
+        if(this.ownArchiveSeqFloorUnknown() || this.foldSeqSpentByOwnAddress(batchSeq)) return null;
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return null;
         let signingSet = await this.archiveSigningSet(cp);
@@ -158,14 +158,12 @@ const foldPublisherMethods = {
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         if(!sender || sender === myPubkey || String(d.publisher || '').toLowerCase() !== sender) return null;
-        let foldBlock = Number(d.snapshot_block);
-        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
-            let resolved;
-            try { resolved = await this.hub.resolveDogeLatestBlock(); }
-            catch(_e){ return null; }
-            if(resolved == null || !Number.isFinite(Number(resolved))) return null;
-            foldBlock = Number(resolved);
-        }
+        if(!this.hub || typeof this.hub.resolveDogeLatestBlock !== 'function') return null;
+        let resolved;
+        try { resolved = await this.hub.resolveDogeLatestBlock(); }
+        catch(_e){ return null; }
+        if(resolved == null || !Number.isFinite(Number(resolved))) return null;
+        const foldBlock = Number(resolved);
         if(!isAnchorFoldActive(foldBlock, String(d.network))) return null;
         let index = Number(a.wrapper_section_index);
         let sec = Number.isInteger(index) ? d.sections[index] : null;

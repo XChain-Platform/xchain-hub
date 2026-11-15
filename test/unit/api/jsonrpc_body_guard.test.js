@@ -16,13 +16,14 @@
 // that reaches the root-mounted express-json-rpc-router without a parsed JSON body
 // (a GET health probe, an empty POST, or a POST with a non-JSON Content-Type) has
 // req.body === undefined. The router then throws "req.body is required", which with
-// no error handler surfaces as an HTTP 500 + stack trace. src/api.js normalizes
-// req.body to {} just before the router to restore the body-parser 1.x behavior.
+// no error handler surfaces as an HTTP 500 + stack trace. createApp in
+// src/api/server.js normalizes req.body to {} just before the router to restore
+// the body-parser 1.x behavior.
 //
 // This reconstructs the exact middleware chain using THIS service's own dependency
 // versions, proves the regression exists without the guard, and proves the guard
-// fixes it. It also asserts src/api.js still wires the guard before the router so
-// the fix cannot silently regress.
+// fixes it. It also asserts src/api.js boots through createApp and that createApp
+// wires the guard before the router so the fix cannot silently regress.
 
 const assert = require('assert');
 const http = require('http');

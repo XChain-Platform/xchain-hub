@@ -28,6 +28,7 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
         ARCHIVE_MAX_WIRE_B64_BYTES, ARCHIVE_MAX_CHAIN_TXS,
         ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
 const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
+const { priceKeyFold } = require('./unheld_row.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 const ARCHIVE_FOLD_SUBDEADLINE_MS = 30000;
@@ -132,6 +133,8 @@ module.exports = {
         priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
         let prices = await this.priceRoundsAboveCommonFloor(
             await this.db.findPriceSnapshotsForArchiveRounds(priceRounds));
+        const priceKeys = new Set(prices.map(priceKeyFold));
+        tombstones = tombstones.filter(row => !priceKeys.has(priceKeyFold(row)));
         return this.archiveRows(matches, calls, rewards, {
             bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
             cappedOrTrimmed: capped

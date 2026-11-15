@@ -74,6 +74,7 @@ module.exports = {
         let batchSeq = await this.getNextBatchSeq();
         // Lead only above the seqs our own DOGE address already spent
         batchSeq = await this.leaderBatchSeqAboveOwn(batchSeq);
+        if(this.ownArchiveSeqFloorUnknown()) return this.archiveFlushStatus('none', 'seq_floor_unknown');
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return this.archiveFlushStatus('none', 'empty_after_reward_resolution');
 

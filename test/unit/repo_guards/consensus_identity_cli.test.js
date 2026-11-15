@@ -112,7 +112,7 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
     it('exits 2 naming an unknown flag instead of ignoring it', function () {
         const res = run(['--assert-no-absnet']);
         expect(res.status).to.equal(2);
-        expect(res.stderr).to.match(/^consensus-identity: unknown flag --assert-no-absnet/);
+        expect(res.stderr).to.match(/^consensus-identity: unknown flag: --assert-no-absnet/);
         expect(res.stdout).to.equal('');
     });
 

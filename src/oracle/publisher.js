@@ -213,16 +213,8 @@ class OraclePublisher {
         rewriteFileAtomically(fs, filePath, text);
     }
 
-    // Read a durable file whole, or null when it cannot be read. The callers all
-    // treat an unreadable file as empty, which is why the failure is returned
-    // rather than thrown.
-    readDurableFile(filePath) {
-        try { return fs.readFileSync(filePath, 'utf8'); }
-        catch (e) { return null; }
-    }
-
     // Read a durable file whole, or null when it does not exist; any other failure
-    // throws, for the queue rebuild that must tell an empty file from an unread one.
+    // throws, because durable stores must tell an empty file from an unread one.
     readDurableFileStrict(filePath) {
         try { return fs.readFileSync(filePath, 'utf8'); }
         catch (e) {

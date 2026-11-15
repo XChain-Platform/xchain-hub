@@ -70,7 +70,10 @@ describe('archive quorum-table selection', function () {
                     { round_number, coin_pair: 'DOGE/USD' }
                 ]);
             },
-            findPriceTombstonesByBatchSeq: async () => [{ round_number: 0, coin_pair: 'XCP/USD' }]
+            findPriceTombstonesByBatchSeq: async () => [
+                { round_number: 1, coin_pair: 'BTC/USD' },
+                { round_number: 0, coin_pair: 'XCP/USD' }
+            ]
         });
         const { pub } = buildPub(db);
         const rows = await pub.gatherArchiveRows();
@@ -79,10 +82,30 @@ describe('archive quorum-table selection', function () {
         expect(rows.checkpoints).to.have.length(1);
         expect(rows.prices).to.have.length(ARCHIVE_MAX_PRICE_ROUNDS * 2);
         expect(rows.tombstones).to.have.length(1);
+        expect(rows.tombstones[0]).to.deep.equal({ round_number: 0, coin_pair: 'XCP/USD' });
         expect(requested).to.have.length(ARCHIVE_MAX_PRICE_ROUNDS);
         expect(requested[0]).to.equal(1);
         expect(requested[requested.length - 1]).to.equal(ARCHIVE_MAX_PRICE_ROUNDS);
         expect(rows.cappedOrTrimmed).to.equal(true);
+    });
+
+});
+
+describe('archive quorum-table selection', function () {
+    it('drops a tombstone whose pair matches a selected price row under the table collation', async () => {
+        const db = emptyDb({
+            findPriceSnapshotRoundsByBatchSeq: async () => [{ round_number: 3 }],
+            findPriceSnapshotsForArchiveRounds: async () => [{ round_number: 3, coin_pair: 'BTC/USD' }],
+            findPriceTombstonesByBatchSeq: async () => [
+                { round_number: 3, coin_pair: 'btc/usd' },
+                { round_number: 3, coin_pair: 'BTC/USD ' },
+                { round_number: 3, coin_pair: 'XCP/USD' }
+            ]
+        });
+        const { pub } = buildPub(db);
+        const rows = await pub.gatherArchiveRows();
+        expect(rows.prices).to.have.length(1);
+        expect(rows.tombstones).to.deep.equal([{ round_number: 3, coin_pair: 'XCP/USD' }]);
     });
 
     it('treats any new stream as archive cargo after reward resolution', function () {

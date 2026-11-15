@@ -25,6 +25,7 @@
 
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { loadLegacyRewardPins } = require('../legacy_reward_pins.js');
+const { REWARD_FAMILY_VERSIONS, rewardFamilyVersions } = require('../anchor_proof_binding.js');
 
 // The hub row mirroring the time columns of the indexer's protocol change.
 const LEGACY_PIN_GATE = 'anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN';
@@ -34,8 +35,12 @@ const MTP_SPAN = 11;
 const TIP_MARGIN = 6;
 // Bitcoin refuses a block timed over two hours past the receiving node's clock.
 const MAX_FUTURE_BLOCK_S = 7200;
-// The pre-restart wire bytes the gate stops from proving a reward.
-const LEGACY_BYTES = [6, 7];
+// The pre-restart wire bytes the gate stops from proving a reward: every byte the binding's
+// legacyDropped form removes from a reward family, read from the binding so the two cannot drift.
+const LEGACY_BYTES = Object.freeze([...new Set(Object.keys(REWARD_FAMILY_VERSIONS).flatMap(f => {
+    let kept = rewardFamilyVersions(f, { legacyDropped: true });
+    return rewardFamilyVersions(f).filter(v => !kept.includes(v));
+}))].sort((a, b) => a - b));
 
 // The vendored pin list, read once at first use.
 let pins = null;
@@ -96,4 +101,4 @@ async function legacyPinGateProven(indexerCall, network, provenFrom, nowS){
     return true;
 }
 
-module.exports = { LEGACY_PIN_GATE, hasLegacyByteRow, isPinnedEntry, legacyPinGateProven, medianTimePast };
+module.exports = { LEGACY_PIN_GATE, LEGACY_BYTES, hasLegacyByteRow, isPinnedEntry, legacyPinGateProven, medianTimePast };

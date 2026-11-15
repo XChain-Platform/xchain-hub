@@ -24,7 +24,7 @@
 const canonicalForms    = require('./canonical_forms.js');
 const { hasSupersedeFields } = require('./supersede_suffix.js');
 const {
-    supersedeCosignDecline,
+    supersedePrefilterDecline,
     checkpointProposalDecline,
 } = require('./replay_hold.js');
 const ValidatorIdentity = require('../../validators/identity.js');
@@ -34,7 +34,7 @@ const logger = getLogger();
 
 // Co-sign declines handleSignReq reaches before it authenticates the sender.
 const PRE_AUTH_COSIGN_DECLINES = new Set([
-    'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived'
+    'network_mismatch', 'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived'
 ]);
 // Fallback pre-auth decline log window when the engine has no stall-log window set.
 const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
@@ -50,6 +50,14 @@ function divergentFields(cp, bh){
 }
 
 module.exports = {
+
+    declinesNetworkMismatch(cp){
+        try { this.assertCheckpointNetwork(cp, 'co-sign'); return false; }
+        catch(e){
+            this.noteCosignDecline('network_mismatch', cp, String(e && e.message).slice(0, 300));
+            return true;
+        }
+    },
 
     // Follower: independently confirm the proposed checkpoint against OUR OWN
     // indexer before signing (never sign state we don't hold ourselves).
@@ -69,9 +77,9 @@ module.exports = {
         // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
         // then refuse the finalized checkpoint under the other. Placed before the tip
         // resolve and the validator resolve, like the propose and peer FINALIZED paths, so
-        // a cross-network record costs no lookups. A throw is caught by the XCHK_SIGN_REQ
-        // .catch in handleMessage; an unscoped hub (this.network === '') is warned, not refused.
-        this.assertCheckpointNetwork(cp, 'co-sign');
+        // a cross-network record costs no lookups. A mismatch is counted and its warning
+        // uses the pre-auth throttle; an unscoped hub (this.network === '') is warned, not refused.
+        if(this.declinesNetworkMismatch(cp)) return;
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
         // the validator set AND every flag-day gate below, but is a wire field the
@@ -123,11 +131,17 @@ module.exports = {
             const reason = /^block not indexed:/.test(detail) ? 'indexer_no_block' : 'indexer_read_failed';
             return this.noteCosignDecline(reason, cp, detail);
         }
-        let proposalDecline = supersedeCosignDecline(cp, bh.rules);
+        let proposalDecline = supersedePrefilterDecline(cp, bh.rules);
         let expectedSupersede;
-        if(!proposalDecline && hasSupersedeFields(cp))
-            expectedSupersede = await this.supersedeFieldsForRound(
-                cp.chain, cp.network, bh);
+        if(!proposalDecline && hasSupersedeFields(cp)){
+            try {
+                expectedSupersede = await this.supersedeFieldsForRound(
+                    cp.chain, cp.network, bh);
+            } catch(e){
+                return this.noteCosignDecline('supersede_read_failed', cp,
+                    String(e && e.message).slice(0, 200));
+            }
+        }
         if(!proposalDecline)
             proposalDecline = checkpointProposalDecline(
                 cp, bh, expectedSupersede);
@@ -141,6 +155,7 @@ module.exports = {
     noteCosignDecline(reason, cp, detail){
         const declines = this._cosignDeclines || (this._cosignDeclines = {});
         declines[reason] = (declines[reason] || 0) + 1;
+        this._cosignDeclinesTotal = (this._cosignDeclinesTotal || 0) + 1;
         this._lastCosignDeclineReason = reason;
         this.noteCheckpointDecline(reason, cp, 'co-sign', detail, declines[reason]);
     },
@@ -251,7 +266,9 @@ module.exports = {
         // would have declined anyway never claims the sequence.
         this.yieldToLowerRound(cp);
         if(this.declinesOffCadence(cp)) return;
-        if(!this.claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical))
+            return this.noteCosignDecline('seq_second_payload', cp,
+                'already signed a different payload at this seq');
         this.noteRoundSignature(cp.snapshot_block);
 
         this.peerManager.broadcast(XCHK_SIGN, {
@@ -301,10 +318,10 @@ module.exports = {
     // signature set under different rules and disagreeing about whether quorum was
     // reached. Callers treat a throw as "do not sign / do not persist".
     // Scoped to a genuine disagreement between two KNOWN networks. An UNSCOPED hub
-    // (this.network === '') is a different, already-documented problem: it silently
-    // resolves every flag-day gate to "off" (isStakeWeightedQuorumActive returns false
-    // on an unknown network) and it is what #2236 found double-crediting the COLLECT
-    // rail. It is warned about loudly here but NOT refused, because refusing would take
+    // (this.network === '') is a different, already-documented problem: only the
+    // stake-weighted-quorum gate falls back to "off" on the empty deployment network.
+    // The signed canonical's gates still follow cp.network. It is warned about loudly
+    // here but NOT refused, because refusing would take
     // every unscoped deployment offline at once, which is a far larger behavioural
     // change than this finding asks for and is not what it is about.
     assertCheckpointNetwork(cp, context){
@@ -313,10 +330,11 @@ module.exports = {
         if(this.network === ''){
             if(!this._warnedUnscopedNetwork){
                 this._warnedUnscopedNetwork = true;
-                logger.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
-                    'flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-commitment) ' +
-                    'resolves to OFF while the checkpoints it handles are scoped to "' + recordNet +
-                    '". Set HUB_NETWORK. Continuing on the legacy unscoped path.');
+                logger.warn('StateCheckpointEngine: this hub has NO deployment network, so the ' +
+                    'stake-weighted quorum gate falls back to OFF (a count tally), while the signed ' +
+                    'canonical gates follow the record network "' + recordNet + '". The quorum rule ' +
+                    'and signed bytes can therefore use different network planes. Set HUB_NETWORK. ' +
+                    'Continuing on the legacy unscoped path.');
             }
             return;
         }

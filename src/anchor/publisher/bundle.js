@@ -30,7 +30,9 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 function orderedSections(sections){
-    return (sections || []).slice().sort((a, b) => {
+    return (sections || []).map(section => Object.assign({}, section, {
+        chain: String(section.chain).toUpperCase()
+    })).sort((a, b) => {
         let x = String(a.chain), y = String(b.chain);
         return x < y ? -1 : (x > y ? 1 : 0);
     });
@@ -38,7 +40,10 @@ function orderedSections(sections){
 
 function appendSections(ctx, parts, ordered){
     for(let s of ordered){
-        let sigs = ctx.parseSigs(s.validator_signatures).slice().sort((a, b) => {
+        let sigs = ctx.parseSigs(s.validator_signatures).map(sig => ({
+            pubkey: String(sig.pubkey).toLowerCase(),
+            sig: String(sig.sig).toLowerCase()
+        })).sort((a, b) => {
             let x = String(a.pubkey), y = String(b.pubkey);
             return x < y ? -1 : (x > y ? 1 : 0);
         });
@@ -58,8 +63,8 @@ function appendPublisherTail(parts, publisher, attestSigs){
         parts.push(String(sig.pubkey).toLowerCase(), String(sig.sig).toLowerCase());
 }
 
-async function resolveFoldBlock(ctx, fallback){
-    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return Number(fallback);
+async function resolveFoldBlock(ctx){
+    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return null;
     try {
         const resolved = await ctx.hub.resolveDogeLatestBlock();
         if(resolved == null || !Number.isFinite(Number(resolved))) return null;
@@ -217,7 +222,7 @@ module.exports = {
         // flag-day publishBundle attaches none at all, so charging a tail there would
         // refuse sections that anchor fine today; at/above it an unmet attestation
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
-        const foldBlock = await resolveFoldBlock(this, snapshotBlock);
+        const foldBlock = await resolveFoldBlock(this);
         const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
         const attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
         const split = this.splitBundle(sections, me, attestTail, foldActive);
@@ -253,7 +258,7 @@ module.exports = {
         let skipped  = { rows: 0 };
         for(let [network, sections] of this.groupSectionsByNetwork(rows))
             await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
-        const foldBlock = await resolveFoldBlock(this, btcBlock);
+        const foldBlock = await resolveFoldBlock(this);
         if(this.network && foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
             this.suppressLegacyArchiveLeg();
 

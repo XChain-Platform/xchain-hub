@@ -139,10 +139,10 @@ describe('ANCHOR v3 one-round archive fold wire', function () {
         let archive = {
             wrapperSectionIndex: 0, batchSeq: 42, count: 17,
             crc: '9C4E1B22', chunks: ['body'],
-            signatures: [{ pubkey: 'b', sig: 'bs' }, { pubkey: 'a', sig: 'as' }]
+            signatures: [{ pubkey: 'B', sig: 'BS' }, { pubkey: 'a', sig: 'As' }]
         };
         let wire = pub.buildV3Payload({ network: 'regtest', snapshot_block: 100 },
-            [section('LTC', 'l'), section('BTC', 'b')], archive, 'publisher', []);
+            [section('ltc', 'l'), section('btc', 'b')], archive, 'publisher', []);
         let parsed = walkSections(wire);
         expect(parsed.fields.slice(0, 5)).to.deep.equal(['ANCHOR', '3', 'regtest', '100', '2']);
         expect(parsed.sections.map(s => s.chain)).to.deep.equal(['BTC', 'LTC']);
@@ -210,7 +210,7 @@ describe('ANCHOR v3 one-round archive fold publication', function () {
     registerFoldHooks();
 
     it('publishes one folded transaction and retires the separate archive reward', async function () {
-        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         let node = bus.nodes[0];
         await startAll(bus);
         await node.pub.flush();
@@ -223,7 +223,7 @@ describe('ANCHOR v3 one-round archive fold publication', function () {
     });
 
     it('co-signs the archive through the bundle attestation request in a multi-node round', async function () {
-        let bus = buildMesh(4, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(4, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         await startAll(bus);
         let leader = v0Order(bus)[0];
         let messages = [];
@@ -247,7 +247,7 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
     registerFoldHooks();
 
     it('ships checkpoints on the archive sub-deadline with ARCHIVE_COUNT 0', async function () {
-        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         let node = bus.nodes[0];
         node.pub.archiveFoldSubdeadlineMs = 10;
         node.pub.buildFoldArchiveSection = () => new Promise(() => {});

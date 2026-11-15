@@ -16,6 +16,7 @@ const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
 const gen        = require('./helpers/generators');
 const coins      = require('../../src/coins');
+const { bcmul, bcdiv, bcformat } = require('../../src/bcmath.js');
 
 
 
@@ -148,6 +149,20 @@ function registerArithmeticPropertiesTestCases2() {
 }
 
 function registerArithmeticPropertiesTestCases3() {
+
+        it('matches the indexer 18-decimal fee-band arithmetic', function () {
+            return fc.assert(fc.asyncProperty(
+                fc.constantFrom('0.000000004', '0.000000009', '0.123456789', '10.000000001'),
+                fc.constantFrom('0.000001', '0.0001', '0.12', '60000'),
+                async function (xchainUsd, coinUsd) {
+                    dbStub.doQuery = priceStub({ 'XCHAIN/USD': xchainUsd, 'BTC/USD': coinUsd });
+                    hub.db = dbStub;
+                    let result = await hub.getFeeQuote('ISSUE', 'BTC');
+                    let expected = bcformat(bcdiv(bcmul(result.xchainAmount, xchainUsd, 18), coinUsd, 18), 8);
+                    expect(result.nativeCoinAmount).to.equal(expected);
+                }
+            ), { numRuns: 40 });
+        });
 
         it('round-trip: nativeCoinAmount * coinUsd ≈ feeUsd', function () {
             return fc.assert(fc.asyncProperty(

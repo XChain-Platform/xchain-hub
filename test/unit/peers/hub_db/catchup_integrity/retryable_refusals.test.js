@@ -92,6 +92,6 @@ describe('signed-row catch-up retryable refusals', function () {
         const second = await registry.getCatchupVerifier('state_checkpoints')(row, context);
         expect(first).to.deep.include({ ok: false, retry: true });
         expect(first.reason).to.include('database busy');
-        expect(second).to.equal(true);
+        expect(second).to.deep.include({ ok: true });
     });
 });

@@ -18,6 +18,7 @@ const {
   expect
 } = require('chai');
 const OracleConsensus = require('../../../../../src/oracle/consensus');
+const { getLogger } = require('../../../../../src/observability');
 const {
   createMockHub
 } = require('../../../../helpers/mockHub');
@@ -199,9 +200,47 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part4() {
     expect(events).to.have.length(1);
   });
 }
+function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part5() {
+  it('reports a throwing finalized listener as an announcement failure', async function () {
+    const store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').resolves();
+    const errors = sinon.stub(getLogger(), 'error');
+    oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND,
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
+    oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', () => {
+      throw new Error('listener boom');
+    });
+    await oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalizeCommittedRound(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND);
+    expect(store.calledOnce).to.be.true;
+    expect(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalized.has(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND)).to.be.true;
+    const lines = errors.getCalls().map(call => String(call.args[0]));
+    expect(lines.some(line => line.includes('announcing round:finalized threw'))).to.be.true;
+    expect(lines.some(line => line.includes('Error storing snapshot'))).to.be.false;
+  });
+
+  it('reports a payload-build throw as an announcement failure', async function () {
+    const store = sinon.stub(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc, 'storeSnapshot').resolves();
+    const errors = sinon.stub(getLogger(), 'error');
+    oracleConsensusQuorumFinalizedSnapshotStorSuite1OracleRound.getSubmissions.throws(new Error('submission boom'));
+    oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.set(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND,
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending());
+    await oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalizeCommittedRound(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND);
+    expect(store.calledOnce).to.be.true;
+    expect(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.has(
+      oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND)).to.be.false;
+    const lines = errors.getCalls().map(call => String(call.args[0]));
+    expect(lines.some(line => line.includes('announcing round:finalized threw'))).to.be.true;
+    expect(lines.some(line => line.includes('Error storing snapshot'))).to.be.false;
+  });
+}
 describe('OracleConsensus: quorum-finalized snapshot-store durability (#1443)', function () {
   registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part1.call(this);
   registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part2.call(this);
   registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part3.call(this);
   registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part4.call(this);
+  registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part5.call(this);
 });

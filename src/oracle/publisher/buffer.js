@@ -120,17 +120,29 @@ module.exports = {
     },
 
     readBufferFile() {
-        let raw = this.readDurableFile(this.bufferPath);
+        let raw;
+        try {
+            raw = this.readDurableFileStrict(this.bufferPath);
+        } catch (e) {
+            logger.error(nodeUtil.format('OraclePublisher: failed to read the v2 round buffer at ' +
+                this.bufferPath + ':', e));
+            return null;
+        }
         if (raw === null) return [];
         return raw.split('\n').filter(l => l.trim().length > 0).map(l => {
             try { return JSON.parse(l); } catch (e) { return null; }
         }).filter(e => e !== null && Number.isFinite(Number(e.round)));
     },
 
-    // Atomic rewrite (rewriteDurableFile), used by the pruning paths. Returns false on a write
-    // failure; the in-memory Map is the authority for this process either way, so a
-    // failed prune costs disk, never correctness.
+    // Atomic rewrite (rewriteDurableFile), used by the pruning paths. An unread
+    // startup buffer is latched so no later compaction can replace data that was
+    // never loaded into memory.
     rewriteBufferFile(entries) {
+        if (this._bufferUnread) {
+            logger.error('OraclePublisher: skipped rewrite of unread v2 round buffer at ' +
+                this.bufferPath + '; restart after the read fault is fixed');
+            return false;
+        }
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
             this.rewriteDurableFile(this.bufferPath, lines);
@@ -148,7 +160,14 @@ module.exports = {
     // the stale copy the batch rail can no longer get co-signed.
     hydrateBuffer() {
         this._buffer = new Map();
-        for (let e of this.readBufferFile()) {
+        let entries = this.readBufferFile();
+        this._bufferUnread = entries === null;
+        if (this._bufferUnread) {
+            logger.error('OraclePublisher: rewrites are suspended because the v2 round buffer at ' +
+                this.bufferPath + ' could not be read; fix the fault and restart to recover its rounds');
+            return;
+        }
+        for (let e of entries) {
             let r = parseInt(e.round);
             if (!Number.isFinite(r)) continue;
             this._buffer.set(r, e);

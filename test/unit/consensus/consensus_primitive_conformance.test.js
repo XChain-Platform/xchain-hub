@@ -127,8 +127,18 @@ describe('consensus-primitive conformance: activation predicate vectors @regress
     const groups = activationVec || {};
 
     it('every group this repo runs is a non-empty list', function(){
-        for(const g of ['isStakeWeightedQuorumActive', 'isEquivHeaderActive', 'snapshotBurial'])
-            assert.ok(Array.isArray(groups[g]) && groups[g].length > 0, g + ' is missing or empty');
+        const allGroups = {
+            'stake_weighted_quorum.meetsStakeThreshold': quorumVec.meetsStakeThreshold,
+            'stake_weighted_quorum.totalStake': quorumVec.totalStake,
+            'equivocation_header.equivKey': equivVec.equivKey,
+            'equivocation_header.equivPrefix': equivVec.equivPrefix,
+            'equivocation_header.buildEquivCanonical': equivVec.buildEquivCanonical,
+            'activation_predicates.isStakeWeightedQuorumActive': groups.isStakeWeightedQuorumActive,
+            'activation_predicates.isEquivHeaderActive': groups.isEquivHeaderActive,
+            'activation_predicates.snapshotBurial': groups.snapshotBurial,
+        };
+        for(const [name, vectors] of Object.entries(allGroups))
+            assert.ok(Array.isArray(vectors) && vectors.length > 0, name + ' is missing or empty');
     });
     (groups.isStakeWeightedQuorumActive || []).forEach(function(c){
         it('isStakeWeightedQuorumActive: ' + c.name, function(){

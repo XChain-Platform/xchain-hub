@@ -79,7 +79,10 @@ function archive(extra){
 }
 
 function checkpoint(){
-    return copy(vectors.C.inputs.checkpoints.find(row => row.snapshot_block === CHECKPOINT_BLOCK));
+    return Object.assign(copy(vectors.C.inputs.checkpoints.find(row => row.snapshot_block === CHECKPOINT_BLOCK)), {
+        state_root: 'a'.repeat(64), state_root_version: 1,
+        block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
+    });
 }
 
 function signaturePrices(){
@@ -158,11 +161,38 @@ describe('archive checkpoint and price follower verification', () => {
         }))).to.equal(false);
     });
 
+});
+
+describe('archive checkpoint and price follower verification', () => {
     it('refuses a tombstone over a live local row', async () => {
         const live = copy(vectors.P.inputs.prices.find(row => row.round_number === 12));
         const pub = buildPub({ prices: [live] });
         expect(await pub.verifyArchiveAgainstLocal(archive({
             price_tombstones: [{ round_number: live.round_number, coin_pair: live.coin_pair }]
         }))).to.equal(false);
+
+        const unheld = buildPub();
+        const prices = signPrices(unheld, signaturePrices());
+        const collision = { round_number: prices[0].round_number, coin_pair: prices[0].coin_pair };
+        expect(await unheld.verifyArchiveAgainstLocal(archive({
+            price_snapshots: prices, price_tombstones: [collision]
+        }))).to.equal(false);
+        expect(await unheld.verifyArchiveAgainstLocal(archive({
+            price_snapshots: prices,
+            price_tombstones: [{ round_number: prices[0].round_number, coin_pair: 'XCP/USD' }]
+        }))).to.equal(true);
+    });
+
+    it('refuses a tombstone whose pair differs from an archived price row only by case or padding', async () => {
+        const unheld = buildPub();
+        const prices = signPrices(unheld, signaturePrices());
+        const pair = prices[0].coin_pair;
+        expect(pair).to.equal(pair.toUpperCase());
+        for(const spelling of [pair.toLowerCase(), pair + ' ', pair.toLowerCase() + '  ']){
+            expect(await unheld.verifyArchiveAgainstLocal(archive({
+                price_snapshots: prices,
+                price_tombstones: [{ round_number: prices[0].round_number, coin_pair: spelling }]
+            }))).to.equal(false);
+        }
     });
 });

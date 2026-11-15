@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const sinon = require('sinon');
 const { expect } = require('chai');
 const swq = require('../../../../src/consensus/stake_weighted_quorum.js');
@@ -40,12 +50,12 @@ describe('state_checkpoints production catch-up context', function () {
         const signers = Array.from({ length: 3 }, () => new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex));
         const context = { db: checkpointDb(signers), network: 'mainnet' };
         expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(
-            signedCheckpoint('mainnet', signers), context)).to.equal(true);
+            signedCheckpoint('mainnet', signers), context)).to.deep.include({ ok: true });
         const foreign = signedCheckpoint('testnet', [signers[0]]);
         expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(foreign, context)).to.deep.equal({
             ok: false, reason: 'checkpoint network does not match deployment network'
         });
-        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(foreign, { db: context.db })).to.equal(true);
+        expect(await checkpointVerifier.verifyStateCheckpointCatchupRow(foreign, { db: context.db })).to.deep.include({ ok: true });
     });
 
     it('marks validator lookup errors retryable while malformed rows remain lasting refusals', async function () {

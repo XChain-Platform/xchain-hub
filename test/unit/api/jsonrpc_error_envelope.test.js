@@ -74,6 +74,15 @@ async function listen(app) {
     return server;
 }
 
+async function listenAsFeed(app) {
+    const server = http.createServer((req, res) => {
+        req.xchainFeedOrigin = true;
+        app(req, res);
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return server;
+}
+
 async function call(server, { method = 'POST', path = '/', headers = {}, body } = {}) {
     const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers, body });
     const text = await res.text();
@@ -172,6 +181,12 @@ describe('JSON-RPC router errors on versionless, bodyless and batch requests', f
         expect(telemetry.headers.get('x-content-type-options')).to.equal('nosniff');
     });
 
+});
+
+describe('JSON-RPC router errors on versionless, bodyless and batch requests', function () {
+    this.timeout(10000);
+    const srv = serveApp();
+
     it('pairs batch errors with their own ids, 0 included', async () => {
         const r = await postJson(srv(), [
             { jsonrpc: '2.0', method: 'ping', id: 7 },
@@ -190,6 +205,77 @@ describe('JSON-RPC router errors on versionless, bodyless and batch requests', f
             ({ jsonrpc: '2.0', method: 'ping', id })));
         expect(overCap.status).to.equal(400);
         expect(overCap.json.error.code).to.equal(-32600);
+    });
+
+    it('returns parser errors through the full createApp chain', async () => {
+        const malformed = await call(srv(), {
+            headers: { 'content-type': 'application/json' }, body: '{bad'
+        });
+        expect(malformed.status).to.equal(400);
+        expect(malformed.json.error).to.deep.equal({ code: -32700, message: 'invalid JSON body' });
+        expect(malformed.text).to.not.match(/<html|<pre>|node_modules|\.js:\d+/);
+
+        const batch = Array.from({ length: 3000 }, (_, id) =>
+            ({ jsonrpc: '2.0', method: 'ping', id }));
+        expect(Buffer.byteLength(JSON.stringify(batch))).to.be.greaterThan(100 * 1024);
+        const oversized = await postJson(srv(), batch);
+        expect(oversized.status).to.equal(413);
+        expect(oversized.json.error).to.deep.equal({ code: -32600, message: 'request entity too large' });
+    });
+});
+
+describe('createApp ingress middleware order', function () {
+    it('registers every security layer in its required runtime order', () => {
+        const { app } = createApp(buildCtx());
+        const stack = app.router.stack;
+        const names = stack.map((layer) => layer.name);
+        const position = (name) => {
+            expect(names, name).to.include(name);
+            return names.indexOf(name);
+        };
+        expect(position('bodyParserErrorHandler')).to.equal(position('jsonParser') + 1);
+        expect(names.filter((name) => name === 'rpcBatchSurcharge')).to.have.length(2);
+        expect(names.lastIndexOf('rpcBatchSurcharge')).to.be.lessThan(position('authGateMiddleware'));
+        expect(position('authGateMiddleware')).to.be.lessThan(position('feedPortAllowlistMiddleware'));
+        const firstRoute = stack.findIndex((layer) => layer.route);
+        expect(position('feedPortAllowlistMiddleware')).to.be.lessThan(firstRoute);
+        expect(firstRoute).to.be.lessThan(position('rpcBatchGuard'));
+        expect(position('rpcBatchGuard')).to.be.lessThan(position('reqBodyShim'));
+        expect(position('reqBodyShim')).to.be.lessThan(position('jsonRpcEnvelopeRepair'));
+        expect(names[names.length - 1]).to.equal('handleTerminalError');
+    });
+
+    it('runs the per-call surcharge before the key gate', async () => {
+        const app = createApp(buildCtx({ HUB_API_KEY: KEY,
+            HUB_RATE_LIMIT_RPM: 100, HUB_RATE_LIMIT_EXEMPT_LOCAL: false })).app;
+        const server = await listen(app);
+        try {
+            const batch = Array.from({ length: 150 }, (_, id) => ({
+                jsonrpc: '2.0', method: id === 149 ? 'updateconfig' : 'ping', id
+            }));
+            const refused = await postJson(server, batch);
+            expect(refused.status).to.equal(429);
+            expect(refused.json.error.code).to.equal(-32029);
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    it('runs the public-port allowlist before JSON-RPC dispatch', async () => {
+        let writes = 0;
+        const ctx = buildCtx({ HUB_API_KEY: KEY, rpcController: {
+            ping: () => 'pong', updateconfig: () => { writes += 1; return 'ok'; }
+        } });
+        const server = await listenAsFeed(createApp(ctx).app);
+        try {
+            const refused = await postJson(server,
+                { jsonrpc: '2.0', method: 'updateconfig', id: 1 }, { 'x-api-key': KEY });
+            expect(refused.status).to.equal(404);
+            expect(refused.json.error.code).to.equal(-32601);
+            expect(writes).to.equal(0);
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
     });
 });
 

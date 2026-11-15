@@ -47,6 +47,9 @@ const CHECKPOINT_SERIES = {
             'Per-chain checkpoint rounds this hub led that threw before proposing', '_roundFailures'),
         countSpec('xchain_checkpoint_leader_declines_total',
             'Checkpoint rounds this hub led that its own proposal check refused', '_leaderDeclinesTotal'),
+        countSpec('xchain_checkpoint_cosign_declines_total',
+            'Checkpoint proposals this hub refused to co-sign as a follower, all reasons',
+            '_cosignDeclinesTotal'),
         countSpec('xchain_checkpoint_self_accept_failures_total',
             'Failed writes of a checkpoint this hub finalized as leader, retries included', '_selfAcceptFailures')
     ],

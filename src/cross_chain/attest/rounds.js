@@ -21,6 +21,8 @@
  ********************************************************************/
 
 const { ALLOWED_CHAINS, DEFAULT_CONFIRMATIONS, XCHAIN_ATTEST_PROPOSE } = require('./constants.js');
+const { getLogger } = require('../../observability');
+const logger = getLogger();
 
 module.exports = {
     // Request an attestation; returns a Promise that resolves when consensus is reached
@@ -160,7 +162,12 @@ module.exports = {
         // 'initiated' forever, and a repeat request re-ran the whole path instead
         // of short-circuiting on the finalized ring.
         this.markFinalized(attestationId);
-        this.emit('attestation:finalized', attestation);
+        try {
+            this.emit('attestation:finalized', attestation);
+        } catch (err) {
+            logger.error('CrossChain: attestation:finalized listener threw for ' +
+                attestationId + ': ' + (err && err.message ? err.message : err));
+        }
         return attestation;
     },
 

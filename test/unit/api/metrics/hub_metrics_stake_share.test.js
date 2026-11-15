@@ -126,6 +126,29 @@ function registerHubStakeShareMetricsSuite2Part2() {
     expect(out).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="LTC"/);
     expect(out).to.match(/xchain_stake_share_alerting 0\b/);
   });
+  it('reports meets_gate 0 and stakes_to_halt 0 for a snapshot the gate fails closed on', function () {
+    // A truncated snapshot is measured, not missing: the predicate refuses every signer
+    // set over it, so the documented alert rule has to see the lost gate with its labels.
+    const observability = realObservability();
+    const validators = hubStakeShareMetricsSuite2Rows([['ours1', 200], ['c1', 50]]);
+    validators.truncated = true;
+    const {
+      hub
+    } = hubStakeShareMetricsSuite2HubWithShare([{
+      chain: 'BTC',
+      capability: 'price',
+      input: {
+        validators,
+        operatorSources: ['ours1']
+      }
+    }]);
+    installHubStakeShareMetrics(observability, hub);
+    const out = observability.registry.render();
+    expect(out).to.match(/xchain_stake_share_meets_gate\{chain="BTC",capability="price"\} 0\b/);
+    expect(out).to.match(/xchain_stake_share_stakes_to_halt\{chain="BTC",capability="price"\} 0\b/);
+    expect(out).to.not.match(/xchain_stake_share_ratio\{[^}]*chain="BTC"/);
+    expect(out).to.match(/^xchain_stake_share_alerting 1$/m);
+  });
 }
 function registerHubStakeShareMetricsSuite2Part3() {
   it('drops a healthy reading once the snapshot becomes unreadable, instead of repeating it', function () {

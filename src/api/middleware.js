@@ -40,6 +40,16 @@ const {
 } = require('./hub_metrics');
 const { authGate, feedPortAllowlist } = require('./auth_gate');
 
+const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';
+
+function resolveTrustProxy(raw) {
+    const value = raw || DEFAULT_TRUST_PROXY;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (/^\d+$/.test(value)) return parseInt(value);
+    return value;
+}
+
 // Returns the observability handle, whose shutdown() the signal handler flushes.
 function installMiddleware(app, ctx) {
     installTransportMiddleware(app, ctx);
@@ -100,9 +110,9 @@ function installTransportMiddleware(app, ctx) {
     // connection, or the real visitor where the proxy resolves it, and the
     // setting below recovers whichever it is. So honour X-Forwarded-For to
     // recover the real client IP, but only from a trusted proxy.
-    // `true` would trust ANY client-supplied XFF, letting
-    // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
-    // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
+    // `true` logs a boot warning because it trusts any client-supplied XFF,
+    // letting callers spoof their IP past the per-IP rate limiter and its
+    // local-caller exemption. The default trusts loopback plus
     // private-range peers: a containerized hub sees the host reverse proxy as
     // the docker bridge IP (uniquelocal), a native hub sees it as loopback;
     // both recover the real client IP. Exposed directly to the internet, a
@@ -111,17 +121,19 @@ function installTransportMiddleware(app, ctx) {
     // count (e.g. `1`), or an address/CIDR list per the express docs. For
     // telemetry the IP is only used transiently to derive a coarse
     // country/region + keyed hash and is never stored.
-    let trustProxy = hubConfig.HUB_TRUST_PROXY || 'loopback, uniquelocal';
-    if (trustProxy === 'true')       trustProxy = true;
-    else if (trustProxy === 'false') trustProxy = false;
-    else if (/^\d+$/.test(trustProxy)) trustProxy = parseInt(trustProxy);
+    const trustProxy = resolveTrustProxy(hubConfig.HUB_TRUST_PROXY);
+    if (trustProxy === true) {
+        ctx.logger.warn('HUB_TRUST_PROXY=true trusts client-supplied X-Forwarded-For; callers can spoof their IP to bypass per-IP limits and the local-caller exemption');
+    }
     app.set('trust proxy', trustProxy);
 
     app.use(helmet());
     app.use(cors({ origin: CORS_ORIGIN }));
     // Counting runs ahead of the parser; only the batch surcharge needs the parsed body.
     const surcharges = installRateCounters(app, ctx);
-    app.use(express.json());
+    // This also bounds the uncapped batch arrays inspected by authGate and
+    // feedPortAllowlist before the JSON-RPC batch guard runs.
+    app.use(express.json({ limit: '100kb' }));
     app.use(bodyParserErrorHandler);
     surcharges.forEach((surcharge) => app.use(surcharge));
 }

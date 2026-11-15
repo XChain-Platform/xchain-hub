@@ -12,6 +12,13 @@ function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
 }
 
+// A verifier that checked a normalized form of the row hands back the row it verified, and that
+// is what gets stored; every other verifier's accepted row is stored as the wire sent it.
+function verifiedRowOr(verdict, wireRow) {
+    const verified = verdict && typeof verdict === 'object' && verdict.ok === true ? verdict.row : null;
+    return verified && typeof verified === 'object' ? withoutWireId(verified) : wireRow;
+}
+
 async function hasRows(promise) {
     const rows = await promise;
     return Array.isArray(rows) ? rows.length > 0 : Boolean(rows);
@@ -74,4 +81,4 @@ function storeVerifiedRow(db, table, row) {
     return writer(db, withoutWireId(row));
 }
 
-module.exports = { withoutWireId, rowAlreadyHeld, storeVerifiedRow };
+module.exports = { withoutWireId, verifiedRowOr, rowAlreadyHeld, storeVerifiedRow };

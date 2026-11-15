@@ -165,7 +165,9 @@ module.exports = {
     // durable record, leaving pending.finalized already true so replayed COMMITs
     // could never re-finalize; the round evaporated on a one-off DB hiccup). Retry
     // the store a bounded number of times; only on durable success do we markFinalized,
-    // delete round state, and emit. If every attempt fails we do NOT delete round state
+    // delete round state, and emit. Announcement runs outside the store retry so a
+    // post-store throw is reported accurately and never retried as a storage failure.
+    // If every attempt fails we do NOT delete round state
     // and we RESET pending.finalized=false, so a later replayed COMMIT re-enters
     // checkCommitQuorum and re-drives finalization instead of the round being lost.
     async finalizeCommittedRound(round) {
@@ -182,13 +184,13 @@ module.exports = {
         let proof = JSON.stringify(sortedSignatures(pending));
 
         const maxAttempts = 3;
+        let storedAttempt = 0;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 await this.storeSnapshot(round, pending.prices, validatorCount, proof,
                     pending.btcBlockHeight, pending.btcBlockTime, pending.admitBlocks);
-
-                announceCommittedRound.call(this, round, pending, attempt);
-                return;
+                storedAttempt = attempt;
+                break;
             } catch (err) {
                 logger.error(nodeUtil.format('Oracle: Error storing snapshot for round %s (attempt %d/%d):', round, attempt, maxAttempts, err.message));
                 if (attempt < maxAttempts) {
@@ -199,6 +201,17 @@ module.exports = {
                     if (!this.pendingRounds.has(round)) return;
                 }
             }
+        }
+
+        if (storedAttempt) {
+            try {
+                announceCommittedRound.call(this, round, pending, storedAttempt);
+            } catch (err) {
+                logger.error(nodeUtil.format(
+                    'Oracle: Round %s snapshot stored and finalized, but announcing round:finalized threw:',
+                    round, err && err.stack || err));
+            }
+            return;
         }
 
         // Every store attempt failed. Do NOT delete round state and do NOT leave

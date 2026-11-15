@@ -250,9 +250,9 @@ function registerSplitSuitePart3() {
     } catch (e) {
       threw = e;
     }
-    expect(threw, 'a cross-network SIGN_REQ must be refused, not silently co-signed').to.not.equal(null);
-    expect(String(threw.message)).to.match(/network mismatch in co-sign/);
-    expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+    expect(threw, 'the refusal is handled by the decline meter').to.equal(null);
+    expect(nd.engine._cosignDeclines.network_mismatch).to.equal(1);
+    expect(nd.engine._lastCosignDeclineReason).to.equal('network_mismatch');
     expect(types.includes('XCHK_SIGN'), 'no co-signature left the hub').to.equal(false);
   });
 }
@@ -277,9 +277,9 @@ function registerSplitSuitePart4() {
     expect(nd.db.checkpoints.length).to.equal(1);
   });
 
-  // An UNSCOPED hub is a different, already-documented problem (#2236): it
-  // resolves every flag-day gate to OFF. It is warned about, not refused, because
-  // refusing would take every unscoped deployment offline at once.
+  // An UNSCOPED hub falls back to a count tally while canonical gates still follow
+  // the record network. It is warned about, not refused, because refusing would take
+  // every unscoped deployment offline at once.
 }
 function registerSplitSuitePart5() {
   it('an unscoped hub warns once but keeps working (legacy path preserved)', async function () {
@@ -309,6 +309,9 @@ function registerSplitSuitePart5() {
     expect(nd.db.checkpoints.length, 'still persists').to.equal(2);
     let unscoped = warnings.filter(w => /NO deployment network/.test(w));
     expect(unscoped.length, 'warned exactly once, not per checkpoint').to.equal(1);
+    expect(unscoped[0]).to.match(/stake-weighted quorum/i);
+    expect(unscoped[0]).to.match(/canonical gates follow the record network/i);
+    expect(unscoped[0]).not.to.match(/every flag-day gate/i);
   });
   it('persist ACCEPTS the same checkpoint once the roots are present', async function () {
     let bus = buildMesh(1, {

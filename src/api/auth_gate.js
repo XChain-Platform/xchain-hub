@@ -157,7 +157,7 @@ function bulkTierRefuses(calls, provided, ctx) {
 // per-IP rate limit.
 function authGate(ctx) {
     const { HUB_API_KEY, HUB_FEED_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY } = ctx;
-    return (req, res, next) => {
+    return function authGateMiddleware(req, res, next) {
         if (!HUB_API_KEY && !HUB_FEED_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
@@ -165,6 +165,8 @@ function authGate(ctx) {
         // element invokes a write or sensitive-read method. Reading req.body.method
         // off an array leaves it undefined, which would let a batch smuggle gated
         // methods past the check unauthenticated.
+        // The batch cap runs after this gate so authentication wins over a 400.
+        // middleware.js keeps this pre-cap walk bounded with its 100 KB parser limit.
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let provided = req.headers['x-api-key'] || '';
         let unauthorized = () => res.status(401).json({
@@ -215,7 +217,7 @@ function authGate(ctx) {
 // caller already holding the key, and does not become an oracle for which
 // methods a hub implements.
 function feedPortAllowlist() {
-    return (req, res, next) => {
+    return function feedPortAllowlistMiddleware(req, res, next) {
         if (!req.xchainFeedOrigin) return next();
         if (req.method === 'GET') return next();     // snapshot reads, already path-scoped
         let calls = Array.isArray(req.body) ? req.body : [req.body];

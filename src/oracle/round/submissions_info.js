@@ -24,6 +24,7 @@
 const { roundBand, describeImplausibleRound } = require('../oracle_round_band.js');
 const { DERIVED_PAIRS } = require('../../constants.js');
 const nodeUtil = require('node:util');
+const nodeCrypto = require('node:crypto');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -240,7 +241,12 @@ function persistCounterFields() {
 
 // The consensus-side round gauges this hub reads off its oracle engine.
 function consensusGaugeFields() {
+    // The counters below start from zero whenever this hub process starts. A
+    // random id fixed for the life of the round object lets a reader tell a
+    // restart from a quiet interval even when a counter lands on its old value.
+    if (!this._counterEpoch) this._counterEpoch = nodeCrypto.randomBytes(8).toString('hex');
     return {
+        processEpoch:             this._counterEpoch,
         // PBFT finalization-timeout evictions (leader and follower seats),
         // mirroring StateCheckpointEngine getStats().round_timeouts so the
         // dashboard can alert on quorum-loss frequency (reviews 1468/1469).

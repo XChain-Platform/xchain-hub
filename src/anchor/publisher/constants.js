@@ -152,8 +152,8 @@ const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
 
 // One policy list can reach 10000 members, so a round carries at most this many policy
-// rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
-// decompress cap every verifier enforces.
+// rows. Builders and co-signers both enforce these caps. Raise a cap only after
+// followers have upgraded; lowering one remains a builder-only rollout.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
 // One version-1 list snapshot row can carry 10000 members, so use the same archive cap.
 const ARCHIVE_MAX_LIST_ROWS = 8;

@@ -29,6 +29,7 @@ const { setSourceLiveness } = require('./hub_metrics_source_liveness');
 const { installHubAttestationMetrics } = require('./hub_metrics_attestation');
 const { installHubCheckpointMetrics } = require('./hub_metrics_checkpoint');
 const { installHubOraclePublisherMetrics } = require('./hub_metrics_oracle_publisher');
+const { LEVELS } = require('../validators/stake_share/levels.js');
 
 /**
  * Register the hub's oracle-round heartbeat on an installed registry.
@@ -201,7 +202,8 @@ function isNum(v){
  * biggest one already staked the federation can absorb (a prior outage saw
  * five of eight equal stakes, so the answer was zero and nothing said so).
  *
- * Alert on stakes_to_halt <= 1 or meets_gate == 0. Values are read from the
+ * Alert on stakes_to_halt <= 1 or meets_gate == 0; a snapshot the gate fails closed on
+ * (level blocked) reports both as 0. Values are read from the
  * watcher's in-memory monitor at scrape time and touch neither DB nor network,
  * because Registry.render() is synchronous.
  *
@@ -285,6 +287,13 @@ function collectStakeShareSeries(hub, { shareRatio, headroom, stakesToHalt, meet
         if(isNum(e.headroom))     headroom.set(labels, Number(e.headroom));
         if(isNum(e.stakesToHalt)) stakesToHalt.set(labels, Number(e.stakesToHalt));
         if(typeof e.meetsGate === 'boolean') meetsGate.set(labels, e.meetsGate ? 1 : 0);
+        // A blocked snapshot is a measured state, not a missing reading: the quorum predicate
+        // fails closed for every signer set over it, so the gate is lost and these two series
+        // say so, which keeps the documented alert rule firing for it as it does for a halt.
+        if(e.level === LEVELS.BLOCKED){
+            stakesToHalt.set(labels, 0);
+            meetsGate.set(labels, 0);
+        }
     }
 }
 

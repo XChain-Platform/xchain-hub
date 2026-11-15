@@ -181,6 +181,21 @@ function sdkRetryAfterMs(e){
     return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
 }
 
+// Parse an RFC 7231 Retry-After value to milliseconds, or null when absent or
+// unparseable. Both forms are in play: the encoder's per-IP limiter sends
+// delta-seconds and a proxy in front of it may rewrite that to an HTTP-date.
+// A past date yields 0 (retry now), never a negative wait.
+function parseRetryAfterMs(raw){
+    if(raw === null || raw === undefined) return null;
+    let value = Array.isArray(raw) ? raw[0] : raw;
+    let text = String(value).trim();
+    if(text === '') return null;
+    if(/^\d+$/.test(text)) return Number(text) * 1000;
+    let at = Date.parse(text);
+    if(Number.isNaN(at)) return null;
+    return Math.max(0, at - Date.now());
+}
+
 function appendDurableLine(filePath, line){
     const fd = fs.openSync(filePath, 'a');
     try {
@@ -227,4 +242,4 @@ function deadLetterAnchorSend(filePath, payload, e){
 }
 
 module.exports = { classifyAnchorSendFailure, markNeverSent, anchorSendMayHaveLanded, sdkRetryAfterMs,
-                   deadLetterAnchorSend };
+                   parseRetryAfterMs, deadLetterAnchorSend };

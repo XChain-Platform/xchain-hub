@@ -45,8 +45,11 @@ module.exports = {
         // plain array property that CapabilitySnapshot sets on the SNAPSHOT, so the .map
         // above drops it, and meetsStakeThreshold reads it off the array it is handed;
         // without this the round's weighted tally silently loses its fail-closed guard and
-        // an under-counted S lets a minority of stake clear the 2/3 bar. Same one-liner as
-        // CrossChainDexEngine.js, OracleConsensus.js and StakeShareWatcher.js.
+        // an under-counted S lets a minority of stake clear the 2/3 bar. The direct twin
+        // is src/oracle/consensus/membership.js; find all carries with
+        // `git grep "truncated === true" src`. The twin carry and per-site parity are
+        // pinned by snapshot_truncation_carry.test.js and
+        // capability_snapshot_truncation_parity.test.js.
         if (snapshot.truncated === true) out.truncated = true;
         return out;
     },

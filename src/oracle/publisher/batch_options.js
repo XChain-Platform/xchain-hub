@@ -266,6 +266,7 @@ module.exports = {
         this.confirmationCheckFailures = 0;
         this.lastConfirmationCheckAt  = null;
         this._confirmTimer            = null;
+        this._confirmChecking         = false;
         // Watchdog cadence. 0 disables the timer entirely (the counters stay live for
         // a caller that drives checkPublishedConfirmations itself).
         this.confirmCheckIntervalMs   = nonNegativeIntConfig(

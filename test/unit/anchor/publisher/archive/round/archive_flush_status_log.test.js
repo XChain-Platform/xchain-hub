@@ -33,6 +33,7 @@ function publisher(){
         archiveRoundIntentHeld: () => false,
         getNextBatchSeq: async () => 7,
         leaderBatchSeqAboveOwn: async seq => seq,
+        ownArchiveSeqFloorUnknown: () => false,
         resolveArchiveRewardSources: async () => [],
         archiveEmptyAfterResolution: () => false,
         buildSizedArchive: async () => ({ json: '{}', count: 0 }),

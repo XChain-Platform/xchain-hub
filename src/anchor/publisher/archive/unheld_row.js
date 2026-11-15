@@ -25,14 +25,26 @@ function comparable(row){
     return out;
 }
 
-// Return why an unheld row is not the shape the archive builder emits, or null.
-// Require unsigned status and key lists to match XBRIDGE, XPOLICY and XLISTSHARE rows.
-function unheldRowRefusal(row, serialized, statuses){
+function reserializeRefusal(row, serialized){
     if(JSON.stringify(comparable(serialized)) !== JSON.stringify(comparable(row)))
         return 'does not re-serialize unchanged with no held row';
+    return null;
+}
+
+// Return why an unheld row is not the shape the archive builder emits, or null.
+// Require unsigned status and key lists to match all row kinds that carry status.
+function unheldRowRefusal(row, serialized, statuses){
+    const shape = reserializeRefusal(row, serialized);
+    if(shape) return shape;
     if(!statuses.includes(row.status))
         return 'is ' + row.status + ' with no held row';
     return null;
 }
 
-module.exports = { comparable, unheldRowRefusal };
+// The price tables key coin_pair under a case-insensitive, trailing-space-padded collation, so two
+// spellings of one pair are one database key. Compare keys through this fold, never raw strings.
+function priceKeyFold(row){
+    return JSON.stringify([Number(row.round_number), String(row.coin_pair).replace(/ +$/, '').toLowerCase()]);
+}
+
+module.exports = { comparable, reserializeRefusal, unheldRowRefusal, priceKeyFold };

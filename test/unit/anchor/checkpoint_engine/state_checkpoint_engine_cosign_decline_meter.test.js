@@ -112,6 +112,7 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
             });
             expect(engine.cosigned, 'still fail-closed').to.have.lengthOf(0);
             expect(engine._cosignDeclines[reason]).to.equal(2);
+            expect(engine._cosignDeclinesTotal).to.equal(2);
             let mine = lines.filter(l => /declining to co-sign/.test(l));
             expect(mine, 'throttled to one line for two declines').to.have.lengthOf(1);
             expect(mine[0]).to.include(reason).and.to.match(detail);
@@ -123,10 +124,41 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         await engine.handleSignReq(signReq());
         expect(engine.cosigned).to.have.lengthOf(1);
         expect(Object.values(engine._cosignDeclines).every(n => n === 0)).to.equal(true);
+        expect(engine._cosignDeclinesTotal).to.equal(0);
     });
 });
 
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
+    it('counts and throttles a pre-auth network mismatch without throwing', async function () {
+        const engine = buildFollower({});
+        const lines = await warnsDuring(async () => {
+            await engine.handleSignReq(signReq({ network: 'mainnet' }));
+            await engine.handleSignReq(signReq({ network: 'mainnet' }));
+        });
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.network_mismatch).to.equal(2);
+        expect(engine._lastCosignDeclineReason).to.equal('network_mismatch');
+        const mismatch = lines.filter(line => line.includes('network_mismatch'));
+        expect(mismatch).to.have.lengthOf(1);
+        expect(mismatch[0]).to.include('mainnet').and.to.include('regtest');
+    });
+
+    it('counts a failed supersede replay-window read instead of rejecting the handler', async function () {
+        const digest = 'ef'.repeat(32);
+        const rules = { digest, replay: {
+            state: 'replayed', target: 30, replay_to: 44, witness: 'passed', changed: true
+        } };
+        const engine = buildFollower({ indexerCall: async () => Object.assign({}, TIP, { rules }) });
+        engine.supersedeFieldsForRound = async () => { throw new Error('db down'); };
+        const lines = await warnsDuring(() => engine.handleSignReq(signReq({
+            supersedes_from: 30, rules_digest: digest
+        })));
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.supersede_read_failed).to.equal(1);
+        expect(engine._lastCosignDeclineReason).to.equal('supersede_read_failed');
+        expect(lines.join('\n')).to.include('supersede_read_failed').and.to.include('db down');
+    });
+
     it('classifies getblockhashes result errors before checkpoint hold checks', async function () {
         const cases = [
             ['block not indexed: 500', 'indexer_no_block'],
@@ -142,6 +174,9 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         }
     });
 
+});
+
+describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     it('counts canonical divergence and rootless fallback refusals', async function () {
         const rooted = signReq().data.checkpoint;
         const rootless = Object.assign({}, rooted, {
@@ -171,12 +206,13 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
     it('getcheckpointstats reports every reason and the last one seen', async function () {
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
-        expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
+        expect(fresh.cosign_declines).to.have.all.keys('network_mismatch', 'own_tip_unresolved',
+            'snapshot_out_of_tolerance', 'off_cadence',
             'seq_not_derived', 'seq_at_or_below_max', 'indexer_read_failed', 'indexer_no_block',
-            'indexer_replaying', 'supersede_no_replay',
+            'indexer_replaying', 'supersede_read_failed', 'supersede_no_replay',
             'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
             'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',
-            'indexer_divergence', 'rootless');
+            'indexer_divergence', 'rootless', 'seq_second_payload');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();

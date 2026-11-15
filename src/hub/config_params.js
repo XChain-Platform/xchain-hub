@@ -141,6 +141,11 @@ class ConfigParams {
             }
         }
 
+        if(learnedNetwork !== null && this.capabilitySnapshot &&
+           typeof this.capabilitySnapshot.assertCanonicalReorgBuffer === 'function') {
+            this.capabilitySnapshot.assertCanonicalReorgBuffer(
+                this.capabilitySnapshot.reorgBufferBlocks, learnedNetwork);
+        }
         if(learnedNetwork !== null) this.network = learnedNetwork;
         return this.network;
     }

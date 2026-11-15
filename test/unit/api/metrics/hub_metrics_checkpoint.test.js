@@ -29,6 +29,7 @@ const COUNTERS = [
     ['_cadenceStalls', 'xchain_checkpoint_cadence_stalls_total', 9],
     ['_roundFailures', 'xchain_checkpoint_round_failures_total', 5],
     ['_leaderDeclinesTotal', 'xchain_checkpoint_leader_declines_total', 8],
+    ['_cosignDeclinesTotal', 'xchain_checkpoint_cosign_declines_total', 10],
     ['_selfAcceptFailures', 'xchain_checkpoint_self_accept_failures_total', 6]
 ];
 

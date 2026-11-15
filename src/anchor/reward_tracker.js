@@ -35,6 +35,18 @@ function legacyAnchorRewardAmount(knob) {
     return bcmath.bcformat(knob, 8);
 }
 
+// Return the frozen consensus amount for on-chain-derived anchor rewards, or
+// null while the legacy operator-configured amount still applies.
+function frozenAnchorRewardAmount(rewardType, blockIndex, network) {
+    const type = String(rewardType);
+    const derivedAnchor = /^anchor_(BTC|LTC|DOGE)$/.test(type) || type === 'anchor_bundle';
+    if (derivedAnchor && ar.isAnchorRewardActive(Number(blockIndex), network))
+        return String(ar.ANCHOR_REWARD_AMOUNT);
+    if (type === 'anchor_archive' && ar.isArchiveRewardActive(Number(blockIndex), network))
+        return String(ar.ARCHIVE_REWARD_AMOUNT);
+    return null;
+}
+
 class RewardTracker {
 
     constructor(hub) {
@@ -235,21 +247,8 @@ class RewardTracker {
         let network   = (rewardNetwork !== undefined && rewardNetwork !== null)
                       ? String(rewardNetwork)
                       : ((this.hub && this.hub.network) ? this.hub.network : '');
-        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
-                               ar.isAnchorRewardActive(Number(blockIndex), network);
-        // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
-        // from the ANCHOR v0 publisher attestation (or a v3 fold). Same frozen ANCHOR_REWARD_AMOUNT and
-        // the same flag-day as the per-chain form it replaces, so a hub that records it
-        // and an indexer that derives it agree on the amount whatever
-        // ANCHOR_REWARD_PER_PUBLISH is set to locally.
-        let isDerivedBundle  = String(rewardType) === 'anchor_bundle' &&
-                               ar.isAnchorRewardActive(Number(blockIndex), network);
-        let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
-                               ar.isArchiveRewardActive(Number(blockIndex), network);
-        // Frozen constants verbatim (byte-identical to what the indexer credits and signs).
-        if (isDerivedChain || isDerivedBundle) return String(ar.ANCHOR_REWARD_AMOUNT);
-        if (isDerivedArchive) return String(ar.ARCHIVE_REWARD_AMOUNT);
-        return legacyAnchorRewardAmount(this.anchorReward);
+        const frozen = frozenAnchorRewardAmount(rewardType, blockIndex, network);
+        return frozen !== null ? frozen : legacyAnchorRewardAmount(this.anchorReward);
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,
@@ -314,5 +313,6 @@ class RewardTracker {
 }
 
 RewardTracker.legacyAnchorRewardAmount = legacyAnchorRewardAmount;
+RewardTracker.frozenAnchorRewardAmount = frozenAnchorRewardAmount;
 
 module.exports = RewardTracker;

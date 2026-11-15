@@ -18,6 +18,7 @@ const assert = require('assert');
 const sinon = require('sinon');
 
 const ListShareEngine = require('../../../../../src/cross_chain/list_share_engine.js');
+const { getLogger } = require('../../../../../src/observability');
 const { listMembersHash } = require('../../../../../src/cross_chain/list/canonical.js');
 const { deriveListSnapshotId } = require('../../../../../src/cross_chain/list/chain.js');
 
@@ -45,7 +46,8 @@ function fullRow(members, overrides = {}) {
 }
 
 function makeEngine(options = {}) {
-    const sharedLists = options.sharedLists || [{ root_index: ROOT_INDEX, share_block: 100 }];
+    const sharedLists = Object.prototype.hasOwnProperty.call(options, 'sharedLists')
+        ? options.sharedLists : [{ root_index: ROOT_INDEX, share_block: 100 }];
     const read = Object.prototype.hasOwnProperty.call(options, 'read')
         ? options.read : listRead(['a']);
     const heldRows = options.heldRows || [];
@@ -79,8 +81,12 @@ function makeEngine(options = {}) {
     };
     engine.confirmations.DOGE = 6;
     engine.indexerCall = sinon.stub().callsFake(async (_chain, method, params) => {
-        if (method === 'getlatestblock') return { block_index: 120 };
+        if (method === 'getlatestblock') {
+            if (options.latestThrows) throw new Error('latest failed');
+            return { block_index: 120 };
+        }
         if (method === 'getsharedlists') {
+            if (options.sharedThrows) throw new Error('shared failed');
             assert.deepStrictEqual(params, { network: 'regtest' });
             return sharedLists;
         }
@@ -98,6 +104,11 @@ function makeEngine(options = {}) {
 function proposed(engine) {
     assert.strictEqual(engine.listConsensus.propose.callCount, 1);
     return engine.listConsensus.propose.firstCall.args;
+}
+
+function listPollWarnLines() {
+    return getLogger().warn.getCalls().map(call => String(call.args[0]))
+        .filter(line => line.includes('ListShare:') && line.includes('failed'));
 }
 
 describe('shared-list leader poll full and unchanged versions', function () {
@@ -320,5 +331,53 @@ describe('shared-list leader poll round refusals', function () {
 
         const [, payload] = proposed(engine);
         assert.strictEqual(payload.row.home_list_index, 2);
+    });
+});
+
+describe('shared-list leader poll indexer failure visibility', function () {
+    beforeEach(function () { sinon.stub(getLogger(), 'warn'); });
+    afterEach(function () { sinon.restore(); });
+
+    it('counts repeated latest-block failures and rate-limits the warning', async function () {
+        const { engine } = makeEngine({ latestThrows: true });
+        await engine.pollSharedLists(SNAPSHOT_BLOCK);
+        await engine.pollSharedLists(SNAPSHOT_BLOCK);
+        assert.strictEqual(engine._listPollFailures, 2);
+        const lines = listPollWarnLines().filter(line => line.includes('getlatestblock on DOGE'));
+        assert.strictEqual(lines.length, 1);
+        assert.match(lines[0], /latest failed/);
+    });
+
+    it('counts thrown and malformed shared-list reads', async function () {
+        const thrown = makeEngine({ sharedThrows: true }).engine;
+        const malformed = makeEngine({ sharedLists: {} }).engine;
+        await thrown.pollSharedLists(SNAPSHOT_BLOCK);
+        await malformed.pollSharedLists(SNAPSHOT_BLOCK);
+        assert.strictEqual(thrown._listPollFailures, 1);
+        assert.strictEqual(malformed._listPollFailures, 1);
+        assert.ok(listPollWarnLines().some(line => line.includes('getsharedlists on DOGE')));
+        assert.ok(listPollWarnLines().some(line => line.includes('non-array result')));
+    });
+
+    it('counts a failed list-at read', async function () {
+        const { engine } = makeEngine({ readThrows: true });
+        await engine.pollSharedLists(SNAPSHOT_BLOCK);
+        assert.strictEqual(engine._listPollFailures, 1);
+        assert.ok(listPollWarnLines().some(line =>
+            line.includes('getlistat on DOGE') && line.includes('read failed')));
+    });
+
+    it('re-arms a warning after a successful read', async function () {
+        const { engine } = makeEngine();
+        engine.indexerCall.resetBehavior();
+        engine.indexerCall.onCall(0).rejects(new Error('temporary'));
+        engine.indexerCall.onCall(1).resolves({ block_index: 120 });
+        engine.indexerCall.onCall(2).rejects(new Error('temporary'));
+        await engine.listOriginBlock('DOGE');
+        await engine.listOriginBlock('DOGE');
+        await engine.listOriginBlock('DOGE');
+        assert.strictEqual(engine._listPollFailures, 2);
+        assert.strictEqual(listPollWarnLines().filter(line =>
+            line.includes('getlatestblock on DOGE')).length, 2);
     });
 });

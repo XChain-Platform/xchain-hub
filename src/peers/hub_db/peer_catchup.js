@@ -11,7 +11,7 @@ const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
 const { createRefusalMemo, DEFAULT_REFUSAL_MEMO_PATH } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
-const { withoutWireId, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
+const { withoutWireId, verifiedRowOr, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
 const { connectedSignerPeers } = require('./signer_peers.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
@@ -368,7 +368,7 @@ class HubDbPeerCatchup {
             const key = groupKey(row) || 'row:' + row.id;
             if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
             const verdict = verdicts.get(key);
-            if (verifierAccepted(verdict)) await this.storeRow(walk.table, localRow);
+            if (verifierAccepted(verdict)) await this.storeRow(walk.table, verifiedRowOr(verdict, localRow));
             else countRefusal(walk, verdict);
         }
     }

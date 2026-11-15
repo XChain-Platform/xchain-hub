@@ -58,6 +58,7 @@ class Governance extends EventEmitter {
         this.validatorSet = [];
         this._messageHandler = null;
         this._tallyTimer = null;
+        this._tallyRunning = false;
         this._resultRequests = new Map();
 
         this.votingPeriod  = parseInt(hubConfig.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
@@ -84,13 +85,24 @@ class Governance extends EventEmitter {
         // process.on('unhandledRejection'), and Node's default turns an unhandled
         // rejection into process death, so without this a per-tick fault kills the hub
         // instead of logging and re-arming, which is what the tally path intends.
-        this._tallyTimer = setInterval(() => {
-            this.checkExpiredProposals()
-                .then(() => this._tallyTimer && this.requestMissingResults())
-                .catch(e => logger.error(nodeUtil.format('Governance tally tick error:', e)));
-        }, this.tallyInterval);
+        this._tallyTimer = setInterval(() => { this.runTallyTick(); }, this.tallyInterval);
 
         logger.info('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
+    }
+
+    async runTallyTick() {
+        if (this._tallyRunning) return false;
+        this._tallyRunning = true;
+        try {
+            await this.checkExpiredProposals();
+            if (this._tallyTimer) await this.requestMissingResults();
+            return true;
+        } catch (e) {
+            logger.error(nodeUtil.format('Governance tally tick error:', e));
+            return false;
+        } finally {
+            this._tallyRunning = false;
+        }
     }
 
     async stop() {

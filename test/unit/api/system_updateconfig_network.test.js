@@ -14,6 +14,7 @@ const sinon = require('sinon');
 const { expect } = require('chai');
 const ConfigParams = require('../../../src/hub/config_params.js');
 const { buildSystemRpc } = require('../../../src/api/rpc/system.js');
+const bootSettings = require('../../../src/validators/capability_snapshot/boot_settings.js');
 
 function configFor(network, coin) {
     return {
@@ -29,8 +30,18 @@ function emptyHub() {
     return hub;
 }
 
+function hubWithBuffer(buffer) {
+    const hub = emptyHub();
+    hub.capabilitySnapshot = {
+        reorgBufferBlocks: buffer,
+        assertCanonicalReorgBuffer: bootSettings.assertCanonicalReorgBuffer
+    };
+    return hub;
+}
+
 function restoreSinon() {
     sinon.restore();
+    delete process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT;
 }
 
 function testSharedNetworkAdoption() {
@@ -108,6 +119,39 @@ function testConfiguredNetworkPreservation() {
     expect(hub.network).to.equal('mainnet');
 }
 
+function testNonCanonicalBufferRefusal() {
+    for(const network of ['mainnet', 'testnet', 'regtest']){
+        const hub = hubWithBuffer(0);
+        let thrown = null;
+        try { hub.learnNetworkFromConfig(configFor(network)); } catch (err) { thrown = err; }
+        expect(thrown).to.be.an('error');
+        expect(thrown.code).to.equal('REORG_BUFFER_MISMATCH');
+        expect(hub.network).to.equal('');
+    }
+}
+
+function testCanonicalBufferAdoption() {
+    const hub = hubWithBuffer(6);
+    expect(hub.learnNetworkFromConfig(configFor('mainnet'))).to.equal('mainnet');
+}
+
+function testRetiredBypassRefusal() {
+    const hub = hubWithBuffer(0);
+    process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
+    expect(() => hub.learnNetworkFromConfig(configFor('mainnet')))
+        .to.throw().with.property('code', 'REORG_BUFFER_MISMATCH');
+    expect(hub.network).to.equal('');
+}
+
+async function testUpdateConfigRefusalIsAtomic() {
+    const hub = hubWithBuffer(0);
+    hub.addParametersFromJson = sinon.stub().resolves(true);
+    const result = await buildSystemRpc({ hub }).updateconfig({ config: configFor('mainnet') });
+    expect(result.error).to.match(/HUB_SNAPSHOT_REORG_BUFFER/);
+    expect(hub.network).to.equal('');
+    expect(hub.addParametersFromJson.called).to.equal(false);
+}
+
 async function testLearnBeforeProposal() {
     const hub = emptyHub();
     hub.consensus = {
@@ -137,6 +181,10 @@ function registerNetworkLearningTests() {
     it('refuses a recognized network paired with an unknown network', testRecognizedAndUnknownRefusal);
     it('refuses mixed recognized networks', testMixedNetworkRefusal);
     it('preserves an already configured network', testConfiguredNetworkPreservation);
+    it('refuses every learned consensus network with a non-canonical buffer', testNonCanonicalBufferRefusal);
+    it('adopts a learned network with the canonical buffer', testCanonicalBufferAdoption);
+    it('does not let the retired bypass weaken learned-network checks', testRetiredBypassRefusal);
+    it('leaves updateconfig unapplied when learned-network validation fails', testUpdateConfigRefusalIsAtomic);
     it('learns the network before proposing the config', testLearnBeforeProposal);
 }
 

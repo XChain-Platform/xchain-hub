@@ -22,3 +22,4 @@ Read the file's header first; each runbook says what it changes and how to check
 
 - `2026-06-02-backfill-price-snapshot-reference-chain.sql`: restores `price_snapshots.reference_chain` from `source_chain`.
 - `2026-09-11-price-ingest-watermarks-network-column.sql`: re-keys `price_ingest_watermarks` by network.
+- `2026-10-24-z-price-snapshots-archive-pending-index.sql`: superseded by `2026-11-14-price-snapshots-archive-pending-column.sql`, a manual migration a boot baselines or reports pending; no separate run is needed.

@@ -1,7 +1,17 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const { expect } = require('chai');
-const { readArchiveSeqFloor } =
+const { readArchiveSeqFloor, readArchiveSeqFloorOutcome } =
     require('../../../../../src/anchor/publisher/archive/seq_floor_seed.js');
 
 function setup(reply){
@@ -28,6 +38,16 @@ async function read(reply, overrides = {}){
     return { ...fixture, value };
 }
 
+async function readOutcome(reply){
+    const fixture = setup(reply);
+    return readArchiveSeqFloorOutcome({
+        indexerCall: fixture.indexerCall,
+        dogeAddress: 'Dauthor',
+        dogeIndexerUrl: 'http://indexer.invalid',
+        logger: fixture.logger
+    });
+}
+
 describe('archive sequence floor reader', () => {
     it('returns the author floor and makes the exact author-only call', async () => {
         const result = await read({ exists: true, match_batch_seq: 12 });
@@ -51,6 +71,12 @@ describe('archive sequence floor reader', () => {
 
         expect(result.value).to.equal(null);
         expect(result.warnings).to.have.length(0);
+    });
+
+    it('distinguishes a null response from an explicit author miss', async () => {
+        expect(await readOutcome(null)).to.deep.include({ kind: 'unknown' });
+        expect(await readOutcome({ exists: false, match_batch_seq: null }))
+            .to.deep.equal({ kind: 'none' });
     });
 
     for(const invalid of ['x', -1, 1.5, undefined]){

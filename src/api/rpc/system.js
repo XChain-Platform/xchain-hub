@@ -318,6 +318,9 @@ function healthBody(hub, configFetchCounters, { anchorStats, attestStats, batchS
     // false with its published heights held, and nothing else on this body shows it.
     if (hub.peerCatchup && typeof hub.peerCatchup.getStats === 'function')
         healthResult.peer_catchup = hub.peerCatchup.getStats();
+    // Retention failures are telemetry only and never change hub availability.
+    if (hub.telemetryRetention && typeof hub.telemetryRetention.getStats === 'function')
+        healthResult.telemetry_retention = hub.telemetryRetention.getStats();
     return healthResult;
 }
 

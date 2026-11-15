@@ -185,6 +185,8 @@ module.exports = {
         // Highest batch seq THIS hub's own DOGE address spent (its own heads, never peer
         // input), so the v1 leader draw honours it without the jump cap. -1 means none known.
         this._ownArchiveBatchSeq = -1;
+        // True after the DOGE indexer definitively reports either a floor or no prior head.
+        this._ownArchiveSeqFloorKnown = false;
 
     },
 
@@ -237,6 +239,7 @@ module.exports = {
                 return;
             }
             if(reply.kind === 'none'){
+                this._ownArchiveSeqFloorKnown = true;
                 logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer found no archive');
                 return;
             }
@@ -248,6 +251,7 @@ module.exports = {
             this.noteConsumedBatchSeq(reply.seq, 'boot-time floor seed from the DOGE indexer');
             // Also hold it as our own floor, which the jump cap never discards and a later failed read keeps
             this.noteOwnArchiveSeq(reply.seq);
+            this._ownArchiveSeqFloorKnown = true;
         } catch(err){
             logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + (err && err.message ? err.message : String(err)));
         }

@@ -48,6 +48,7 @@ function leader(pending, opts){
         anchorIntentHolds: () => false,
         getNextBatchSeq: async () => nextSeq,
         leaderBatchSeqAboveOwn: async seq => seq,
+        ownArchiveSeqFloorUnknown: () => false,
         resolveArchiveRewardSources: async () => [],
         archiveEmptyAfterResolution: () => false,
         buildSizedArchive: async () => ({ json: '{}', count: 0 }),
