@@ -204,7 +204,8 @@ function feature19startOracleWiresOracleBatchSignerBatchSignerDeps() {
     },
     './oracle/publisher.js': function () {
       return {
-        start: sinon.stub().resolves()
+        start: sinon.stub().resolves(),
+        stop: sinon.stub()
       };
     },
     './lib/signer_loader.js': {
