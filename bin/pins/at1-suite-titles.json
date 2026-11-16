@@ -1581,6 +1581,17 @@
       "7c36897336cb945f760ffb7fbb9656f2ec236131387882acb86e5204c3db6448",
       "23747befb3bc4b6cfa53abbd682feb825d03cdeb012d569c36b2eff8013506a7"
     ],
+    "20d462955367bb16": [
+      "ba07958742df45782aa6c3b887d973e2f07c95f03c5c3d024cc58f0eac64ca08",
+      "3c1daa2790b2bcc6afbc1e137f5202c7d05b539ef91eda3fdb157dfb8e57081f",
+      "15459aa24b99288748dd98df6deb1b11030c366d316164ba0925aa729809d678",
+      "db45cbbdd924cca7634b5671262d25e8770b9853f87cbd1e65edc373d22711ec",
+      "f4d946cd9d17c36be456d1628b78b5c3fe16b77adb42658023ef7c80e803a330",
+      "1644ba829efa891ec1f652a403840985d3ac5b23068db6fdcc9bb04983c7ad44",
+      "109a0b51a07d6128d092a0b7f3d0dd697ab159f077651f2233a698f531b65ae7",
+      "54e95b11442622dde80f8a35734a069f5cb926aea3b3469046dc048a294969f1",
+      "894a7c73e4f5c0606b65b801437924b5b4b0e80cfdbbcf091570987e7aecf8dc"
+    ],
     "20e0731f8156479b": [
       "cd41d84bfcc3c1e655e08a52447712590b8d1d1bbc74ceb7ed7253dfe9472cdc",
       "90bd578852d3eb86b28160ef76ddb546583ad3619c73e76d7c432ef265616feb",
@@ -4538,6 +4549,16 @@
       "d1f09b1bbe0b46e958dc39eac8beed23b22cd6eabbedbf548abc302e0de3196a",
       "58141f286243c7dfb9d6219dad148d97817aa6cfbefdf7830c84ba3bd910ccaa",
       "11cd32d2195d1bf20f39731822b919bd023a708e6c52f767dd61bfa4e50b4882"
+    ],
+    "51e98b65a907e984": [
+      "a21d0d179c36b0dd7542dbeccfb22ec0d68e0c23b92363d3c66d47284b26357f",
+      "92666413437863ef875f1ded69a8c740f01102c3d9b55c7053b677f50c6732f7",
+      "d5e068cc5ae61392b898283f1310539d14849ee9d692dcb2fd39bec268644e23",
+      "56363375a45974720530a891c715e11a98b9ecd80622866d6c72d498d133ca8e",
+      "2ea64f40da2f691c08b0384e7c7055217320df3f4bae5a06e18dac7e3fc0d1db",
+      "794ef740d3b0483f021790943ef50bb2ad0b87e182b64d3665b623ef1640dd70",
+      "889d6e630b64a90416f93601f117a9183e69d5e87a1d0f83b44f18000fca9b29",
+      "38f2e987d11d2826a24cb9006d8cdb54b6381626c67a34a88232003ea49a5da5"
     ],
     "5218f99c58504992": [
       "ab332bac1ff553729465683d0d9bc700be231c746394e1441d43d239fad0f411",
@@ -9605,6 +9626,15 @@
       "f9f8c0c5f67dbdcfe1b839efaf23da98e1ad231cdd5b804bdb3bf881a849af0f",
       "82b5ccf44921df115949a8aaa06bf61bcaab0b09be87325d0bd48b3b9c4cb96a"
     ],
+    "aaba59d9be062265": [
+      "22cb21c5c5e0af9955a5c5aa44c6ce04762eb8c6f5078f4691f6eb121deae2b2",
+      "4e9ca9f580de21d115ebf14cdf094b33cd15c570497273b8da57e7c6adc73e60",
+      "eafe9738822fd1c8deddf9364027cc7861cb7d61968ab5e636c484fe5d82d26c",
+      "36f4bef1fe9cf78295e7b2cef24f60cda6a4806fef60ffdc6d865de4b1c929b3",
+      "8558ad213b59e053b02d77dd8bbe194b9036048ee2ea69b60b2132f94d1fdbe3",
+      "e317f6c28d6bd8476e5c2fc8989ab4df0ec9dc81be6780bac39ad9f80fc7c6bc",
+      "230d2edc85db4607c6223120878d761304bea4ce79f67ad23f469e8c308bd842"
+    ],
     "aafa8648cee3dace": [
       "5c523e19e2196c9a7ec54a6df092e3ae6526907f1e151bbc3517fd4785e5a7ff",
       "28dd7152f12af7ad423d1b7c69366090d19d4a172b2bd76fb6f0c78dc0dd9166",
@@ -10332,14 +10362,6 @@
       "273ed52461b2ec704a57d1f3ca70aace799c94ff33e402ad99108dacbb439751",
       "070827c1854b79ea28829d8f7eb9d5d4a8b24e380e94ed92579fd71488c13deb",
       "ed267b7f9302d5cc7a8ab413ba0e979894c8de625b729262a0f6577fb9c864e3"
-    ],
-    "b99cf19ee7e1cab4": [
-      "22cb21c5c5e0af9955a5c5aa44c6ce04762eb8c6f5078f4691f6eb121deae2b2",
-      "eafe9738822fd1c8deddf9364027cc7861cb7d61968ab5e636c484fe5d82d26c",
-      "36f4bef1fe9cf78295e7b2cef24f60cda6a4806fef60ffdc6d865de4b1c929b3",
-      "8558ad213b59e053b02d77dd8bbe194b9036048ee2ea69b60b2132f94d1fdbe3",
-      "e317f6c28d6bd8476e5c2fc8989ab4df0ec9dc81be6780bac39ad9f80fc7c6bc",
-      "230d2edc85db4607c6223120878d761304bea4ce79f67ad23f469e8c308bd842"
     ],
     "b9a05ae92d57f4d5": [
       "b7cae0f72ecb8c72fdb753e2206183eb7d37e3be83c668d7f4947f991b192300",
@@ -13890,8 +13912,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1149,
-      "titleCount": 10157,
+      "fileCount": 1150,
+      "titleCount": 10167,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14047,6 +14069,7 @@
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "c861e1871044a08d",
+        "test/unit/anchor/publisher/ladder/ladder_age_bundle_eligibility.test.js": "20d462955367bb16",
         "test/unit/anchor/publisher/list_snapshot/list_snapshot_constants.test.js": "cc90b09452f902a5",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_bundle_done.test.js": "a42b115faad48823",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
@@ -14071,7 +14094,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "e3693dc307e989bd",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
-        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
+        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "aaba59d9be062265",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
         "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
@@ -15098,8 +15121,8 @@
       }
     },
     "test": {
-      "fileCount": 1149,
-      "titleCount": 10157,
+      "fileCount": 1150,
+      "titleCount": 10167,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15255,6 +15278,7 @@
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "c861e1871044a08d",
+        "test/unit/anchor/publisher/ladder/ladder_age_bundle_eligibility.test.js": "20d462955367bb16",
         "test/unit/anchor/publisher/list_snapshot/list_snapshot_constants.test.js": "cc90b09452f902a5",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_bundle_done.test.js": "a42b115faad48823",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
@@ -15279,7 +15303,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "e3693dc307e989bd",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
-        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
+        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "aaba59d9be062265",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
         "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
@@ -16253,8 +16277,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1235,
-      "titleCount": 11040,
+      "fileCount": 1237,
+      "titleCount": 11058,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16289,6 +16313,7 @@
         "test/integration/anchor/anchor_selector_supersede.test.js": "933ea559dc18c43e",
         "test/integration/anchor/anchor_stamp_sweep_reward_retract.test.js": "5a778521f58af611",
         "test/integration/anchor/archive_seq_divergence.test.js": "f1ffe523fac316d9",
+        "test/integration/anchor/ladder_age_bundle_eligible.test.js": "51e98b65a907e984",
         "test/integration/api/jsonrpc.test.js": "b77bbdfced921d0e",
         "test/integration/api/jsonrpc_validator_state.test.js": "c7e7cf2060be8512",
         "test/integration/consensus/config_consensus.test.js": "037dd45be032426d",
@@ -16496,6 +16521,7 @@
         "test/unit/anchor/publisher/fold/fold_wire.test.js": "38650bede0d339fe",
         "test/unit/anchor/publisher/fold/v3_payload.test.js": "704bbe119d68f856",
         "test/unit/anchor/publisher/fold/wrapper_canonical.test.js": "c861e1871044a08d",
+        "test/unit/anchor/publisher/ladder/ladder_age_bundle_eligibility.test.js": "20d462955367bb16",
         "test/unit/anchor/publisher/list_snapshot/list_snapshot_constants.test.js": "cc90b09452f902a5",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_bundle_done.test.js": "a42b115faad48823",
         "test/unit/anchor/publisher/pkg8/state_anchor_publisher_pkg8_follower_gate.test.js": "f44a68f03584e4e0",
@@ -16520,7 +16546,7 @@
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_attestation.test.js": "e3693dc307e989bd",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_done.test.js": "afacda0cdc1c3e97",
         "test/unit/anchor/publisher/state_anchor_publisher_bundle_election.test.js": "7d644b3ef72543a4",
-        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "b99cf19ee7e1cab4",
+        "test/unit/anchor/publisher/state_anchor_publisher_commitment_floor.test.js": "aaba59d9be062265",
         "test/unit/anchor/publisher/state_anchor_publisher_confirmed_inputs.test.js": "39d26e0eae08be73",
         "test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js": "8e957dfdb35568e1",
         "test/unit/anchor/publisher/state_anchor_publisher_existing_anchor.test.js": "15f03803933952f8",
@@ -17564,13 +17590,14 @@
       }
     },
     "test:integration": {
-      "fileCount": 22,
-      "titleCount": 116,
+      "fileCount": 23,
+      "titleCount": 124,
       "files": {
         "test/integration/anchor/anchor_reward_supersede_atomic.test.js": "d30bd8a54d132bc6",
         "test/integration/anchor/anchor_selector_supersede.test.js": "933ea559dc18c43e",
         "test/integration/anchor/anchor_stamp_sweep_reward_retract.test.js": "5a778521f58af611",
         "test/integration/anchor/archive_seq_divergence.test.js": "f1ffe523fac316d9",
+        "test/integration/anchor/ladder_age_bundle_eligible.test.js": "51e98b65a907e984",
         "test/integration/api/jsonrpc.test.js": "b77bbdfced921d0e",
         "test/integration/api/jsonrpc_validator_state.test.js": "c7e7cf2060be8512",
         "test/integration/consensus/config_consensus.test.js": "037dd45be032426d",

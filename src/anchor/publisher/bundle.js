@@ -154,6 +154,13 @@ module.exports = {
         return checkpointForms.isCheckpointCommitmentActive(row);
     },
 
+    // The lowest snapshot_block sectionCommitmentActive accepts on `network`, or null when
+    // it accepts none; the leader's ladder age reads it so both floors stay one rule. A
+    // harness that overrides sectionCommitmentActive overrides this beside it.
+    commitmentFloorBlock(network){
+        return checkpointForms.checkpointCommitmentFloor(network);
+    },
+
     // Group the result set into ONE bundle per network. A chain absent from a
     // group is NOT an anomaly (D4): under the daily cadence the normal case is a
     // chain whose newest eligible seq is already anchored.
@@ -236,7 +243,7 @@ module.exports = {
                           'signer count comes down');
         }
         for(let group of split.bundles){
-            const contentBlock = await this.bundleContentBlock(network, group);
+            const contentBlock = await this.bundleContentBlock(network, group, true);
             await this.publishBundle(signer, network, group, this.bundleLadderBlock(group, btcBlock, contentBlock),
                                      failoverOnly, anchored, skipped,
                                      { active: foldActive, block: foldBlock });

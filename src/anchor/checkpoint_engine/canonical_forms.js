@@ -60,6 +60,17 @@ const forms = {
         return gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null);
     },
 
+    // The lowest snapshot_block at which isCheckpointCommitmentActive holds on `network`,
+    // or null when it holds at no height (UNPINNED, an unknown network). A height gate is
+    // active at every block at or above its threshold, so this bounds the gate in SQL.
+    checkpointCommitmentFloor(network){
+        if(typeof network !== 'string') return null;
+        const table = gateRegistry.get(CHECKPOINT_COMMITMENT_KEY);
+        const threshold = Object.prototype.hasOwnProperty.call(table, network) ? table[network] : undefined;
+        if(typeof threshold !== 'number' || !Number.isFinite(threshold)) return null;
+        return Math.max(0, Math.ceil(threshold));
+    },
+
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
     // canonical at/above the CHECKPOINT_COMMITMENT flag-day. This is the hub's only
     // copy and no other repo imports it: the SDK and sync checkpoint.js, the explorer's
