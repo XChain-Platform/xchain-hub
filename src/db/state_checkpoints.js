@@ -217,10 +217,11 @@ module.exports = {
         return this.doQuery(PENDING_ANCHOR_CHECKPOINTS_SQL + ' AND sc.network = ?', [checkpointIntervalBlocks, anchorEveryNCheckpoints, network]);
     },
 
-    // Per chain of one network, the oldest snapshot_block among the anchor-eligible
-    // checkpoints above the newest anchored one: the content the v0 bundle has owed since
-    // its last anchor. Superseded rows below an anchor are never stamped, so the anchored
-    // seq bounds the age; without an anchor, the first eligible checkpoint starts the age.
+    // Per chain of one network, the oldest snapshot_block among the unanchored checkpoints
+    // on the anchor stride above the newest anchored one; without an anchor, the first
+    // such checkpoint starts the age. It also counts rows no bundle carries (markers,
+    // rootless, superseded, below CHECKPOINT_COMMITMENT), so it is never younger than
+    // findOldestBundleEligibleCheckpointBlocksByNetwork. Followers read this one.
     async findOldestUnanchoredCheckpointBlocksByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network) {
         return this.doQuery(
             'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc LEFT JOIN (' +
@@ -231,6 +232,30 @@ module.exports = {
             'AND (a.anchored_seq IS NULL OR sc.checkpoint_seq > a.anchored_seq) ' +
             'AND MOD(FLOOR(sc.checkpoint_seq / ?), ?) = 0 GROUP BY sc.chain',
             [network, network, checkpointIntervalBlocks, anchorEveryNCheckpoints]);
+    },
+
+    // The age above restricted to rows a v0 bundle can carry: no supersede field, all four
+    // roots, snapshot_block at or above the CHECKPOINT_COMMITMENT floor, and not
+    // superseded by a later marker under the selector's reader rule. Markers are read in
+    // one grouped pass and anti-joined, so the cost stays linear in the chain's rows;
+    // a correlated NOT EXISTS would rescan every later row per candidate row.
+    async findOldestBundleEligibleCheckpointBlocksByNetwork(checkpointIntervalBlocks, anchorEveryNCheckpoints, network, commitmentFloor) {
+        return this.doQuery(
+            'SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block FROM state_checkpoints sc LEFT JOIN (' +
+            '  SELECT chain, network, MAX(checkpoint_seq) AS anchored_seq FROM state_checkpoints' +
+            '  WHERE anchor_txid IS NOT NULL AND network = ? GROUP BY chain, network' +
+            ') a ON sc.chain = a.chain AND sc.network = a.network LEFT JOIN (' +
+            '  SELECT chain, checkpoint_seq, MIN(supersedes_from) AS supersedes_from FROM state_checkpoints' +
+            '  WHERE supersedes_from IS NOT NULL AND network = ? GROUP BY chain, checkpoint_seq' +
+            ') m ON m.chain = sc.chain AND m.checkpoint_seq > sc.checkpoint_seq AND m.supersedes_from <= sc.block_index ' +
+            'WHERE sc.network = ? AND sc.anchor_txid IS NULL ' +
+            'AND (a.anchored_seq IS NULL OR sc.checkpoint_seq > a.anchored_seq) ' +
+            'AND MOD(FLOOR(sc.checkpoint_seq / ?), ?) = 0 ' +
+            'AND sc.supersedes_from IS NULL AND sc.rules_digest IS NULL ' +
+            'AND sc.state_root IS NOT NULL AND sc.state_root_version IS NOT NULL ' +
+            'AND sc.block_merkle_root IS NOT NULL AND sc.block_merkle_version IS NOT NULL ' +
+            'AND sc.snapshot_block >= ? AND m.chain IS NULL GROUP BY sc.chain',
+            [network, network, network, checkpointIntervalBlocks, anchorEveryNCheckpoints, commitmentFloor]);
     },
 
     // Every superseding row (supersedes_from set), the columns the reader rule reads.

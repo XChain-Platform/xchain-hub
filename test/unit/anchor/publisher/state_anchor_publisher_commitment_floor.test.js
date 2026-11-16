@@ -90,4 +90,14 @@ function registerMeshOverrideScopeCase() {
         expect(Object.prototype.hasOwnProperty.call(armed, 'sectionCommitmentActive')).to.equal(false);
         expect(armed.groupSectionsByNetwork([row]).size, 'after stop the real gate applies').to.equal(0);
     });
+
+    it('arms the ladder age floor beside the gate and stopMeshes restores the real floor', async function () {
+        const armed = buildMesh(1, { network: 'mainnet', checkpointCommitment: true }).nodes[0].pub;
+        const plain = buildMesh(1, { network: 'mainnet' }).nodes[0].pub;
+        expect(armed.commitmentFloorBlock('mainnet'), 'armed mesh: every block is above the floor').to.equal(0);
+        expect(plain.commitmentFloorBlock('mainnet'), 'unarmed mesh: the registry floor').to.equal(961000);
+        await stopMeshes();
+        expect(Object.prototype.hasOwnProperty.call(armed, 'commitmentFloorBlock')).to.equal(false);
+        expect(armed.commitmentFloorBlock('mainnet')).to.equal(961000);
+    });
 }
