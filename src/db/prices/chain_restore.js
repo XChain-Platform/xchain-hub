@@ -32,12 +32,16 @@ module.exports = {
         return Number.isSafeInteger(oldest) && oldest >= 0 ? oldest : 0;
     },
 
-    // Read complete rows for a bounded set of rounds in one statement. Both
-    // batch ingest and the repair pass use this as their sole presence read.
+    // Read a narrow projection of every row of a bounded set of rounds in one
+    // statement; batch ingest and the repair pass use it as their sole presence
+    // read. The projection must carry every column isProducerRoundRow reads plus
+    // coin_pair, because the re-land path uses both to keep the pairs this hub
+    // finalized itself out of the batch upsert.
     async findPriceSnapshotRowsForRounds(rounds) {
         if (!Array.isArray(rounds) || rounds.length === 0) return [];
         let placeholders = rounds.map(() => '?').join(',');
-        return this.doQuery('SELECT round_number, status, source_chain, source_action_index, push_generation, consensus_proof ' +
+        return this.doQuery('SELECT round_number, coin_pair, status, reference_chain, source_chain, ' +
+            'source_action_index, push_generation, consensus_proof ' +
             'FROM price_snapshots WHERE round_number IN (' + placeholders + ') ' +
             'ORDER BY round_number ASC, coin_pair ASC', rounds);
     },

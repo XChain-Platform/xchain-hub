@@ -20,6 +20,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../../helpers/mockHub');
+const { projectPresenceRows } = require('../../../../../helpers/prices/presence_projection');
 
 function makeValidator() {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -62,7 +63,7 @@ const batchRow = (pair, generation) => ({
 });
 
 function installDb(db) {
-    db.findPriceSnapshotRowsForRounds = async () => table.map(r => Object.assign({}, r));
+    db.findPriceSnapshotRowsForRounds = async () => projectPresenceRows(table);
     db.setBatchPriceSnapshotRound = async (round, pairs, referenceBlock, referenceChain, timestamp, validatorCount,
         proofJson, actionIndex, generation, blockTime) => {
         upserts.push(pairs.map(p => p.pair));

@@ -22,6 +22,7 @@ const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/validators/identity');
 const { createMockHub, DB_METHODS } = require('./mockHub');
 const { CP_ROW }           = require('./anchor_mesh_db.js');
+const { projectPresenceRows } = require('./prices/presence_projection');
 const vectors              = require('../fixtures/anchor_archive_vectors.json');
 
 const HELD_ROUND   = 200;          // finalized on both hubs over P2P before the batch lands
@@ -100,7 +101,7 @@ function ingestQueries(rows) {
     return {
         async findPriceSnapshotRowsForRounds(rounds) {
             let wanted = new Set(rounds);
-            return copy(rows.filter(r => wanted.has(r.round_number)));
+            return projectPresenceRows(rows.filter(r => wanted.has(r.round_number)));
         },
         async getPriceSnapshotByRoundNumber(round) {
             return rows.filter(r => r.round_number === round && r.status !== 'skipped').slice(0, 1).map(r => ({ id: r.id }));
