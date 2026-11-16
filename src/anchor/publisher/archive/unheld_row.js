@@ -47,4 +47,8 @@ function priceKeyFold(row){
     return JSON.stringify([Number(row.round_number), String(row.coin_pair).replace(/ +$/, '').toLowerCase()]);
 }
 
-module.exports = { comparable, reserializeRefusal, unheldRowRefusal, priceKeyFold };
+function samePriceKey(first, second){
+    return priceKeyFold(first) === priceKeyFold(second);
+}
+
+module.exports = { comparable, reserializeRefusal, unheldRowRefusal, priceKeyFold, samePriceKey };

@@ -24,6 +24,7 @@
 const crypto = require('crypto');
 const configRedaction = require('./config_redaction.js');
 const { requestId } = require('./jsonrpc_envelope.js');
+const { isSnapshotRequest } = require('./rate_limit_policy.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub:
@@ -219,7 +220,13 @@ function authGate(ctx) {
 function feedPortAllowlist() {
     return function feedPortAllowlistMiddleware(req, res, next) {
         if (!req.xchainFeedOrigin) return next();
-        if (req.method === 'GET') return next();     // snapshot reads, already path-scoped
+        // Only a bodyless snapshot page read bypasses the RPC method check. The root
+        // JSON-RPC router dispatches parsed bodies on GET too, including on snapshot
+        // paths that no page route handles.
+        const emptyObject = req.body && !Array.isArray(req.body) &&
+            Object.getPrototypeOf(req.body) === Object.prototype && Object.keys(req.body).length === 0;
+        if (req.method === 'GET' && isSnapshotRequest(req) &&
+            (req.body === undefined || emptyObject)) return next();
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let allowed = calls.length > 0 && calls.every((call) => {
             let method = call && call.method;

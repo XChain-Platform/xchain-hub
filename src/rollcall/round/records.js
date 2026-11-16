@@ -29,6 +29,7 @@ const fs    = require('fs');
 const path  = require('path');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { readDurableLog } = require('../../lib/fs/durable_log_read.js');
 const logger = getLogger();
 
 // Settle a batch a crash left open, from its chunk plan and the sent set. The first
@@ -112,10 +113,13 @@ module.exports = {
     // The same pass rebuilds which signatures this hub may already have on the wire
     // for each epoch, which the chain has shown landed ('landed'), and which a reorg
     // has since taken off it ('reorged'); restoreDelivered hands them to the round.
+    //
+    // Only a missing file is an empty log. Any other read failure leaves the log unread
+    // (spendLogReady), because an unread log read as empty would forget every committed
+    // spend and let a restart pay for the same epoch again.
     loadSpendLog(){
-        let text;
-        try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
-        catch(e){ return; }
+        let text = readDurableLog(fs, this, '_spendLogUnread', this.spendLogPath, 'RollcallRound');
+        if(text === null) return;
         let mine = this.ownPubkey();
         let keys = new Map();
         // <epoch>:<ledger_hash>:<pubkey> for each signature a 'rescue' line took off the
@@ -143,6 +147,14 @@ module.exports = {
                 if(!lifted.has(base + pk)) this.memoryFor(this._delivered, k.epoch, k.ledgerHash).add(pk);
             }
         }
+    },
+
+    // True once the spend log has been read (or is absent). While it has not, the read is
+    // retried here and no publish may go out: the committed set is only as complete as
+    // the log that fed it.
+    spendLogReady(){
+        if(this._spendLogUnread) this.loadSpendLog();
+        return !this._spendLogUnread;
     },
 
     // One spend-log line into the per-key fold loadSpendLog finishes; `lifted` collects

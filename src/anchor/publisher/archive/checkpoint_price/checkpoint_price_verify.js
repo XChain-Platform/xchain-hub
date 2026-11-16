@@ -19,7 +19,7 @@
 'use strict';
 
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
-const { reserializeRefusal, priceKeyFold } = require('../unheld_row.js');
+const { reserializeRefusal, priceKeyFold, samePriceKey } = require('../unheld_row.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
 const logger = getLogger();
@@ -62,15 +62,14 @@ function samePriceRow(local, archived, signatureProofed){
 }
 
 function findHeldPriceRow(held, archived, signatureProofed){
-    const local = (held || []).find(candidate =>
-        String(candidate.coin_pair) === String(archived.coin_pair));
+    const local = (held || []).find(candidate => samePriceKey(candidate, archived));
     if(signatureProofed && local && String(local.status) === 'skipped') return null;
     return local;
 }
 
 function hasHeldLivePriceRow(held, archived){
     return (held || []).some(candidate =>
-        String(candidate.coin_pair) === String(archived.coin_pair) &&
+        samePriceKey(candidate, archived) &&
         String(candidate.status) !== 'skipped');
 }
 

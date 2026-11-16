@@ -28,6 +28,7 @@ const path     = require('path');
 const nodeUtil = require('node:util');
 const { ORIGIN_CHAINS, MAX_TRACKED_DEADLINES } = require('./constants.js');
 const { getLogger } = require('../../observability');
+const { readDurableLog } = require('../../lib/fs/durable_log_read.js');
 const logger = getLogger();
 
 module.exports = {
@@ -54,6 +55,13 @@ module.exports = {
         }
     },
 
+    // True once the WAL has been read (or is absent); the read is retried here. No leg
+    // is broadcast while it has not, because the at-most-once sets come from it.
+    walReady(){
+        if(this._walUnread) this.loadWal();
+        return !this._walUnread;
+    },
+
     // Seed the at-most-once sets from the WAL. An `intent` with no terminal record is
     // a crash mid-broadcast: treated as SENT, because a duplicate leg burns a real fee
     // for an action the indexer rejects, while a missed relay merely lets the origin
@@ -72,10 +80,12 @@ module.exports = {
     //
     // Returns { records, keys } so start() can tell a file that is one record per live
     // key from a history that has earned a compaction.
+    //
+    // Only a missing file (a first run) is an empty log. Any other read failure leaves the
+    // WAL unread (walReady), so a transient fault cannot forget a leg already sent.
     loadWal(){
-        let text;
-        try { text = fs.readFileSync(this.walPath, 'utf8'); }
-        catch(e){ return { records: 0, keys: 0 }; }   // absent on a first run
+        let text = readDurableLog(fs, this, '_walUnread', this.walPath, 'AttestationRelay');
+        if(text === null) return { records: 0, keys: 0 };
         let outcome = new Map();
         let records = 0;
         for(let line of text.split('\n')){

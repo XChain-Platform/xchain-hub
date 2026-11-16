@@ -139,6 +139,7 @@ module.exports = {
     // it took, and nothing here awaits, so no other driver can interleave between the
     // reservation and the WAL record it is paired with.
     prepareLegSend(phase, rid, state){
+        if(!this.walReady()) return null;
         let entry = state.wire.get(rid);
         if(!entry) return null;
         if(state.published.has(rid)) return null;

@@ -152,9 +152,16 @@ function normalizeRetractedBatchWindows(batches) {
         let first = parseIndex(batch && batch.first_round);
         let last = parseIndex(batch && batch.last_round);
         if (first === null || last === null || first < 0 || last < first) return { error: 'invalid batches' };
-        windows.push({ first, last });
+        windows.push({ first, last, clock: retractedLandingClock(batch.block_time) });
     }
     return { windows };
+}
+
+// The retracted landing's clock, or null when absent or unusable: a null clock widens the
+// reset to the whole window rather than refusing the retraction.
+function retractedLandingClock(value) {
+    let clock = (value === undefined || value === null) ? null : parseIndex(value);
+    return (clock !== null && clock > 0) ? clock : null;
 }
 
 // The windows to reset, logging and dropping a malformed list.
@@ -166,19 +173,19 @@ function retractedBatchWindows(sourceChain, batches) {
     return [];
 }
 
-// Clear the landing clock on every round of each retracted batch window, whatever path
-// stored the round. The batch-row join above finds only rounds this hub stored from the
-// batch itself, so a batch whose every round this hub had already finalized left its
-// stamp behind; the window names those rounds directly. Re-emits the reset rows so every
-// mirror following this hub clears them too.
+// Clear the landing clock the retracted landing stamped on each round of its window,
+// whatever path stored the round. The batch-row join above finds only rounds this hub
+// stored from the batch itself, so a batch whose every round this hub had already
+// finalized left its stamp behind; the window names those rounds directly. Re-emits the
+// reset rows so every mirror following this hub clears them too.
 async function resetRetractedBatchWindows(windows) {
     for (let w of windows) {
-        let rows = await this.db.findPriceSnapshotRoundsLandedBetween(w.first, w.last);
+        let rows = await this.db.findPriceSnapshotRoundsLandedBetween(w.first, w.last, w.clock);
         let rounds = [...new Set((Array.isArray(rows) ? rows : [])
             .map(row => Number(row.round_number))
             .filter(Number.isSafeInteger))];
         if (rounds.length === 0) continue;
-        await this.db.updatePriceSnapshotsClearBatchBlockTimeBetween(w.first, w.last);
+        await this.db.updatePriceSnapshotsClearBatchBlockTimeBetween(w.first, w.last, w.clock);
         for (let round of rounds) {
             let resetRows = await this.db.findPriceSnapshotsForRound(round);
             for (let row of (Array.isArray(resetRows) ? resetRows : [])) {
@@ -312,8 +319,9 @@ module.exports = {
     // row re-published at a recycled action_index (higher generation) survives even though it falls
     // inside [from, to]. Omitted (older indexer) => no fence == today's behavior; the bound is
     // mirrored onto row:deleted so replicas fence identically.
-    // batches (optional) names the round window [{first_round, last_round}] of each PRICE
-    // batch the indexer rolled back; every round inside one has its landing clock cleared.
+    // batches (optional) names the round window [{first_round, last_round, block_time?}] of
+    // each PRICE batch the indexer rolled back; every round inside one that holds that
+    // landing's block_time (any stamped round when block_time is absent) is cleared.
     async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration, batches) {
         // Fail-closed on a SUPPLIED-but-invalid bound: a malformed to/generation must not
         // collapse into the absent branch and widen this into the open-ended DELETE below.

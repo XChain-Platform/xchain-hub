@@ -137,6 +137,13 @@ function ingestQueries(rows) {
     };
 }
 
+// The window statements' predicate: a stamped, unskipped round inside the window, narrowed to
+// the retracted landing's clock when the window carries a usable one.
+function landedInWindow(r, first, last, clock) {
+    if (r.round_number < first || r.round_number > last || r.status === 'skipped' || !(r.batch_block_time > 0)) return false;
+    return !(Number.isSafeInteger(clock) && clock > 0) || r.batch_block_time === clock;
+}
+
 // The retraction statements: the fence, the deletes and both landing-clock resets.
 function retractionQueries(rows) {
     return {
@@ -154,15 +161,13 @@ function retractionQueries(rows) {
             for (let r of orphanedLandings(rows, args)) r.batch_block_time = 0;
             return {};
         },
-        async findPriceSnapshotRoundsLandedBetween(first, last) {
-            let rounds = rows.filter(r => r.round_number >= first && r.round_number <= last &&
-                r.status !== 'skipped' && r.batch_block_time > 0).map(r => r.round_number);
+        async findPriceSnapshotRoundsLandedBetween(first, last, clock) {
+            let rounds = rows.filter(r => landedInWindow(r, first, last, clock)).map(r => r.round_number);
             return [...new Set(rounds)].map(round_number => ({ round_number }));
         },
-        async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last) {
+        async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last, clock) {
             for (let r of rows) {
-                if (r.round_number >= first && r.round_number <= last && r.status !== 'skipped' && r.batch_block_time > 0)
-                    r.batch_block_time = 0;
+                if (landedInWindow(r, first, last, clock)) r.batch_block_time = 0;
             }
             return {};
         },

@@ -34,7 +34,8 @@ const logger = getLogger();
 
 // Co-sign declines handleSignReq reaches before it authenticates the sender.
 const PRE_AUTH_COSIGN_DECLINES = new Set([
-    'network_mismatch', 'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived'
+    'network_mismatch', 'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived',
+    'validator_resolve_failed', 'not_member', 'not_cadence_leader', 'sender_sig_invalid'
 ]);
 // Fallback pre-auth decline log window when the engine has no stall-log window set.
 const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
@@ -100,25 +101,54 @@ module.exports = {
         // This closes seq-grinding (a leader picking an arbitrary seq to dodge the
         // replay guard below or fork the anchor/reward bookkeeping) and makes the
         // tightened (chain, network, checkpoint_seq) unique key a true split-brain fence.
-        const derivedSeq = canonicalForms.deriveCheckpointSeq(cp.snapshot_block);
-        if(Number(cp.checkpoint_seq) !== derivedSeq)
-            return this.noteCosignDecline('seq_not_derived', cp,
-                'seq ' + cp.checkpoint_seq + ', derived ' + derivedSeq);
+        if(this.declinesInvalidSequence(cp)) return;
 
-        let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
+        const validators = await this.resolveCosignValidators(cp);
+        if(!validators) return;
         if(!this.followsCadenceLeader(validators, sender, myPubkey, cp)) return;
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender))
+            return this.noteCosignDecline('sender_sig_invalid', cp);
         this.supersedeOwnAttempt(myBtc);                           // our tip moved past a round we led
         if(this.declinesOffCadence(cp, true)) return;              // too soon after the last checkpoint
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
-        let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
+        const seqRead = await this.readCosignMaxSeq(cp);
+        if(!seqRead.ok) return;
+        const maxSeq = seqRead.value;
         if(maxSeq != null && cp.checkpoint_seq <= maxSeq)
             return this.noteCosignDecline('seq_at_or_below_max', cp, 'max recorded seq ' + maxSeq);
 
         await this.coSignConfirmedCheckpoint(cp, canonical, myPubkey);
+    },
+
+    declinesInvalidSequence(cp){
+        const derivedSeq = canonicalForms.deriveCheckpointSeq(cp.snapshot_block);
+        if(Number(cp.checkpoint_seq) === derivedSeq) return false;
+        this.noteCosignDecline('seq_not_derived', cp,
+            'seq ' + cp.checkpoint_seq + ', derived ' + derivedSeq);
+        return true;
+    },
+
+    async resolveCosignValidators(cp){
+        try {
+            return await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
+        } catch(e){
+            this.noteCosignDecline('validator_resolve_failed', cp,
+                String(e && e.message ? e.message : e).slice(0, 200));
+            return null;
+        }
+    },
+
+    async readCosignMaxSeq(cp){
+        try {
+            return { ok: true, value: await this.getMaxCheckpointSeq(cp.chain, cp.network) };
+        } catch(e){
+            this.noteCosignDecline('seq_read_failed', cp,
+                String(e && e.message ? e.message : e).slice(0, 200));
+            return { ok: false };
+        }
     },
 
     async coSignConfirmedCheckpoint(cp, canonical, myPubkey){
@@ -223,8 +253,19 @@ module.exports = {
         // site in leadsCadenceSlot (see the rationale there). Both MUST rank the same list or leader
         // and follower disagree on the cadence slot (split-brain). Inert below SWQ.
         let pubkeys    = [...new Set(validators.map(v => String(v.pubkey).toLowerCase()))].sort();
-        if(!pubkeys.includes(myPubkey)) return false;              // we don't qualify
-        if(sender !== pubkeys[cp.snapshot_block % pubkeys.length]) return false;   // not the cadence leader
+        if(!pubkeys.includes(myPubkey)){
+            // Observer hubs receive requests but cannot publish their reply, so do not meter them each round.
+            if(!this.observerHold()) this.noteCosignDecline('not_member', cp,
+                pubkeys.length + ' members' +
+                (validators && validators.snapshotUnavailable ? ', capability snapshot unavailable' : ''));
+            return false;
+        }
+        const slot = cp.snapshot_block % pubkeys.length;
+        if(sender !== pubkeys[slot]){
+            this.noteCosignDecline('not_cadence_leader', cp,
+                'sender ' + sender.slice(0, 12) + '... is not slot ' + slot + ' of ' + pubkeys.length);
+            return false;
+        }
         return true;
     },
 

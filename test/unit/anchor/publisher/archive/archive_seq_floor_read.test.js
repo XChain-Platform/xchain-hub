@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const { readArchiveSeqFloor, readArchiveSeqFloorOutcome } =
+const { readArchiveSeqFloorOutcome } =
     require('../../../../../src/anchor/publisher/archive/seq_floor_seed.js');
 
 function setup(reply){
@@ -28,31 +28,21 @@ function setup(reply){
 
 async function read(reply, overrides = {}){
     const fixture = setup(reply);
-    const value = await readArchiveSeqFloor({
+    const outcome = await readArchiveSeqFloorOutcome({
         indexerCall: fixture.indexerCall,
         dogeAddress: 'Dauthor',
         dogeIndexerUrl: 'http://indexer.invalid',
         logger: fixture.logger,
         ...overrides
     });
-    return { ...fixture, value };
-}
-
-async function readOutcome(reply){
-    const fixture = setup(reply);
-    return readArchiveSeqFloorOutcome({
-        indexerCall: fixture.indexerCall,
-        dogeAddress: 'Dauthor',
-        dogeIndexerUrl: 'http://indexer.invalid',
-        logger: fixture.logger
-    });
+    return { ...fixture, outcome };
 }
 
 describe('archive sequence floor reader', () => {
     it('returns the author floor and makes the exact author-only call', async () => {
         const result = await read({ exists: true, match_batch_seq: 12 });
 
-        expect(result.value).to.equal(12);
+        expect(result.outcome).to.deep.equal({ kind: 'ok', seq: 12 });
         expect(result.calls).to.deep.equal([
             ['DOGE', 'getarchiveanchor', { author: 'Dauthor' }]
         ]);
@@ -62,20 +52,20 @@ describe('archive sequence floor reader', () => {
     it('returns null when no archive exists for the author', async () => {
         const result = await read({ exists: false, match_batch_seq: null });
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.equal({ kind: 'none' });
         expect(result.calls).to.have.length(1);
     });
 
     it('returns null for a null response', async () => {
         const result = await read(null);
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.include({ kind: 'unknown', reason: 'invalid_seq' });
         expect(result.warnings).to.have.length(0);
     });
 
     it('distinguishes a null response from an explicit author miss', async () => {
-        expect(await readOutcome(null)).to.deep.include({ kind: 'unknown' });
-        expect(await readOutcome({ exists: false, match_batch_seq: null }))
+        expect((await read(null)).outcome).to.deep.include({ kind: 'unknown' });
+        expect((await read({ exists: false, match_batch_seq: null })).outcome)
             .to.deep.equal({ kind: 'none' });
     });
 
@@ -83,7 +73,7 @@ describe('archive sequence floor reader', () => {
         it('returns null for invalid sequence ' + invalid, async () => {
             const result = await read({ exists: true, match_batch_seq: invalid });
 
-            expect(result.value).to.equal(null);
+            expect(result.outcome).to.deep.include({ kind: 'unknown', reason: 'invalid_seq' });
             expect(result.warnings).to.have.length(0);
         });
     }
@@ -93,7 +83,9 @@ describe('archive sequence floor reader failures', () => {
     it('warns once and returns null when the lookup rejects', async () => {
         const result = await read(new Error('unreachable'));
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.equal({
+            kind: 'unknown', reason: 'lookup_failed', detail: 'unreachable'
+        });
         expect(result.warnings).to.have.length(1);
         expect(result.warnings[0]).to.include('getarchiveanchor');
     });
@@ -101,7 +93,9 @@ describe('archive sequence floor reader failures', () => {
     it('warns once and returns null when the lookup reports an error', async () => {
         const result = await read({ error: 'boom' });
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.equal({
+            kind: 'unknown', reason: 'indexer_error', detail: 'boom'
+        });
         expect(result.warnings).to.have.length(1);
         expect(result.warnings[0]).to.include('getarchiveanchor');
     });
@@ -109,14 +103,14 @@ describe('archive sequence floor reader failures', () => {
     it('does not call the indexer without a DOGE address', async () => {
         const result = await read({ exists: true, match_batch_seq: 12 }, { dogeAddress: '' });
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.equal({ kind: 'unconfigured' });
         expect(result.calls).to.have.length(0);
     });
 
     it('does not call the indexer without a DOGE indexer URL', async () => {
         const result = await read({ exists: true, match_batch_seq: 12 }, { dogeIndexerUrl: null });
 
-        expect(result.value).to.equal(null);
+        expect(result.outcome).to.deep.equal({ kind: 'unconfigured' });
         expect(result.calls).to.have.length(0);
     });
 });

@@ -18,8 +18,22 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
 const finders = require('../../../../src/db/prices/newest_page.js');
+const Prices = require('../../../../src/hub/prices.js');
 
 const FORMS = [['50', 50], ['0050', 50], ['050', 50], ['1', 1], ['10000', 10000]];
+
+function ctx(boundaryRows) {
+    const calls = [];
+    return {
+        calls,
+        doQuery: async (sql, params) => {
+            calls.push({ sql, params });
+            for (const p of params) if (typeof p === 'string') throw new Error('string bind ' + p);
+            if (/OFFSET/.test(sql)) return boundaryRows;
+            return [];
+        },
+    };
+}
 
 describe('getpricesnapshots digit-string limit reaches the DB as a number', function () {
     for (const status of [undefined, 'all']) {
@@ -28,8 +42,7 @@ describe('getpricesnapshots digit-string limit reaches the DB as a number', func
                 findPriceSnapshotsFinalized: sinon.stub().resolves([]),
                 findPriceSnapshotsAnyStatus: sinon.stub().resolves([]),
             };
-            const hub = { getPriceSnapshots: (l, s) => s === 'all'
-                ? db.findPriceSnapshotsAnyStatus(l || 50) : db.findPriceSnapshotsFinalized(l || 50) };
+            const hub = { db, getPriceSnapshots: Prices.prototype.getPriceSnapshots };
             const rpc = buildOracleRpc({ hub });
             for (const [s, n] of FORMS) {
                 const out = await rpc.getpricesnapshots({ limit: s, status });
@@ -39,6 +52,15 @@ describe('getpricesnapshots digit-string limit reaches the DB as a number', func
                 expect(typeof arg).to.equal('number');
                 expect(arg).to.equal(n);
             }
+            db.findPriceSnapshotsFinalized.resetHistory();
+            db.findPriceSnapshotsAnyStatus.resetHistory();
+            await hub.getPriceSnapshots(undefined, status);
+            const selected = status === 'all'
+                ? db.findPriceSnapshotsAnyStatus : db.findPriceSnapshotsFinalized;
+            const other = status === 'all'
+                ? db.findPriceSnapshotsFinalized : db.findPriceSnapshotsAnyStatus;
+            expect(selected.calledOnceWithExactly(50)).to.equal(true);
+            expect(other.called).to.equal(false);
         });
     }
 
@@ -50,24 +72,17 @@ describe('getpricesnapshots digit-string limit reaches the DB as a number', func
     });
 
     describe('real finders never bind a string LIMIT', function () {
-        function ctx(boundaryRows) {
-            const calls = [];
-            return {
-                calls,
-                doQuery: async (sql, params) => {
-                    calls.push({ sql, params });
-                    if (/OFFSET/.test(sql)) return boundaryRows;
-                    for (const p of params) if (typeof p === 'string') throw new Error('string bind ' + p);
-                    return [];
-                },
-            };
-        }
         for (const name of ['findPriceSnapshotsAnyStatus', 'findPriceSnapshotsFinalized']) {
             for (const [label, rows] of [['fallback', []], ['boundary', [{ round_number: 9 }]]]) {
                 it(name + ' ' + label + ' branch', async function () {
                     for (const [s] of FORMS) {
                         const c = ctx(rows);
-                        await finders[name].call(c, s);
+                        c.findPriceSnapshotsAnyStatus = finders.findPriceSnapshotsAnyStatus;
+                        c.findPriceSnapshotsFinalized = finders.findPriceSnapshotsFinalized;
+                        const hub = { db: c, getPriceSnapshots: Prices.prototype.getPriceSnapshots };
+                        const status = name === 'findPriceSnapshotsAnyStatus' ? 'all' : undefined;
+                        const out = await buildOracleRpc({ hub }).getpricesnapshots({ limit: s, status });
+                        expect(out).to.not.have.property('error');
                         const last = c.calls[c.calls.length - 1];
                         expect(typeof last.params[last.params.length - 1]).to.equal('number');
                         expect(last.params[last.params.length - 1]).to.equal(Number(s));

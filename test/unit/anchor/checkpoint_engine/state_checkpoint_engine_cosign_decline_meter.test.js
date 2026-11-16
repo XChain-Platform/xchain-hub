@@ -102,6 +102,58 @@ async function expectSequenceDeclinesAreMetered() {
     }
 }
 
+async function expectRequestDecline(reason, configure, request = signReq()){
+    const engine = buildFollower({});
+    configure(engine);
+    const lines = await warnsDuring(async () => {
+        await engine.handleSignReq(request);
+        await engine.handleSignReq(request);
+    });
+    expect(engine.cosigned, reason + ' stays fail-closed').to.have.lengthOf(0);
+    expect(engine._cosignDeclines[reason], reason).to.equal(2);
+    expect(engine._cosignDeclinesTotal, reason).to.equal(2);
+    expect(engine._lastCosignDeclineReason, reason).to.equal(reason);
+    expect(lines.filter(line => line.includes(reason)), reason).to.have.lengthOf(1);
+}
+
+describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
+    it('counts validator resolution, membership, leader, signature, and sequence read refusals', async function () {
+        await expectRequestDecline('validator_resolve_failed', engine => {
+            engine.resolveCapabilityValidators = async () => { throw new Error('resolver down'); };
+        });
+        await expectRequestDecline('not_member', engine => {
+            engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+            engine.resolveCapabilityValidators = async () => [leader, absent]
+                .map(id => ({ pubkey: pk(id), amount: '1' }));
+        });
+        await expectRequestDecline('not_cadence_leader', engine => {
+            engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+            engine.resolveCapabilityValidators = async () => [follower, absent]
+                .map(id => ({ pubkey: pk(id), amount: '1' }));
+        });
+        const badSig = signReq();
+        badSig.data.sig = leader.sign('different checkpoint');
+        await expectRequestDecline('sender_sig_invalid', () => {}, badSig);
+        await expectRequestDecline('seq_read_failed', engine => {
+            engine.getMaxCheckpointSeq = async () => { throw new Error('db down'); };
+        });
+    });
+
+    it('does not meter a non-member observer that cannot publish a reply', async function () {
+        const engine = buildFollower({});
+        engine.peerManager = { authoringHeld: () => true };
+        engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+        engine.resolveCapabilityValidators = async () => [leader, absent]
+            .map(id => ({ pubkey: pk(id), amount: '1' }));
+
+        await engine.handleSignReq(signReq());
+
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.not_member).to.equal(0);
+        expect(engine._cosignDeclinesTotal).to.equal(0);
+    });
+});
+
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     for (let [reason, opts, detail] of DECLINE_CASES) {
         it(reason + ': declines, counts it, and warns once per window', async function () {
@@ -208,7 +260,9 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         let fresh = await engine.getStats();
         expect(fresh.cosign_declines).to.have.all.keys('network_mismatch', 'own_tip_unresolved',
             'snapshot_out_of_tolerance', 'off_cadence',
-            'seq_not_derived', 'seq_at_or_below_max', 'indexer_read_failed', 'indexer_no_block',
+            'seq_not_derived', 'validator_resolve_failed', 'not_member', 'not_cadence_leader',
+            'sender_sig_invalid', 'seq_read_failed', 'seq_at_or_below_max',
+            'indexer_read_failed', 'indexer_no_block',
             'indexer_replaying', 'supersede_read_failed', 'supersede_no_replay',
             'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
             'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',

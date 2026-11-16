@@ -48,7 +48,7 @@ function producerRows(env, round, firstId, options) {
     const payload = env.aggregator.buildPriceV0Payload(round, timestamp, pairs, REFERENCE_BLOCK, null);
     const sigs = env.validators.slice(0, 3).map(item => ({
         pubkey: item.pubkey, sig: opts.forged ? 'ab'.repeat(64) : item.sign(payload)
-    }));
+    })).sort((a, b) => (a.pubkey < b.pubkey ? -1 : 1));
     return pairs.map((pair, index) => ({
         id: firstId + index,
         round_number: round,

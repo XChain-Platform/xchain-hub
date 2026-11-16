@@ -23,7 +23,7 @@ const HUB_VERSION = require('../../../package.json').version;
 
 const DEFAULT_MAX_ENTRIES = 500000;
 const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const STORE_FORMAT = 1;
+const STORE_FORMAT = 2;
 
 function contentHash(row) {
     const columns = Object.keys(row || {}).filter(column => column !== 'id').sort();
@@ -67,6 +67,19 @@ function resolveStore({ store, filePath }) {
     return filePath ? createFileRefusalStore(filePath) : null;
 }
 
+function keyFor(peerIdentity, table, row) {
+    const parts = [String(peerIdentity), String(table), Number(row && row.id), contentHash(row)];
+    return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('base64');
+}
+
+// A producer round is refused or accepted as the whole set of its rows, so its key covers every row
+// the walk checked: a round that later gains a row is a different set and is verified again.
+function keyForGroup(peerIdentity, table, rows) {
+    const members = rows.map(row => [Number(row && row.id), contentHash(row)]).sort((a, b) => a[0] - b[0]);
+    const parts = [String(peerIdentity), String(table), members];
+    return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('base64');
+}
+
 function createRefusalMemo(options = {}) {
     const limit = Number(options.maxEntries) > 0 ? Number(options.maxEntries) : DEFAULT_MAX_ENTRIES;
     const maxAgeMs = Number(options.maxAgeMs) > 0 ? Number(options.maxAgeMs) : DEFAULT_MAX_AGE_MS;
@@ -82,11 +95,6 @@ function createRefusalMemo(options = {}) {
     // A Set iterates in insertion order, so its first entry is always the oldest.
     const keys = new Set();
     let loaded = !store, dirty = false;
-
-    function keyFor(peerIdentity, table, row) {
-        const parts = [String(peerIdentity), String(table), Number(row && row.id), contentHash(row)];
-        return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('base64');
-    }
 
     function load() {
         if (loaded) return;
@@ -123,7 +131,7 @@ function createRefusalMemo(options = {}) {
         }
     }
 
-    return { keyFor, has, remember, flush, size: () => { load(); return keys.size; } };
+    return { keyFor, keyForGroup, has, remember, flush, size: () => { load(); return keys.size; } };
 }
 
 module.exports = {

@@ -41,6 +41,7 @@ function publisher(db){
 
 function heldPrice(extra){
     return Object.assign({
+        round_number: 11,
         coin_pair: 'BTC/USD',
         status: 'finalized',
         batch_block_time: 1234,

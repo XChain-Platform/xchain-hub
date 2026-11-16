@@ -15,11 +15,11 @@
 'use strict';
 
 /**
- * The bound on concurrent JSON-RPC getpricesnapshots calls.
+ * The shared bound on concurrent JSON-RPC price snapshot reads.
  *
  * The defect this guards: the REST snapshot routes cap their in-flight reads, but
- * the JSON-RPC getpricesnapshots read had no bound. Four dozen public callers at
- * limit=10000 (or ten callers sending 20-member batches) filled the shared
+ * the JSON-RPC price snapshot reads had no complete bound. Four dozen public callers
+ * (or ten callers sending 20-member batches) filled the shared
  * ten-connection pool, the liveness probe's SELECT 1 queued behind them, and
  * ping and health answered 503 db:false while the database was serving every
  * read. The handler now admits a bounded number of reads and sheds the rest
@@ -70,8 +70,8 @@ function fakePool(size) {
     };
 }
 
-// A hub whose page reads hold a pool slot until the test lets them go, with the
-// real configs mixin (the liveness probe) running over the same pool.
+// A hub whose snapshot reads hold a pool slot until the test lets them go, with
+// the real configs mixin (the liveness probe) running over the same pool.
 function starvableHub(pool) {
     const held = [];
     const state = { calls: 0, inFlight: 0, peak: 0, failNext: 0 };
@@ -82,24 +82,28 @@ function starvableHub(pool) {
             try { return [{ 1: 1 }]; } finally { pool.release(); }
         }
     });
+    async function holdRead(result) {
+        state.calls++;
+        if (state.failNext > 0) { state.failNext--; throw new Error('read failed'); }
+        state.inFlight++;
+        state.peak = Math.max(state.peak, state.inFlight);
+        const gate = deferred();
+        held.push(gate);
+        await pool.acquire();
+        try {
+            await gate.promise;
+            return result;
+        } finally {
+            pool.release();
+            state.inFlight--;
+        }
+    }
     const hub = {
         network: 'regtest',
         db,
-        async getPriceSnapshots() {
-            state.calls++;
-            if (state.failNext > 0) { state.failNext--; throw new Error('read failed'); }
-            state.inFlight++;
-            state.peak = Math.max(state.peak, state.inFlight);
-            const gate = deferred();
-            held.push(gate);
-            await pool.acquire();
-            try {
-                await gate.promise;
-                return [{ id: 1 }];
-            } finally {
-                pool.release();
-                state.inFlight--;
-            }
+        getPriceSnapshots() { return holdRead([{ id: 1 }]); },
+        getOracleRoundPresence() {
+            return holdRead({ from_round: 0, to_round: 999, rounds: [], missing: [], digest: 'x' });
         },
         async oracleMaxAgeSecondsInForce() { return 600; }
     };
@@ -134,35 +138,34 @@ async function peakWithConfig(hubConfig) {
 
 function boundSuite() {
     it('caps in-flight page reads below the pool, sheds the excess in-band, and keeps ping answering db:true', async function () {
-        const { hub, state, releaseAll } = starvableHub(fakePool(POOL_SIZE));
-        const oracle = buildOracleRpc({ hub, hubConfig: {} });
-        const system = systemRpc(hub);
+        for (const kind of ['page', 'presence']) {
+            const { hub, state, releaseAll } = starvableHub(fakePool(POOL_SIZE));
+            const oracle = buildOracleRpc({ hub, hubConfig: {} });
+            const calls = Array.from({ length: CALLERS }, () => kind === 'page'
+                ? oracle.getpricesnapshots({ limit: 10000 })
+                : oracle.getoracleroundpresence({ from_round: 0, to_round: 999 }));
+            let settled = 0;
+            for (const c of calls) c.then(() => { settled++; });
+            await waitFor(() => state.inFlight + settled === CALLERS);
 
-        const calls = Array.from({ length: CALLERS }, () =>
-            oracle.getpricesnapshots({ limit: 10000 }));
-        let settled = 0;
-        for (const c of calls) c.then(() => { settled++; });
-        // Every call is either holding a read or already answered.
-        await waitFor(() => state.inFlight + settled === CALLERS);
+            const started = Date.now();
+            const probe = await ping(systemRpc(hub));
+            expect(probe.statusCode).to.equal(200);
+            expect(probe.body).to.deep.equal({ status: 'success', db: true });
+            expect(Date.now() - started).to.be.below(DB_PROBE_TIMEOUT_MS);
+            expect(state.peak).to.be.within(1, POOL_SIZE - 2);
 
-        // The broken invariant first: with the reads held, ping must still see the DB.
-        const started = Date.now();
-        const probe = await ping(system);
-        expect(probe.statusCode).to.equal(200);
-        expect(probe.body).to.deep.equal({ status: 'success', db: true });
-        expect(Date.now() - started).to.be.below(DB_PROBE_TIMEOUT_MS);
-        expect(state.peak).to.be.within(1, POOL_SIZE - 2);
-
-        releaseAll();
-        const results = await Promise.all(calls);
-        const served = results.filter((r) => Array.isArray(r));
-        const shed = results.filter((r) => r && !Array.isArray(r) && r.code === -32029);
-        expect(served.length).to.equal(state.peak);
-        expect(served.length + shed.length).to.equal(CALLERS);
-        for (const r of shed) {
-            expect(r.error).to.be.a('string');
-            expect(r.data.retryAfterSeconds).to.be.at.least(1);
-            expect(r.data.limit).to.equal(state.peak);
+            releaseAll();
+            const results = await Promise.all(calls);
+            const served = results.filter((r) => Array.isArray(r) || (r && r.digest === 'x'));
+            const shed = results.filter((r) => r && r.code === -32029);
+            expect(served.length).to.equal(state.peak);
+            expect(served.length + shed.length).to.equal(CALLERS);
+            for (const r of shed) {
+                expect(r.error).to.be.a('string');
+                expect(r.data.retryAfterSeconds).to.be.at.least(1);
+                expect(r.data.limit).to.equal(state.peak);
+            }
         }
     });
 }
@@ -193,8 +196,28 @@ function releaseSuite() {
         releaseAll();
         const results = await Promise.all(calls);
         expect(results.filter((r) => Array.isArray(r))).to.have.length(2);
+
+        const mixed = starvableHub(fakePool(POOL_SIZE));
+        const mixedRpc = buildOracleRpc({ hub: mixed.hub,
+            hubConfig: { HUB_RPC_SNAPSHOT_MAX_INFLIGHT: '2' } });
+        const mixedCalls = [
+            mixedRpc.getoracleroundpresence({ from_round: 0, to_round: 1 }),
+            mixedRpc.getpricesnapshots({ limit: 10 }),
+            mixedRpc.getoracleroundpresence({ from_round: 2, to_round: 3 }),
+            mixedRpc.getpricesnapshots({ limit: 10 }),
+        ];
+        let mixedSettled = 0;
+        for (const call of mixedCalls) call.then(() => { mixedSettled++; });
+        await waitFor(() => mixed.state.inFlight + mixedSettled === mixedCalls.length);
+        expect(mixed.state.peak).to.equal(2);
+        mixed.releaseAll();
+        const mixedResults = await Promise.all(mixedCalls);
+        expect(mixedResults.filter((r) => r && r.code === -32029)).to.have.length(2);
     });
 
+}
+
+function releaseSlotSuite() {
     it('frees the slot when the read throws, so later calls are admitted again', async function () {
         const { hub, state, releaseAll } = starvableHub(fakePool(POOL_SIZE));
         const oracle = buildOracleRpc({ hub, hubConfig: { HUB_RPC_SNAPSHOT_MAX_INFLIGHT: '2' } });
@@ -229,6 +252,16 @@ function releaseSuite() {
         await waitFor(() => state.inFlight === 1);
         releaseAll();
         expect(await ok).to.deep.equal([{ id: 1 }]);
+
+        const presence = starvableHub(fakePool(POOL_SIZE));
+        const presenceRpc = buildOracleRpc({ hub: presence.hub,
+            hubConfig: { HUB_RPC_SNAPSHOT_MAX_INFLIGHT: '1' } });
+        expect(await presenceRpc.getoracleroundpresence({ from_round: -1 })).to.have.property('error');
+        expect(presence.state.calls).to.equal(0);
+        const presenceOk = presenceRpc.getoracleroundpresence({ from_round: 0, to_round: 1 });
+        await waitFor(() => presence.state.inFlight === 1);
+        presence.releaseAll();
+        expect(await presenceOk).to.have.property('digest', 'x');
     });
 }
 
@@ -236,4 +269,5 @@ describe('JSON-RPC getpricesnapshots in-flight bound', function () {
     boundSuite();
     configBoundSuite();
     releaseSuite();
+    releaseSlotSuite();
 });

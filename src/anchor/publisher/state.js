@@ -25,7 +25,7 @@
 const coins = require('../../coins');
 const hubConfig = require('../../config');
 const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
-const { classifyArchiveSeqFloorReply } = require('./archive/seq_floor_seed.js');
+const { readArchiveSeqFloorOutcome } = require('./archive/seq_floor_seed.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -226,31 +226,39 @@ module.exports = {
 
     async seedArchiveSeqFloor(){
         const ix = this.indexers && this.indexers.DOGE;
-        if(!this.dogeAddress || !ix || !ix.url){
-            logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE address or indexer is not configured');
-            return;
-        }
         try {
-            const res = await this.indexerCall('DOGE', 'getarchiveanchor', { author: this.dogeAddress });
-            const reply = classifyArchiveSeqFloorReply(res);
-            // Report an indexer error as a failed lookup, never as "no archive"
-            if(reply.kind === 'error'){
-                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: the DOGE indexer answered ' + reply.detail);
+            const outcome = await readArchiveSeqFloorOutcome({
+                indexerCall: (coin, method, params) => this.indexerCall(coin, method, params),
+                dogeAddress: this.dogeAddress,
+                dogeIndexerUrl: ix && ix.url,
+                logger: null
+            });
+            if(outcome.kind === 'unconfigured'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE address or indexer is not configured');
                 return;
             }
-            if(reply.kind === 'none'){
+            // Report an indexer error as a failed lookup, never as "no archive"
+            if(outcome.kind === 'unknown' && outcome.reason === 'indexer_error'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: the DOGE indexer answered ' + outcome.detail);
+                return;
+            }
+            if(outcome.kind === 'unknown' && outcome.reason === 'lookup_failed'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + outcome.detail);
+                return;
+            }
+            if(outcome.kind === 'none'){
                 this._ownArchiveSeqFloorKnown = true;
                 logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer found no archive');
                 return;
             }
             // Refuse a seq that is not a whole number >= 0 (it would make the next batch seq fractional)
-            if(reply.kind === 'invalid'){
-                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer returned an invalid seq ' + String(reply.raw));
+            if(outcome.kind === 'unknown' && outcome.reason === 'invalid_seq'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer returned an invalid seq ' + String(outcome.raw));
                 return;
             }
-            this.noteConsumedBatchSeq(reply.seq, 'boot-time floor seed from the DOGE indexer');
+            this.noteConsumedBatchSeq(outcome.seq, 'boot-time floor seed from the DOGE indexer');
             // Also hold it as our own floor, which the jump cap never discards and a later failed read keeps
-            this.noteOwnArchiveSeq(reply.seq);
+            this.noteOwnArchiveSeq(outcome.seq);
             this._ownArchiveSeqFloorKnown = true;
         } catch(err){
             logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + (err && err.message ? err.message : String(err)));

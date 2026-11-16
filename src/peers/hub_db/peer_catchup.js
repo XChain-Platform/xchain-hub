@@ -12,6 +12,9 @@ const { createRefusalMemo, DEFAULT_REFUSAL_MEMO_PATH } = require('./refusal_memo
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
 const { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
+const { processRoundGroup, settlePooledRounds, verifierAccepted, refusalReason, countRefusal, logRefusal,
+    KNOWN_REFUSAL, MAX_POOLED_ROUNDS, MAX_POOLED_ROWS_PER_ROUND,
+    MAX_POOLED_BYTES_PER_ROUND, MAX_POOLED_BYTES_PER_WALK } = require('./price_round_walk.js');
 const { connectedSignerPeers } = require('./signer_peers.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
@@ -19,12 +22,9 @@ const DEFAULT_PAGE_SIZE = 10000, DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000, DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000, DEFAULT_BOOT_GRACE_MS = 30000;
-// Per-walk cap on individual refusal lines; the walk summary carries the full count, so a restart with an empty memo stays bounded.
-const MAX_REFUSAL_LINES_PER_WALK = 10;
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 // How a table walk ended: complete, served with a failed indexer read, or served by no peer.
 const WALK_COMPLETE = 'complete', WALK_LEFT_BEHIND = 'left_behind', WALK_UNSERVED = 'unserved';
-const KNOWN_REFUSAL = Object.freeze({ ok: false, reason: 'refused on an earlier walk' });
 
 function positiveOr(value, fallback) {
     return Number(value) > 0 ? Number(value) : fallback;
@@ -80,22 +80,9 @@ function requestJson(url, feedKey, timeoutMs) {
     });
 }
 
-function countRefusal(walk, verdict) {
-    walk.refused += 1;
-    if (verdict === KNOWN_REFUSAL) walk.knownRefused += 1;
-}
-
 // Refused rows that got no individual line (not already known, past the cap).
 const suppressedNote = w => (w.refused - w.knownRefused - w.refusalLines > 0
     ? '; ' + (w.refused - w.knownRefused - w.refusalLines) + ' per-row refusal line(s) suppressed' : '');
-
-function verifierAccepted(verdict) {
-    return !(verdict === false || verdict === null || (verdict && typeof verdict === 'object' && verdict.ok === false));
-}
-
-function refusalReason(verdict) {
-    return verdict && typeof verdict === 'object' && verdict.reason ? String(verdict.reason) : 'verifier refused row';
-}
 
 class HubDbPeerCatchup {
     constructor(options) {
@@ -105,6 +92,10 @@ class HubDbPeerCatchup {
         this.feedKey = opts.feedKey || '';
         this.network = opts.network != null ? String(opts.network) : '';
         this.pageSize = Math.min(positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE);
+        this.maxPooledRounds = positiveOr(opts.maxPooledRounds, MAX_POOLED_ROUNDS);
+        this.maxPooledRowsPerRound = positiveOr(opts.maxPooledRowsPerRound, MAX_POOLED_ROWS_PER_ROUND);
+        this.maxPooledBytesPerRound = positiveOr(opts.maxPooledBytesPerRound, MAX_POOLED_BYTES_PER_ROUND);
+        this.maxPooledBytesPerWalk = positiveOr(opts.maxPooledBytesPerWalk, MAX_POOLED_BYTES_PER_WALK);
         this.warnIntervalMs = positiveOr(opts.warnIntervalMs, DEFAULT_WARN_INTERVAL_MS);
         this.retryIntervalMs = positiveOr(opts.retryIntervalMs, DEFAULT_RETRY_INTERVAL_MS);
         this.maxRetryIntervalMs = positiveOr(opts.maxRetryIntervalMs, DEFAULT_MAX_RETRY_INTERVAL_MS);
@@ -333,25 +324,32 @@ class HubDbPeerCatchup {
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
         const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [],
             refused: 0, knownRefused: 0, refusalLines: 0 };
-        for (;;) {
-            const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
-            if (!page || page.table !== table || !Array.isArray(page.rows)) throw new Error('Invalid snapshot page for ' + table);
-            // A stale or newer peer's rows may carry columns this hub cannot interpret; the throw
-            // lands in walkTable's catch, which backs the feed off and tries the next peer.
-            if (page.schema_version !== HUB_SCHEMA_VERSION) {
-                throw new Error('Snapshot page for ' + table + ' has schema_version ' + page.schema_version +
-                    ', expected ' + HUB_SCHEMA_VERSION);
+        try {
+            for (;;) {
+                const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
+                if (!page || page.table !== table || !Array.isArray(page.rows)) throw new Error('Invalid snapshot page for ' + table);
+                // A stale or newer peer's rows may carry columns this hub cannot interpret; the throw
+                // lands in walkTable's catch, which backs the feed off and tries the next peer.
+                if (page.schema_version !== HUB_SCHEMA_VERSION) {
+                    throw new Error('Snapshot page for ' + table + ' has schema_version ' + page.schema_version +
+                        ', expected ' + HUB_SCHEMA_VERSION);
+                }
+                walk.cursor = advanceCursor(walk.cursor, page.rows);
+                const full = page.rows.length >= this.pageSize;
+                const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
+                walk.carry = batch.held;
+                await this.processBatch(walk, batch.ready);
+                if (!full) return this.endWalk(walk);
             }
-            walk.cursor = advanceCursor(walk.cursor, page.rows);
-            const full = page.rows.length >= this.pageSize;
-            const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
-            walk.carry = batch.held;
-            await this.processBatch(walk, batch.ready);
-            if (!full) return this.endWalk(walk);
+        } catch (error) {
+            await settlePooledRounds(this, walk);
+            this.refusals.flush();
+            throw error;
         }
     }
 
-    endWalk(walk) {
+    async endWalk(walk) {
+        await settlePooledRounds(this, walk);
         if (walk.refused > 0) this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table +
             ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)' + suppressedNote(walk));
         this.refusals.flush();
@@ -359,23 +357,25 @@ class HubDbPeerCatchup {
     }
 
     async processBatch(walk, rows) {
-        const groups = indexGroups(rows);
-        const verdicts = new Map();
         for (const row of rows) {
+            if (groupKey(row) !== null) continue;
             const localRow = withoutWireId(row);
             if (await this.hasRow(walk.table, localRow)) continue;
-            const key = groupKey(row) || 'row:' + row.id;
-            if (!verdicts.has(key)) verdicts.set(key, await this.verifyWalkRow(walk, row, groups.get(key)));
-            const verdict = verdicts.get(key);
+            const verdict = await this.verifyWalkRow(walk, row);
             if (verifierAccepted(verdict)) await this.storeRow(walk.table, verifiedRowOr(verdict, localRow));
             else if (!notMirrored(verdict)) countRefusal(walk, verdict);
         }
+        for (const [key, group] of indexGroups(rows)) await processRoundGroup(this, walk, key, group);
     }
 
-    // A retryable or failed-read refusal is not remembered because a later walk may accept it.
-    async verifyWalkRow(walk, row, priceRoundRows) {
+    // A retryable or failed-read refusal is not remembered because a later walk may accept it. With
+    // deferLasting a lasting refusal is returned unlogged and unremembered, for the walk to settle once
+    // the rest of a producer round (the rows of priceRoundRows) has had every chance to arrive.
+    async verifyWalkRow(walk, row, priceRoundRows, deferLasting) {
         const { peer, table, reads } = walk;
-        const memoKey = this.refusals.keyFor(walk.peerIdentity || peer, table, row);
+        const identity = walk.peerIdentity || peer;
+        const memoKey = priceRoundRows ? this.refusals.keyForGroup(identity, table, priceRoundRows)
+            : this.refusals.keyFor(identity, table, row);
         if (this.refusals.has(memoKey)) return KNOWN_REFUSAL;
         const failedBefore = reads ? reads.failedServes : 0;
         const verdict = await this.verifyRow(walk.verifier, row, {
@@ -383,13 +383,11 @@ class HubDbPeerCatchup {
             network: this.network, readCapabilitySnapshot: reads ? reads.read : undefined, priceRoundRows
         });
         if (verifierAccepted(verdict) || notMirrored(verdict)) return verdict;
-        if (walk.refusalLines < MAX_REFUSAL_LINES_PER_WALK) {
-            walk.refusalLines += 1;
-            this.logger.warn('Hub DB peer catch-up verifier refused ' + table +
-                ' row ' + Number(row.id) + ' from ' + peer + ': ' + refusalReason(verdict));
-        }
-        if (verdict && (verdict.retry === true || verdict.retryable === true)) walk.leftBehind = true;
-        else if (reads && reads.failedServes > failedBefore) walk.leftBehind = true;
+        const retry = Boolean(verdict && (verdict.retry === true || verdict.retryable === true)) ||
+            Boolean(reads && reads.failedServes > failedBefore);
+        if (deferLasting && !retry) return { ok: false, reason: refusalReason(verdict), deferred: true, memoKey };
+        logRefusal(this, walk, row, verdict);
+        if (retry) walk.leftBehind = true;
         else this.refusals.remember(memoKey);
         return verdict;
     }

@@ -30,13 +30,6 @@ function classifyArchiveSeqFloorReply(res){
     return { kind: 'ok', seq };
 }
 
-async function readArchiveSeqFloor({ indexerCall, dogeAddress, dogeIndexerUrl, logger }){
-    const outcome = await readArchiveSeqFloorOutcome({
-        indexerCall, dogeAddress, dogeIndexerUrl, logger
-    });
-    return outcome.kind === 'ok' ? outcome.seq : null;
-}
-
 // Preserve whether the indexer gave a definitive answer. A missing archive is known;
 // a failed lookup or malformed seq is not and must not authorize a fresh leader draw.
 async function readArchiveSeqFloorOutcome({ indexerCall, dogeAddress, dogeIndexerUrl, logger }){
@@ -46,14 +39,15 @@ async function readArchiveSeqFloorOutcome({ indexerCall, dogeAddress, dogeIndexe
     try {
         res = await indexerCall('DOGE', 'getarchiveanchor', { author: dogeAddress });
     } catch(e) {
-        warnLookupFailure(logger, e && e.message);
-        return { kind: 'unknown', reason: 'lookup_failed' };
+        const detail = e && e.message ? e.message : String(e);
+        warnLookupFailure(logger, detail);
+        return { kind: 'unknown', reason: 'lookup_failed', detail };
     }
 
     const reply = classifyArchiveSeqFloorReply(res);
     if(reply.kind === 'error'){
         warnLookupFailure(logger, reply.detail);
-        return { kind: 'unknown', reason: 'indexer_error' };
+        return { kind: 'unknown', reason: 'indexer_error', detail: reply.detail };
     }
     if(reply.kind === 'invalid')
         return { kind: 'unknown', reason: 'invalid_seq', raw: reply.raw };
@@ -61,5 +55,5 @@ async function readArchiveSeqFloorOutcome({ indexerCall, dogeAddress, dogeIndexe
 }
 
 module.exports = {
-    classifyArchiveSeqFloorReply, readArchiveSeqFloor, readArchiveSeqFloorOutcome
+    classifyArchiveSeqFloorReply, readArchiveSeqFloorOutcome
 };

@@ -26,12 +26,12 @@ const { RATE_LIMIT_RPC_ERROR_CODE } = require('../rate_limit_policy');
 // Preserve consensus-input capacity by enriching at most 16 historical anchors per public request.
 const MAX_QUORUM_MARGIN_ANCHORS = 16;
 
-// Bound on getpricesnapshots calls in flight at once, whoever sends them. The pool holds
-// ten connections; the REST /hub-db/snapshot gate takes up to 4 of them by default and this
-// gate up to 3, so at least 3 stay free for the hub's own writers and for the SELECT 1
-// liveness probe behind ping and health. HUB_RPC_SNAPSHOT_MAX_INFLIGHT overrides it, and
-// the two gates count separately, so an operator raising either should keep their sum
-// below the pool size.
+// Bound on getpricesnapshots and getoracleroundpresence calls in flight together, whoever
+// sends them. The pool holds ten connections; the REST /hub-db/snapshot gate takes up to
+// 4 of them by default and this gate up to 3, so at least 3 stay free for the hub's own
+// writers and for the SELECT 1 liveness probe behind ping and health.
+// HUB_RPC_SNAPSHOT_MAX_INFLIGHT overrides it, and the REST and RPC gates count separately,
+// so an operator raising either should keep their sum below the pool size.
 const DEFAULT_RPC_SNAPSHOT_MAX_INFLIGHT = 3;
 const RPC_SNAPSHOT_BUSY_RETRY_AFTER_S = 1;
 
@@ -121,7 +121,8 @@ async function addQuorumMargins(hub, rows) {
 }
 
 function buildOracleRpc(ctx) {
-    return Object.assign({}, oracleStatusRpc(ctx), priceReadsRpc(ctx), roundPresenceRpc(ctx));
+    const gatedCtx = Object.assign({}, ctx, { admitSnapshotRead: snapshotReadGate(ctx.hubConfig) });
+    return Object.assign({}, oracleStatusRpc(ctx), priceReadsRpc(gatedCtx), roundPresenceRpc(gatedCtx));
 }
 
 function oracleStatusRpc(ctx) {
@@ -204,8 +205,7 @@ async function readPriceSnapshots(hub, {limit, status, with_watermark, with_quor
 }
 
 function priceReadsRpc(ctx) {
-    const { hub, hubConfig } = ctx;
-    const admitSnapshotRead = snapshotReadGate(hubConfig);
+    const { hub, admitSnapshotRead } = ctx;
     return {
         // status is optional and additive: omitted/'finalized' preserves the
         // historical finalized-only contract; 'all' includes skipped/disputed
@@ -239,7 +239,7 @@ function priceReadsRpc(ctx) {
 }
 
 function roundPresenceRpc(ctx) {
-    const { hub } = ctx;
+    const { hub, admitSnapshotRead } = ctx;
     return {
         // Per-round PRESENCE over an explicit range, so "this hub has no
         // record of round 26" is a REPORTED value rather than an empty result set.
@@ -263,11 +263,15 @@ function roundPresenceRpc(ctx) {
                 if (n === null || n < 1 || n > roundPresence.MAX_RANGE)
                     return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
             }
-            try {
-                return await hub.getOracleRoundPresence(from_round, to_round, limit);
-            } catch (err) {
-                return {error: "error fetching oracle round presence"};
-            }
+            // Hold one shared price-snapshot slot across the optional max-round query
+            // and the range read. Validation stays outside the gate so bad calls take no slot.
+            return admitSnapshotRead(async () => {
+                try {
+                    return await hub.getOracleRoundPresence(from_round, to_round, limit);
+                } catch (err) {
+                    return {error: "error fetching oracle round presence"};
+                }
+            });
         },
 
         // Operator stake share vs the weighted commit gate (read, no auth). Per chain

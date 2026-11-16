@@ -172,6 +172,9 @@ module.exports = {
         // the lifetime total feeds the scrape series without an async getStats call.
         this._cosignDeclines = { network_mismatch: 0, own_tip_unresolved: 0,
                                  snapshot_out_of_tolerance: 0, seq_not_derived: 0,
+                                 validator_resolve_failed: 0, not_member: 0,
+                                 not_cadence_leader: 0, sender_sig_invalid: 0,
+                                 seq_read_failed: 0,
                                  seq_at_or_below_max: 0, off_cadence: 0,
                                  indexer_read_failed: 0, indexer_no_block: 0, indexer_replaying: 0,
                                  supersede_read_failed: 0, supersede_no_replay: 0, supersede_unwitnessed: 0,

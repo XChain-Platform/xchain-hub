@@ -24,6 +24,7 @@
 const crypto = require('crypto');
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const { serialPass } = require('../drain_serial.js');
+const { samePriceKey } = require('./unheld_row.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -108,8 +109,7 @@ module.exports = {
             const round = Number(price.round_number);
             if(!heldRounds.has(round))
                 heldRounds.set(round, await this.db.findPriceSnapshotsForRound(round));
-            const held = (heldRounds.get(round) || []).find(row =>
-                String(row.coin_pair) === String(price.coin_pair));
+            const held = (heldRounds.get(round) || []).find(row => samePriceKey(row, price));
             if(!held || String(held.status) === 'skipped') continue;
             if(price.status === '__partial__'){
                 localPrices.push(price);
@@ -250,7 +250,7 @@ module.exports = {
                p.batch_block_time == null || p.proof_sha == null) return false;
             if(p.status === '__partial__') continue;
             const rows = await this.db.findPriceSnapshotsForRound(Number(p.round_number));
-            const held = (rows || []).find(r => String(r.coin_pair) === String(p.coin_pair));
+            const held = (rows || []).find(r => samePriceKey(r, p));
             const ignoredSkip = held && String(held.status) === 'skipped' &&
                 String(p.status) !== 'skipped';
             if(held && !ignoredSkip && (String(held.status) !== String(p.status) ||

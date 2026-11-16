@@ -56,17 +56,31 @@ async function eachOrphanedLandingStatement(db, head, query) {
     return results;
 }
 
+// A round keeps the earliest landing clock of every batch that carried it, so a window reset
+// clears only rows holding the retracted landing's own clock; a round stamped earlier by a
+// landing that is still canonical, on this chain or another, keeps its stamp. A window with
+// no usable clock (sent by an indexer that does not carry one) keeps the whole-range reset,
+// which only ever fails closed. Two landings sharing one exact clock both clear, which also
+// fails closed until the landing backfill restamps the survivor.
+function windowLandingFilter(first, last, clock) {
+    if (!Number.isSafeInteger(clock) || clock <= 0) return { tail: '', args: [first, last] };
+    return { tail: ' AND batch_block_time = ?', args: [first, last, clock] };
+}
+
 module.exports = {
 
     // Rounds inside a retracted PRICE batch window that hold a landing stamp, whatever path
     // stored them (a hub that finalized every round of the batch itself holds no batch row).
-    async findPriceSnapshotRoundsLandedBetween(first, last) {
-        return this.doQuery(`SELECT DISTINCT round_number FROM price_snapshots WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
+    async findPriceSnapshotRoundsLandedBetween(first, last, clock) {
+        const { tail, args } = windowLandingFilter(first, last, clock);
+        return this.doQuery(`SELECT DISTINCT round_number FROM price_snapshots WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0${tail}`, args);
     },
 
-    // Clears the landing stamp on every round inside a retracted PRICE batch window.
-    async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last) {
-        return this.doQuery(`UPDATE price_snapshots SET batch_block_time = 0 WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0`, [first, last]);
+    // Clears the landing stamp on the rounds inside a retracted PRICE batch window that the
+    // read above returns, under the same filter.
+    async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last, clock) {
+        const { tail, args } = windowLandingFilter(first, last, clock);
+        return this.doQuery(`UPDATE price_snapshots SET batch_block_time = 0 WHERE round_number BETWEEN ? AND ? AND status != 'skipped' AND batch_block_time > 0${tail}`, args);
     },
 
     async findSelfFinalizedRoundsForBatchRetraction(...query) {
