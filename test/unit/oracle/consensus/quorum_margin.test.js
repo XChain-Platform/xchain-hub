@@ -37,6 +37,11 @@ describe('oracle quorum margin', function(){
             expect(r.signers).to.equal(3);
             expect(r.oneFaultTolerant).to.equal(false);
         });
+        it('does not count a signer outside the validator snapshot', function(){
+            let r = computeQuorumMargin({ weighted: false, validators: vals([1,1,1,1]),
+                signers: ['pk0', 'pk1', 'outside-a', 'outside-b'] });
+            expect(r).to.include({ signers: 2, met: false, oneFaultTolerant: false });
+        });
     });
 
     describe('stake mode', function(){
@@ -64,6 +69,11 @@ describe('oracle quorum margin', function(){
             ];
             let r = computeQuorumMargin({ weighted: true, validators: v, signers: ['a1','a2','b','c'] });
             expect(r).to.include({ met: true, oneFaultTolerant: false });
+        });
+        it('does not report an unknown signer as a fault source', function(){
+            let r = computeQuorumMargin({ weighted: true, validators: vals([10,10,10]),
+                signers: ['pk0', 'pk1', 'pk2', 'outside'] });
+            expect(r).to.include({ signers: 3, met: true, oneFaultTolerant: false });
         });
     });
 });

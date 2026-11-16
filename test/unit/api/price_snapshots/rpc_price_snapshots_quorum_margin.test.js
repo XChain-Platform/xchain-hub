@@ -68,6 +68,12 @@ describe('getpricesnapshots quorum margin', function () {
         const out = await rpc.getpricesnapshots({ with_quorum_margin: true });
         expect(out[0].quorum_margin).to.include({ met: true, oneFaultTolerant: true, signers: 4 });
     });
+
+    it('does not let proof entries outside the snapshot inflate count mode', async function () {
+        const { rpc } = fixture([row({ consensus_proof: sigs('a', 'b', 'outside-a', 'outside-b') })]);
+        const out = await rpc.getpricesnapshots({ with_quorum_margin: true });
+        expect(out[0].quorum_margin).to.include({ met: false, oneFaultTolerant: false, signers: 2 });
+    });
 });
 
 describe('getpricesnapshots quorum margin', function () {

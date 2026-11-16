@@ -1,5 +1,7 @@
 'use strict';
 
+const { samePriceKey } = require('../../anchor/publisher/archive/unheld_row.js');
+
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -11,47 +13,9 @@
 const ROUND_AGREEMENT_KEYS = Object.freeze(['round_number', 'reference_block', 'block_timestamp',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof']);
 
-function priceRoundKey(row) {
-    return JSON.stringify([Number(row.round_number), row.consensus_proof]);
-}
-
-function groupByRound(rows) {
-    const groups = new Map();
-    for (const row of rows) {
-        const key = priceRoundKey(row);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(row);
-    }
-    return groups;
-}
-
-// With a full page the last row may be the first of a longer round, so its
-// group is held; a short page is the end of the table and releases everything.
-function splitRoundGroups(carried, pageRows, pageFull) {
-    const page = pageRows || [];
-    const groups = groupByRound([...(carried || []), ...page]);
-    if (!pageFull || page.length === 0) {
-        return { ready: [...groups.values()], held: [] };
-    }
-    const heldKey = priceRoundKey(page[page.length - 1]);
-    const ready = [];
-    let held = [];
-    for (const [key, rows] of groups) {
-        if (key === heldKey) held = rows;
-        else ready.push(rows);
-    }
-    return { ready, held };
-}
-
-function signedValue(value) {
-    return value === null || value === undefined ? '' : 'v' + String(value);
-}
-
-function sameSignedRoundFields(rows) {
-    if (!Array.isArray(rows) || rows.length === 0) return false;
-    const first = rows[0];
-    return rows.every(row =>
-        ROUND_AGREEMENT_KEYS.every(key => signedValue(first[key]) === signedValue(row[key])));
+function sameValue(a, b) {
+    if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
+    return String(a) === String(b);
 }
 
 // A producer round is one finalized, unsourced BTC-anchored round whose pair rows share a signature set.
@@ -71,6 +35,19 @@ function groupKey(row) {
     return JSON.stringify([Number(row.round_number), row.consensus_proof]);
 }
 
+// True when every member is a producer row of one signed round: the same signed fields, the same
+// validator_count (one insert wrote them all) and no coin pair twice.
+function groupAgrees(first, group) {
+    const pairs = new Set();
+    for (const member of group) {
+        if (!isProducerRoundRow(member) || pairs.has(member.coin_pair)) return false;
+        pairs.add(member.coin_pair);
+        if (!ROUND_AGREEMENT_KEYS.every(key => sameValue(first[key], member[key])) ||
+            !sameValue(first.validator_count, member.validator_count)) return false;
+    }
+    return true;
+}
+
 function indexGroups(rows) {
     const groups = new Map();
     for (const row of rows) {
@@ -82,9 +59,9 @@ function indexGroups(rows) {
     return groups;
 }
 
-// Splits off the group that ends a full page, since its remaining pair rows may start the next page.
-// Every row of that round is held, adjacent or not: an upsert that upgrades an older placeholder keeps
-// its earlier id, so a round's rows need not sit together.
+// Holding the group that ends a full page avoids the common boundary split. It is only a shortcut:
+// upgraded placeholders retain earlier ids, so the walk-wide refusal pool joins fragments this window
+// cannot hold together.
 function holdTrailingGroup(rows, pageIsFull) {
     const key = rows.length > 0 ? groupKey(rows[rows.length - 1]) : null;
     if (!pageIsFull || key === null) return { ready: rows, held: [] };
@@ -110,7 +87,7 @@ function admissionBlocks(row) {
 
 function priceSnapshotAlreadyHeld(rows, row) {
     const held = Array.isArray(rows) && rows.find(candidate =>
-        candidate && candidate.coin_pair === row.coin_pair);
+        candidate && samePriceKey(candidate, row));
     return Boolean(held) && !(held.status === 'skipped' && row.status === 'finalized');
 }
 
@@ -140,7 +117,7 @@ function storePriceSnapshot(db, row) {
 }
 
 module.exports = {
-    priceRoundKey, splitRoundGroups, sameSignedRoundFields, ROUND_AGREEMENT_KEYS,
+    ROUND_AGREEMENT_KEYS, sameValue, groupAgrees,
     advanceCursor, storePriceSnapshot, priceSnapshotAlreadyHeld,
     isProducerRoundRow, groupKey, indexGroups, holdTrailingGroup
 };

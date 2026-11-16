@@ -319,7 +319,7 @@ async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
         this, structural.sigs, snapshot, built.payload, head.btcBlockHeight);
     let quorumReason = roundQuorumReason(weighted, snapshot, verifiedSigs);
     if (quorumReason) return { accepted: false, reason: quorumReason };
-    return { accepted: true, head, verifiedSigs };
+    return { accepted: true, head, verifiedSigs, payload: built.payload, snapshot };
 }
 
 module.exports = {

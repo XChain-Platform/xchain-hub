@@ -12,18 +12,14 @@ const { validateOraclePriceIdentity, validateOraclePriceValue,
         validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
-const { isProducerRoundRow, groupKey, ROUND_AGREEMENT_KEYS } = require('../../peers/hub_db/price_round_groups.js');
+const { isProducerRoundRow, groupKey, groupAgrees, sameValue } = require('../../peers/hub_db/price_round_groups.js');
+const { producerProofReason } = require('./producer_proof.js');
 const admissionHeight = require('../../lib/admission_height.js');
 
 const SOURCE_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 
 function refuse(reason) {
     return { ok: false, reason };
-}
-
-function sameValue(a, b) {
-    if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
-    return String(a) === String(b);
 }
 
 function parseProof(raw) {
@@ -135,16 +131,6 @@ async function verifyBatchRow(row, context, proof) {
     return { ok: true };
 }
 
-function groupAgrees(first, group) {
-    const pairs = new Set();
-    for (const member of group) {
-        if (!isProducerRoundRow(member) || pairs.has(member.coin_pair)) return false;
-        pairs.add(member.coin_pair);
-        if (!ROUND_AGREEMENT_KEYS.every(key => sameValue(first[key], member[key]))) return false;
-    }
-    return true;
-}
-
 // Routes the round's price snapshot read through the walk reader so a round costs at most one indexer read.
 function readerBoundAggregator(aggregator, context) {
     const read = context && context.readCapabilitySnapshot;
@@ -186,7 +172,9 @@ async function verifyProducerRound(row, context, proof) {
     catch (e) { return refuse('admission map unusable: ' + e.message); }
     const bound = readerBoundAggregator(aggregator, context);
     const verified = await roundIngest.verifyValidatedRound.call(bound, 'BTC', roundData, false);
-    return verified.accepted ? { ok: true } : refuse(verified.reason);
+    if (!verified.accepted) return refuse(verified.reason);
+    const proofReason = producerProofReason(row, proof, verified);
+    return proofReason ? refuse(proofReason) : { ok: true };
 }
 
 // A skipped row is a hub's own record of a round it lost, and a disputed row is its own retraction of a

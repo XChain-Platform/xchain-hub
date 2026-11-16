@@ -13,6 +13,8 @@
 const crypto = require('crypto');
 const sinon = require('sinon');
 const { expect } = require('chai');
+const { producerProofReason } = require('../../../../../src/oracle/price_aggregator/producer_proof.js');
+const consensusCommit = require('../../../../../src/oracle/consensus/commit.js');
 const PriceAggregator = require('../../../../../src/oracle/price_aggregator.js');
 const { verifyPriceSnapshot } = require('../../../../../src/oracle/price_aggregator/catchup_verifiers.js');
 const { rememberCatchupHub } = require('../../../../../src/peers/hub_db/catchup_context.js');
@@ -59,9 +61,11 @@ function storedRoundRows(env, round, firstId, options) {
         { pair: 'DOGE/USD', price: '0.12' }];
     const timestamp = 1700000000 + round;
     const payload = env.aggregator.buildPriceV0Payload(round, timestamp, pairs, REFERENCE_BLOCK, null);
-    const sigs = env.validators.slice(0, 3).map(item => ({
+    const signers = env.validators.slice(0, 3).concat(opts.extraSigner ? [opts.extraSigner] : []);
+    let sigs = signers.map(item => ({
         pubkey: item.pubkey, sig: opts.forged ? 'ab'.repeat(64) : item.sign(payload)
-    }));
+    })).sort((a, b) => (a.pubkey < b.pubkey ? -1 : 1));
+    if (opts.proofEdit) sigs = opts.proofEdit(sigs);
     const referenceChain = opts.referenceChain || 'BTC';
     return pairs.map((pair, index) => ({
         id: firstId + index,
@@ -71,9 +75,9 @@ function storedRoundRows(env, round, firstId, options) {
         reference_block: REFERENCE_BLOCK,
         reference_chain: referenceChain,
         block_timestamp: timestamp,
-        validator_count: 3,
+        validator_count: opts.validatorCount === undefined ? 3 : opts.validatorCount,
         consensus_round: 1,
-        consensus_proof: JSON.stringify(sigs),
+        consensus_proof: typeof sigs === 'string' ? sigs : JSON.stringify(sigs),
         status: 'finalized',
         source_chain: opts.sourceChain || STORED_DEFAULT_SOURCE_CHAIN,
         source_action_index: opts.sourceActionIndex === undefined ? null : opts.sourceActionIndex,
@@ -158,6 +162,146 @@ describe('price catch-up verifier refusals around stored producer rounds', funct
         const rows = storedRoundRows(env, 7, 1, { sourceActionIndex: 42 });
         const verdict = await verifyPriceSnapshot(rows[0], contextFor(env, rows));
         expect(verdict).to.deep.equal({ ok: false, reason: 'complete signed round unavailable' });
+    });
+});
+
+async function verdictOf(env, rows, index) {
+    return verifyPriceSnapshot(rows[index || 0], contextFor(env, rows));
+}
+
+describe('price catch-up verifier over the stored proof and count of a producer round', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('accepts an honest round whose proof carries a validly signed non-qualified key and a larger voter count', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157820, 1101200, { extraSigner: validator(), validatorCount: 4 });
+        expect(JSON.parse(rows[0].consensus_proof)).to.have.length(4);
+        for (let index = 0; index < rows.length; index++) {
+            expect(await verdictOf(env, rows, index)).to.deep.equal({ ok: true });
+        }
+    });
+
+    it('refuses a proof padded with a qualified pubkey and a junk signature', async function () {
+        const env = setup();
+        const junk = { pubkey: env.validators[3].pubkey, sig: 'cd'.repeat(64) };
+        const rows = storedRoundRows(env, 157821, 1101203, { proofEdit: sigs =>
+            sigs.concat(junk).sort((a, b) => (a.pubkey < b.pubkey ? -1 : 1)) });
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'stored round proof carries an unverified signature' });
+    });
+
+    it('refuses a proof that repeats an entry', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157822, 1101206, { proofEdit: sigs => [sigs[0]].concat(sigs) });
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'stored round proof is not in strict lowercase pubkey order' });
+    });
+
+    it('refuses a proof whose entries are out of pubkey order', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157823, 1101209, { proofEdit: sigs => sigs.slice().reverse() });
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'stored round proof is not in strict lowercase pubkey order' });
+    });
+
+});
+
+describe('price catch-up verifier over the canonical form of a stored producer proof', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('refuses a proof that repeats a key in another letter case', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157824, 1101212, { proofEdit: sigs => {
+            const first = sigs[0];
+            const upper = { pubkey: first.pubkey.toUpperCase(), sig: first.sig };
+            return [first, upper, ...sigs.slice(1)].sort((a, b) => (a.pubkey < b.pubkey ? -1 : 1));
+        } });
+        const verdict = await verdictOf(env, rows);
+        expect(verdict.ok).to.equal(false);
+        expect(verdict.reason).to.equal('stored round proof is not in strict lowercase pubkey order');
+    });
+
+    it('refuses a proof entry with an extra field and a proof with added whitespace', async function () {
+        const env = setup();
+        const extra = storedRoundRows(env, 157825, 1101215, { proofEdit: sigs =>
+            sigs.map((entry, index) => (index === 0 ? Object.assign({ note: 'x' }, entry) : entry)) });
+        expect(await verdictOf(env, extra)).to.deep.equal(
+            { ok: false, reason: 'stored round proof is not in canonical form' });
+        const spaced = storedRoundRows(env, 157826, 1101218, { proofEdit: sigs => JSON.stringify(sigs, null, 1) });
+        expect(await verdictOf(env, spaced)).to.deep.equal(
+            { ok: false, reason: 'stored round proof is not in canonical form' });
+    });
+
+    it('refuses an oversized proof before verifying its entries', function () {
+        const proof = Array.from({ length: 1025 }, () => ({ pubkey: 'a', sig: 'b' }));
+        const reason = producerProofReason({ consensus_proof: JSON.stringify(proof), validator_count: 1 }, proof, {});
+        expect(reason).to.equal('stored round proof has too many entries');
+    });
+
+    it('refuses a proof carrying a single uppercased pubkey that no other entry repeats', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157830, 1101230, { proofEdit: sigs =>
+            sigs.map((entry, index) => (index === 0 ? { pubkey: entry.pubkey.toUpperCase(), sig: entry.sig } : entry)) });
+        expect(JSON.parse(rows[0].consensus_proof)[0].pubkey).to.match(/[A-F]/);
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'stored round proof is not in strict lowercase pubkey order' });
+    });
+
+});
+
+describe('price catch-up verifier over the stored count of a producer round', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('refuses a validator_count that is not a whole number', async function () {
+        const env = setup();
+        for (const bad of ['3.5', -1, 'many', '1e3']) {
+            const rows = storedRoundRows(env, 157827, 1101221, { validatorCount: bad });
+            expect(await verdictOf(env, rows), String(bad)).to.deep.equal(
+                { ok: false, reason: 'stored round validator_count is not a whole number' });
+        }
+    });
+
+    it('refuses a group whose rows disagree on validator_count', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157828, 1101224);
+        rows[1].validator_count = 4;
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'price round rows disagree on the signed round' });
+    });
+
+    it('refuses a validator_count above both the snapshot and proof sizes', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157829, 1101227, { validatorCount: 99999999 });
+        expect(await verdictOf(env, rows)).to.deep.equal(
+            { ok: false, reason: 'stored round validator_count exceeds the round signer bound' });
+    });
+
+    it('refuses a zero validator_count beside a fully signed proof', async function () {
+        const env = setup();
+        for (const zero of [0, '0', '00']) {
+            const rows = storedRoundRows(env, 157831, 1101233, { validatorCount: zero });
+            expect(JSON.parse(rows[0].consensus_proof)).to.have.length(3);
+            expect(await verdictOf(env, rows), String(zero)).to.deep.equal(
+                { ok: false, reason: 'stored round validator_count is below the proposer floor' });
+        }
+    });
+
+    it('accepts the smallest honest validator_count, the single proposer a solo or federated round records', async function () {
+        const env = setup();
+        const rows = storedRoundRows(env, 157832, 1101236, { validatorCount: 1 });
+        expect(await verdictOf(env, rows)).to.deep.equal({ ok: true });
+    });
+
+    it('accepts one signed proof beside each PREPARE tally the producer writer can record for it', async function () {
+        const env = setup();
+        const pending = { memberPubkeys: new Set(env.validators.map(item => item.pubkey)) };
+        const proposerOnly = consensusCommit.countDistinctMembers(pending, new Set([env.validators[0].pubkey]));
+        const everyMember = consensusCommit.countDistinctMembers(pending, pending.memberPubkeys);
+        expect([proposerOnly, everyMember]).to.deep.equal([1, 4]);
+        for (const [offset, count] of [[0, proposerOnly], [3, everyMember]]) {
+            const rows = storedRoundRows(env, 157833, 1101239 + offset, { validatorCount: count });
+            expect(await verdictOf(env, rows), String(count)).to.deep.equal({ ok: true });
+        }
     });
 });
 
