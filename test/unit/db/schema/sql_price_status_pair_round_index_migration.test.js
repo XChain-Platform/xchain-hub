@@ -129,7 +129,9 @@ function registerAccessPathTests() {
 
     it('had no index pinning both status and coin_pair before this one', async function () {
         const shape = predicateShape(await capturedSql('getLatestFinalizedPriceBelowRound', ['BTC/USD', 100]));
-        const others = priceSnapshotIndexes().filter(index => index.name !== 'idx_status_pair_round');
+        const others = priceSnapshotIndexes().filter(index => index.name !== 'idx_status_pair_round'
+            // Added 2026-11-16 for the explorer price-history read; it postdates this migration.
+            && index.name !== 'price_snapshots_pair_status_ts');
         expect(others.length).to.be.at.least(5);
         for (const index of others)
             expect(accessPath(index, shape).allEqualitiesUsed, index.name).to.equal(false);

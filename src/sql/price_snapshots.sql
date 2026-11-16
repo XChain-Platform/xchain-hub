@@ -78,5 +78,10 @@ CREATE TABLE price_snapshots (
     KEY idx_source_chain_action (source_chain, source_action_index, push_generation),
     -- The archive's pending-round page reads (FORCE INDEX) walk the materialized
     -- archive_pending flag in round order.
-    KEY idx_archive_pending_round (archive_pending, round_number)
+    KEY idx_archive_pending_round (archive_pending, round_number),
+    -- The explorer oracle price-history read pins coin_pair and status and ranges over
+    -- block_timestamp; with status in the key and price as the last column the filter
+    -- and the price IS NOT NULL test resolve in the index (index-only) instead of one row
+    -- lookup per round.
+    KEY price_snapshots_pair_status_ts (coin_pair, status, block_timestamp, price)
 );
