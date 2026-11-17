@@ -16,14 +16,18 @@
  * XChain Hub - DEX offer-list enforcement and rules
  *
  * Resolve each offer's chain-local allow and block lists at the source tip that
- * supplied the open book, then apply them to the counterparty payout address.
+ * supplied the open book, then apply them to the counterparty payout address and,
+ * after activation, any source address that maps onto the list owner's chain.
  *
  ********************************************************************/
 
 const registry = require('../../consensus/gate_registry.js');
+const { reencodeAddress } = require('./address_reencode.js');
 
 const CROSS_CHAIN_OFFER_LIST_ENFORCEMENT =
     'cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT';
+const CROSS_CHAIN_LIST_SOURCE_ACTIVATION =
+    'cross_chain/dex/offer_lists.CROSS_CHAIN_LIST_SOURCE_ACTIVATION';
 const OFFER_LIST_STATE = Symbol('crossChainOfferListState');
 const CANONICAL_POSITIVE_INTEGER = /^[1-9][0-9]*$/;
 
@@ -120,7 +124,7 @@ async function prepareOfferLists(engine, offers, snapshotBlock){
     }));
 }
 
-function oneSideAllows(offer, counterparty){
+function oneSideAllows(offer, counterparty, effectiveTime){
     let state = offer && offer[OFFER_LIST_STATE];
     if(!state || !state.enforced) return true;
     if(!state.valid) return false;
@@ -129,15 +133,34 @@ function oneSideAllows(offer, counterparty){
     if(typeof payout !== 'string' || payout.length === 0) return false;
     if(state.allowAttached && !state.allowMembers.includes(payout)) return false;
     if(state.blockAttached && state.blockMembers.includes(payout)) return false;
+    let checkSource = registry.activeAt(
+        CROSS_CHAIN_LIST_SOURCE_ACTIVATION,
+        offer.home_network,
+        null,
+        null,
+        effectiveTime
+    );
+    if(checkSource){
+        let source = reencodeAddress(
+            counterparty && counterparty.source,
+            counterparty && counterparty.home_coin,
+            offer.home_coin,
+            offer.home_network
+        );
+        if(source !== null){
+            if(state.allowAttached && !state.allowMembers.includes(source)) return false;
+            if(state.blockAttached && state.blockMembers.includes(source)) return false;
+        }
+    }
     return true;
 }
 
-function offerPairAllowed(a, b){
+function offerPairAllowed(a, b, effectiveTime){
     let aState = a && a[OFFER_LIST_STATE];
     let bState = b && b[OFFER_LIST_STATE];
     if(!aState && !bState) return true;
     if((aState && aState.enforced) !== (bState && bState.enforced)) return false;
-    return oneSideAllows(a, b) && oneSideAllows(b, a);
+    return oneSideAllows(a, b, effectiveTime) && oneSideAllows(b, a, effectiveTime);
 }
 
 function attachedListIds(offer){
@@ -185,6 +208,7 @@ function offerListVerdict(offer, answers, taker){
 
 module.exports = {
     CROSS_CHAIN_OFFER_LIST_ENFORCEMENT,
+    CROSS_CHAIN_LIST_SOURCE_ACTIVATION,
     prepareOfferLists,
     offerPairAllowed,
     attachedListIds,

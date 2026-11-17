@@ -41,8 +41,8 @@ module.exports = {
         // receiving it, and the two then carried different settlement action indexes
         // for the same match. Size the margin to the SLOWER of the two legs, since
         // both chains must hold the row before either reaches its eligible block.
-        let effectiveTime = this.nowSeconds() +
-            Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
+        let effectiveTime = Number.isFinite(Number(desc.effectiveTime)) ? Number(desc.effectiveTime) :
+            this.nowSeconds() + Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
 
         let row = this.buildMatchRow(desc, matchId, snapshotBlock, effectiveTime);
         if(!(await this.stampMatchAdmission(row, matchId))) return;

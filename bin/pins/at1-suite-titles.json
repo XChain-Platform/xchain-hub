@@ -1192,6 +1192,18 @@
       "ee306c7312ff7fea92cd2f7a0d0f6957553b3286bdfc32ee894eaff8ba43fc09",
       "4d828d28502c87be3371663dd8381b2af99d7d724afeca437951827a67e513af"
     ],
+    "18d482ac6d897f85": [
+      "51a9f2744e83473e3f6464e060a41e1e3ad9a5f57475a5a802300c721e71dc48",
+      "51cbd9ec1a9162ae3c92473eb6c0f23eae911a5f9e1d11a71066eb61c36b0dea",
+      "5e44da398875daffd9b88a7a32ce2dce3c714896e93175846487297ce67ceae2",
+      "5c7fd661783b8e6c120c434fc6009d29d9729476685182fb4c6c64a88918eec4",
+      "2f8a5c68b1bf73f9823061da27704e130f64b57af268e5ad99adae34dc5254f2",
+      "0d3c18ffa7679303c88bda65fde0284b461165bb827a8e0d81cf00a3a7345cb8",
+      "0f9118e77f72dec6b7cd754530ee7842f091ab8c6c59e01987763c726a35767b",
+      "c6a1498c35719b272d90f3892ba674028058d179e21bef6fe0d99c552c509122",
+      "7129f098a00a4e581e238c114c737eb74266350fdfa957088c5cf0bf1c6508ec",
+      "22487b76f17f349be402bf6c110ab33bc1cacb4b0c3bb3626d2e86ec2e2eba6c"
+    ],
     "18feae309726dbeb": [
       "3efcc103a7206cd635a85b171e5e9693e81510ea4dec84a82c7555777a538eac",
       "a66fd11ee50cfab3eba5cf0534cfb89fb70a42e95d429ab00f1f5d4e15b8affc",
@@ -2008,6 +2020,11 @@
       "4c781c0d3007a172890611cca5690e2b607161783cbc7183f08f38715185def0",
       "b6ae262f5577042591d33fa3c9394809411edcb7b9110cc0df6a0ba3d4b39bb1",
       "f3d577f5877362ac4627d2126d939f78df7d650ef1663f35d5cbcd86e9ef2106"
+    ],
+    "267ca77d2837d84d": [
+      "fb4d37dc3d1cace688632e9fb93157b9f70f5ba772db7b4a7fbda80a42c8c40f",
+      "d98872e9df5b6a0e521745e4a0dfba6c74041de4f1329fdca41a3bc2673f2e91",
+      "e17f51a7e6ce5917042c38cc91725284682d1ee5542490450e13d7151d134b4a"
     ],
     "267f634d55fc1cb0": [
       "267f634d55fc1cb06e967581a0c91ecb52a6287a58a0386bcf61e6fb8e46c80f"
@@ -4386,16 +4403,6 @@
       "1d0bec99302f9838a3932e497dc515836eccc7828789354a654c9948ba043df4",
       "c959a2980257788a4a7b8998770024da531bb3cd7830c2e4790900fe2acd72f5",
       "16fdcbc5224682b58b6ddb0c5e8613e11d3933eedd3309d46eebcbc1b65f1391"
-    ],
-    "4f9130204f58ea4e": [
-      "51a9f2744e83473e3f6464e060a41e1e3ad9a5f57475a5a802300c721e71dc48",
-      "5e44da398875daffd9b88a7a32ce2dce3c714896e93175846487297ce67ceae2",
-      "5c7fd661783b8e6c120c434fc6009d29d9729476685182fb4c6c64a88918eec4",
-      "2f8a5c68b1bf73f9823061da27704e130f64b57af268e5ad99adae34dc5254f2",
-      "0d3c18ffa7679303c88bda65fde0284b461165bb827a8e0d81cf00a3a7345cb8",
-      "0f9118e77f72dec6b7cd754530ee7842f091ab8c6c59e01987763c726a35767b",
-      "7129f098a00a4e581e238c114c737eb74266350fdfa957088c5cf0bf1c6508ec",
-      "22487b76f17f349be402bf6c110ab33bc1cacb4b0c3bb3626d2e86ec2e2eba6c"
     ],
     "503ffbfb7404b0f7": [
       "503ffbfb7404b0f7e35e99467c626613b2c0bdb8c6ff550652868c0683d27421"
@@ -13072,10 +13079,6 @@
       "b113b17290022bdde34cd54ab0afa7126c797d167b0dec802858067b8c556b56",
       "7d3dcfac2b67f13f104c9d14cb83384a8a2c5be4d4090a7c37acf303a4594322"
     ],
-    "f124281b14374603": [
-      "d98872e9df5b6a0e521745e4a0dfba6c74041de4f1329fdca41a3bc2673f2e91",
-      "e17f51a7e6ce5917042c38cc91725284682d1ee5542490450e13d7151d134b4a"
-    ],
     "f1c31e47d19a9777": [
       "f1c31e47d19a9777dcfa647083b0b1e2644b6a466dd5451b2bce4787775a404a"
     ],
@@ -13913,7 +13916,7 @@
         "ci:regression"
       ],
       "fileCount": 1150,
-      "titleCount": 10167,
+      "titleCount": 10170,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14428,7 +14431,7 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "267ca77d2837d84d",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
@@ -14537,7 +14540,7 @@
         "test/unit/cross_chain/dex/cross_chain_dex_engine_09_min_confirmations_per_coin_resolution.test.js": "c2be087d50b754b8",
         "test/unit/cross_chain/dex/cross_chain_dex_engine_10_l4_determinism_match_canonicalization.test.js": "2aad6dce5a9816c3",
         "test/unit/cross_chain/dex/dex_fill_plain_amount_strings.test.js": "1fdab48308714318",
-        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "4f9130204f58ea4e",
+        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "18d482ac6d897f85",
         "test/unit/cross_chain/dex/price_cross/price_cross_activation.test.js": "aedbf77ca48ac24e",
         "test/unit/cross_chain/dex/retraction_fence/cross_chain_dex_insert_window_retraction.test.js": "4da3be4b079415c6",
         "test/unit/cross_chain/list/canonical/list_share_canonical_meta.test.js": "ec6bd15fb2be5dbe",
@@ -15122,7 +15125,7 @@
     },
     "test": {
       "fileCount": 1150,
-      "titleCount": 10167,
+      "titleCount": 10170,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15637,7 +15640,7 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "267ca77d2837d84d",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
@@ -15746,7 +15749,7 @@
         "test/unit/cross_chain/dex/cross_chain_dex_engine_09_min_confirmations_per_coin_resolution.test.js": "c2be087d50b754b8",
         "test/unit/cross_chain/dex/cross_chain_dex_engine_10_l4_determinism_match_canonicalization.test.js": "2aad6dce5a9816c3",
         "test/unit/cross_chain/dex/dex_fill_plain_amount_strings.test.js": "1fdab48308714318",
-        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "4f9130204f58ea4e",
+        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "18d482ac6d897f85",
         "test/unit/cross_chain/dex/price_cross/price_cross_activation.test.js": "aedbf77ca48ac24e",
         "test/unit/cross_chain/dex/retraction_fence/cross_chain_dex_insert_window_retraction.test.js": "4da3be4b079415c6",
         "test/unit/cross_chain/list/canonical/list_share_canonical_meta.test.js": "ec6bd15fb2be5dbe",
@@ -16278,7 +16281,7 @@
     },
     "test:all": {
       "fileCount": 1237,
-      "titleCount": 11058,
+      "titleCount": 11061,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16880,7 +16883,7 @@
         "test/unit/consensus/gate_registry/digest_value_row_count.test.js": "b451a0720a1d1e2b",
         "test/unit/consensus/gate_registry/list_share_digest_twin.test.js": "503ffbfb7404b0f7",
         "test/unit/consensus/gate_registry/list_share_registry_twin.test.js": "874bec602d7b7b3e",
-        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "f124281b14374603",
+        "test/unit/consensus/gate_registry/offer_list_enforcement_row.test.js": "267ca77d2837d84d",
         "test/unit/consensus/gate_registry/offer_list_regtest_switch.test.js": "57541f407f082a03",
         "test/unit/consensus/gate_registry/price_scale_rows.test.js": "9b528086ab74ca61",
         "test/unit/consensus/gate_registry/regtest_arming_at_read.test.js": "6c004462541fea40",
@@ -16989,7 +16992,7 @@
         "test/unit/cross_chain/dex/cross_chain_dex_engine_09_min_confirmations_per_coin_resolution.test.js": "c2be087d50b754b8",
         "test/unit/cross_chain/dex/cross_chain_dex_engine_10_l4_determinism_match_canonicalization.test.js": "2aad6dce5a9816c3",
         "test/unit/cross_chain/dex/dex_fill_plain_amount_strings.test.js": "1fdab48308714318",
-        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "4f9130204f58ea4e",
+        "test/unit/cross_chain/dex/offer_list_enforcement.test.js": "18d482ac6d897f85",
         "test/unit/cross_chain/dex/price_cross/price_cross_activation.test.js": "aedbf77ca48ac24e",
         "test/unit/cross_chain/dex/retraction_fence/cross_chain_dex_insert_window_retraction.test.js": "4da3be4b079415c6",
         "test/unit/cross_chain/list/canonical/list_share_canonical_meta.test.js": "ec6bd15fb2be5dbe",
