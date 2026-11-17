@@ -26,7 +26,6 @@ const { ALLOWED_CHAINS } = require('./constants.js');
 const offerLists = require('./offer_lists.js');
 const { ANY_PRICE_ERA, pricesCross } = require('./price_cross.js');
 const { getLogger } = require('../../observability');
-const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const logger = getLogger();
 
 module.exports = {
@@ -162,15 +161,9 @@ module.exports = {
     tryMatch(a, b, snapshotBlock, effectiveTime){
         if(a.home_coin === b.home_coin) return null;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return null; // never match across networks
-        let policyTime = effectiveTime;
-        if(policyTime === undefined && typeof this.nowSeconds === 'function'){
-            policyTime = this.nowSeconds() +
-                Math.max(relayMarginFloorS(a.home_coin), relayMarginFloorS(b.home_coin));
-        }
-        if(!offerLists.offerPairAllowed(a, b, policyTime)) return null;
+        if(!offerLists.offerPairAllowed(a, b, effectiveTime = offerLists.matchPolicyTime(this, a, b, effectiveTime))) return null;
         let aKind = (a.kind === 'order') ? 'order' : 'swap';
         let bKind = (b.kind === 'order') ? 'order' : 'swap';
-        let desc = null;
         if(aKind === 'swap' && bKind === 'swap'){
             if(!this.isExactMatch(a, b)) return null;
             // Skip a swap already committed to a finalized match (it stays in the open book
@@ -178,13 +171,10 @@ module.exports = {
             // the reservation gate. Ownership offers expose amount '1' (see getOpenCrossChain*).
             if(bc.bclte(this.effectiveRemaining(a).give, 0) || bc.bclte(this.effectiveRemaining(b).give, 0)) return null;
             // Single full fill (committed is 0 pre-match → filled_before 0).
-            desc = this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount));
+            return offerLists.withPolicyTime(this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount)), effectiveTime);
         }
-        else if(aKind === 'order' && bKind === 'order') desc = this.tryOrderMatch(a, b, snapshotBlock);
-        if(desc && Number.isFinite(Number(policyTime))) Object.defineProperty(desc, 'effectiveTime', {
-            value: Number(policyTime)
-        });
-        return desc;                                   // SWAP↔ORDER: carry-forward
+        if(aKind === 'order' && bKind === 'order') return offerLists.withPolicyTime(this.tryOrderMatch(a, b, snapshotBlock), effectiveTime);
+        return null;                                   // SWAP↔ORDER: carry-forward
     },
 
     // Deterministic total order over offers for price-time priority (maker = earlier).

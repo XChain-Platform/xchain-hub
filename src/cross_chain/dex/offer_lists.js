@@ -23,6 +23,7 @@
 
 const registry = require('../../consensus/gate_registry.js');
 const { reencodeAddress } = require('./address_reencode.js');
+const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 
 const CROSS_CHAIN_OFFER_LIST_ENFORCEMENT =
     'cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT';
@@ -163,6 +164,21 @@ function offerPairAllowed(a, b, effectiveTime){
     return oneSideAllows(a, b, effectiveTime) && oneSideAllows(b, a, effectiveTime);
 }
 
+// The time a pair's list policy is judged at. A follower passes the proposed row's
+// signed effective_time; the leader judges at the effective time it will sign, its
+// clock plus the slower leg's relay margin, so both sides agree at the activation.
+function matchPolicyTime(engine, a, b, effectiveTime){
+    if(effectiveTime !== undefined || typeof engine.nowSeconds !== 'function') return effectiveTime;
+    return engine.nowSeconds() + Math.max(relayMarginFloorS(a.home_coin), relayMarginFloorS(b.home_coin));
+}
+
+// Carry the judged time on a match descriptor so finalize signs exactly that time.
+function withPolicyTime(desc, policyTime){
+    if(desc && Number.isFinite(Number(policyTime)))
+        Object.defineProperty(desc, 'effectiveTime', { value: Number(policyTime) });
+    return desc;
+}
+
 function attachedListIds(offer){
     if(offer === null || typeof offer !== 'object') return [];
 
@@ -211,6 +227,8 @@ module.exports = {
     CROSS_CHAIN_LIST_SOURCE_ACTIVATION,
     prepareOfferLists,
     offerPairAllowed,
+    matchPolicyTime,
+    withPolicyTime,
     attachedListIds,
     resolvedMembers,
     offerListVerdict
