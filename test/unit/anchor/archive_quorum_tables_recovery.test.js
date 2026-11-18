@@ -156,12 +156,9 @@ function fixtureArchive(batch){
     return JSON.parse(zlib.gunzipSync(Buffer.from(joined, 'base64url')).toString('utf8'));
 }
 function project(row, columns){ return Object.fromEntries(columns.map(column => [column, row[column]])); }
-// An archived id is the publishing hub's own AUTO_INCREMENT value, so recovery lands each row
-// under a local surrogate id; every other column must survive the round trip unchanged.
-function expectRows(dbRows, hubRows, columns){
-    const carried = columns.filter(column => column !== 'id');
+// Skip id: recovery lands each row under a local surrogate, not the publishing hub's AUTO_INCREMENT.
+const expectRows = (dbRows, hubRows, columns, carried = columns.filter(column => column !== 'id')) =>
     expect(dbRows.map(row => project(row, carried))).to.deep.equal(hubRows.map(row => project(row, carried)));
-}
 function setFor(archive, capability, block){
     return archive.capability_snapshots.filter(row => row.capability === capability &&
         Number(row.snapshot_block) === Number(block)).map(row =>
