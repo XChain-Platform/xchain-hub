@@ -120,6 +120,7 @@ describe('OraclePublisher publish intent across a failure and a restart', functi
     afterEach(function () { fs.rmSync(ctx.dir, { recursive: true, force: true }); });
     registerNeverSentTests();
     registerQuarantineTests();
+    registerHydrationFailureTest();
 });
 
 function registerNeverSentTests() {
@@ -198,7 +199,9 @@ function registerQuarantineTests() {
         expect(ctx.db.rows.map(r => r.round)).to.deep.equal(ROUNDS);
         expect(p._ambiguousWindows.has(7)).to.equal(true);
     });
+}
 
+function registerHydrationFailureTest() {
     it('a failed startup hydration cannot hide a crash-mid-send intent from the publish pass', async function () {
         let sent = [];
         ctx.db.rows.push({ round: ROUNDS[0], txid: null, sent_at: null });

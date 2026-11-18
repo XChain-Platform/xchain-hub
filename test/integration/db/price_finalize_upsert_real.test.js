@@ -34,6 +34,34 @@ async function finalizeOther(round) {
     await db.setFinalizedPriceSnapshotRound(round, MOVED, 101, 1700000500, 9, '[{"own":1}]', OTHER);
 }
 
+function registerPushedRowTests() {
+    it('leaves a finalized pushed row whole instead of mixing in the producer payload', async function () {
+        await holdPushed(9);
+        await finalizeOther(9);
+        const r = await row(9);
+        expect(r.status).to.equal('finalized');
+        expect(r.price).to.equal('50000');
+        expect(Number(r.reference_block)).to.equal(900);
+        expect(r.reference_chain).to.equal('DOGE');
+        expect(r.source_chain).to.equal('DOGE');
+        expect(Number(r.source_action_index)).to.equal(42);
+        expect(Number(r.validator_count)).to.equal(5);
+        expect(r.consensus_proof).to.equal('[{"landed":1}]');
+        expect([r.admit_block_btc, r.admit_block_ltc, r.admit_block_doge].map(Number)).to.deep.equal([11, 12, 13]);
+    });
+
+    it('keeps a disputed row disputed with its payload untouched', async function () {
+        await holdPushed(10);
+        await db.doQuery("UPDATE price_snapshots SET status = 'disputed' WHERE round_number = 10");
+        await finalizeOther(10);
+        const r = await row(10);
+        expect(r.status).to.equal('disputed');
+        expect(r.price).to.equal('50000');
+        expect(Number(r.reference_block)).to.equal(900);
+        expect(r.consensus_proof).to.equal('[{"landed":1}]');
+    });
+}
+
 describe('Integration: finalize upsert on a real MariaDB', function () {
     before(async function () {
         try {
@@ -77,29 +105,5 @@ describe('Integration: finalize upsert on a real MariaDB', function () {
         expect([r.admit_block_btc, r.admit_block_ltc, r.admit_block_doge].map(Number)).to.deep.equal([21, 22, 23]);
     });
 
-    it('leaves a finalized pushed row whole instead of mixing in the producer payload', async function () {
-        await holdPushed(9);
-        await finalizeOther(9);
-        const r = await row(9);
-        expect(r.status).to.equal('finalized');
-        expect(r.price).to.equal('50000');
-        expect(Number(r.reference_block)).to.equal(900);
-        expect(r.reference_chain).to.equal('DOGE');
-        expect(r.source_chain).to.equal('DOGE');
-        expect(Number(r.source_action_index)).to.equal(42);
-        expect(Number(r.validator_count)).to.equal(5);
-        expect(r.consensus_proof).to.equal('[{"landed":1}]');
-        expect([r.admit_block_btc, r.admit_block_ltc, r.admit_block_doge].map(Number)).to.deep.equal([11, 12, 13]);
-    });
-
-    it('keeps a disputed row disputed with its payload untouched', async function () {
-        await holdPushed(10);
-        await db.doQuery("UPDATE price_snapshots SET status = 'disputed' WHERE round_number = 10");
-        await finalizeOther(10);
-        const r = await row(10);
-        expect(r.status).to.equal('disputed');
-        expect(r.price).to.equal('50000');
-        expect(Number(r.reference_block)).to.equal(900);
-        expect(r.consensus_proof).to.equal('[{"landed":1}]');
-    });
+    registerPushedRowTests();
 });

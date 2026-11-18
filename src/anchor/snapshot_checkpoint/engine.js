@@ -303,16 +303,7 @@ class SnapshotCheckpointEngine {
         const decision = snapshotLeaderDecision(
             due.block_index, validators, myPubkey, overdue);
         if (!decision.leads) {
-            this.noteSkip(decision.reason, {
-                snapshotBlock: due.snapshot_block,
-                blockIndex: due.block_index,
-                rank: decision.rank,
-                waitBlocks: decision.waitBlocks,
-            });
-            if (decision.reason === SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT ||
-                decision.reason === SNAPSHOT_LEADER_SKIP.MISSING_DEPTH) {
-                this.scheduleFallbackTick();
-            }
+            this.declineLeadership(due, decision);
             return false;
         }
         const rank = decision.rank;
@@ -340,6 +331,16 @@ class SnapshotCheckpointEngine {
         if (validators.length === 1) return this.persistSoleCheckpoint(cp, signature);
         await this.leadRound(cp, validators, due.snapshot_block, signature);
         return false;
+    }
+
+    // Record why this hub does not lead a due snapshot and re-arm the wait when it must.
+    declineLeadership(due, decision) {
+        const { reason, rank, waitBlocks } = decision;
+        this.noteSkip(reason, {
+            snapshotBlock: due.snapshot_block, blockIndex: due.block_index, rank, waitBlocks,
+        });
+        if (reason === SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT ||
+            reason === SNAPSHOT_LEADER_SKIP.MISSING_DEPTH) this.scheduleFallbackTick();
     }
 
     async claimPayload(cp) {

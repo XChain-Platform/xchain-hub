@@ -40,69 +40,76 @@ describe('llm envelope boundary helpers', function () {
     registerResponseBodyTests();
 });
 
+function registerEnvelopeFieldRejections() {
+    it('rejects non-JSON payloads', function () {
+        expectLlmError(() => parseEnvelope(settings, '{', { modelRank: 0 }));
+    });
+
+    it('rejects a missing or non-string prompt', function () {
+        for (const envelope of [{}, { prompt: 42 }])
+            expectLlmError(() => parse(envelope));
+    });
+
+    it('rejects an unsupported envelope version', function () {
+        expectLlmError(() => parse({ prompt: 'hello', envelope_version: 2 }));
+    });
+
+    it('rejects max_tokens values that are not positive integers', function () {
+        for (const maxTokens of [0, -1, 1.5, 'invalid'])
+            expectLlmError(() => parse({ prompt: 'hello', max_tokens: maxTokens }));
+    });
+
+    it('rejects temperatures outside the range or of the wrong type', function () {
+        for (const temperature of [-0.1, 2.1, '1', null])
+            expectLlmError(() => parse({ prompt: 'hello', temperature }));
+    });
+
+    it('rejects a non-string system prompt', function () {
+        for (const system of [42, { role: 'system' }])
+            expectLlmError(() => parse({ prompt: 'hello', system }));
+    });
+
+    it('rejects NUL anywhere in the system prompt', function () {
+        for (const system of ['\u0000a', 'a\u0000b', 'a\u0000'])
+            expectLlmError(() => parse({ prompt: 'hello', system }));
+    });
+}
+
+function registerEnvelopeFallbackAndAcceptTests() {
+    it('accepts system values that can be carried by every transport', function () {
+        for (const envelope of [
+            { prompt: 'hello', system: 'ordinary' },
+            { prompt: 'hello', system: '' },
+            { prompt: 'hello' },
+            { prompt: 'hello', system: '\\u0000' }
+        ]) expect(parse(envelope)).to.deep.equal(envelope);
+    });
+
+    it('rejects fallback values other than any or strict', function () {
+        expectLlmError(() => parse({ prompt: 'hello', fallback: 'best' }));
+    });
+
+    it('rejects strict fallback after the primary model', function () {
+        expectLlmError(() => parse({ prompt: 'hello', fallback: 'strict' }, { modelRank: 1 }));
+    });
+
+    it('returns a valid parsed envelope', function () {
+        const envelope = {
+            prompt: 'hello',
+            envelope_version: 1,
+            max_tokens: 128,
+            temperature: 0.5,
+            system: 'be concise',
+            fallback: 'strict'
+        };
+        expect(parse(envelope)).to.deep.equal(envelope);
+    });
+}
+
 function registerParseEnvelopeTests() {
     describe('parseEnvelope', function () {
-        it('rejects non-JSON payloads', function () {
-            expectLlmError(() => parseEnvelope(settings, '{', { modelRank: 0 }));
-        });
-
-        it('rejects a missing or non-string prompt', function () {
-            for (const envelope of [{}, { prompt: 42 }])
-                expectLlmError(() => parse(envelope));
-        });
-
-        it('rejects an unsupported envelope version', function () {
-            expectLlmError(() => parse({ prompt: 'hello', envelope_version: 2 }));
-        });
-
-        it('rejects max_tokens values that are not positive integers', function () {
-            for (const maxTokens of [0, -1, 1.5, 'invalid'])
-                expectLlmError(() => parse({ prompt: 'hello', max_tokens: maxTokens }));
-        });
-
-        it('rejects temperatures outside the range or of the wrong type', function () {
-            for (const temperature of [-0.1, 2.1, '1', null])
-                expectLlmError(() => parse({ prompt: 'hello', temperature }));
-        });
-
-        it('rejects a non-string system prompt', function () {
-            for (const system of [42, { role: 'system' }])
-                expectLlmError(() => parse({ prompt: 'hello', system }));
-        });
-
-        it('rejects NUL anywhere in the system prompt', function () {
-            for (const system of ['\u0000a', 'a\u0000b', 'a\u0000'])
-                expectLlmError(() => parse({ prompt: 'hello', system }));
-        });
-
-        it('accepts system values that can be carried by every transport', function () {
-            for (const envelope of [
-                { prompt: 'hello', system: 'ordinary' },
-                { prompt: 'hello', system: '' },
-                { prompt: 'hello' },
-                { prompt: 'hello', system: '\\u0000' }
-            ]) expect(parse(envelope)).to.deep.equal(envelope);
-        });
-
-        it('rejects fallback values other than any or strict', function () {
-            expectLlmError(() => parse({ prompt: 'hello', fallback: 'best' }));
-        });
-
-        it('rejects strict fallback after the primary model', function () {
-            expectLlmError(() => parse({ prompt: 'hello', fallback: 'strict' }, { modelRank: 1 }));
-        });
-
-        it('returns a valid parsed envelope', function () {
-            const envelope = {
-                prompt: 'hello',
-                envelope_version: 1,
-                max_tokens: 128,
-                temperature: 0.5,
-                system: 'be concise',
-                fallback: 'strict'
-            };
-            expect(parse(envelope)).to.deep.equal(envelope);
-        });
+        registerEnvelopeFieldRejections();
+        registerEnvelopeFallbackAndAcceptTests();
     });
 }
 

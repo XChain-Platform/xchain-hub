@@ -39,6 +39,29 @@ async function readFailoverMaxIds(db, maxIds) {
     } catch (e) { /* table may not exist yet */ }
 }
 
+// Reads the insert-only mirror tables whose ceilings use an unfiltered MAX(id).
+async function readTailMaxIds(db, maxIds) {
+    try {
+        // Third member of the hub-state mirror set (see anchor_reward_attestations
+        // above; this list must move in lockstep with HUB_STATE_TABLES). The catch
+        // below is empty by design and therefore silent, so a table name that does
+        // not exist leaves the key absent with no log line, and an absent key gates
+        // the consumer's gap catch-up for the table OFF entirely.
+        // Unfiltered MAX(id), like anchor_reward_attestations and unlike the two
+        // cross_chain_* entries: attestation_responses is insert-only and never
+        // retracted, so a status filter would advertise a ceiling BELOW what the
+        // snapshot feed serves and strand the catch-up.
+        let ar = await db.getAttestationResponsesMaxId();
+        maxIds.attestation_responses = (ar.length > 0 && ar[0].max_id != null) ? Number(ar[0].max_id) : 0;
+    } catch (e) { /* table may not exist yet */ }
+    try {
+        // Unfiltered MAX(id): the snapshot feed serves every row in this
+        // append-only table, and the ceiling also enables stale-cursor reset.
+        const rt = await db.getRemoteTokenSnapshotsMaxId();
+        maxIds.remote_token_snapshots = (rt.length > 0 && rt[0].max_id != null) ? Number(rt[0].max_id) : 0;
+    } catch (e) { /* table may not exist yet */ }
+}
+
 // The per-table max row IDs the 'ready' frame carries. Each read is guarded on its
 // own, so a table the schema has not created yet leaves its key absent instead
 // of failing the whole acknowledgement.
@@ -85,25 +108,7 @@ async function readMaxIds(db) {
             maxIds.cross_chain_calls = (cc.length > 0 && cc[0].max_id != null) ? Number(cc[0].max_id) : 0;
         } catch (e) { /* table may not exist yet */ }
         await readFailoverMaxIds(db, maxIds);
-        try {
-            // Third member of the hub-state mirror set (see anchor_reward_attestations
-            // above; this list must move in lockstep with HUB_STATE_TABLES). The catch
-            // below is empty by design and therefore silent, so a table name that does
-            // not exist leaves the key absent with no log line, and an absent key gates
-            // the consumer's gap catch-up for the table OFF entirely.
-            // Unfiltered MAX(id), like anchor_reward_attestations and unlike the two
-            // cross_chain_* entries: attestation_responses is insert-only and never
-            // retracted, so a status filter would advertise a ceiling BELOW what the
-            // snapshot feed serves and strand the catch-up.
-            let ar = await db.getAttestationResponsesMaxId();
-            maxIds.attestation_responses = (ar.length > 0 && ar[0].max_id != null) ? Number(ar[0].max_id) : 0;
-        } catch (e) { /* table may not exist yet */ }
-        try {
-            // Unfiltered MAX(id): the snapshot feed serves every row in this
-            // append-only table, and the ceiling also enables stale-cursor reset.
-            const rt = await db.getRemoteTokenSnapshotsMaxId();
-            maxIds.remote_token_snapshots = (rt.length > 0 && rt[0].max_id != null) ? Number(rt[0].max_id) : 0;
-        } catch (e) { /* table may not exist yet */ }
+        await readTailMaxIds(db, maxIds);
     }
     return maxIds;
 }
