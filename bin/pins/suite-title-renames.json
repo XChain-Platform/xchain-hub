@@ -51,6 +51,10 @@
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
     },
+    "test/unit/security/configuration/dependency_advisories.test.js": {
+      "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 11.0.9",
+      "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 11.0.9"
+    },
     "test/unit/repo_guards/configuration_doc.test.js": {
       "CONFIGURATION.md env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/": "hub configuration page env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/",
       "CONFIGURATION.md env-var coverage documents every dynamically-composed <COIN>_ env var read in src/": "hub configuration page env-var coverage documents every dynamically-composed <COIN>_ env var read in src/"
