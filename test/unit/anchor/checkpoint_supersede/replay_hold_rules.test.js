@@ -37,6 +37,16 @@ describe('checkpoint supersede replay-hold rules @regression', function () {
         expect(indexerReplayOpen({ digest: DIGEST, replay: null })).to.equal(false);
     });
 
+    it('fails closed on unknown or malformed replay states', function () {
+        expect(indexerReplayOpen(replayRules('aborted'))).to.equal(true);
+        expect(indexerReplayOpen(replayRules(undefined))).to.equal(true);
+        expect(indexerReplayOpen({ digest: DIGEST, replay: {} })).to.equal(true);
+        expect(supersedePrefilterDecline({}, replayRules('failed')))
+            .to.equal('indexer_replaying');
+        expect(checkpointProposalDecline({}, { rules: replayRules('aborted') }))
+            .to.equal('indexer_replaying');
+    });
+
     it('returns indexer_replaying before inspecting any checkpoint metadata', function () {
         expect(supersedePrefilterDecline({}, replayRules('replaying')))
             .to.equal('indexer_replaying');
@@ -53,8 +63,6 @@ describe('checkpoint supersede replay-hold rules @regression', function () {
         const cp = { supersedes_from: 30, rules_digest: DIGEST };
         expect(supersedePrefilterDecline(cp, null)).to.equal('supersede_no_replay');
         expect(supersedePrefilterDecline(cp, { digest: DIGEST, replay: null }))
-            .to.equal('supersede_no_replay');
-        expect(supersedePrefilterDecline(cp, replayRules('failed')))
             .to.equal('supersede_no_replay');
     });
 

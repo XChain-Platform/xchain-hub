@@ -162,7 +162,53 @@ const testCase6 = async function () {
             expect(h.p.getStats().batchSplitCount).to.equal(0);
         };
 
+// A signer whose signing round fills one in-span round into the caller's array in
+// place, as the real in-span gap fill does.
+function fillOnSign(signer, fillRound) {
+    let sign = signer.collectBatchSignatures;
+    signer.collectBatchSignatures = async (first, last, anchor, rounds) => {
+        let held = rounds.some(r => r.round === fillRound);
+        if (!held && first < fillRound && fillRound < last) {
+            rounds.push(bufferedFixture(fillRound));
+            rounds.sort((a, b) => a.round - b.round);
+        }
+        return sign(first, last, anchor, rounds);
+    };
+}
+
+const testCase7 = async function () {
+            let h = makePublisher();
+            await h.p.start();
+            fillOnSign(h.signer, 102);
+            sinon.stub(h.p, 'packSegment').callsFake(r => Math.min(3, r.length));
+            let rounds = [100, 101, 103, 104, 105].map(n => bufferedFixture(n));
+
+            let wires = await h.p.signWindowWires(h.signer, rounds, 800105, 1);
+
+            expect(h.signer.calls.map(c => c.rounds)).to.deep.equal([[100, 101, 102, 103], [104, 105]]);
+            expect(wires.flatMap(w => w.rounds.map(r => r.round)), 'every round signed exactly once')
+                .to.deep.equal([100, 101, 102, 103, 104, 105]);
+        };
+
+const testCase8 = async function () {
+            let h = makePublisher();
+            await h.p.start();
+            fillOnSign(h.signer, 102);
+            sinon.stub(h.p, 'packSegment').callsFake(r => Math.min(3, r.length));
+            let fits = sinon.stub(h.p, 'wireFits').returns(true);
+            fits.onFirstCall().returns(false);
+            let rounds = [100, 101, 103].map(n => bufferedFixture(n));
+
+            let wires = await h.p.signWindowWires(h.signer, rounds, 800103, 1);
+
+            expect(h.signer.calls.map(c => c.rounds))
+                .to.deep.equal([[100, 101, 102, 103], [100, 101, 102], [103]]);
+            expect(wires.map(w => w.rounds.map(r => r.round))).to.deep.equal([[100, 101, 102], [103]]);
+        };
+
 function registerSuite1() {
+    it('advances past the rounds a range really covered when its in-span fill grew it', testCase7);
+    it('still signs the tail round when a filled range shrinks to fit', testCase8);
     it('packs the largest range that fits and splits an overflowing window into several wires', testCase1);
     it('splits at an armed oracle flag-day boundary inside the window (D7)', testCase2);
     it('re-derives the header anchor for EVERY split, never the whole window\'s', testCase3);

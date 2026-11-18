@@ -17,6 +17,9 @@
 const hubConfig = require('../../config');
 const { exactU64TypeCast } = require('./exact_u64.js');
 
+// Connections one hub pool holds; the snapshot read caps are budgeted against it.
+const POOL_CONNECTION_LIMIT = 10;
+
 // The mariadb pool options for one hub database connection.
 function buildPoolParams(host, port, dbName, user, pass){
     const queryTimeout = parseInt(hubConfig.DB_QUERY_TIMEOUT) || 30000;
@@ -27,7 +30,7 @@ function buildPoolParams(host, port, dbName, user, pass){
         password:           pass,
         database:           dbName,
         port:               port,
-        connectionLimit:    10,
+        connectionLimit:    POOL_CONNECTION_LIMIT,
         connectTimeout:     parseInt(hubConfig.DB_CONNECT_TIMEOUT) || 10000,
         acquireTimeout:     parseInt(hubConfig.DB_ACQUIRE_TIMEOUT) || 10000,
         idleTimeout:        60000,
@@ -65,4 +68,4 @@ function buildPoolParams(host, port, dbName, user, pass){
     };
 }
 
-module.exports = { buildPoolParams };
+module.exports = { buildPoolParams, POOL_CONNECTION_LIMIT };

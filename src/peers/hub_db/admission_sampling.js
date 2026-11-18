@@ -115,6 +115,39 @@ class HubDbAdmissionSampling {
         return true;
     }
 
+    trackCatchupStores(source) {
+        if (!source || typeof source.storeRow !== 'function' || typeof source.run !== 'function') return false;
+        if (!this._catchupStoreSources) this._catchupStoreSources = new WeakSet();
+        if (this._catchupStoreSources.has(source)) return true;
+        this._catchupStoreSources.add(source);
+        let stored = 0;
+        const wrapStore = (name, countRows) => {
+            if (typeof source[name] !== 'function') return;
+            const original = source[name].bind(source);
+            source[name] = async (...args) => {
+                const result = await original(...args);
+                stored += countRows(args);
+                return result;
+            };
+        };
+        wrapStore('storeRow', () => 1);
+        wrapStore('storeRound', args => Array.isArray(args[1]) ? args[1].length : 0);
+        const run = source.run.bind(source);
+        source.run = async (...args) => {
+            stored = 0;
+            try { return await run(...args); }
+            finally {
+                const count = stored;
+                stored = 0;
+                if (count > 0) {
+                    try { this.dropAllForResync('peer catch-up stored ' + count + ' row(s)'); }
+                    catch (e) { logger.warn('HubDbBroadcaster: could not resync after peer catch-up stores'); }
+                }
+            }
+        };
+        return true;
+    }
+
     // Attach the hub the watermark is sampled from, and start sampling.
     //
     // The broadcaster is constructed with (p2pConfig, db) and has no hub handle, so the
@@ -138,6 +171,7 @@ class HubDbAdmissionSampling {
             startPeerCatchup = true;
         }
         this.trackLandingRelay(hub.peerCatchup);
+        this.trackCatchupStores(hub.peerCatchup);
         if (startPeerCatchup) {
             hub.peerCatchup.start().catch((e) =>
                 logger.error(nodeUtil.format('HubDbBroadcaster: initial peer catch-up failed:',

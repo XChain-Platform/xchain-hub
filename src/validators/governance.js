@@ -40,6 +40,7 @@ const resultRequestMixin  = require('./governance/result_request.js');
 const tallyMixin          = require('./governance/tally.js');
 const overdueMixin        = require('./governance/overdue.js');
 const boundsMixin         = require('./governance/bounds.js');
+const { resolveGovVotingPeriod } = require('./governance/voting_period.js');
 const { GOV_RESULT_REQ }   = resultRequestMixin;
 const hubConfig = require('../config');
 const nodeUtil = require('node:util');
@@ -61,7 +62,7 @@ class Governance extends EventEmitter {
         this._tallyRunning = false;
         this._resultRequests = new Map();
 
-        this.votingPeriod  = parseInt(hubConfig.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
+        this.votingPeriod  = resolveGovVotingPeriod(hubConfig);
         this.tallyInterval = parseInt(hubConfig.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
 

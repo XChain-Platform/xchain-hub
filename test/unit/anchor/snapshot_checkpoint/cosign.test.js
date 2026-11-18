@@ -100,6 +100,8 @@ describe('snapshot checkpoint co-sign round', function () {
             expect(leader.engine.snapshotRounds.size).to.equal(1);
             clock.tick(13);
             expect(leader.engine.snapshotRounds.size).to.equal(0);
+            expect(leader.engine.getStats().round_timeouts).to.equal(1);
+            expect(leader.engine.getStats().round_expiries).to.deep.equal({ below_quorum: 1 });
             const expired = warnLog.args.map(args => args.map(String).join(' '))
                 .filter(line => line.includes('SnapshotCheckpointEngine: round') &&
                     line.includes('expired'));

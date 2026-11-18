@@ -181,7 +181,8 @@ module.exports = {
                                  supersede_no_disagreement: 0, supersede_target_mismatch: 0,
                                  supersede_digest_mismatch: 0, checkpoint_disagreement: 0,
                                  checkpoint_reorged: 0, indexer_divergence: 0, rootless: 0,
-                                 seq_second_payload: 0 };
+                                 seq_second_payload: 0, supersede_below_gate: 0,
+                                 supersede_malformed: 0 };
         this._cosignDeclinesTotal = 0;
         this._lastCosignDeclineReason = null;
         this._cosignDeclineLoggedAt   = {};   // pre-auth decline warn throttle per reason, on the cadence-stall window
@@ -242,7 +243,7 @@ module.exports = {
         this._leaderDeclines = { indexer_replaying: 0, supersede_no_replay: 0, supersede_unwitnessed: 0,
                                  supersede_no_disagreement: 0, supersede_target_mismatch: 0,
                                  supersede_digest_mismatch: 0, checkpoint_disagreement: 0, checkpoint_reorged: 0,
-                                 seq_second_payload: 0 };
+                                 indexer_no_block: 0, off_cadence: 0, seq_second_payload: 0 };
         this._leaderDeclinesTotal      = 0;
         this._lastLeaderDeclineByChain = {};
     }

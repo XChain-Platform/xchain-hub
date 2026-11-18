@@ -64,5 +64,8 @@ describe('price_snapshots reference_chain backfill runbooks', function () {
         const line = readme.split('\n').find(text => text.includes(SUPERSEDED));
         expect(line).to.contain(GUARDED);
         expect(readme).to.contain('`' + GUARDED + '`');
+        expect(readme).to.contain('every hub database in the federation');
+        expect(readme).to.contain('does not re-pend archived rows');
+        expect(readme).to.contain('no network discriminator');
     });
 });

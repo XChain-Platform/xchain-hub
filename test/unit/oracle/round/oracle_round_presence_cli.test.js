@@ -131,7 +131,7 @@ function paramsOf(call) {
         // bounds instead of exiting with nothing compared.
         async function skipsAHubThatAnswersWithTest13() {
             const { cli, post } = loadCli({
-                [HUB_A]: () => emptyPresence(),
+                [HUB_A]: p => p.to_round == null ? emptyPresence() : presence(p.from_round, p.to_round, { 25: 'missing', 26: 'missing', 27: 'missing' }),
                 [HUB_B]: () => presence(25, 27)
             });
 
@@ -168,7 +168,7 @@ function paramsOf(call) {
 
         async function givesUpWithExit2OnlyTest15() {
             const { cli } = loadCli({
-                [HUB_A]: () => emptyPresence(),
+                [HUB_A]: p => p.to_round == null ? emptyPresence() : presence(p.from_round, p.to_round, { 25: 'missing', 26: 'missing', 27: 'missing' }),
                 [HUB_B]: () => emptyPresence()
             });
 
@@ -353,7 +353,7 @@ function paramsOf(call) {
 
         async function printsThePinnedRangeAndPerTest33() {
             const { cli } = loadCli({
-                [HUB_A]: () => emptyPresence(),
+                [HUB_A]: p => p.to_round == null ? emptyPresence() : presence(p.from_round, p.to_round, { 25: 'missing', 26: 'missing', 27: 'missing' }),
                 [HUB_B]: () => presence(25, 27)
             });
 

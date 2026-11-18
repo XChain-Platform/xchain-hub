@@ -184,6 +184,7 @@ module.exports = {
     // always the oldest four, a hub holding 697 closed windows re-proposed windows 10-13
     // for ever and proposed window 14 never once.
     sweepBufferCatchup() {
+        if (this._stopped) return 0;
         let pending = this.pendingCatchupWindows();
         if (pending.length === 0) return 0;
         this.batchCatchupSweeps++;

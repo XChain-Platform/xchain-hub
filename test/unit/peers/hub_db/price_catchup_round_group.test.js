@@ -88,7 +88,8 @@ function walkOf(env, rows, pageSize) {
 }
 
 function storedPairs(db) {
-    return db.setFinalizedPriceSnapshotRound.getCalls().map(call => call.args[1][0].coinPair).sort();
+    return db.setFinalizedPriceSnapshotRound.getCalls()
+        .flatMap(call => call.args[1].map(pair => pair.coinPair)).sort();
 }
 
 describe('price catch-up of producer round groups', function () {

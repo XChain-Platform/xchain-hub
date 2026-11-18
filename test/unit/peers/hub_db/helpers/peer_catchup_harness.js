@@ -57,6 +57,8 @@ function makeCatchup(overrides) {
         fetchPage: opts.fetchPage,
         hasRow: opts.hasRow,
         storeRow: opts.storeRow,
+        storeRound: opts.storeRound,
+        localRoundRows: opts.localRoundRows,
         pageSize: 'pageSize' in opts ? opts.pageSize : 2,
         maxPooledRounds: opts.maxPooledRounds,
         maxPooledRowsPerRound: opts.maxPooledRowsPerRound,

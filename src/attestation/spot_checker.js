@@ -111,8 +111,9 @@ class AttestationSpotChecker {
             ? hub.spotCheckInjector.bind(hub)
             : null;
 
-        // Active spot-check entries: Map<requestIdLower, { providerId, expectedPattern, registeredAt }>
+        // Active spot-check entries: Map<requestIdLower, { providerId, expectedPattern, registeredAt, ttlMs }>
         this._queue = new Map();
+        this.queueExpired = 0;
 
         // Per-validator failure history: Map<pubkeyLower, [{ requestId, timestamp }]>
         this._failures = new Map();

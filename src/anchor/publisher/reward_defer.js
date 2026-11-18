@@ -173,15 +173,15 @@ module.exports = {
     // that a reorg is not expected to change it.
     //
     // 'rejected:status' and 'rejected:txid' are deliberately NOT terminal here.
-    // 'rejected:txid' fires while getanchoraction's checkpoint_anchored is UNFILTERED, so
-    // it also fires while our own tx is merely unmined on a checkpoint that already carries
-    // an earlier anchor, which is the v1 archive head's normal state. 'rejected:status'
-    // (the indexer's decoded-invalid verdict, e.g. a CHECKPOINT_SEQ replay guard) is
-    // checked BEFORE that same depth gate, so it can be reached by a still-shallow txid
-    // whose ordering a pending reorg can still rewrite: today's "stale replay" against a
-    // competing anchor can undecide itself once the chain resettles, so treating it as
-    // terminal here can drop a reward for an anchor that goes on to verify. Retrying either
-    // until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
+    // A txid-filtered miss on a checkpoint that already carries an earlier anchor (the v1
+    // archive head's normal state while our own tx is unmined) reads 'absent:other-anchor'
+    // and retries here too; 'rejected:txid' needs a returned row naming a different txid
+    // and stays retained. 'rejected:status' (the indexer's decoded-invalid verdict, e.g. a
+    // CHECKPOINT_SEQ replay guard) is checked BEFORE that same depth gate, so a still-shallow
+    // txid can reach it, one whose ordering a pending reorg can still rewrite: today's "stale
+    // replay" against a competing anchor can undecide itself once the chain resettles, so
+    // treating it as terminal here can drop a reward for an anchor that goes on to verify.
+    // Retrying either until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
     // Every non-verified outcome writes nothing either way, so the safety property does not
     // depend on this choice.
     //

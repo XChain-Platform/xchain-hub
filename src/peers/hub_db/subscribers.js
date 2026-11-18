@@ -98,6 +98,12 @@ async function readMaxIds(db) {
             let ar = await db.getAttestationResponsesMaxId();
             maxIds.attestation_responses = (ar.length > 0 && ar[0].max_id != null) ? Number(ar[0].max_id) : 0;
         } catch (e) { /* table may not exist yet */ }
+        try {
+            // Unfiltered MAX(id): the snapshot feed serves every row in this
+            // append-only table, and the ceiling also enables stale-cursor reset.
+            const rt = await db.getRemoteTokenSnapshotsMaxId();
+            maxIds.remote_token_snapshots = (rt.length > 0 && rt[0].max_id != null) ? Number(rt[0].max_id) : 0;
+        } catch (e) { /* table may not exist yet */ }
     }
     return maxIds;
 }

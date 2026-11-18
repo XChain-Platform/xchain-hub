@@ -77,7 +77,7 @@ function walkOf(env, rows, pageSize, extra) {
 
 function storedPairs(db) {
     return db.setFinalizedPriceSnapshotRound.getCalls()
-        .map(call => call.args[0] + '|' + call.args[1][0].coinPair).sort();
+        .flatMap(call => call.args[1].map(pair => call.args[0] + '|' + pair.coinPair)).sort();
 }
 
 // A producer pair row of another round, standing for a per-pair marker or any row between two halves of a round.

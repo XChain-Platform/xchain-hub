@@ -5,7 +5,7 @@
 
 // How catch-up asks whether the hub already holds a peer row, and how it stores one it verified.
 
-const { priceSnapshotAlreadyHeld, storePriceSnapshot } = require('./price_round_groups.js');
+const { groupKey, priceSnapshotAlreadyHeld, storePriceSnapshot, storePriceRound } = require('./price_round_groups.js');
 const { hasSupersedeFields } = require('../../anchor/checkpoint_engine/supersede_suffix.js');
 
 function withoutWireId(row) {
@@ -86,4 +86,19 @@ function storeVerifiedRow(db, table, row) {
     return writer(db, withoutWireId(row));
 }
 
-module.exports = { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow };
+function storeVerifiedRound(db, table, rows) {
+    if (table !== 'price_snapshots') throw new Error('No grouped hub DB catch-up writer for table: ' + table);
+    return storePriceRound(db, rows.map(withoutWireId));
+}
+
+async function localRoundRows(db, table, row) {
+    if (table !== 'price_snapshots') return [];
+    const key = groupKey(row);
+    const rows = await db.findPriceSnapshotsForRound(row.round_number);
+    return (Array.isArray(rows) ? rows : []).filter(candidate => groupKey(candidate) === key).map(withoutWireId);
+}
+
+module.exports = {
+    withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow,
+    storeVerifiedRound, localRoundRows
+};

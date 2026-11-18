@@ -22,8 +22,9 @@ const { supersedeWitnessDecline, checkpointHoldDecline } = require('./checkpoint
 const { hasSupersedeFields } = require('./supersede_suffix.js');
 
 function indexerReplayOpen(rules){
-    const state = rules && rules.replay && rules.replay.state;
-    return state === 'pending' || state === 'replaying';
+    if(!rules || rules.replay == null) return false;
+    // Only a completed replay is closed. Unknown states hold signing during version skew.
+    return rules.replay.state !== 'replayed';
 }
 
 function supersedeDecline(cp, rules, strict, expectedSupersede){

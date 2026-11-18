@@ -29,7 +29,7 @@ const { validateLimit, validateSince } = require('../validate');
 const { mountSnapshotQueryValidation } = require('./hub_db_snapshot_query');
 const { mountCapabilitySnapshotProof } = require('./capability_snapshot_proof');
 const { RATE_LIMIT_RPC_ERROR_CODE } = require('../rate_limit_policy');
-const DEFAULT_SNAPSHOT_MAX_INFLIGHT = 4;   // of the ten pooled connections; HUB_SNAPSHOT_MAX_INFLIGHT overrides
+const { resolveRestSnapshotCap } = require('../snapshot_read_caps');   // HUB_SNAPSHOT_MAX_INFLIGHT, of the ten pooled connections
 const SNAPSHOT_BUSY_RETRY_AFTER_S = 1;
 
 function mountSnapshotRoutes(app, ctx) {
@@ -121,8 +121,7 @@ function mountSnapshotAuth(app, { HUB_API_KEY, HUB_API_KEY_PREVIOUS, HUB_FEED_AP
 // probe's SELECT 1 starves. Excess is shed with the limiter's 429 shape and Retry-After,
 // which the indexer bootstrap retries; finish or close frees the slot (error, abort).
 function mountSnapshotConcurrencyGate(app, { hubConfig }) {
-    const configured = parseInt((hubConfig || {}).HUB_SNAPSHOT_MAX_INFLIGHT, 10);
-    const cap = Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_SNAPSHOT_MAX_INFLIGHT;
+    const cap = resolveRestSnapshotCap(hubConfig);
     let inFlight = 0;
     app.use('/hub-db/snapshot', (req, res, next) => {
         if (inFlight >= cap) {

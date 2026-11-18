@@ -26,6 +26,17 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../observability');
 const logger = getLogger();
 
+// Resolutions that start together share one configs read, so a burst of them takes one
+// pooled connection instead of one each. Nothing is cached: the next call after the read
+// settles queries again, and a failure reaches every caller that joined it.
+function readConfigsShared(hub){
+    if(!hub._configsReadInFlight){
+        hub._configsReadInFlight = Promise.resolve(hub.db.getAllConfigs())
+            .finally(() => { hub._configsReadInFlight = null; });
+    }
+    return hub._configsReadInFlight;
+}
+
 class IndexerUrls {
 
     // Which BTC network this hub talks to. For a hub that DECLARED one (every validator,
@@ -41,7 +52,7 @@ class IndexerUrls {
         // A hub told which network it is never guesses: with no configs, its own is the answer.
         if(!this.db) return this.network || 'mainnet';
         let configs;
-        try { configs = await this.db.getAllConfigs(); }
+        try { configs = await readConfigsShared(this); }
         catch (err) {
             logger.error(nodeUtil.format('XChainHub: failed to resolve BTC network from configs:', err));
             return this.network || 'mainnet';
@@ -151,7 +162,7 @@ class IndexerUrls {
         if(env[coin + '_INDEXER_URL']) return env[coin + '_INDEXER_URL'];
         if(!this.db) return null;
         let configs;
-        try { configs = await this.db.getAllConfigs(); }
+        try { configs = await readConfigsShared(this); }
         catch (err) { logger.error(nodeUtil.format('XChainHub: failed to resolve ' + coin + ' indexer URL from configs:', err)); return null; }
         // Key the configs tree by the coin registry's full name, the same key the configs
         // writer stores under, so a chain added to the registry resolves with no edit here.

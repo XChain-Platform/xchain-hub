@@ -74,7 +74,8 @@ describe('hub DB ready frame ceilings', function () {
                 bridge_transfers: 29,
                 policy_snapshots: 29,
                 list_snapshots: 29,
-                attestation_responses: 29
+                attestation_responses: 29,
+                remote_token_snapshots: 29
             },
             hub_instance_id: INSTANCE_ONE,
             caught_up: true,
@@ -85,9 +86,11 @@ describe('hub DB ready frame ceilings', function () {
         const bridgeMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM bridge_transfers'));
         const policyMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM policy_snapshots'));
         const listMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM list_snapshots'));
+        const remoteTokenMax = queries.find(sql => sql.includes('MAX(id)') && sql.includes('FROM remote_token_snapshots'));
         expect(bridgeMax).to.include("status <> 'retracted'");
         expect(policyMax).not.to.include('status');
         expect(listMax).not.to.include('status');
+        expect(remoteTokenMax).not.to.include('status');
         broadcaster.stop();
     });
 });

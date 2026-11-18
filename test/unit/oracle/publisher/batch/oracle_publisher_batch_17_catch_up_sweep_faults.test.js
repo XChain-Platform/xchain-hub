@@ -19,6 +19,10 @@ const {
     expect,
     bufferedFixture,
     makePublisher,
+    makeDb,
+    ME,
+    PEER1,
+    PEER2,
     cleanupPublisherBatch
 } = require('./oracle_publisher_batch.test.js');
 
@@ -77,6 +81,69 @@ function registerSuite1() {
     it('catches a rejecting tick fired from the timer instead of leaving it unhandled', testCase3);
 }
 
+// A hub that follows window 1 (ME ranks first of three, so it leads 0, 3, 6...), with
+// takeover armed and a batch observed so a takeover timer is a possible outcome.
+async function followerHub() {
+    let snapshots = [{ round_number: 99, batch: true, status: 'finalized' }];
+    for (let r = 0; r < 12; r++) snapshots.push({ round_number: r, status: 'finalized' });
+    let h = makePublisher({ publishers: [ME, PEER1, PEER2], db: makeDb({ snapshots: snapshots }),
+                            cfg: { ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS: '2' } });
+    await h.p.start();
+    for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+    return h;
+}
+
+const testCase4 = async function () {
+    let h = await followerHub();
+    let release;
+    let gate = new Promise(resolve => { release = resolve; });
+    let elect = h.p.getActiveOraclePublishPubkeys;
+    sinon.stub(h.p, 'getActiveOraclePublishPubkeys').callsFake(async (anchor) => {
+        await gate;
+        return elect.call(h.p, anchor);
+    });
+    let assembly = h.p.assembleWindow(1);
+    await new Promise(resolve => setImmediate(resolve));
+    h.p.stop();
+    release();
+    await assembly;
+    expect(h.p._takeoverTimers.size, 'no takeover timer outlives stop()').to.equal(0);
+    expect(h.signer.calls, 'no signing round starts on a stopped publisher').to.have.length(0);
+};
+
+const testCase5 = async function () {
+    let h = await followerHub();
+    h.p.stop();
+    h.p.rearmTakeover(1, 1000);
+    expect(h.p._takeoverTimers.size).to.equal(0);
+    expect(await h.p.runTakeoverAttempt(1)).to.equal(false);
+};
+
+const testCase6 = async function () {
+    let h = await followerHub();
+    expect(h.p.pendingCatchupWindows().length, 'closed windows are waiting (control)').to.be.greaterThan(0);
+    h.p.stop();
+    expect(h.p.sweepBufferCatchup()).to.equal(0);
+    await h.p.assembleWindow(1);
+    expect(h.p._assembledWindows.has(1)).to.equal(false);
+};
+
+const testCase7 = async function () {
+    let h = await followerHub();
+    h.p.stop();
+    await h.p.start();
+    for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+    await h.p.assembleWindow(1);
+    expect(h.p._takeoverTimers.has(1), 'the guards key on _stopped, not a sticky flag').to.equal(true);
+};
+
+function registerSuite2() {
+    it('does not arm a takeover timer from an assembly that was mid-await when stop() ran', testCase4);
+    it('does not re-arm or run a takeover after stop()', testCase5);
+    it('queues no catch-up assembly and runs no window after stop()', testCase6);
+    it('arms takeover normally again after a stop and start cycle', testCase7);
+}
+
 function registerOuterSuite() {
     beforeEach(function () {
         logs = { log: [], warn: [], error: [] };
@@ -88,6 +155,7 @@ function registerOuterSuite() {
         cleanupPublisherBatch();
     });
     describe('a catch-up sweep tick that faults', registerSuite1);
+    describe('work in flight when stop() runs', registerSuite2);
 }
 
 describe('OraclePublisher PRICE batch rail', registerOuterSuite);

@@ -225,8 +225,9 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // N-1), and the id-ordered mirror bootstrap could persist that torn read to a replica.
     // A single statement is the atomicity primitive here, needing no withTransaction.
     // `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
-    // already resolved to its per-chain columns. The upsert upgrades a 'skipped' placeholder
-    // row to 'finalized', but cannot revive a row concurrently marked 'disputed'.
+    // already resolved to its per-chain columns. A new key inserts, a 'skipped'
+    // placeholder upgrades, and an existing finalized or disputed row stays unchanged.
+    // Status is assigned last because the preceding guards must read the held status.
     async setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols) {
         let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
         let params = [];
@@ -237,12 +238,16 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  validator_count, consensus_round, consensus_proof, status,
                  admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
-                 block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
-                 consensus_proof = VALUES(consensus_proof),
-                 status = IF(status = 'disputed', status, 'finalized'),
-                 admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                 admit_block_doge = VALUES(admit_block_doge)`;
+                ON DUPLICATE KEY UPDATE
+                 price = IF(status = 'skipped', VALUES(price), price),
+                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
+                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
+                 validator_count = IF(status = 'skipped', VALUES(validator_count), validator_count),
+                 consensus_proof = IF(status = 'skipped', VALUES(consensus_proof), consensus_proof),
+                 admit_block_btc = IF(status = 'skipped', VALUES(admit_block_btc), admit_block_btc),
+                 admit_block_ltc = IF(status = 'skipped', VALUES(admit_block_ltc), admit_block_ltc),
+                 admit_block_doge = IF(status = 'skipped', VALUES(admit_block_doge), admit_block_doge),
+                 status = IF(status = 'disputed', status, 'finalized')`;
         return this.doQuery(query, params);
     },
 

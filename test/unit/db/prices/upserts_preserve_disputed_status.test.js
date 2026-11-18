@@ -57,4 +57,17 @@ describe('finalized price snapshot upserts', () => {
             assert.match(update, /push_generation\s*=\s*VALUES\(push_generation\)/);
         }
     });
+
+    it('only upgrades skipped rows when finalizing a round', async () => {
+        const { update } = parts(await capture('setFinalizedPriceSnapshotRound'));
+        const guarded = ['price', 'reference_block', 'block_timestamp', 'validator_count',
+            'consensus_proof', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
+        for (const column of guarded) {
+            const pattern = new RegExp(column + "\\s*=\\s*IF\\(status\\s*=\\s*'skipped',\\s*VALUES\\(" +
+                column + '\\),\\s*' + column + '\\)');
+            assert.match(update, pattern, column);
+        }
+        assert.doesNotMatch(update, /\b(reference_chain|source_chain|source_action_index|push_generation|batch_block_time)\s*=/);
+        assert.match(update, /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)\s*$/);
+    });
 });

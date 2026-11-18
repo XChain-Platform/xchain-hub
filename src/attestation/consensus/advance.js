@@ -216,8 +216,9 @@ module.exports = {
         // fetches shrink `proposals.length` and a lone unreplicated body clears
         // ceil((N+1)/2) with N=1, becoming the round winner and suppressing the
         // deterministic no_quorum audit row (byte_equality's independent-fetch
-        // premise goes unexercised). byte_equality honours it; judge_model
-        // ignores it. `need` is the responsible-set bound maybeAdvanceFromProposals computed.
+        // premise goes unexercised). byte_equality honours it as the majority
+        // denominator; judge_model refuses a lone ok proposal under it. `need` is
+        // the responsible-set bound maybeAdvanceFromProposals computed.
         return { pinnedJudgeModel: pending.pinnedJudgeModel || null, pinnedVendors: pending.pinnedVendors || null,
                  pinnedApprovedModels: pending.pinnedApprovedModels || null,
                  timeoutMs: judgeTimeoutMs, expectedN: need, outcome: judgeOutcome };

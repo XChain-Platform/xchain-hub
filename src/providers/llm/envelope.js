@@ -50,9 +50,13 @@ function parseEnvelope(settings, payload, options, envelopeVersion) {
     }
     // Same boundary rule for the optional system prompt: a non-string would otherwise
     // string-coerce into '[object Object]' on the json_object path and fail per
-    // transport (spawn argv vs vendor 400) on the text path. Omission stays legal.
+    // transport (spawn argv vs vendor 400) on the text path. A NUL cannot be carried
+    // in a process argument, so allowing one would also make the outcome transport-specific.
+    // Omission stays legal.
     if (envelope.system !== undefined && typeof envelope.system !== 'string')
         throw new Error('llm: envelope.system must be a string');
+    if (typeof envelope.system === 'string' && envelope.system.includes('\u0000'))
+        throw new Error('llm: envelope.system must not contain NUL characters');
 
     // Requester-controlled fallback policy. 'any' (default): serve from any
     // approved model on the chain. 'strict': the requesting contract only

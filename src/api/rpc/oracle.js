@@ -22,6 +22,7 @@ const { validateLimit, strictInt } = require('../validate');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { computeQuorumMargin } = require('../../oracle/quorum_margin.js');
 const { RATE_LIMIT_RPC_ERROR_CODE } = require('../rate_limit_policy');
+const { resolveRpcSnapshotCap } = require('../snapshot_read_caps');
 
 // Preserve consensus-input capacity by enriching at most 16 historical anchors per public request.
 const MAX_QUORUM_MARGIN_ANCHORS = 16;
@@ -31,15 +32,9 @@ const MAX_QUORUM_MARGIN_ANCHORS = 16;
 // 4 of them by default and this gate up to 3, so at least 3 stay free for the hub's own
 // writers and for the SELECT 1 liveness probe behind ping and health.
 // HUB_RPC_SNAPSHOT_MAX_INFLIGHT overrides it, and the REST and RPC gates count separately,
-// so an operator raising either should keep their sum below the pool size.
-const DEFAULT_RPC_SNAPSHOT_MAX_INFLIGHT = 3;
+// so an operator raising either should keep their sum within the budget that
+// snapshot_read_caps.js checks and warns about at boot.
 const RPC_SNAPSHOT_BUSY_RETRY_AFTER_S = 1;
-
-function rpcSnapshotCap(hubConfig) {
-    const raw = (hubConfig || {}).HUB_RPC_SNAPSHOT_MAX_INFLIGHT;
-    const configured = typeof raw === 'string' || typeof raw === 'number' ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(configured) && configured >= 1 ? configured : DEFAULT_RPC_SNAPSHOT_MAX_INFLIGHT;
-}
 
 // Unbounded, a flood of limit=10000 reads (single calls or 20-member batches) filled the
 // shared pool, and the liveness probe's SELECT 1 queued behind them until ping and health
@@ -48,7 +43,7 @@ function rpcSnapshotCap(hubConfig) {
 // router shares one response across every member of a batch, so a 429 for one shed member
 // would fail the members that were served.
 function snapshotReadGate(hubConfig) {
-    const cap = rpcSnapshotCap(hubConfig);
+    const cap = resolveRpcSnapshotCap(hubConfig);
     let inFlight = 0;
     return async function admit(work) {
         if (inFlight >= cap) {

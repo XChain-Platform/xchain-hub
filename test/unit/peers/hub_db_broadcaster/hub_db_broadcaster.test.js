@@ -14,6 +14,7 @@ const sinon              = require('sinon');
 const { expect }         = require('chai');
 const proxyquire         = require('proxyquire');
 const { DB_METHODS }     = require('../../../helpers/mockHub');
+const { MIRRORED_TABLES } = require('../../../../src/peers/hub_db/catchup_verifiers.js');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Load HubDbBroadcaster with WebSocket stubbed
@@ -240,7 +241,7 @@ function registerFeature2addSubscriberPart2() {
       }
     }
     let msg = JSON.parse(ws.send.firstCall.args[0]);
-    for (const table of ['state_checkpoints', 'anchor_reward_attestations']) {
+    for (const table of MIRRORED_TABLES) {
       expect(msg.max_ids, 'ready frame omits ' + table + ', so the consumer never runs its gap catch-up for it').to.have.property(table, 7);
       expect(asked.some(sql => sql.includes('FROM ' + table)), 'no MAX(id) query was issued for ' + table).to.equal(true);
     }

@@ -323,8 +323,8 @@ describe('price catch-up walk over missed stored producer rounds', function () {
             fetchPage: feed(rows), pageSize: 4, indexerReadIntervalMs: 0, logger });
         await catchup.run();
         expect(logger.warn.calledWithMatch('refused')).to.equal(false);
-        const stored = env.db.setFinalizedPriceSnapshotRound.getCalls().map(call =>
-            [call.args[0], call.args[1][0].coinPair, call.args[1][0].price].join('|'));
+        const stored = env.db.setFinalizedPriceSnapshotRound.getCalls().flatMap(call => call.args[1].map(pair =>
+            [call.args[0], pair.coinPair, pair.price].join('|')));
         expect(stored.sort()).to.deep.equal(
             rows.map(row => [row.round_number, row.coin_pair, row.price].join('|')).sort());
         expect(env.db.setPushedPriceSnapshotRound.called).to.equal(false);

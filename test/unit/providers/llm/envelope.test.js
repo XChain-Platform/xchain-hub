@@ -70,6 +70,20 @@ function registerParseEnvelopeTests() {
                 expectLlmError(() => parse({ prompt: 'hello', system }));
         });
 
+        it('rejects NUL anywhere in the system prompt', function () {
+            for (const system of ['\u0000a', 'a\u0000b', 'a\u0000'])
+                expectLlmError(() => parse({ prompt: 'hello', system }));
+        });
+
+        it('accepts system values that can be carried by every transport', function () {
+            for (const envelope of [
+                { prompt: 'hello', system: 'ordinary' },
+                { prompt: 'hello', system: '' },
+                { prompt: 'hello' },
+                { prompt: 'hello', system: '\\u0000' }
+            ]) expect(parse(envelope)).to.deep.equal(envelope);
+        });
+
         it('rejects fallback values other than any or strict', function () {
             expectLlmError(() => parse({ prompt: 'hello', fallback: 'best' }));
         });

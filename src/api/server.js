@@ -30,6 +30,7 @@ const { installMiddleware, terminalErrorHandler } = require('./middleware');
 const { withEnvelopeRepair } = require('./jsonrpc_envelope');
 const { buildRpcController } = require('./rpc');
 const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
+const { snapshotCapWarnings } = require('./snapshot_read_caps');
 const { mountTelemetryRoutes } = require('./rest/telemetry');
 const { mountRegistryRoutes } = require('./rest/registry');
 
@@ -37,6 +38,7 @@ function createApp(ctx) {
     const { express, hubConfig } = ctx;
     const jsonRouter = ctx.jsonRouter || defaultJsonRouter;
     const app = express();
+    for (const warning of snapshotCapWarnings(hubConfig)) ctx.logger.warn(warning);
     const observability = installMiddleware(app, ctx);
     const jsonRpcController = ctx.rpcController || buildRpcController(ctx);
     mountSnapshotRoutes(app, ctx);

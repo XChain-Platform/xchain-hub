@@ -48,9 +48,11 @@ module.exports = {
     // the caller treats as ABSTAIN (skip stamp+reward): 'no-indexer' (a hub with no
     // DOGE indexer wired fails closed, i.e. skips the receiver stamp+reward; wire
     // DOGE_INDEXER_URL fleet-wide before deploy), 'unreachable',
-    // 'absent', 'shallow' are the benign redundant-re-anchor direction the receiver
-    // paths already tolerate; 'rejected:status' / 'rejected:mismatch' /
-    // 'rejected:txid' / 'rejected:version' are a positively-detected forge.
+    // 'absent', 'absent:other-anchor', 'shallow' are the benign redundant-re-anchor
+    // direction the receiver paths already tolerate; 'rejected:status' /
+    // 'rejected:mismatch' / 'rejected:txid' / 'rejected:version' are a
+    // positively-detected forge ('rejected:txid' only when a row came back carrying
+    // a different txid).
     //
     // `expect` BINDS the announcement to a specific on-chain transaction:
     //   expect.txid    - the txid the peer announced (signed into the BUNDLE_DONE /
@@ -98,11 +100,13 @@ module.exports = {
     // the binding verifyAnchorOnChain was asked for (`want`, with its lowercased txid).
     anchorActionVerdict(res, cp, want, wantTxid){
         if(!res || !res.exists){
-            // The filtered lookup found nothing. `checkpoint_anchored` says whether ANY
-            // anchor exists for this checkpoint: if one does, the announced txid is a
-            // forge (the checkpoint is anchored, just not by that tx). If none does, the
-            // checkpoint simply is not anchored yet, which is the benign direction.
-            if(wantTxid && res && res.checkpoint_anchored) return 'rejected:txid';
+            // The filtered lookup found nothing. `checkpoint_anchored` is computed from the
+            // UNFILTERED rows, so it only says some anchor exists for this checkpoint
+            // (one key routinely carries both a v0 bundle and a v1 archive head). An
+            // announced tx that is still in the mempool misses the same way, so a miss is
+            // undecided, never a forge: the caller queues it, and only an exact-txid row
+            // at depth can stamp. A positive txid forge needs a returned row (below).
+            if(wantTxid && res && res.checkpoint_anchored) return 'absent:other-anchor';
             return 'absent';
         }
         if(/^invalid/i.test(String(res.status || ''))) return 'rejected:status';

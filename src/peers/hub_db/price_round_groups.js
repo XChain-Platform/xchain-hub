@@ -116,8 +116,19 @@ function storePriceSnapshot(db, row) {
         row.block_timestamp, row.validator_count, row.consensus_proof, admissionBlocks(row));
 }
 
+function storePriceRound(db, rows) {
+    if (!Array.isArray(rows) || rows.length === 0 || !groupAgrees(rows[0], rows)) {
+        throw new Error('Catch-up producer round rows must be one complete agreeing group');
+    }
+    const first = rows[0];
+    return db.setFinalizedPriceSnapshotRound(first.round_number,
+        rows.map(row => ({ coinPair: row.coin_pair, price: row.price })),
+        first.reference_block, first.block_timestamp, first.validator_count,
+        first.consensus_proof, admissionBlocks(first));
+}
+
 module.exports = {
     ROUND_AGREEMENT_KEYS, sameValue, groupAgrees,
-    advanceCursor, storePriceSnapshot, priceSnapshotAlreadyHeld,
+    advanceCursor, storePriceSnapshot, storePriceRound, priceSnapshotAlreadyHeld,
     isProducerRoundRow, groupKey, indexGroups, holdTrailingGroup
 };

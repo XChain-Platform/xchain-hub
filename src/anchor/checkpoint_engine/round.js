@@ -86,7 +86,7 @@ module.exports = {
         this.assertCheckpointNetwork(cp, 'propose');
         // The interval rule, re-read here because a peer's FINALIZED or this hub's own
         // co-signature on another round of the interval may have landed during the reads above.
-        if(this.declinesOwnRound(cp)) return;
+        if(this.declinesOwnRound(cp)) return this.noteLeaderDecline('off_cadence', cp);
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
         if(!this.claimSeqSignature(cp, canonical))

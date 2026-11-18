@@ -111,7 +111,7 @@ function registerOracleConsensusDerivedPairDropMarkersItemSuite1Part2() {
       coinPair: 'BTC/USD',
       price: '100000'
     }], 3, '[]', 900, 1700000000);
-    const skipInsert = queries.find(q => q.sql.includes("'skipped'") && q.sql.includes('INSERT INTO price_snapshots'));
+    const skipInsert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots') && /'\[\]', 'skipped'\)/.test(q.sql));
     expect(skipInsert, 'a skipped-marker INSERT was issued').to.exist;
     expect(skipInsert.params, 'the derived pair is among the marked pairs').to.include(oracleConsensusDerivedPairDropMarkersItemSuite1XCHAIN);
   });
@@ -136,7 +136,7 @@ function registerOracleConsensusDerivedPairDropMarkersItemSuite1Part2() {
       coinPair: oracleConsensusDerivedPairDropMarkersItemSuite1XCHAIN,
       price: '0.01'
     }], 3, '[]', 900, 1700000000);
-    const skipInsert = queries.find(q => q.sql.includes("'skipped'") && q.sql.includes('INSERT INTO price_snapshots'));
+    const skipInsert = queries.find(q => q.sql.includes('INSERT INTO price_snapshots') && /'\[\]', 'skipped'\)/.test(q.sql));
     if (skipInsert) expect(skipInsert.params).to.not.include(oracleConsensusDerivedPairDropMarkersItemSuite1XCHAIN);
   });
 }

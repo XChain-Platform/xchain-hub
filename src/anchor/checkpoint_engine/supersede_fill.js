@@ -20,7 +20,7 @@
 
 'use strict';
 
-const { hasSupersedeFields } = require('./supersede_suffix.js');
+const { hasSupersedeFields, supersedeSuffix } = require('./supersede_suffix.js');
 
 // Only a replay the indexer witnessed and found changed may supersede. An
 // indexer that predates the witness omits both fields, and that fails closed.
@@ -69,4 +69,17 @@ function supersedeGateRefusal(cp, gateActive) {
     return hasSupersedeFields(cp) && gateActive !== true ? 'supersede_below_gate' : null;
 }
 
-module.exports = { replayWindowFor, supersedeFieldsFor, supersedeGateRefusal };
+// The named input refusal canonicalCheckpoint would raise for supersession fields.
+function supersedeFieldsRefusal(cp, gateActive) {
+    const belowGate = supersedeGateRefusal(cp, gateActive);
+    if(belowGate || !hasSupersedeFields(cp)) return belowGate;
+    try { supersedeSuffix(cp); return null; }
+    catch(_e){ return 'supersede_malformed'; }
+}
+
+module.exports = {
+    replayWindowFor,
+    supersedeFieldsFor,
+    supersedeGateRefusal,
+    supersedeFieldsRefusal,
+};

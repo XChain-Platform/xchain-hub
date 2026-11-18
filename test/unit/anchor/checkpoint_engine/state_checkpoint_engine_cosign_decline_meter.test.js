@@ -116,6 +116,22 @@ async function expectRequestDecline(reason, configure, request = signReq()){
     expect(lines.filter(line => line.includes(reason)), reason).to.have.lengthOf(1);
 }
 
+function requestWithSupersedeFields(fields){
+    const request = signReq();
+    request.data.checkpoint = Object.assign({}, request.data.checkpoint, fields);
+    return request;
+}
+
+async function expectSupersedeFieldDecline(reason, fields, gateActive){
+    const originalGate = canonicalForms.isCheckpointSupersedeActive;
+    canonicalForms.isCheckpointSupersedeActive = () => gateActive;
+    try {
+        await expectRequestDecline(reason, () => {}, requestWithSupersedeFields(fields));
+    } finally {
+        canonicalForms.isCheckpointSupersedeActive = originalGate;
+    }
+}
+
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     it('counts validator resolution, membership, leader, signature, and sequence read refusals', async function () {
         await expectRequestDecline('validator_resolve_failed', engine => {
@@ -211,6 +227,19 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         expect(lines.join('\n')).to.include('supersede_read_failed').and.to.include('db down');
     });
 
+    it('counts malformed supersession fields before canonical construction', async function () {
+        const digest = 'ef'.repeat(32);
+        await expectSupersedeFieldDecline('supersede_below_gate', {
+            supersedes_from: 30, rules_digest: digest,
+        }, false);
+        for(const fields of [
+            { supersedes_from: 30 },
+            { rules_digest: digest },
+            { supersedes_from: 'abc', rules_digest: digest },
+            { supersedes_from: 30, rules_digest: 'xyz' },
+        ]) await expectSupersedeFieldDecline('supersede_malformed', fields, true);
+    });
+
     it('classifies getblockhashes result errors before checkpoint hold checks', async function () {
         const cases = [
             ['block not indexed: 500', 'indexer_no_block'],
@@ -266,7 +295,8 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
             'indexer_replaying', 'supersede_read_failed', 'supersede_no_replay',
             'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
             'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',
-            'indexer_divergence', 'rootless', 'seq_second_payload');
+            'indexer_divergence', 'rootless', 'seq_second_payload',
+            'supersede_below_gate', 'supersede_malformed');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();

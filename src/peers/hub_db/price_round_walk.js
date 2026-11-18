@@ -3,7 +3,8 @@
 // Copyright © 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-const { withoutWireId, verifiedRowOr } = require('./catchup_rows.js');
+const { withoutWireId } = require('./catchup_rows.js');
+const { groupKey } = require('./price_round_groups.js');
 
 // A producer round's pair rows are not always served together: a pair that was a skipped placeholder keeps its
 // earlier id when the round finalizes, so one round can start on one page and finish many pages later. A
@@ -44,7 +45,7 @@ function rowBytes(row) {
 }
 
 function newEntry() {
-    return { rows: new Map(), unheld: new Map(), bytes: 0, verdict: null, dirty: false };
+    return { rows: new Map(), unheld: new Map(), bytes: 0, verdict: null, dirty: false, verificationRows: null };
 }
 
 async function addNewRows(catchup, walk, entry, group) {
@@ -63,6 +64,21 @@ function entryRows(entry) {
     return Array.from(entry.rows.values());
 }
 
+async function rowsForVerification(catchup, walk, key, entry) {
+    const served = entryRows(entry);
+    const first = entry.unheld.values().next().value || served[0];
+    const local = await catchup.localRoundRows(walk.table, withoutWireId(first));
+    const pairs = new Set(served.map(row => row.coin_pair));
+    const completed = served.slice();
+    for (const row of Array.isArray(local) ? local : []) {
+        if (groupKey(row) !== key || pairs.has(row.coin_pair)) continue;
+        pairs.add(row.coin_pair);
+        completed.push(withoutWireId(row));
+    }
+    entry.verificationRows = completed;
+    return completed;
+}
+
 function entryLimitReason(catchup, entry) {
     if (entry.rows.size > catchup.maxPooledRowsPerRound) return 'producer round exceeded catch-up row limit';
     if (entry.bytes > catchup.maxPooledBytesPerRound) return 'producer round exceeded catch-up byte limit';
@@ -75,13 +91,17 @@ function settleRound(catchup, walk, entry) {
     logRefusal(catchup, walk, unheld[0], entry.verdict);
     if (entry.verdict !== KNOWN_REFUSAL) {
         const identity = walk.peerIdentity || walk.peer;
-        catchup.refusals.remember(catchup.refusals.keyForGroup(identity, walk.table, entryRows(entry)));
+        const rows = entry.verificationRows || entryRows(entry);
+        catchup.refusals.remember(catchup.refusals.keyForGroup(identity, walk.table, rows));
     }
     for (let index = 0; index < unheld.length; index++) countRefusal(walk, entry.verdict);
 }
 
 async function storeRound(catchup, walk, unheld, verdict) {
-    for (const row of unheld) await catchup.storeRow(walk.table, verifiedRowOr(verdict, withoutWireId(row)));
+    if (verdict && typeof verdict === 'object' && verdict.ok === true && verdict.row) {
+        throw new Error('A producer round verifier cannot replace a multi-pair group with one row');
+    }
+    await catchup.storeRound(walk.table, unheld.map(withoutWireId));
 }
 
 function forgetEntry(walk, key, entry) {
@@ -101,6 +121,7 @@ async function processRoundGroup(catchup, walk, key, group) {
     if (entry) {
         const before = entry.bytes;
         entry.dirty = (await addNewRows(catchup, walk, entry, group)) || entry.dirty;
+        if (entry.dirty) entry.verificationRows = null;
         walk.poolBytes += entry.bytes - before;
         const limitReason = entryLimitReason(catchup, entry);
         if (!limitReason && walk.poolBytes <= catchup.maxPooledBytesPerWalk) return;
@@ -112,7 +133,7 @@ async function processRoundGroup(catchup, walk, key, group) {
     entry = newEntry();
     await addNewRows(catchup, walk, entry, group);
     if (entry.unheld.size === 0) return;
-    const rows = entryRows(entry);
+    const rows = await rowsForVerification(catchup, walk, key, entry);
     const verdict = await catchup.verifyWalkRow(walk, entry.unheld.values().next().value, rows, true);
     if (verifierAccepted(verdict)) {
         await storeRound(catchup, walk, Array.from(entry.unheld.values()), verdict);
@@ -136,7 +157,7 @@ async function processRoundGroup(catchup, walk, key, group) {
 
 async function finishEntry(catchup, walk, key, entry) {
     if (entry.dirty) {
-        const rows = entryRows(entry);
+        const rows = await rowsForVerification(catchup, walk, key, entry);
         entry.verdict = await catchup.verifyWalkRow(
             walk, entry.unheld.values().next().value, rows, true);
         if (verifierAccepted(entry.verdict)) {

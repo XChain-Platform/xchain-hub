@@ -65,6 +65,15 @@ class JudgeAgreement {
             return null;
         }
         if (proposals.length === 1) {
+            // The caller hands in only the ok proposals, so a lone survivor of a
+            // responsible set that expected more is an unreplicated body: seating it
+            // would skip the judge and the meta corroboration for an answer no second
+            // validator produced. Inconclusive, so the round resolves to the retryable
+            // no_quorum and a later ok proposal re-enters the judge.
+            if ((Number(options && options.expectedN) || 0) > 1) {
+                markInconclusive(options, 'unreplicated_proposal');
+                return null;
+            }
             // Allowlist still applies with a single proposal. There is nothing to
             // corroborate against, but an unapproved identifier is unrecognized either way
             // and must not reach the canonical signature.
@@ -230,7 +239,8 @@ class JudgeAgreement {
 
     // Consensus strategy: judge_model (spec §6).
     //
-    // Single-proposal case (redundancy=1): trivial. Return the only proposal.
+    // Single-proposal case (redundancy=1, or no expectedN above 1): trivial. Return the
+    // only proposal. A lone ok proposal under expectedN > 1 is no_quorum, never a winner.
     // Multi-proposal case (redundancy>=3): build a judge prompt enumerating
     // candidate responses, run JUDGE_MODEL at temperature=0, parse JSON
     // verdict { equivalent, canonical_index } and return the canonical

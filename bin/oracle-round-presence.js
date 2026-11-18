@@ -28,13 +28,14 @@
  *
  * Read-only: it broadcasts nothing and writes nothing.
  *
+ * Explicit from/to spans are limited to 1000 rounds; split wider checks into windows.
  * Exit codes: 0 agreed, 1 divergent, 2 could not compare (an invalid invocation,
  * or fewer than two distinct hubs with a usable answer).
  */
 'use strict';
 
 const axios = require('axios');
-const { comparePresence, comparePairCounts } = require('../src/lib/oracle_round_presence.js');
+const { comparePresence, comparePairCounts, MAX_RANGE } = require('../src/lib/oracle_round_presence.js');
 
 // The URL string is the only hub identity there is: presence answers carry no hub id,
 // so two DNS aliases of one host stay indistinguishable and this does not pretend
@@ -116,6 +117,11 @@ function parseBounds(opts) {
         console.error('--from must not be greater than --to; got ' + bounds.from + ' and ' + bounds.to);
         return null;
     }
+    if (bounds.from !== null && bounds.to !== null && bounds.to - bounds.from + 1 > MAX_RANGE) {
+        console.error('Requested span ' + (bounds.to - bounds.from + 1) + ' exceeds MAX_RANGE ' + MAX_RANGE +
+            '; split the request into windows of at most ' + MAX_RANGE + ' rounds.');
+        return null;
+    }
     return bounds;
 }
 
@@ -159,6 +165,13 @@ async function collectAnswers(hubs, range) {
         // view to be reported as federation agreement.
         if (!presence || !Array.isArray(presence.rounds)) {
             unreachable.push({ hub, error: 'answered without a rounds array' });
+            continue;
+        }
+        // The answering hub owns its range cap, so version skew must fail closed even
+        // when this CLI's local MAX_RANGE accepted the request.
+        if (presence.from_round !== range.from_round || presence.to_round !== range.to_round) {
+            unreachable.push({ hub, error: 'answered rounds ' + presence.from_round + '-' + presence.to_round +
+                ', not the pinned ' + range.from_round + '-' + range.to_round });
             continue;
         }
         answers.push({ hub, presence });

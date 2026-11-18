@@ -77,6 +77,39 @@ const CHECKPOINT_SERIES = {
     ]
 };
 
+const SNAPSHOT_CHECKPOINT_SERIES = {
+    counters: [
+        countSpec('xchain_snapshot_checkpoint_round_timeouts_total',
+            'Snapshot checkpoint rounds this hub led that timed out', '_roundTimeouts'),
+        countSpec('xchain_snapshot_checkpoint_round_aborts_total',
+            'Snapshot checkpoint rounds this hub led that aborted', '_roundAbortsTotal'),
+        countSpec('xchain_snapshot_checkpoint_cosign_declines_total',
+            'Snapshot checkpoint proposals this hub refused to co-sign', '_cosignDeclinesTotal'),
+        countSpec('xchain_snapshot_checkpoint_tick_failures_total',
+            'Snapshot checkpoint cadence ticks that threw', '_tickFailures')
+    ],
+    gauges: [
+        {
+            name: 'xchain_snapshot_checkpoint_overdue_blocks',
+            help: 'BTC blocks by which the oldest due snapshot is overdue',
+            read: (engine) => engine._dueOverdueBlocks
+        },
+        {
+            name: 'xchain_snapshot_checkpoint_last_tick_age_seconds',
+            help: 'Seconds since the snapshot checkpoint engine last completed a tick',
+            read: (engine) => {
+                const at = engine._lastTickOkAt || engine._startedAt;
+                return Number.isFinite(at) ? Math.max(0, Date.now() - at) / 1000 : null;
+            }
+        },
+        {
+            name: 'xchain_snapshot_checkpoint_gate_armed',
+            help: '1 when snapshot checkpointing is armed on this network',
+            read: (engine) => engine.getStats().gate_armed
+        }
+    ]
+};
+
 /**
  * Register the state checkpoint scrape series on an installed registry.
  *
@@ -93,7 +126,8 @@ function installHubCheckpointMetrics(observability, hub){
     const registry = observability && observability.registry;
     if(!registry || !hub) return false;
     installEngineSeries(registry, () => hub.stateCheckpoints, CHECKPOINT_SERIES);
+    installEngineSeries(registry, () => hub.snapshotCheckpoints, SNAPSHOT_CHECKPOINT_SERIES);
     return true;
 }
 
-module.exports = { installHubCheckpointMetrics, CHECKPOINT_SERIES };
+module.exports = { installHubCheckpointMetrics, CHECKPOINT_SERIES, SNAPSHOT_CHECKPOINT_SERIES };

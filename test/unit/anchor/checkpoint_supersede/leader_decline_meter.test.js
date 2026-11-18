@@ -151,6 +151,26 @@ describe('StateCheckpointEngine leader proposal declines', function () {
         expect(db.checkpoints.map(r => r.chain), 'the undeclined chain still checkpoints').to.deep.equal(['BTC']);
     });
 
+    it('counts a cadence conflict found immediately before leader signing', async function () {
+        const { engine, db } = buildEngine();
+        const indexerCall = engine.indexerCall;
+        engine.indexerCall = async (chain, method, params) => {
+            const answer = await indexerCall(chain, method, params);
+            if(chain === 'LTC') engine._lastCheckpointBtcBlock = 101;
+            return answer;
+        };
+
+        await warnsDuring(() => engine.tick());
+
+        const stats = await engine.getStats();
+        expect(stats.leader_declines.off_cadence).to.equal(1);
+        expect(stats.leader_declines_total).to.equal(1);
+        expect(stats.last_leader_decline_by_chain.LTC.reason).to.equal('off_cadence');
+        expect(stats.last_leader_decline_by_chain).to.not.have.property('BTC');
+        expect(Object.values(stats.cosign_declines).every(n => n === 0)).to.equal(true);
+        expect(db.checkpoints.map(r => r.chain)).to.deep.equal(['BTC']);
+    });
+
     it('keeps the chain failure entry through a declined retry and clears both on a passing round', async function () {
         const { engine, state } = buildEngine();
         state.down.add('LTC');

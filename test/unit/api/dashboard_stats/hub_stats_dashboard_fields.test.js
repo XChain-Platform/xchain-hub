@@ -26,6 +26,7 @@ const sinon                 = require('sinon');
 const { expect }            = require('chai');
 const StateAnchorPublisher  = require('../../../../src/anchor/publisher');
 const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine');
+const SnapshotCheckpointEngine = require('../../../../src/anchor/snapshot_checkpoint/engine');
 const AttestationRound      = require('../../../../src/attestation/round');
 const AttestationConsensus  = require('../../../../src/attestation/consensus');
 const CrossChainCallEngine  = require('../../../../src/cross_chain/call_engine');
@@ -56,6 +57,10 @@ const CHECKPOINT_KEYS = [
     'self_accepts_abandoned'
 ];
 const COSIGN_DECLINE_KEYS = ['indexer_read_failed', 'indexer_no_block'];
+const SNAPSHOT_CHECKPOINT_KEYS = [
+    'active', 'gate_armed', 'poll_ms', 'round_timeouts', 'due_snapshot_block',
+    'due_overdue_blocks', 'last_successful_tick_age_ms'
+];
 
 const ATTESTATION_KEYS = [
     'failed_count', 'poll_rpc_error_count', 'last_successful_poll_age_ms', 'poll_unsuccessful_for_ms',
@@ -95,6 +100,12 @@ function checkpointEngine() {
     });
 }
 
+function snapshotCheckpointEngine() {
+    return new SnapshotCheckpointEngine({
+        db: pairedDb(), network: 'regtest', identity: {}, peerManager: null
+    });
+}
+
 function attestationRound() {
     const hub = createMockHub();
     const round = new AttestationRound({ getPeerManager: () => null, db: null, p2pConfig: {} }, null);
@@ -123,10 +134,14 @@ describe('hub stats RPCs: fields xchain-dashboard alerts read', function () {
     });
 
     it('getcheckpointstats emits every key the dashboard reads, with its cosign decline sub-keys', async function () {
-        const rpc = buildAnchorRpc({ hub: { stateCheckpoints: checkpointEngine() } });
+        const rpc = buildAnchorRpc({ hub: {
+            stateCheckpoints: checkpointEngine(),
+            snapshotCheckpoints: snapshotCheckpointEngine()
+        } });
         const stats = await rpc.getcheckpointstats();
         expect(missingKeys(stats, CHECKPOINT_KEYS)).to.deep.equal([]);
         expect(missingKeys(stats.cosign_declines, COSIGN_DECLINE_KEYS)).to.deep.equal([]);
+        expect(missingKeys(stats.snapshot_checkpoints, SNAPSHOT_CHECKPOINT_KEYS)).to.deep.equal([]);
         expect(stats.last_finalized_by_chain.BTC).to.have.property('block_index', 10);
     });
 

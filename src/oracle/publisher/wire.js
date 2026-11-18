@@ -122,6 +122,18 @@ module.exports = {
         return true;
     },
 
+    // How many entries of `segment`, from `idx`, a signed range accounts for. The signing
+    // round fills in-span gaps into the range in place, so the range can come back longer
+    // than the segment slice it was cut from; its length is not a cursor step. The last
+    // signed round is, because the range is ascending and only ever extended inside its
+    // own span or trimmed at its tail. At least one, so a malformed range cannot stall it.
+    segmentRoundsConsumed(segment, idx, signedRounds) {
+        let lastSigned = parseInt(signedRounds[signedRounds.length - 1].round);
+        let next = idx;
+        while (next < segment.length && parseInt(segment[next].round) <= lastSigned) next++;
+        return Math.max(1, next - idx);
+    },
+
     // Run the signing round for a range, then measure the wire the signatures actually
     // produced. Shrinks and re-signs while the real wire overflows, because the sig set
     // is only known after quorum and a bigger-than-estimated set can push a range over.

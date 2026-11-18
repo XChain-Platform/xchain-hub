@@ -23,6 +23,7 @@
 
 const canonicalForms    = require('./canonical_forms.js');
 const { hasSupersedeFields } = require('./supersede_suffix.js');
+const { supersedeFieldsRefusal } = require('./supersede_fill.js');
 const {
     supersedePrefilterDecline,
     checkpointProposalDecline,
@@ -35,7 +36,8 @@ const logger = getLogger();
 // Co-sign declines handleSignReq reaches before it authenticates the sender.
 const PRE_AUTH_COSIGN_DECLINES = new Set([
     'network_mismatch', 'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived',
-    'validator_resolve_failed', 'not_member', 'not_cadence_leader', 'sender_sig_invalid'
+    'validator_resolve_failed', 'not_member', 'not_cadence_leader', 'sender_sig_invalid',
+    'supersede_below_gate', 'supersede_malformed'
 ]);
 // Fallback pre-auth decline log window when the engine has no stall-log window set.
 const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
@@ -60,6 +62,9 @@ module.exports = {
         }
     },
 
+    declinesSupersedeFields(cp){ const reason = supersedeFieldsRefusal(cp, canonicalForms.isCheckpointSupersedeActive(cp));
+        if(reason) this.noteCosignDecline(reason, cp); return !!reason;
+    },
     // Follower: independently confirm the proposed checkpoint against OUR OWN
     // indexer before signing (never sign state we don't hold ourselves).
     async handleSignReq(envelope){
@@ -105,7 +110,7 @@ module.exports = {
 
         const validators = await this.resolveCosignValidators(cp);
         if(!validators) return;
-        if(!this.followsCadenceLeader(validators, sender, myPubkey, cp)) return;
+        if(!this.followsCadenceLeader(validators, sender, myPubkey, cp) || this.declinesSupersedeFields(cp)) return;
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender))

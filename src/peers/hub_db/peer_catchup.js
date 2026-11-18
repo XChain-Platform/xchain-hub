@@ -11,7 +11,8 @@ const { createPeerFeedBackoff } = require('./peer_feed_backoff.js');
 const { createRefusalMemo, DEFAULT_REFUSAL_MEMO_PATH } = require('./refusal_memo.js');
 const { advanceCursor, groupKey, indexGroups, holdTrailingGroup } = require('./price_round_groups.js');
 const { HUB_SCHEMA_VERSION } = require('../../hub_schema_version.js');
-const { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow } = require('./catchup_rows.js');
+const { withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow,
+    storeVerifiedRound, localRoundRows } = require('./catchup_rows.js');
 const { processRoundGroup, settlePooledRounds, verifierAccepted, refusalReason, countRefusal, logRefusal,
     KNOWN_REFUSAL, MAX_POOLED_ROUNDS, MAX_POOLED_ROWS_PER_ROUND,
     MAX_POOLED_BYTES_PER_ROUND, MAX_POOLED_BYTES_PER_WALK } = require('./price_round_walk.js');
@@ -113,6 +114,8 @@ class HubDbPeerCatchup {
         this.getVerifier = opts.getVerifier || registry.getCatchupVerifier;
         this.hasRow = opts.hasRow || ((table, row) => rowAlreadyHeld(this.db, table, row));
         this.storeRow = opts.storeRow || ((table, row) => storeVerifiedRow(this.db, table, row));
+        this.storeRound = opts.storeRound || ((table, rows) => storeVerifiedRound(this.db, table, rows));
+        this.localRoundRows = opts.localRoundRows || ((table, row) => localRoundRows(this.db, table, row));
         this.tables = opts.tables || registry.MIRRORED_TABLES;
         this.state = createCatchupState(this.tables);
         // Usable peers seen by the last run. Zero means no signer-set peer to fetch from, so the hub

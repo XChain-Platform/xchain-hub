@@ -29,6 +29,7 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
         ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
 const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
 const { priceKeyFold } = require('./unheld_row.js');
+const { supersededBySeq } = require('../../checkpoint_engine/superseded_rule.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 const ARCHIVE_FOLD_SUBDEADLINE_MS = 30000;
@@ -126,6 +127,7 @@ module.exports = {
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);
         rewards = this.dropChainDerivedRewards(rewards);
+        checkpoints = this.deferSupersededCheckpoints(checkpoints);
         let cappedLists = capListRows(lists, ARCHIVE_MAX_LIST_ROWS);
         let capped = policies.length > ARCHIVE_MAX_POLICY_ROWS || cappedLists.capped ||
             priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
@@ -139,6 +141,14 @@ module.exports = {
             bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
             cappedOrTrimmed: capped
         });
+    },
+
+    // Recovery refuses an archive that carries a checkpoint beside a superseding marker
+    // for it, so a row a marker in the same page supersedes waits unstamped for a later
+    // archive, where the marker is already stamped and the row rides alone.
+    deferSupersededCheckpoints(checkpoints){
+        const page = checkpoints || [];
+        return page.filter(row => supersededBySeq(row, page) === null);
     },
 
     // All row sets normalized to arrays, or null when no stream has archive cargo.

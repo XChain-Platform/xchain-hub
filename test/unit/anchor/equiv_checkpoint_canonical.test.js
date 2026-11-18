@@ -40,7 +40,7 @@ const GOLDEN = require('../../fixtures/anchor_canonical_vectors.json');
 // ANCHOR wire bytes, not this gate. A mis-resolved sibling path in the
 // required-siblings CI lane (bin/ci-all.sh sets XCHAIN_REQUIRE_SIBLINGS=1) would
 // otherwise turn both blocks into permanent pendings on a green run. So there the
-// missing sibling is a hard failure, matching ConsensusPrimitiveConformance.test.js
+// missing sibling is a hard failure, matching consensus_primitive_conformance.test.js
 // and the indexer's coins-conformance / anchorRewardActivationParity guards.
 // A sibling symlinked into a peer's live main checkout is refused before it loads (sibling_checkout.js).
 const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');

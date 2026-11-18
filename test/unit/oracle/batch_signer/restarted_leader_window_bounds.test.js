@@ -146,6 +146,24 @@ function registerLandedTests() {
         expect(h.broadcasts).to.have.length(1);
         expect(header(h.broadcasts[0])).to.equal('102|105|5005|4');
     });
+
+    it('treats a round a peer holds only as a landed batch\'s copy as on chain, not as withheld', async function () {
+        mesh = buildMesh(4, { perNodeRounds: i => i === 0 ? only([102, 103, 104, 105])
+                                                          : landedCopy([100, 101]), timeoutMs: 400 });
+        quickFill(mesh);
+        let h = leaderPublisher(only([102, 103, 104, 105]));
+        await h.p.assembleWindow(0);
+
+        let replies = mesh.nodes.slice(1).flatMap(n => sentOf(n, 'XPRICEB_FILL'));
+        expect(replies, 'every peer answered the fill').to.have.length(3);
+        for (let m of replies) {
+            expect(m.data.held, 'landed copies are not claimed as held').to.deep.equal([102, 103, 104, 105]);
+            expect(m.data.rounds.map(r => r.round)).to.deep.equal(m.data.held);
+        }
+        expect(h.broadcasts).to.have.length(1);
+        expect(header(h.broadcasts[0])).to.equal('102|105|5005|4');
+        expect(h.p._assembledWindows.has(0)).to.equal(true);
+    });
 }
 
 describe('OraclePublisher PRICE batch rail: a restarted leader proposes the whole window', function () {

@@ -40,6 +40,7 @@ module.exports = {
     // identically from the same snapshot: rank leader+1 first, then leader+2, and so
     // on. Each step is failoverWindowBlocks blocks of continued silence.
     scheduleTakeover(windowIndex, myRank, leaderRank, publisherCount) {
+        if (this._stopped) return;                          // stop() already released every timer
         if (!this.failoverWindowBlocks) return;             // opt-in, default off
         if (!publisherCount || publisherCount < 2) return;  // nobody to take over from
         if (this._takeoverTimers.has(windowIndex)) return;
@@ -66,7 +67,7 @@ module.exports = {
     },
 
     async runTakeoverAttempt(windowIndex) {
-        if (!this.enabled) return false;
+        if (!this.enabled || this._stopped) return false;
         // The plan's range, so the guards below check the rounds assembleWindow publishes.
         let { first, last } = this.windowPlan.rangeOf(windowIndex);
 
@@ -213,7 +214,7 @@ module.exports = {
     // that one computes the rank stagger from scratch, and this window's stagger has
     // already been served; what is left to wait out is only the cooldown remainder.
     rearmTakeover(windowIndex, delay) {
-        if (this._takeoverTimers.has(windowIndex)) return;
+        if (this._stopped || this._takeoverTimers.has(windowIndex)) return;
         let timer = setTimeout(() => {
             this._takeoverTimers.delete(windowIndex);
             this.attemptTakeover(windowIndex).catch(err =>

@@ -21,10 +21,9 @@
  * carries a signer hook's reveal fields is appended to the anchor dead-letter
  * file, so an operator can rebroadcast the exact signed reveal.
  *
- * Signer hooks built on xchain-sdk throw the SDK's EncoderClient errors, which
- * carry no axios `.response` and no raw transport `.code`. Those shapes are
- * read here, so an SDK refusal the encoder answered before processing, and any SDK
- * failure of a build call, stays retryable the way it is through the hub's own client.
+ * Signer hooks built on xchain-sdk throw the SDK's EncoderClient errors. The shared
+ * idempotent-broadcast classifier reads those shapes for every rail, so an SDK
+ * refusal or build failure stays retryable here too.
  *
  * A thrown value that cannot carry a tag (a string, undefined, null, a frozen
  * or otherwise non-extensible object) is replaced by an Error that names it as
@@ -53,16 +52,8 @@ const CARRIED_FIELDS = REVEAL_FIELDS.concat(['fundsCommitted', 'neverSent', 'anc
     'anchorNoConfirmedUtxo', 'code', 'rpcCode', 'rpcData', 'response', 'status', 'details',
     'retryAfterSeconds']);
 
-// The SDK EncoderClient's code for an HTTP 4xx answer other than 429: the encoder
-// refused the call before processing it, so nothing reached the node.
-const SDK_REFUSED_CODE = /^ENCODER_HTTP_4\d\d$/;
 // The SDK's code for an HTTP 429 (SDKRateLimitedError), refused before processing too.
 const SDK_RATE_LIMITED = 'RATE_LIMITED';
-// Encoder methods that build or read and never put a transaction on a wire. The SDK
-// names the failed call on details.method, so a network fault, timeout or 5xx on one
-// of these is never sent. Phase one of the SDK pipeline is create_tx, and a hook that
-// has already broadcast something owes the hub fundsCommitted, which outranks this.
-const SDK_PRE_SEND_METHODS = new Set(['create_tx', 'get_utxos']);
 
 // One property read that never throws: an accessor that throws reads as absent.
 function safeGet(obj, key){
@@ -113,38 +104,12 @@ function withFlag(e, flag){
     return err;
 }
 
-// True when the SDK reports a failure that put nothing on a wire: the encoder refused
-// the call before processing it (4xx, 429), or the failed call was a build or read.
-function isSdkNeverSent(e){
-    const code = safeGet(e, 'code');
-    if(typeof code !== 'string') return false;
-    if(code === SDK_RATE_LIMITED || SDK_REFUSED_CODE.test(code)) return true;
-    if(code.indexOf('ENCODER_') !== 0) return false;
-    const details = safeGet(e, 'details');
-    return isObjectLike(details) && SDK_PRE_SEND_METHODS.has(safeGet(details, 'method'));
-}
-
-// The SDK keeps the encoder's JSON-RPC error on details.rpcError rather than on
-// rpcCode and rpcData, so the node's own NODE_REJECTED and TX_ALREADY_IN_CHAIN
-// reasons are lifted into the fields the shared classifier reads.
-function classifierView(e){
-    const details = safeGet(e, 'details');
-    const rpcError = isObjectLike(details) ? safeGet(details, 'rpcError') : undefined;
-    if(!isObjectLike(rpcError) || safeGet(e, 'rpcCode') !== undefined) return e;
-    return { message: safeGet(e, 'message'), code: safeGet(e, 'code'), response: safeGet(e, 'response'),
-             neverSent: safeGet(e, 'neverSent'), fundsCommitted: safeGet(e, 'fundsCommitted'),
-             rpcCode: safeGet(rpcError, 'code'), rpcData: safeGet(rpcError, 'data') };
-}
-
 // May this failure have put a transaction on a wire? fundsCommitted and an existing
-// tag outrank everything; an SDK failure that sent nothing is definitive; the rest is
-// the shared classifier's call, so an SDK network fault or timeout on broadcast_tx
-// stays ambiguous (the request can reach the node and the reply be lost). Throws only
-// when the error's own fields cannot be read.
+// tag outrank everything; the shared classifier handles both hub-client and SDK
+// errors. An SDK network fault or timeout on broadcast_tx stays ambiguous.
 function anchorSendAmbiguous(e){
-    if(e.anchorAmbiguousSend || e.fundsCommitted) return true;
-    if(e.neverSent !== true && isSdkNeverSent(e)) return false;
-    return isAmbiguousSendError(classifierView(e));
+    if(safeGet(e, 'anchorAmbiguousSend') || safeGet(e, 'fundsCommitted')) return true;
+    return isAmbiguousSendError(e);
 }
 
 // The error broadcastWithRetry acts on for one broadcaster failure: tagged

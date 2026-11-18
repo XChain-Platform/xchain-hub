@@ -43,7 +43,7 @@ module.exports = {
     // leader check is identical, deliberately: a takeover must put the same
     // canonical content on chain the leader would have, never a variant.
     async assembleWindow(windowIndex, opts) {
-        if (!this.enabled) return;
+        if (!this.enabled || this._stopped) return;
         let takeover = !!(opts && opts.takeover);
         if (!takeover && this._assembledWindows.has(windowIndex)) return;
 
@@ -55,6 +55,7 @@ module.exports = {
         // window that drifted before the buffer learned to track a re-finalization.
         await this.reconcileBufferedWindow(first, last);
         await this.shedRetractedWindowCarriedByChain(windowIndex, first, last);
+        if (this._stopped) return;   // an assembly already past its first await when stop() ran
         let rounds = this.bufferedRange(first, last);
         if (rounds.length === 0) { this.noteAssembled(windowIndex); this.forgetRetractedWindow(windowIndex); return; }
 
@@ -65,7 +66,7 @@ module.exports = {
 
         // Who publishes this window, and whether this hub is it.
         let election = await this.electWindowPublisher(windowIndex, first, last, anchor, takeover);
-        if (!election) return;
+        if (!election || this._stopped) return;
 
         let signer = this.getBatchSigner();
         if (!signer) {
@@ -164,7 +165,7 @@ module.exports = {
                 let range = segment.slice(idx, idx + take);
                 let wire  = await this.signAndSizeRange(signer, range);
                 if (wire === null) return null;
-                idx += wire.rounds.length;
+                idx += this.segmentRoundsConsumed(segment, idx, wire.rounds);
                 if (wire.unpublishable) continue;   // the ceiling case, already dead-lettered
                 wires.push(wire);
             }

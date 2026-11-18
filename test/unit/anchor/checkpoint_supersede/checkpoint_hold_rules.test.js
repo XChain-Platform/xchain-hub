@@ -84,6 +84,22 @@ function returnsReorgedFirstForBlockHashMismatch(){
         .to.equal('checkpoint_reorged');
 }
 
+function declinesUnavailableOwnHashes(){
+    for(const value of [null, undefined, '']){
+        expect(checkpointHoldDecline(
+            checkpoint(), checkpoint({ block_hash: value }), null
+        )).to.equal('indexer_no_block');
+        for(const field of ['ledger_hash', 'actions_hash', 'contract_hash']){
+            expect(checkpointHoldDecline(
+                checkpoint(), checkpoint({ [field]: value }), replay()
+            )).to.equal('indexer_no_block');
+        }
+    }
+    expect(checkpointHoldDecline(
+        checkpoint(), checkpoint({ block_hash: 'bb', ledger_hash: null }), replay()
+    )).to.equal('checkpoint_reorged');
+}
+
 function returnsDisagreementForOtherHashMismatch(){
     const fields = ['ledger_hash', 'actions_hash', 'contract_hash', 'state_root',
         'state_root_version', 'block_merkle_root', 'block_merkle_version'];
@@ -173,6 +189,8 @@ describe('checkpoint hold rules', function checkpointHoldRulesSuite(){
         comparesHashesCaseInsensitively);
     it('returns reorged first for block hash mismatch',
         returnsReorgedFirstForBlockHashMismatch);
+    it('declines unavailable own hashes before replay overrides',
+        declinesUnavailableOwnHashes);
     it('returns disagreement for each other hash mismatch',
         returnsDisagreementForOtherHashMismatch);
     it('ignores state_root unless both readings provide one',

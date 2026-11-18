@@ -18,6 +18,7 @@ function getAnchorStats(){
         sectionsAnchored:   this._sectionsAnchored,
         bundlesOversize:    this._bundlesOversize,
         foldArchiveNoHeadRoom: this._foldArchiveNoHeadRoom,
+        foldArchiveNoHeadRoomStreak: Object.assign({}, this._foldArchiveNoHeadRoomStreak),
         foldArchiveDroppedOversize: this._foldArchiveDroppedOversize,
         anchorsAsLeader:    this._anchorsAsLeader,
         anchorsAsBackup:    this._anchorsAsBackup,

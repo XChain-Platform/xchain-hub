@@ -328,6 +328,28 @@ function registerWindowTests() {
     });
 }
 
+function sdkHeadError(code){
+    return Object.assign(new Error('Encoder returned HTTP 429 for method broadcast_tx'),
+                         { code, details: { method: 'broadcast_tx', status: 429 } });
+}
+
+// A hook built on xchain-sdk throws these shapes, with no axios response and no raw code.
+function registerSdkHeadTests() {
+    it('retries a head the SDK reports rate limited, as a refusal before the node', async function () {
+        let hub = makeHub({ dir: dir });
+        let now = 200 * WINDOW_S;
+        let start = now - WINDOW_S;
+        hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+        let p = new AttestationBatchPublisher(hub);
+        p.setBroadcastHook(async () => { throw sdkHeadError('RATE_LIMITED'); });
+        p._floorWindow = start;
+        await p.sweep(now);
+        expect(hub.db.marker(start), 'a refused head strands no marker').to.equal(null);
+        expect(p.stats.windowsRefusalRetried).to.equal(1);
+        expect(p.spendGuard.spentInWindow()).to.equal(0);
+    });
+}
+
 describe('AttestationBatchPublisher: a head refused at create_tx', function () {
     beforeEach(function () { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-batch-')); });
     afterEach(function () {
@@ -337,4 +359,5 @@ describe('AttestationBatchPublisher: a head refused at create_tx', function () {
     describe('the classifier', registerClassifierTests);
     describe('the default pipeline', registerPipelineTaggingTests);
     describe('the window', registerWindowTests);
+    describe('SDK encoder errors', registerSdkHeadTests);
 });
