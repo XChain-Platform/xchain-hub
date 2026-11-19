@@ -31,9 +31,17 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 const BUNDLE_DONE_PUBLISHER_BIND_GATE = 'anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION';
-
+async function prepareFoldArchive(ctx, group, network, snapshotBlock, active){
+    if(!active) return null;
+    const section = await ctx.collectFoldArchive(group, network).catch(e => {
+        logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
+                    '; publishing checkpoints without it: ' + (e && e.message));
+        return null;
+    });
+    if(section) ctx.armFoldArchiveRound(section, { network: network, snapshot_block: snapshotBlock });
+    return section;
+}
 module.exports = {
-
     ...canonicalForms.foldPublisherMethods,
 
     // Elect the publisher order for one bundle, or null when the oracle_publish set
@@ -351,15 +359,7 @@ module.exports = {
             if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
 
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-            let archiveSection = foldActive
-                ? await this.collectFoldArchive(group, network).catch(e => {
-                    logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
-                                '; publishing checkpoints without it: ' + (e && e.message));
-                    return null;
-                })
-                : null;
-            if(archiveSection) this.armFoldArchiveRound(archiveSection,
-                { network: network, snapshot_block: snapshotBlock });
+            let archiveSection = await prepareFoldArchive(this, group, network, snapshotBlock, foldActive);
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
             if(!attestation){
                 if(archiveSection) this.finishFoldArchiveRound(archiveSection, null);

@@ -313,6 +313,8 @@ function registerFeature7policySnapshotsNested7Part1() {
       block_list: 'not json'
     }))).to.equal(false);
   });
+}
+function registerFeature7policySnapshotsNested7Part1Equivocation() {
   it('refuses a second content at a seq it already finalized (that is equivocation)', async function () {
     const {
       engine,
@@ -348,6 +350,7 @@ function registerFeature7policySnapshotsNested7Part2() {
 function registerFeature7policySnapshotsNested7() {
   describe('follower verification', function () {
     registerFeature7policySnapshotsNested7Part1();
+    registerFeature7policySnapshotsNested7Part1Equivocation();
     registerFeature7policySnapshotsNested7Part2();
   });
 }

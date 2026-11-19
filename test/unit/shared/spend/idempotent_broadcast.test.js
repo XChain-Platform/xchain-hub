@@ -111,6 +111,8 @@ function registerIsAmbiguousSendErrorSuite1Part2() {
       code: 'ECONNREFUSED'
     }))).to.equal(false);
   });
+}
+function registerIsAmbiguousSendErrorSuite1Part2Funding() {
 
   // A multi-phase HUB_SIGNER_MODULE broadcasts its funding tx first and can then be
   // rejected DEFINITIVELY on the reveal. Every rule above would call that safe to
@@ -316,6 +318,7 @@ function registerIdempotentBroadcastHelperSuite3Part1() {
   describe('isAmbiguousSendError', function () {
     registerIsAmbiguousSendErrorSuite1Part1.call(this);
     registerIsAmbiguousSendErrorSuite1Part2.call(this);
+    registerIsAmbiguousSendErrorSuite1Part2Funding.call(this);
   });
   describe('AtMostOnce', function () {
     it('records and reports keys, and clears', function () {

@@ -11,12 +11,12 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
-const { CP_ROW } = require('../../../../helpers/anchor_mesh_db.js');
-const vectors = require('../../../../fixtures/anchor_archive_vectors.json');
-const { XANC_SIGN } = require('../../../../../src/anchor/publisher/constants.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
+const { CP_ROW } = require('../../../../../helpers/anchor_mesh_db.js');
+const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
+const { XANC_SIGN } = require('../../../../../../src/anchor/publisher/constants.js');
 
 const PRICE_BLOCK = 111;
 const ELECTION_BLOCK = 200;
