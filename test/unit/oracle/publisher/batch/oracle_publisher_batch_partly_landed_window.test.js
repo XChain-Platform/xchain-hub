@@ -117,6 +117,64 @@ describe('oracle publisher batch: landed batch with a hole', function () {
     });
 });
 
+describe('oracle publisher batch: landing narrower than its window', function () {
+    beforeEach(captureLogs);
+    afterEach(function () { cleanupPublisherBatch(); });
+
+    it('keeps a late round publishable after the buffered prefix lands', async function () {
+        let h = makePublisher({ db: makeDb({ snapshots: windowSnapshots([0, 1, 2]) }) });
+        await h.p.start();
+        for (const r of [0, 1]) h.p._buffer.set(r, bufferedFixture(r));
+        h.p.noteBatchLanded(0, 1, { rounds: [0, 1] });
+        expect(h.p._assembledWindows.has(0)).to.equal(false);
+        h.p._buffer.set(2, bufferedFixture(2));
+        await h.p.assembleWindow(0);
+        expect(h.signer.calls).to.have.length(1);
+        expect(h.signer.calls[0]).to.include({ first: 2, last: 2 });
+    });
+
+    it('keeps grace and takeover timers for a partly landed window', async function () {
+        let h = makePublisher();
+        await h.p.start();
+        const grace = setTimeout(() => {}, 10000);
+        const takeover = setTimeout(() => {}, 10000);
+        h.p._windows.set(0, { timer: grace });
+        h.p._takeoverTimers.set(0, takeover);
+        h.p.noteBatchLanded(0, 1, { rounds: [0, 1] });
+        expect(h.p._windows.get(0).timer).to.equal(grace);
+        expect(h.p._takeoverTimers.get(0)).to.equal(takeover);
+        clearTimeout(grace);
+        clearTimeout(takeover);
+    });
+
+    it('does not memoize a partial landing without an exact list', async function () {
+        let h = makePublisher();
+        await h.p.start();
+        h.p._buffer.set(1, bufferedFixture(1));
+        h.p.noteBatchLanded(1, 1, null);
+        expect(h.p._assembledWindows.has(0)).to.equal(false);
+    });
+
+    it('memoizes after separate landed batches cover the complete window', async function () {
+        let h = makePublisher();
+        await h.p.start();
+        for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+        h.p.noteBatchLanded(0, 2, { rounds: [0, 1, 2] });
+        expect(h.p._assembledWindows.has(0)).to.equal(false);
+        h.p.noteBatchLanded(3, 5, { rounds: [3, 4, 5] });
+        expect(h.p._assembledWindows.has(0)).to.equal(true);
+    });
+
+    it('does not infer missing prefix coverage after a restart', async function () {
+        let h = makePublisher();
+        await h.p.start();
+        h.p.noteBatchLanded(2, 5, { rounds: [2, 3, 4, 5] });
+        expect(h.p._assembledWindows.has(0)).to.equal(false);
+        await h.p.assembleWindow(0);
+        expect(h.signer.calls).to.have.length(0);
+    });
+});
+
 function windowSnapshots(rounds) {
     return rounds.map(r => ({ round_number: r, block_timestamp: 1800000000 + r * 600, status: 'finalized' }));
 }

@@ -329,6 +329,30 @@ function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
         // A coerced-to-zero block_time would read as "before every flag day"; refused.
         let zeroTime = await agg.receiveValidatedBatch('BTC', makeBatch({ block_time: 0 }));
         expect(zeroTime.reason).to.equal('invalid block_time');
+
+        const malformed = [
+            [makeBatch({ first_round: '12junk' }), 'invalid round window'],
+            [makeBatch({ last_round: '105.5' }), 'invalid round window'],
+            [makeBatch({ btc_block_height: [BATCH_ANCHOR] }), 'invalid btc_block_height'],
+            [makeBatch({ block_index: '500junk' }), 'invalid block_index'],
+            [makeBatch({ block_time: [BLOCK_TIME] }), 'invalid block_time'],
+            [makeBatch({ block_time: '123.5' }), 'invalid block_time']
+        ];
+        for (const [field, value, reason] of [
+            ['round', '12junk', 'invalid rounds'],
+            ['timestamp', '123.5', 'invalid round timestamp'],
+            ['timestamp', 123.5, 'invalid round timestamp'],
+            ['btc_block_height', [799000], 'invalid round btc_block_height']
+        ]) {
+            const batch = makeBatch();
+            batch.rounds[0][field] = value;
+            malformed.push([batch, reason]);
+        }
+        for (const [batch, reason] of malformed) {
+            const result = await agg.receiveValidatedBatch('BTC', batch);
+            expect(result.accepted).to.equal(false);
+            expect(result.reason).to.equal(reason);
+        }
     });
 }
 

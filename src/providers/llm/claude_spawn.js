@@ -159,23 +159,40 @@ function buildCliArgs(model, systemPrompt, systemPromptOverride, maxBudgetUsd) {
 }
 
 // Reject on the child failures that arrive as events rather than as an exit code.
-function rejectOnChildErrors(child, timer, rejectTransient) {
+function rejectOnChildErrors(child, timer, terminate, rejectTransient) {
     child.on('error', (e) => {
         clearTimeout(timer);
         rejectTransient('claude-spawn: spawn error: ' + e.message);
     });
 
-    // stdin write failures on a child that exits early (bad flag, late
-    // binary-resolution failure, CLI startup crash) arrive asynchronously
-    // as an 'error' event (EPIPE), not as a synchronous throw from the
-    // write() in runCli. Without a handler the unhandled stream error would
-    // propagate to the process and can take down the whole hub; reject the
-    // promise instead. The child.on('error') handler above covers spawn
-    // failures only, not pipe errors.
+    // A broken stdin pipe does not prove the child exited. Terminate it through
+    // the same bounded sequence as a timeout before allowing fallback to advance.
     child.stdin.on('error', (e) => {
         clearTimeout(timer);
+        terminate();
         rejectTransient('claude-spawn: stdin error: ' + e.message);
     });
+}
+
+// One idempotent SIGTERM, then SIGKILL after a grace period, for a child that must
+// stop. The escalation is dropped as soon as the child's exit is confirmed.
+function makeTerminator(child) {
+    let terminating = false;
+    let escalationTimer = null;
+    const clearEscalation = () => {
+        if (escalationTimer) clearTimeout(escalationTimer);
+        escalationTimer = null;
+    };
+    const terminate = () => {
+        if (terminating) return;
+        terminating = true;
+        try { child.kill('SIGTERM'); } catch {}
+        escalationTimer = setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch {}
+        }, 2000);
+        if (escalationTimer.unref) escalationTimer.unref();
+    };
+    return { terminate, clearEscalation };
 }
 
 // Spawn the CLI once, stream `prompt` on stdin, and settle on its exit.
@@ -204,19 +221,21 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
         const rejectTransient = (msg) => { let err = new Error(msg); err.transient = true; safeReject(err); };
         const rejectHard = (msg, kind) => { let err = new Error(msg); err.transient = false; if (kind) err.kind = kind; safeReject(err); };
 
+        const { terminate, clearEscalation } = makeTerminator(child);
         const timer = setTimeout(() => {
-            try { child.kill('SIGTERM'); } catch {}
-            setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000);
+            terminate();
             rejectTransient('claude-spawn: timeout after ' + timeoutMs + 'ms');
         }, timeoutMs);
 
         child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
         child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
 
-        rejectOnChildErrors(child, timer, rejectTransient);
+        rejectOnChildErrors(child, timer, terminate, rejectTransient);
 
+        child.once('exit', clearEscalation);
         child.on('close', (code) => {
             clearTimeout(timer);
+            clearEscalation();
             const outcome = closeOutcome(code, stdout, stderr);
             if (outcome.transient === true)       rejectTransient(outcome.message);
             else if (outcome.transient === false) rejectHard(outcome.message, outcome.kind);
@@ -228,6 +247,7 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
             child.stdin.end();
         } catch (e) {
             clearTimeout(timer);
+            terminate();
             rejectTransient('claude-spawn: stdin write failed: ' + e.message);
         }
     });

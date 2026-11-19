@@ -159,6 +159,7 @@ module.exports = {
         }
         try { await this.engine.persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+        if(this.pending.get(rid) !== pending || pending.finalized) return;
         let sig = this.identity.sign(canonical);
         pending.signatures.set(myPubkey, sig);
         this.finalize(rid);
@@ -197,6 +198,7 @@ module.exports = {
     async broadcastPropose(pending){
         try { await this.engine.persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
         catch(e){ logger.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
+        if(this.pending.get(pending.matchId) !== pending || pending.finalized) return;
         let mySig = this.identity.sign(pending.canonical);
         pending.signatures.set(pending.myPubkey, mySig);
         pending.prepares.add(pending.myPubkey);

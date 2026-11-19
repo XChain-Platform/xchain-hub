@@ -24,6 +24,7 @@
 
 'use strict';
 const crypto            = require('crypto');
+const metaVerdict       = require('../../providers/llm/meta_verdict');
 // Body-size ceiling every proposed/signed response must clear, leader and
 // follower alike (spec §5.3, D40/D41, row 9). Applies in both canonical eras.
 const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } = require('../attest_response_body_cap.js');
@@ -220,27 +221,15 @@ module.exports = {
         return false;
     },
 
-    // judge_model is non-deterministic across hubs: only the ELECTED LEADER
-    // runs agree() and its selected body is the canonical winner. So only the
-    // leader's PREPARE may establish the winner. A Byzantine responsible
-    // non-leader that broadcasts a divergent body FIRST must not have honest
-    // followers adopt it. Buffer a non-leader judge_model PREPARE until the
-    // leader's winner lands (it then replays through the "winner already
-    // established" path below and verifies over the canonical winner) or the
-    // round expires. byte_equality is deterministic (independently-fetched
-    // identical bodies) and stays first-verified-PREPARE-wins.
+    // Only the elected leader may establish a judge_model winner. Non-leader
+    // PREPAREs wait for that winner; byte_equality remains first-verified wins.
     adoptOkPrepare(envelope, pending, rid, d, body, meta, status, senderPubkey, wireAdmitBlocks){
         if(pending.pinnedConsensusStrategy === 'judge_model' && pending.leaderPubkey &&
            senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
             this.bufferEarlyMessage(rid, envelope);
             return false;
         }
-        // First PREPARE we accept establishes the winner. It MUST carry a valid
-        // signature from its sender over the proposed body. An unsigned (or badly
-        // signed) PREPARE must never set the winner: otherwise a peer that spoofs
-        // the sender pubkey can inject an arbitrary body honest followers then
-        // co-sign (item 4559). For judge_model the sender is already constrained to
-        // the elected leader above; a node that cannot sign cannot lead a round.
+        // The establishing PREPARE must carry its sender's valid signature.
         if(!d.sig || !d.sig_pubkey){
             logger.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
             return false;
@@ -248,11 +237,7 @@ module.exports = {
         let verified = this.verifyEstablishingPrepare(pending, d, rid, body, meta, status, senderPubkey, wireAdmitBlocks);
         if(!verified) return false;
         if(!this.prepareAdmitMapAllowed(envelope, pending, rid, senderPubkey, wireAdmitBlocks)) return false;
-        // Adoption itself is deferred to the point the winner is actually set,
-        // below: the A-F1 and A-F4 body checks can still refuse this PREPARE,
-        // and a refused one must leave the round's bytes exactly as it found
-        // them or a leader could shift this hub's stamp with a body it never
-        // proves.
+        // Run every adoption check before mutating the round.
         let prepBodyHash = crypto.createHash('sha256').update(body).digest('hex');
         if(pending.pinnedConsensusStrategy === 'judge_model'){
             if(!this.leaderBodyMatchesProposal(envelope, pending, rid, d, meta, senderPubkey, prepBodyHash)) return false;
@@ -279,14 +264,8 @@ module.exports = {
         return true;
     },
 
-    // A-F1: the leader's signature proves authorship, not honesty. agree()
-    // only ever SELECTS one of the collected proposals, so an honest
-    // leader's winner must hash-match a proposal this follower collected
-    // itself; a Byzantine per-request leader injecting a fabricated body
-    // (that no responsible validator proposed) must not be adopted and
-    // re-signed on faith. If we haven't collected enough proposals to
-    // check yet, buffer the PREPARE (replayed once proposals arrive via
-    // handlePropose) instead of accepting blind.
+    // The leader proves authorship, not approval. Followers require a collected
+    // matching proposal and re-apply the deterministic model metadata gates.
     leaderBodyMatchesProposal(envelope, pending, rid, d, meta, senderPubkey, prepBodyHash){
         let need = Math.min(pending.redundancy, pending.responsible.length);
         if(pending.proposals.size < need){
@@ -311,7 +290,28 @@ module.exports = {
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected, A-F1)');
             return false;
         }
-        return true;
+        // Synthetic legacy round states used by internal tests predate this pin.
+        // Real AttestationRound states always carry it, including explicit null.
+        if(!pending.approvedModelsPinned) return true;
+        const okProposals = [...pending.proposals.values()].filter(p => (p.status || 'ok') === 'ok');
+        const verdict = metaVerdict(okProposals, meta, this.approvedMetaFor(pending), need);
+        if(verdict === 'ok') return true;
+        if(verdict === 'uncorroborated' && pending.proposals.size < pending.responsible.length){
+            this.bufferEarlyMessage(rid, envelope);
+            return false;
+        }
+        logger.warn('AttestationConsensus: leader PREPARE metadata rejected for ' + rid.substring(0,16) +
+                    '... (' + verdict + '; not co-signing)');
+        return false;
+    },
+
+    // The allowlist the leader judged against: the round pin when it holds one,
+    // else the provider's live set (what the leader falls back to). A provider
+    // module that cannot supply it yields an empty set, which fails closed.
+    approvedMetaFor(pending){
+        if(Array.isArray(pending.pinnedApprovedModels) && pending.pinnedApprovedModels.length) return pending.pinnedApprovedModels;
+        const mod = this.providerRegistry.getModule(pending.providerId);
+        return (mod && typeof mod.approvedMetaSet === 'function') ? mod.approvedMetaSet({}) : [];
     },
 
     // A-F4: byte_equality winner adoption must not latch from a single

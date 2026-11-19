@@ -100,8 +100,10 @@ module.exports = {
         let anchor = intOrNaN(batchData.btc_block_height);
         if(!Number.isInteger(anchor) || anchor <= 0) return refuse('invalid btc_block_height');
 
-        let actionIndex = intOrNaN(batchData.action_index);
-        if(!Number.isInteger(actionIndex) || actionIndex < 0) return refuse('invalid action_index');
+        // Unlike the other header integers, action_index is stored but is not signed.
+        const actionIndex = batchData.action_index;
+        if(typeof actionIndex !== 'number' || !Number.isSafeInteger(actionIndex) || actionIndex < 0)
+            return refuse('invalid action_index');
 
         // Structural signature shape before any snapshot work.
         if(!Array.isArray(batchData.sigs) || batchData.sigs.length < 1) return refuse('invalid sigs');

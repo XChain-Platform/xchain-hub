@@ -221,6 +221,10 @@ const testCase13 = async function () {
             let h = makePublisher({ db: db, publishers: [ME, PEER1, PEER2] });
             await h.p.start();
             for (let r = 0; r < 8; r++) await h.p.onRoundFinalized(roundFixture(r));
+            h.hub.resolveIndexerUrl = sinon.stub().resolves('indexer-url');
+            sinon.stub(h.p, 'indexerRpc').resolves({ batches: [
+                { first_round: 0, last_round: 5, round_count: 6, action_index: 70 }
+            ] });
 
             let pruned = await h.p.pruneObservedWindow(0, 5);
             expect(pruned).to.equal(6);

@@ -24,6 +24,7 @@
 const { XCALL_MAX_HOPS } = require('../../constants.js');
 const { ALLOWED_CHAINS, RESULT_STATUSES, RESULT_BACKOFF_BASE_MS, RESULT_BACKOFF_MAX_MS, RESULT_BACKOFF_EXCLUDE_MAX, RESULT_BACKOFF_MAP_MAX, CALL_LIST_MAX } = require('./constants.js');
 const { getLogger } = require('../../observability');
+const roundRetraction = require('../retraction/rounds.js');
 const logger = getLogger();
 
 // Repeat a failing chain's dispatch-poll warn at most this often (one line per tick otherwise).
@@ -161,6 +162,8 @@ module.exports = {
 
         let roundId = this.roundId('dispatch', callId);
         if(this._inflight.has(roundId)) return;
+        const proposal = roundRetraction.begin(this);
+        try {
         if(await this.rowExists(callId, 'dispatch')) return;
 
         let snapshotBlock = await this.resolveSnapshotBlock();
@@ -171,6 +174,7 @@ module.exports = {
         if(!await this.stampAdmission(row)) return;
 
         let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        if(roundRetraction.covered(this, proposal, row)) return;
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -178,6 +182,7 @@ module.exports = {
             this._inflight.delete(roundId);
             throw e;
         }
+        } finally { roundRetraction.end(this, proposal); }
     },
 
     buildDispatchRow(coin, network, call, callId, roundId, snapshotBlock){
@@ -272,9 +277,10 @@ module.exports = {
         let callId = String(dispatch.call_id).toLowerCase();
         let roundId = this.roundId('result', callId);
         if(this._inflight.has(roundId)) return true;   // round already progressing; don't park
-
+        const proposal = roundRetraction.begin(this);
+        try {
         let res = await this.indexerCall(coin, 'getcrosschaincallresult', { call_id: callId });
-        // The indexer answers a refused lookup (database not ready) as a result body, not an RPC error.
+        // A refused lookup is a result body rather than an RPC error.
         if(res && res.error) throw new Error('target indexer refused the result lookup: ' + res.error);
         if(!res || res.exists !== true) return false;
 
@@ -317,6 +323,7 @@ module.exports = {
         if(!await this.stampAdmission(row)) return false;
 
         let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        if(roundRetraction.covered(this, proposal, row)) return false;
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -325,5 +332,6 @@ module.exports = {
             throw e;
         }
         return true;   // result found and a relay round proposed; clear any backoff
+        } finally { roundRetraction.end(this, proposal); }
     },
 };

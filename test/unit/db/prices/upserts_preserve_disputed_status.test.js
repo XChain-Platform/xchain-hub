@@ -45,16 +45,20 @@ describe('finalized price snapshot upserts', () => {
             const { insert, update } = parts(await capture(method));
             assert.match(insert, /'finalized'/);
             assert.match(update, /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)/);
-            assert.doesNotMatch(update, /status\s*=\s*'finalized'/);
+            assert.doesNotMatch(update, /(?:^|,)\s*status\s*=\s*'finalized'/);
         });
     }
 
     it('keeps canonical landing metadata mutable while the disputed status stays fixed', async () => {
         for (const method of ['setPushedPriceSnapshotRound', 'setBatchPriceSnapshotRound']) {
             const { update } = parts(await capture(method));
-            assert.match(update, /reference_block\s*=\s*VALUES\(reference_block\)/);
-            assert.match(update, /source_action_index\s*=\s*VALUES\(source_action_index\)/);
-            assert.match(update, /push_generation\s*=\s*VALUES\(push_generation\)/);
+            assert.match(update, /consensus_round\s*=\s*IF\(status\s*=\s*'finalized'/);
+            for (const column of ['reference_block', 'source_action_index', 'push_generation']) {
+                const guarded = new RegExp(column + '\\s*=\\s*IF\\(consensus_round\\s*=\\s*2,\\s*' +
+                    column + ',\\s*VALUES\\(' + column + '\\)\\)');
+                assert.match(update, guarded);
+            }
+            assert.match(update, /consensus_round\s*=\s*1,\s*status\s*=/);
         }
     });
 

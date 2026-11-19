@@ -22,11 +22,9 @@
  * read at the request's block.
  *
  * NOT read at the request's block: the hub-local fee floor the request has to
- * clear (min_fee_xchain) comes from the provider def the round fetched under,
- * which is the live hot-reloadable registry entry at round start, and the
- * response-byte cap start_round pins comes from that same def. Hubs whose
- * reloads raced can briefly disagree on whether a request clears the floor,
- * which can cost a round redundancy (liveness), never a fork.
+ * clear (min_fee_xchain) comes from the live provider definition. The response
+ * cap is block-anchored because it shapes both fetch outcomes and consensus
+ * admission, while the local fee floor only decides whether this hub serves.
  *
  ********************************************************************/
 
@@ -54,6 +52,9 @@ module.exports = {
         }
         if(this.feeBelowProviderFloor(rid, providerId, providerDef, request)) return null;
         pins.pinnedConsensusStrategy = pinnedConsensusStrategy;
+        pins.pinnedMaxResponseBytes = (this.providerRegistry &&
+            typeof this.providerRegistry.getMaxResponseBytes === 'function')
+            ? this.providerRegistry.getMaxResponseBytes(providerId, snapshotBlk) : null;
         return pins;
     },
 

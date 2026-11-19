@@ -25,7 +25,8 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 const {
-    DEFAULTS, parseAttestationProviderParam, normalizeMinStakeXchain, normalizeConsensusStrategy
+    DEFAULTS, parseAttestationProviderParam, normalizeMinStakeXchain, normalizeConsensusStrategy,
+    normalizeMaxResponseBytes
 } = require('./defaults.js');
 
 module.exports = {
@@ -48,10 +49,12 @@ module.exports = {
             // block-0 strategy has to be the same on a hub restarted after an operator
             // edited the configs table as on one that was never restarted.
             let cs = normalizeConsensusStrategy(def && def.consensus_strategy);
+            let mrb = normalizeMaxResponseBytes(def && def.max_response_bytes);
             let hist = this.providerConfigHistory.get(providerId) || [];
             let g = hist.find(e => e.activation_block === 0);
-            if (g) { g.additional_config = ac; g.min_stake_xchain = ms; g.consensus_strategy = cs; }
-            else { hist.push({ activation_block: 0, additional_config: ac, min_stake_xchain: ms, consensus_strategy: cs }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+            if (g) { g.additional_config = ac; g.min_stake_xchain = ms; g.consensus_strategy = cs; g.max_response_bytes = mrb; }
+            else { hist.push({ activation_block: 0, additional_config: ac, min_stake_xchain: ms,
+                consensus_strategy: cs, max_response_bytes: mrb }); hist.sort((a, b) => a.activation_block - b.activation_block); }
             this.providerConfigHistory.set(providerId, hist);
         }
     },
@@ -149,6 +152,24 @@ module.exports = {
         return normalizeConsensusStrategy(def && def.consensus_strategy);
     },
 
+    // Resolve the response cap at the request block. Fetching and consensus body
+    // admission both depend on this value, so a hot reload must not move either
+    // side of an already-anchored request.
+    getMaxResponseBytes(providerId, blockIndex){
+        let hist = this.providerConfigHistory.get(providerId);
+        let resolved = null;
+        if (hist && hist.length > 0){
+            for (let e of hist){
+                if (blockIndex !== undefined && blockIndex !== null && e.activation_block > blockIndex) break;
+                if (e.max_response_bytes !== null && e.max_response_bytes !== undefined)
+                    resolved = e.max_response_bytes;
+            }
+        }
+        if (resolved !== null) return resolved;
+        let def = this.getDef(providerId);
+        return normalizeMaxResponseBytes(def && def.max_response_bytes);
+    },
+
     // Append a block-anchored governance provider-config change to the history (idempotent
     // by activation_block; kept sorted ascending). Mirror of
     // CapabilityRegistry.applyMinStakeActivation: the change does not take effect until the
@@ -159,16 +180,20 @@ module.exports = {
     // unparseable value) for a change that does not move that field, and the entry stores
     // null so getMinStake / getConsensusStrategy keep resolving the last-activated
     // value.
-    applyProviderConfigActivation(providerId, activationBlock, additionalConfig, minStakeXchain, consensusStrategy){
+    applyProviderConfigActivation(providerId, activationBlock, additionalConfig, minStakeXchain,
+                                  consensusStrategy, maxResponseBytes){
         let ab = Number(activationBlock);
         if (!Number.isInteger(ab) || ab < 0)
             throw new Error('invalid activation_block: ' + activationBlock);
         let ms = normalizeMinStakeXchain(minStakeXchain);
         let cs = normalizeConsensusStrategy(consensusStrategy);
+        let mrb = normalizeMaxResponseBytes(maxResponseBytes);
         let hist = this.providerConfigHistory.get(providerId) || [];
         let existing = hist.find(e => e.activation_block === ab);
-        if (existing) { existing.additional_config = additionalConfig; existing.min_stake_xchain = ms; existing.consensus_strategy = cs; }
-        else { hist.push({ activation_block: ab, additional_config: additionalConfig, min_stake_xchain: ms, consensus_strategy: cs }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+        if (existing) { existing.additional_config = additionalConfig; existing.min_stake_xchain = ms;
+            existing.consensus_strategy = cs; existing.max_response_bytes = mrb; }
+        else { hist.push({ activation_block: ab, additional_config: additionalConfig, min_stake_xchain: ms,
+            consensus_strategy: cs, max_response_bytes: mrb }); hist.sort((a, b) => a.activation_block - b.activation_block); }
         this.providerConfigHistory.set(providerId, hist);
         return hist;
     },
@@ -196,7 +221,7 @@ module.exports = {
         for (let r of rows){
             let providerId = parseAttestationProviderParam(r.parameter);
             if (!providerId) continue;
-            let ac, ms, cs;
+            let ac, ms, cs, mrb;
             try {
                 let parsed = JSON.parse(r.proposed_value);
                 // Accept either a full provider def or a bare additional_config object.
@@ -210,8 +235,11 @@ module.exports = {
                 // one) or a restarted hub and a long-running one resolve different state
                 // machines for the same block, which is the divergence anchoring removes.
                 cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
+                // Response caps shape both fetch and consensus admission. Read this
+                // on restart replay exactly as the live governance path does.
+                mrb = (parsed && parsed.max_response_bytes !== undefined) ? parsed.max_response_bytes : undefined;
             } catch (e) { continue; }
-            this.applyProviderConfigActivation(providerId, r.activation_block, ac, ms, cs);
+            this.applyProviderConfigActivation(providerId, r.activation_block, ac, ms, cs, mrb);
         }
     }
 };

@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const { normalizeRetractionBounds } = require('../../lib/retraction_bounds.js');
+const roundRetraction = require('../retraction/rounds.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -93,8 +94,7 @@ module.exports = {
 
     pruneRetractionFence(){
         this.ensureRetractionFence();
-        let floor = this._retractionSeq;
-        for(const token of this._pendingWrites) if(token.seq < floor) floor = token.seq;
+        let floor = roundRetraction.floor(this, this._retractionSeq);
         this._retractionFence = this._retractionFence.filter(entry => entry.seq > floor);
     },
 
@@ -244,6 +244,8 @@ module.exports = {
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
         const entry = this.recordRetraction(chain, bounds);
+        roundRetraction.cancelCoveredPending(this, this.transferConsensus, entry,
+            id => this.releaseSourceLegGuard(id));
         await this.waitForCoveredWrites(entry);
         let rows = await this.db.findFinalizedBridgeTransferIdsForReorg(chain, from, to, gen, bounded, fenced);
         for(let r of rows){

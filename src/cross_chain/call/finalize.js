@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const { normalizeRetractionBounds } = require('../../lib/retraction_bounds.js');
+const roundRetraction = require('../retraction/rounds.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -186,8 +187,7 @@ module.exports = {
     // sequence is unreachable. With no write pending the whole list is unreachable.
     pruneRetractionFence(){
         this.ensureRetractionFence();
-        let floor = this._retractionSeq;
-        for(let t of this._pendingWrites) if(t.seq < floor) floor = t.seq;
+        let floor = roundRetraction.floor(this, this._retractionSeq);
         this._retractionFence = this._retractionFence.filter(e => e.seq > floor);
     },
 
@@ -278,6 +278,10 @@ module.exports = {
         // row matches. A round whose row is not inserted yet is invisible to the SQL below,
         // and the early return on an empty select leaves no other trace of this retraction.
         const entry = this.recordRetraction(chain, bounds);
+        roundRetraction.cancelCoveredPending(this, this.consensus, entry, (rid, row) => {
+            this._inflight.delete(rid);
+            if(row && row.call_id) this._resultBackoff.delete(String(row.call_id).toLowerCase());
+        });
         await this.waitForCoveredWrites(entry);
         let rows = await this.db.findFinalizedCrossChainCallsInRetractionRange(chain, bounds);
         if(!rows.length) return;

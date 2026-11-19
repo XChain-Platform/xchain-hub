@@ -344,6 +344,8 @@ module.exports = {
     forgetFinalized(rid){
         rid = String(rid).toLowerCase();
         this.clearRoundHeld(rid);
+        this.earlyMessages.delete(rid);
+        this.earlyMessageTtl.delete(rid);
         let had = this.finalized.delete(rid);
         this.finalizedRows.delete(rid);
         if(had){
@@ -357,6 +359,25 @@ module.exports = {
             this.pending.delete(rid);
         }
         return had;
+    },
+
+    cancelPendingWhere(predicate){
+        const cancelled = [];
+        for(const [rid, pending] of this.pending){
+            if(pending.finalized) continue;
+            let matches = false;
+            try { matches = !!predicate(pending.row); } catch(e){ matches = false; }
+            if(!matches) continue;
+            if(pending.timer) clearTimeout(pending.timer);
+            if(pending.cleanupTimer) clearTimeout(pending.cleanupTimer);
+            this.pending.delete(rid);
+            this.earlyMessages.delete(rid);
+            this.earlyMessageTtl.delete(rid);
+            this.clearRoundHeld(rid);
+            cancelled.push({ roundId: rid, row: pending.row });
+            this.emit('match:abandoned', { matchId: rid });
+        }
+        return cancelled;
     },
 
     markFinalized(rid, row, signatures, view){

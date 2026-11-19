@@ -27,7 +27,7 @@ const {
     ATTESTED_VERSIONS, REWARD_FAMILY_VERSIONS, isRewardCandidateRow, judgeAnchors
 } = require('../anchor_proof_binding.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
-const { hasLegacyByteRow, isPinnedEntry, legacyPinGateProven } = require('./legacy_reward_pin.js');
+const { isPinnedEntry, legacyPinGateState, judgeWithLegacyPin } = require('./legacy_reward_pin.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -228,16 +228,16 @@ module.exports = {
             try {
                 r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
             } catch(err){
-                if(err && /^no indexer url for /.test(err.message)) return await this.judgeDrainEntry([], expect, screenLegacy);
+                if(err && /^no indexer url for /.test(err.message)) return await judgeWithLegacyPin(this, [], expect, screenLegacy, judgeDrainAnchors, logger);
                 throw err;
             }
-            if(r && r.exists && r.anchors === undefined) return await this.judgeDrainEntry([], expect, screenLegacy);
+            if(r && r.exists && r.anchors === undefined) return await judgeWithLegacyPin(this, [], expect, screenLegacy, judgeDrainAnchors, logger);
             if(!r || !Array.isArray(r.anchors)) return 'unknown';
             // Defer when the FIRST page shows no anchor: the DOGE indexer may simply be behind.
             // A later page may be empty, and the rows already walked are judged, as the indexer does.
             if(page === 0 && (!r.exists || r.anchors.length === 0)) return 'unknown';
             anchors = anchors.concat(r.anchors);
-            if(r.truncated !== true) return await this.judgeDrainEntry(anchors, expect, screenLegacy);
+            if(r.truncated !== true) return await judgeWithLegacyPin(this, anchors, expect, screenLegacy, judgeDrainAnchors, logger);
             // Defer when a truncated page gives no usable cursor, or one that does not advance.
             let next = parseAnchorCursor(r.next_after_action_index);
             if(!Number.isInteger(next) || next < 0 || (after !== null && next <= after)){
@@ -251,28 +251,6 @@ module.exports = {
         logger.error('StateAnchorPublisher: ' + txid + ' still truncated after ' + MAX_ANCHOR_PAGES +
                      ' pages; binding left undecided');
         return 'unknown';
-    },
-
-    // judgeDrainAnchors, dropping the pre-restart bytes 6 and 7 as the indexer does once the
-    // LEGACY_ANCHOR_REWARD_PIN gate is proven on. Unproven, the bytes still bind and nothing is forfeit.
-    async judgeDrainEntry(anchors, expect, screenLegacy){
-        if(screenLegacy === true && hasLegacyByteRow(anchors) && await this.legacyPinGateOn(expect.network))
-            return judgeDrainAnchors(anchors, Object.assign({}, expect, { legacyDropped: true }));
-        return judgeDrainAnchors(anchors, expect);
-    },
-
-    // Is LEGACY_ANCHOR_REWARD_PIN proven on for this network (legacy_reward_pin.js)? False, after a
-    // warning, when this hub's BTC indexer cannot prove it.
-    async legacyPinGateOn(network){
-        if(!this._legacyPinProvenFrom) this._legacyPinProvenFrom = new Map();
-        try {
-            return await legacyPinGateProven((coin, method, params) => this.indexerCall(coin, method, params),
-                String(network || ''), this._legacyPinProvenFrom, Math.floor(Date.now() / 1000));
-        } catch(err){
-            logger.warn('StateAnchorPublisher: LEGACY_ANCHOR_REWARD_PIN not proven from the BTC indexer (' +
-                        (err && err.message) + '); legacy anchor bytes still bind');
-            return false;
-        }
     },
 
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
@@ -318,11 +296,19 @@ module.exports = {
         }
         if(bound !== 'verified') return;   // undecided: retained until the TTL
         // A tuple the indexer pins is never minted again once the gate is on, so write nothing for it.
-        if(isPinnedEntry(e) && await this.legacyPinGateOn(e.network)){
-            await this.dropDeferredRewardAttest(key);
-            logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
-                         'tuple; dropped, no reward');
-            return;
+        if(isPinnedEntry(e)){
+            let pinState = await legacyPinGateState(this, e.network, logger);
+            if(pinState === 'unproven'){
+                logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a pinned legacy tuple, ' +
+                            'but the gate is unproven; entry retained');
+                return;
+            }
+            if(pinState === 'on'){
+                await this.dropDeferredRewardAttest(key);
+                logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
+                            'tuple; dropped, no reward');
+                return;
+            }
         }
         // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
         // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's

@@ -83,11 +83,11 @@ class LandingWatermark {
         if (this._tracked.has(aggregator)) return true;
         this._tracked.add(aggregator);
         const inner = aggregator.receiveValidatedBatch.bind(aggregator);
-        aggregator.receiveValidatedBatch = async (sourceChain, batchData) => {
+        aggregator.receiveValidatedBatch = async (sourceChain, batchData, ...rest) => {
             const c = normalizeChain(sourceChain) || '';
             this._inFlight.set(c, (this._inFlight.get(c) || 0) + 1);
             this._started.set(c, (this._started.get(c) || 0) + 1);
-            try { return await inner(sourceChain, batchData); }
+            try { return await inner(sourceChain, batchData, ...rest); }
             finally { this._inFlight.set(c, this._inFlight.get(c) - 1); }
         };
         return true;

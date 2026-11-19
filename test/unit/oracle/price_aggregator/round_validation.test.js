@@ -33,6 +33,8 @@ function fields(data, ctx) {
 describe('round_validation validateRoundFields', function () {
     it('returns the parsed header values', function () {
         expect(fields(makeRound())).to.deep.equal({ round: 5, timestamp: 9, referenceBlock: 3, btcBlockHeight: 7 });
+        expect(fields(makeRound({ round: '5', timestamp: '9', block_index: '3', btc_block_height: '7' })))
+            .to.deep.equal({ round: 5, timestamp: 9, referenceBlock: 3, btcBlockHeight: 7 });
     });
 
     it('refuses null data and an empty pairs array', function () {
@@ -40,14 +42,19 @@ describe('round_validation validateRoundFields', function () {
         expect(fields(makeRound({ pairs: [] }))).to.deep.equal({ reason: 'invalid roundData' });
     });
 
-    for (const [label, overrides, reason] of [
-        ['a negative round', { round: -1 }, 'invalid round'],
-        ['a non-numeric timestamp', { timestamp: 'abc' }, 'invalid timestamp'],
-        ['a negative block_index', { block_index: -1 }, 'invalid block_index'],
-        ['a missing btc_block_height', { btc_block_height: undefined }, 'invalid btc_block_height']
+    for (const [label, overrides, reason, malformed] of [
+        ['a negative round', { round: -1 }, 'invalid round',
+            [{ round: '12junk' }, { round: '1e3' }, { round: ' 5' }, { round: 2 ** 53 }]],
+        ['a non-numeric timestamp', { timestamp: 'abc' }, 'invalid timestamp',
+            [{ timestamp: '123.5' }, { timestamp: 123.5 }, { timestamp: 2 ** 53 }]],
+        ['a negative block_index', { block_index: -1 }, 'invalid block_index',
+            [{ block_index: '500junk' }, { block_index: true }]],
+        ['a missing btc_block_height', { btc_block_height: undefined }, 'invalid btc_block_height',
+            [{ btc_block_height: [600] }, { btc_block_height: {} }]]
     ]) {
         it('refuses ' + label, function () {
             expect(fields(makeRound(overrides))).to.deep.equal({ reason });
+            for (const bad of malformed) expect(fields(makeRound(bad))).to.deep.equal({ reason });
         });
     }
 

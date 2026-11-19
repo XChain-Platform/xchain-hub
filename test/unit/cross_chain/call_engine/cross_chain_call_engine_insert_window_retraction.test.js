@@ -17,6 +17,7 @@
 const { expect } = require('chai');
 const sinon = require('sinon');
 const CrossChainCallEngine = require('../../../../src/cross_chain/call_engine');
+const CrossChainDexConsensus = require('../../../../src/cross_chain/dex_consensus');
 
 function deferred() {
     let resolve;
@@ -122,5 +123,100 @@ describe('CrossChainCallEngine insert-window retraction fence', function () {
         expect(stored[0].status).to.equal('finalized');
         expect(engine.mirrorCallRow.calledOnce).to.equal(true);
         expect(engine.emit.calledWith('call:dispatch')).to.equal(true);
+    });
+
+    it('cancels a covered pending round even when no row was persisted', async function () {
+        const { engine } = makeEngine();
+        const pendingRow = row();
+        engine._inflight.add(pendingRow.round_id);
+        engine._resultBackoff.set(pendingRow.call_id, { attempts: 1 });
+        engine.consensus.cancelPendingWhere = sinon.stub().callsFake(predicate =>
+            predicate(pendingRow) ? [{ roundId: pendingRow.round_id, row: pendingRow }] : []);
+
+        await engine.retractCallsForReorg('BTC', 40);
+
+        expect(engine.consensus.cancelPendingWhere.calledOnce).to.equal(true);
+        expect(engine._inflight.has(pendingRow.round_id)).to.equal(false);
+        expect(engine._resultBackoff.has(pendingRow.call_id)).to.equal(false);
+        expect(engine.consensus.forgetFinalized.called).to.equal(false);
+    });
+
+    it('fences a dispatch whose admission stamp was awaiting during retraction', async function () {
+        const { engine } = makeEngine();
+        const entered = deferred();
+        const release = deferred();
+        engine.confirmations = { BTC: 1 };
+        engine.rowExists = sinon.stub().resolves(false);
+        engine.resolveSnapshotBlock = sinon.stub().resolves(10);
+        engine.resolveCapabilityValidators = sinon.stub().resolves([{ pubkey: 'aa' }]);
+        engine.stampAdmission = sinon.stub().callsFake(async () => {
+            entered.resolve();
+            await release.promise;
+            return true;
+        });
+        engine.consensus.propose = sinon.stub().resolves();
+        const call = { call_id: 'ab'.repeat(32), block_index: 100, action_index: 41,
+            target_chain: 'DOGE', deadline_block: 200, cross_hops: 0 };
+
+        const proposing = engine.maybeDispatch('BTC', 'regtest', 100, call);
+        await entered.promise;
+        await engine.retractCallsForReorg('BTC', 40);
+        release.resolve();
+        await proposing;
+
+        expect(engine.consensus.propose.called).to.equal(false);
+        expect(engine._pendingProposals.size).to.equal(0);
+        expect(engine._retractionFence).to.deep.equal([]);
+    });
+});
+
+describe('CrossChainDexConsensus cancellation', function () {
+    afterEach(function () { sinon.restore(); });
+
+    function consensus() {
+        const engine = { hub: { p2pConfig: {} }, peerManager: null, identity: null,
+            capSnapshot: null, canonicalMatch: sinon.stub(), persistCapabilitySnapshot: sinon.stub() };
+        return new CrossChainDexConsensus(engine);
+    }
+
+    it('drops pending state and early messages for a covered live round', function () {
+        const c = consensus();
+        const pendingRow = row();
+        const timer = setTimeout(() => {}, 10000);
+        c.pending.set('round-1', { row: pendingRow, finalized: false, timer, cleanupTimer: null });
+        c.earlyMessages.set('round-1', [{}]);
+        c.earlyMessageTtl.set('round-1', Date.now() + 10000);
+        const abandoned = sinon.spy();
+        c.on('match:abandoned', abandoned);
+
+        expect(c.cancelPendingWhere(value => value.source_action_index >= 40))
+            .to.deep.equal([{ roundId: 'round-1', row: pendingRow }]);
+        expect(c.pending.has('round-1')).to.equal(false);
+        expect(c.earlyMessages.has('round-1')).to.equal(false);
+        expect(abandoned.calledWith({ matchId: 'round-1' })).to.equal(true);
+    });
+
+    it('does not sign or broadcast after cancellation during snapshot persistence', async function () {
+        const entered = deferred();
+        const release = deferred();
+        const c = consensus();
+        c.identity = { sign: sinon.stub().returns('sig') };
+        c.peerManager = { broadcast: sinon.stub() };
+        c.engine.persistCapabilitySnapshot = sinon.stub().callsFake(async () => {
+            entered.resolve();
+            await release.promise;
+        });
+        const pending = { matchId: 'round-1', row: row(), canonical: 'canonical',
+            myPubkey: 'aa', signatures: new Map(), prepares: new Set(), finalized: false };
+        c.pending.set('round-1', pending);
+
+        const broadcasting = c.broadcastPropose(pending);
+        await entered.promise;
+        c.cancelPendingWhere(() => true);
+        release.resolve();
+        await broadcasting;
+
+        expect(c.identity.sign.called).to.equal(false);
+        expect(c.peerManager.broadcast.called).to.equal(false);
     });
 });

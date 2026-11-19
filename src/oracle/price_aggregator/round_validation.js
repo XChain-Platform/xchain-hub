@@ -22,6 +22,7 @@
  ********************************************************************/
 
 const { PRICE_MAX } = require('../../constants.js');
+const parseWholeInteger = require('./whole_integer.js');
 const pricePair         = require('../../consensus/gates/price_pair_gate.js');
 const priceScale        = require('../../consensus/gates/price_scale_gate.js');
 
@@ -32,8 +33,8 @@ function validateRoundFields(sourceChain, roundData) {
         return { reason: 'invalid roundData' };
     }
 
-    let round = parseInt(roundData.round);
-    if (!Number.isFinite(round) || round < 0) {
+    const round = parseWholeInteger(roundData.round);
+    if (round === null) {
         return { reason: 'invalid round' };
     }
 
@@ -44,15 +45,15 @@ function validateRoundFields(sourceChain, roundData) {
     if (bandReason) return { reason: bandReason };
 
     // timestamp is part of the signed payload; it must be present and sane
-    let timestamp = parseInt(roundData.timestamp);
-    if (!Number.isFinite(timestamp) || timestamp < 0) {
+    const timestamp = parseWholeInteger(roundData.timestamp);
+    if (timestamp === null) {
         return { reason: 'invalid timestamp' };
     }
 
     // block_index anchors both the signed payload's validator snapshot and
     // the stored reference_block; verification is impossible without it
-    let referenceBlock = parseInt(roundData.block_index);
-    if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
+    const referenceBlock = parseWholeInteger(roundData.block_index);
+    if (referenceBlock === null) {
         return { reason: 'invalid block_index' };
     }
 
@@ -60,8 +61,8 @@ function validateRoundFields(sourceChain, roundData) {
     // the on-chain PRICE v0 wire. It is what the EQUIV header gate keys on, so the
     // hub reconstructs identical bytes to what the validators signed (#4232). It is
     // distinct from block_index (the block the PRICE tx itself was mined in).
-    let btcBlockHeight = parseInt(roundData.btc_block_height);
-    if (!Number.isFinite(btcBlockHeight) || btcBlockHeight < 0) {
+    const btcBlockHeight = parseWholeInteger(roundData.btc_block_height);
+    if (btcBlockHeight === null) {
         return { reason: 'invalid btc_block_height' };
     }
     return { round, timestamp, referenceBlock, btcBlockHeight };

@@ -23,6 +23,7 @@
 
 const { PRICE_MAX } = require('../../constants.js');
 const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../../price_batch_compression.js');
+const parseWholeInteger = require('./whole_integer.js');
 const pricePair         = require('../../consensus/gates/price_pair_gate.js');
 const priceScale        = require('../../consensus/gates/price_scale_gate.js');
 // The verify-first tally rule is a registry row read by literal key (W5), on the
@@ -44,10 +45,9 @@ function validateBatchWindow(sourceChain, batchData) {
         return { reason: 'too many rounds' };
     }
 
-    let firstRound = parseInt(batchData.first_round);
-    let lastRound  = parseInt(batchData.last_round);
-    if (!Number.isFinite(firstRound) || firstRound < 0 ||
-        !Number.isFinite(lastRound)  || lastRound  < 0 || firstRound > lastRound) {
+    const firstRound = parseWholeInteger(batchData.first_round);
+    const lastRound  = parseWholeInteger(batchData.last_round);
+    if (firstRound === null || lastRound === null || firstRound > lastRound) {
         return { reason: 'invalid round window' };
     }
 
@@ -65,16 +65,16 @@ function validateBatchWindow(sourceChain, batchData) {
 function validateBatchAnchors(batchData) {
     // The BATCH anchor: part of the signed canonical, and the height every oracle
     // flag day below resolves on (§5.5). Distinct from each round's own anchor.
-    let btcBlockHeight = parseInt(batchData.btc_block_height);
-    if (!Number.isFinite(btcBlockHeight) || btcBlockHeight < 0) {
+    const btcBlockHeight = parseWholeInteger(batchData.btc_block_height);
+    if (btcBlockHeight === null) {
         return { reason: 'invalid btc_block_height' };
     }
 
     // block_index is the LANDING block on the landing chain, and it is what the
     // stored reference_block records (D8). It is NOT what the validator snapshot
     // resolves on; see the snapshot read below.
-    let referenceBlock = parseInt(batchData.block_index);
-    if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
+    const referenceBlock = parseWholeInteger(batchData.block_index);
+    if (referenceBlock === null) {
         return { reason: 'invalid block_index' };
     }
 
@@ -84,12 +84,10 @@ function validateBatchAnchors(batchData) {
     // reasoning receiveOraclePrice records for its own block_time gate (parseInt
     // rounds silently past 2^53, and a coerced 0 would read as "before every flag
     // day" on a genesis-on network).
-    if (!/^[0-9]+$/.test(String(batchData.block_time)) ||
-        !Number.isSafeInteger(Number(batchData.block_time)) ||
-        Number(batchData.block_time) <= 0) {
+    const blockTime = parseWholeInteger(batchData.block_time);
+    if (blockTime === null || blockTime <= 0) {
         return { reason: 'invalid block_time' };
     }
-    let blockTime = parseInt(batchData.block_time, 10);
 
     // THE PAIR-NAME FLAG DAY IS KEYED ON THE BATCH'S block_time, NOT on each
     // round's own timestamp as v0 keys it (D14). v0 has no block time in its push
@@ -154,16 +152,16 @@ function validateBatchRounds(batchData, window) {
     let prev    = null;
     for (let r of batchData.rounds) {
         if (!r || !Array.isArray(r.pairs) || r.pairs.length < 1) return { reason: 'invalid rounds' };
-        let round = parseInt(r.round);
-        if (!Number.isFinite(round) || round < 0)               return { reason: 'invalid rounds' };
+        const round = parseWholeInteger(r.round);
+        if (round === null)                                    return { reason: 'invalid rounds' };
         if (round < window.firstRound || round > window.lastRound) return { reason: 'round outside window' };
         if (prev !== null && round <= prev)                     return { reason: 'rounds not strictly ascending' };
         prev = round;
 
-        let timestamp = parseInt(r.timestamp);
-        if (!Number.isFinite(timestamp) || timestamp < 0)       return { reason: 'invalid round timestamp' };
-        let roundAnchor = parseInt(r.btc_block_height);
-        if (!Number.isFinite(roundAnchor) || roundAnchor < 0)   return { reason: 'invalid round btc_block_height' };
+        const timestamp = parseWholeInteger(r.timestamp);
+        if (timestamp === null)                                return { reason: 'invalid round timestamp' };
+        const roundAnchor = parseWholeInteger(r.btc_block_height);
+        if (roundAnchor === null)                              return { reason: 'invalid round btc_block_height' };
 
         let pairsReason = validateBatchRoundPairs(r.pairs, window.pairPattern, window.pricePattern);
         if (pairsReason) return { reason: pairsReason };

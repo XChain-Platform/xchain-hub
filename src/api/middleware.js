@@ -15,10 +15,10 @@
  * XChain Hub - the express middleware stack ahead of every route.
  *
  * Order is the auth boundary and is kept exactly: trust proxy, helmet, CORS, the
- * three per-IP rate limits, the JSON body parser, the batch surcharges, the
- * observability surface and hub gauges, then the x-api-key tier gate and the
- * public-port allowlist. The limits count a request before its body is parsed,
- * so a malformed or oversize POST that the parser answers is still metered.
+ * three per-IP rate limits, the bounded JSON body parser and method-size gate,
+ * the batch surcharges, the observability surface and hub gauges, then the
+ * x-api-key tier gate and the public-port allowlist. The limits count a request
+ * before its body is parsed, so a malformed or oversize POST is still metered.
  *
  ********************************************************************/
 
@@ -28,6 +28,7 @@
 const { buildRateLimitOptions, isSnapshotPageRead, parseSnapshotRpm,
         SNAPSHOT_PATH_PREFIX } = require('./rate_limit_policy.js');
 const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
+const { ATTEST_BATCH_MAX_INFLATED_BYTES } = require('../lib/attest_batch_wire.js');
 const FixedWindowStore = require('./rate_limit_store.js');
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
 const {
@@ -39,9 +40,11 @@ const {
     installHubReorgRetractionMetrics,
     installHubOraclePublisherMetrics
 } = require('./hub_metrics');
-const { authGate, feedPortAllowlist } = require('./auth_gate');
+const { authGate, bulkKeyMatches, feedPortAllowlist } = require('./auth_gate');
 
 const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';
+const DEFAULT_BODY_LIMIT_BYTES = 100 * 1024;
+const ATTEST_BATCH_BODY_LIMIT_BYTES = ATTEST_BATCH_MAX_INFLATED_BYTES + 64 * 1024;
 
 function resolveTrustProxy(raw) {
     const value = raw || DEFAULT_TRUST_PROXY;
@@ -78,6 +81,25 @@ function bodyParserErrorHandler(err, req, res, next) {
                   : 'invalid request body';
     res.status(status).json({ jsonrpc: '2.0', id: null,
         error: { code: parseFailed ? -32700 : -32600, message } });
+}
+
+function recordJsonBodyBytes(req, res, buf) {
+    req.jsonBodyBytes = buf.length;
+}
+
+function attestParserAllowed(req, ctx) {
+    if (!ctx.HUB_API_KEY) return true;
+    return bulkKeyMatches(req.headers['x-api-key'] || '', ctx);
+}
+
+function largeBodyMethodGate(req, res, ...rest) {
+    const next = rest[0];
+    if (!req.jsonBodyBytes || req.jsonBodyBytes <= DEFAULT_BODY_LIMIT_BYTES) return next();
+    const singleAttestPush = req.body && !Array.isArray(req.body) &&
+        typeof req.body.method === 'string' && req.body.method.toLowerCase() === 'pushattestbatch';
+    if (singleAttestPush) return next();
+    return res.status(413).json({ jsonrpc: '2.0', id: null,
+        error: { code: -32600, message: 'request entity too large' } });
 }
 
 // Keep unhandled middleware and route errors out of Express's HTML finalhandler.
@@ -132,10 +154,18 @@ function installTransportMiddleware(app, ctx) {
     app.use(cors({ origin: CORS_ORIGIN }));
     // Counting runs ahead of the parser; only the batch surcharge needs the parsed body.
     const surcharges = installRateCounters(app, ctx);
-    // This also bounds the uncapped batch arrays inspected by authGate and
-    // feedPortAllowlist before the JSON-RPC batch guard runs.
-    app.use(express.json({ limit: '100kb' }));
+    // The larger parser is available only to the bulk-key tier. A hub without
+    // HUB_API_KEY has explicitly declared an unauthenticated write posture at
+    // boot, so its indexers have no key to present and must use the same parser.
+    // The gate after parsing still keeps every non-attest call and every batch
+    // array at 100 KB, bounding the pre-cap walks in authGate and feedPortAllowlist.
+    const defaultJson = express.json({ limit: DEFAULT_BODY_LIMIT_BYTES, verify: recordJsonBodyBytes });
+    const attestJson = express.json({ limit: ATTEST_BATCH_BODY_LIMIT_BYTES, verify: recordJsonBodyBytes });
+    app.use(function jsonParser(req, res, next) {
+        return (attestParserAllowed(req, ctx) ? attestJson : defaultJson)(req, res, next);
+    });
     app.use(bodyParserErrorHandler);
+    app.use(largeBodyMethodGate);
     surcharges.forEach((surcharge) => app.use(surcharge));
 }
 
@@ -264,4 +294,11 @@ function installMetrics(app, ctx) {
     return observability;
 }
 
-module.exports = { installMiddleware, installTransportMiddleware, bodyParserErrorHandler, terminalErrorHandler };
+module.exports = {
+    installMiddleware,
+    installTransportMiddleware,
+    bodyParserErrorHandler,
+    terminalErrorHandler,
+    DEFAULT_BODY_LIMIT_BYTES,
+    ATTEST_BATCH_BODY_LIMIT_BYTES
+};

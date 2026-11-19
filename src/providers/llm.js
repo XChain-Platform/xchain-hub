@@ -205,6 +205,9 @@ exports.fetch = async (payload, options) => {
 exports.modelCarriesSystemRole = modelCarriesSystemRole;
 exports._setJudgeCallForTest = (fn) => judge.setJudgeCallForTest(fn);
 exports.agree = (proposals, options) => judge.agree(proposals, options);
+// The allowlist agree() judges a winning meta against: the round pin when set,
+// else this provider's live approved models. Followers use it for a round that pinned none.
+exports.approvedMetaSet = (options) => metaGates.approvedMetaSet(options);
 
 // Capability self-test probe. Confirms credential paths are configured for
 // the vendors the current model chains actually use. Avoids burning quota on

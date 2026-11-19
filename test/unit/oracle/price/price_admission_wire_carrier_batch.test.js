@@ -294,7 +294,7 @@ function registerThePriceBatchRailCarries2Tests7() {
             expect(inserts.length).to.equal(2);
             for (const [sql, params] of inserts) {
                 expect(sql).to.match(/admit_block_btc, admit_block_ltc, admit_block_doge\)/);
-                expect(sql).to.match(/admit_block_doge = VALUES\(admit_block_doge\)/);
+                expect(sql).to.match(/admit_block_doge = IF\(consensus_round = 2, admit_block_doge, VALUES\(admit_block_doge\)\)/);
                 // 16 params per pair row: the three admission columns ride LAST, after created_at.
                 expect(params.length).to.equal(16);
             }

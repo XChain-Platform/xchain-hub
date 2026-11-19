@@ -242,6 +242,23 @@ function announceStoredRound(round, sourceChain, roundData, insertedRows, valida
     }
 }
 
+// The mirror stream carries what this hub holds, not what the push carried: the
+// upsert keeps a producer row that consensus finalized after the duplicate read,
+// so the built rows can differ from the stored ones. The round is already
+// stored, so a failed re-read never turns it into a reject; it falls back to
+// the built rows so a replaying mirror still fills.
+async function storedSignedRows(round, pairs, builtRows) {
+    let heldRows = null;
+    try {
+        heldRows = await this.db.findPriceSnapshotsForRound(round);
+    } catch (err) {
+        logger.warn(nodeUtil.format('PriceAggregator: could not re-read stored round ' + round + ':', err));
+    }
+    const storedRows = Array.isArray(heldRows) && heldRows.length > 0 ? heldRows : builtRows;
+    const signedPairs = new Set(pairs.map(pair => pair.pair));
+    return storedRows.filter(row => row && row.status !== 'skipped' && signedPairs.has(row.coin_pair));
+}
+
 // The store half, after the round has cleared verification and quorum: the stale-replay
 // fence, the atomic insert and the announcements. Async because those are its own awaits;
 // the caller returns its result directly, so nothing of the caller's runs after it.
@@ -277,13 +294,14 @@ async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
         // per-chain columns (NULL for a legacy round, never 0), appended AFTER created_at
         // so every positional reader of this INSERT keeps its index.
         let admitCols = this.admission.admitBlocksToColumns(roundData.admit_blocks == null ? null : roundData.admit_blocks);
-        insertedRows = priceSnapshotRows(round, roundData, sourceChain, stamps, admitCols);
+        const builtRows = priceSnapshotRows(round, roundData, sourceChain, stamps, admitCols);
         try {
             await pushedRoundInsert.call(this, round, roundData, sourceChain, stamps, admitCols);
         } catch (err) {
             logger.error(nodeUtil.format('PriceAggregator: error inserting round ' + round + ':', err));
             return { accepted: false, reason: 'db error' };
         }
+        insertedRows = await storedSignedRows.call(this, round, roundData.pairs, builtRows);
     }
 
     announceStoredRound.call(this, round, sourceChain, roundData, insertedRows, validatorCount);

@@ -19,6 +19,7 @@ const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
+const { isProducerRoundRow } = require('../../../../../../src/peers/hub_db/price_round_groups');
 const { createMockHub } = require('../../../../../helpers/mockHub');
 const { projectPresenceRows } = require('../../../../../helpers/prices/presence_projection');
 
@@ -70,6 +71,7 @@ function installDb(db) {
         for (const p of pairs) {
             let row = table.find(r => r.coin_pair === p.pair);
             if (!row) { row = { id: table.length + 1, round_number: round, coin_pair: p.pair, batch_block_time: 0 }; table.push(row); }
+            if (isProducerRoundRow(row)) continue;
             Object.assign(row, { price: p.price, reference_block: referenceBlock, reference_chain: referenceChain,
                 status: 'finalized', source_chain: referenceChain, source_action_index: actionIndex,
                 push_generation: generation, consensus_proof: proofJson, batch_block_time: blockTime });
@@ -81,7 +83,7 @@ function installDb(db) {
     db.findPriceSnapshotsByRoundNumberAndBatchBlockTime = async () => [];
 }
 
-describe('PriceAggregator batch re-land over a round of mixed origin', function () {
+function registerHooks() {
     beforeEach(function () {
         const hub = createMockHub({ network: 'mainnet' });
         agg = new PriceAggregator(hub);
@@ -96,6 +98,10 @@ describe('PriceAggregator batch re-land over a round of mixed origin', function 
         installDb(hub.db);
     });
     afterEach(function () { sinon.restore(); });
+}
+
+describe('PriceAggregator batch re-land over a round of mixed origin', function () {
+    registerHooks();
 
     it('moves the batch-sourced pair of a re-landed round and leaves the self-finalized pair alone', async function () {
         const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
@@ -130,5 +136,42 @@ describe('PriceAggregator batch re-land over a round of mixed origin', function 
         await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
         expect(upserts).to.deep.equal([['BTC/USD', 'LTC/USD']]);
         expect(table.every(r => r.push_generation === 5)).to.equal(true);
+    });
+
+    it('fills only a signed pair missing from an ordinary duplicate round', async function () {
+        table = [producerRow('BTC/USD'), {
+            id: 2, round_number: ROUND, coin_pair: 'LTC/USD', status: 'skipped', price: null
+        }];
+        const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
+        expect(result).to.deep.equal({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });
+        expect(upserts).to.deep.equal([['LTC/USD']]);
+        expect(table.find(row => row.coin_pair === 'BTC/USD').consensus_proof).to.equal(PRODUCER_PROOF);
+        expect(table.find(row => row.coin_pair === 'LTC/USD').status).to.equal('finalized');
+    });
+});
+
+describe('PriceAggregator batch ingest mirrors the rows it holds', function () {
+    registerHooks();
+
+    it('broadcasts held producer data when the presence read loses a finalize race', async function () {
+        table = [producerRow('BTC/USD')];
+        agg.db.findPriceSnapshotRowsForRounds = async () => [];
+        const emitted = [];
+        agg.on('row:inserted', event => emitted.push(event.row));
+        const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
+        expect(result.accepted).to.equal(true);
+        const own = emitted.find(row => row.coin_pair === 'BTC/USD');
+        expect(own.reference_block).to.equal(PRODUCER_BLOCK);
+        expect(own.consensus_proof).to.equal(PRODUCER_PROOF);
+    });
+
+    it('counts a stored batch round as stored when its post-write re-read fails', async function () {
+        table = [];
+        agg.db.findPriceSnapshotsForRound = async () => { throw new Error('read lost'); };
+        const emitted = [];
+        agg.on('row:inserted', event => emitted.push(event.row));
+        const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
+        expect(result).to.deep.equal({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });
+        expect(emitted.map(row => row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
     });
 });

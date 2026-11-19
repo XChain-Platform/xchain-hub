@@ -143,6 +143,44 @@ function targetRounds(batch, range, present, rewritePending) {
     return targets;
 }
 
+function rememberComplete(rounds) {
+    for (const round of rounds) this._priceRestoreVerifiedComplete.add(round);
+    while (this._priceRestoreVerifiedComplete.size > PRICE_RESTORE_RECENT_ROUNDS * 2) {
+        const oldest = this._priceRestoreVerifiedComplete.values().next().value;
+        this._priceRestoreVerifiedComplete.delete(oldest);
+    }
+}
+
+function batchRoundsInRange(batch, range) {
+    const rounds = [];
+    for (let round = Number(batch.first_round); round <= Number(batch.last_round); round++) {
+        if (round >= range.first && round <= range.last) rounds.push(round);
+    }
+    return rounds;
+}
+
+function fillRoundsForPayload(payload, state, targets) {
+    const held = new Map();
+    for (const row of state.rows) {
+        const round = Number(row && row.round_number);
+        if (!Number.isSafeInteger(round) || !row || row.status === 'skipped') continue;
+        if (!held.has(round)) held.set(round, new Set());
+        held.get(round).add(row.coin_pair);
+    }
+    const fill = new Set(), complete = [];
+    for (const item of payload.rounds) {
+        const round = Number(item && item.round);
+        if (!Number.isSafeInteger(round) || round < state.range.first || round > state.range.last ||
+            targets.has(round) || this._priceRestoreVerifiedComplete.has(round)) continue;
+        const pairs = Array.isArray(item.pairs) ? item.pairs : [];
+        const present = held.get(round) || new Set();
+        if (pairs.every(pair => pair && present.has(pair.pair))) complete.push(round);
+        else fill.add(round);
+    }
+    rememberComplete.call(this, complete);
+    return fill;
+}
+
 async function deleteRefusedRewrite(payload) {
     if (this._priceRestoreStopped) return 0;
     let action = Number(payload && payload.action_index);
@@ -161,7 +199,9 @@ async function deleteRefusedRewrite(payload) {
 
 async function restoreBatch(batch, state, now) {
     let targets = targetRounds(batch, state.range, state.present, state.rewritePending);
-    if (targets.size === 0) return {};
+    const candidates = batchRoundsInRange(batch, state.range)
+        .filter(round => targets.has(round) || !this._priceRestoreVerifiedComplete.has(round));
+    if (candidates.length === 0) return {};
     let fetched = await this.fetchPriceBatchPayloadForRestore(batch.action_index);
     if (this._priceRestoreStopped) return { result: stoppedResult() };
     if (fetched && fetched.unsupported) {
@@ -180,46 +220,54 @@ async function restoreBatch(batch, state, now) {
         warnRestoreOnce.call(this, 'batch payload identity does not match its request');
         return { refused: targets.size };
     }
-    return ingestRestoredBatch.call(this, fetched.payload, targets, state);
+    const fillRounds = fillRoundsForPayload.call(this, fetched.payload, state, targets);
+    if (targets.size === 0 && fillRounds.size === 0) return {};
+    return ingestRestoredBatch.call(this, fetched.payload, targets, fillRounds, state);
 }
 
-async function ingestRestoredBatch(payload, targets, state) {
+async function ingestRestoredBatch(payload, targets, fillRounds, state) {
     let target = new Set(payload.rounds
         .map(round => Number(round && round.round))
         .filter(round => Number.isSafeInteger(round) && round >= state.range.first &&
             round <= state.range.last && targets.has(round)));
-    if (target.size === 0) return {};
+    let fill = new Set(payload.rounds
+        .map(round => Number(round && round.round))
+        .filter(round => Number.isSafeInteger(round) && fillRounds.has(round)));
+    if (target.size === 0 && fill.size === 0) return {};
     let existingTargets = [...target].filter(round => state.present.has(round));
     let result = await this.receiveValidatedBatch(PRICE_LANDING_COIN, payload,
-        { existingRows: state.rows, targetRounds: target });
+        { existingRows: state.rows, targetRounds: target, fillRounds: fill });
     if (this._priceRestoreStopped) return { result: stoppedResult() };
     if (result && result.accepted) {
         target.forEach(round => state.present.add(round));
+        fill.forEach(round => state.present.add(round));
         existingTargets.forEach(round => state.rewritePending.delete(round));
-        return { restored: result.stored, rewritten: existingTargets.length };
+        rememberComplete.call(this, [...target, ...fill]);
+        return { restored: result.stored, rewritten: existingTargets.length, filled: fill.size };
     }
     if (result && result.reason === 'stale (retracted generation)' && existingTargets.length > 0)
         await deleteRefusedRewrite.call(this, payload);
-    return { refused: target.size };
+    return { refused: target.size + fill.size };
 }
 
 async function restoreChosenBatches(prepared, rewriteRounds, now) {
     let state = Object.assign(prepared, {
         rewritePending: new Set(Array.isArray(rewriteRounds) ? rewriteRounds.map(Number) : [])
     });
-    let totals = { restored: 0, rewritten: 0, refused: 0 };
+    let totals = { restored: 0, rewritten: 0, filled: 0, refused: 0 };
     for (let batch of prepared.chosen.batches) {
         let outcome = await restoreBatch.call(this, batch, state, now);
         if (outcome.result) return outcome.result;
         totals.restored += outcome.restored || 0;
         totals.rewritten += outcome.rewritten || 0;
+        totals.filled += outcome.filled || 0;
         totals.refused += outcome.refused || 0;
     }
     this._priceRestoreWarned = null;
     if (!prepared.range.bounded)
         advanceBackgroundWalk.call(this, prepared.range, prepared.chosen, prepared.answer);
     if (totals.restored > 0) logger.info('PriceAggregator: restored ' + totals.restored +
-        ' PRICE round(s) from valid active-chain batches');
+        ' PRICE round(s) from valid active-chain batches, including ' + totals.filled + ' filled round(s)');
     return Object.assign({ ran: true, considered: prepared.chosen.rounds.length }, totals);
 }
 

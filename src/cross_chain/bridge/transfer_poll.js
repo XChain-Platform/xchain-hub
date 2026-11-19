@@ -25,6 +25,7 @@ const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const { ALLOWED_CHAINS, PENDING_PAGE } = require('./constants.js');
 const { proofReadyActive, proofReadySnapshot, anchorProofReadyActive, anchorProofReadySnapshot } = require('./proof_ready_snapshot.js');
 const { getLogger } = require('../../observability');
+const roundRetraction = require('../retraction/rounds.js');
 const logger = getLogger();
 
 module.exports = {
@@ -232,6 +233,8 @@ module.exports = {
     },
 
     async maybeFinalizeTransfer(coin, network, latestBlock, tipBlock, t){
+        const proposal = roundRetraction.begin(this);
+        try {
         let leg = await this.admitTransferLeg(coin, network, latestBlock, tipBlock, t);
         if(!leg) return;
         let { destChain, tick, srcActionIndex, transferId, sourceLegKey } = leg;
@@ -271,6 +274,8 @@ module.exports = {
         if(!await this.stampAdmission('bridge_transfers', row, 'transfer ' + transferId)) return;
 
         let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), network);
+        if(roundRetraction.covered(this, proposal, row))
+            return this.logHeld(coin, t, 'source leg was retracted while preparing its round');
         this._inflight.add(transferId);
         this._inflightSourceLegs.add(sourceLegKey);
         this._inflightTransferLeg.set(transferId, sourceLegKey);
@@ -282,6 +287,7 @@ module.exports = {
             this.releaseSourceLegGuard(transferId);
             throw e;
         }
+        } finally { roundRetraction.end(this, proposal); }
     },
 
     // The block a leg's row is stamped with: the tip, or for a BTC leg past its flag day the

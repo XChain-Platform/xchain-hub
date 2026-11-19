@@ -124,6 +124,7 @@ describe('StateAnchorPublisher: content-addressed archive-anchor existence check
 
     registerArchiveExistencePublishTests();
     registerArchiveExistenceRecoveryTests();
+    registerArchiveMissingTxidTests();
     registerArchiveLookupTests();
 });
 
@@ -230,6 +231,49 @@ function registerArchiveExistenceRecoveryTests() {
         pub.indexers = {};
         await pub.publishArchive(mkRound(sent));
         expect(sent.length).to.equal(CHUNKS.length);
+    });
+}
+
+function registerArchiveMissingTxidTests() {
+
+    it('counts a txid-less continuation once and never sends that payload again', async () => {
+        const { pub } = mkPub(() => ABSENT);
+        const sends = new Map();
+        const broadcaster = async (payload) => {
+            const chunk = parse(payload).chunkIndex;
+            sends.set(chunk, (sends.get(chunk) || 0) + 1);
+            return chunk === '1' ? { txid: null } : 'bb'.repeat(32);
+        };
+        const lost = await pub.broadcastArchiveChunks(mkRound([]), ROUND_SEQ, broadcaster, CP);
+        expect(lost).to.equal(1);
+        expect(sends.get('1'), 'an ambiguous send must not be repeated').to.equal(1);
+        expect(sends.get('2')).to.equal(1);
+    });
+
+    it('keeps archive rows pending when a continuation returns no txid', async () => {
+        const { pub, sent, backfills } = mkPub(() => ABSENT);
+        const round = mkRound(sent);
+        round.signer.broadcastFn = async (payload) => {
+            sent.push(payload);
+            const wire = parse(payload);
+            if(wire.version === '2' && wire.chunkIndex === '1') return {};
+            return { txid: 'fresh-tx-' + sent.length };
+        };
+        await pub.publishArchive(round);
+        expect(backfills).to.have.length(1);
+        expect(backfills[0].matches[0].status).to.equal('__partial__');
+        expect(sent.filter(p => parse(p).chunkIndex === '1')).to.have.length(1);
+    });
+
+    it('accepts a txid-less adopted chunk only with positive existence evidence', async () => {
+        const { pub } = mkPub(() => onChain([0, 1, 2]));
+        let sends = 0;
+        const lost = await pub.broadcastArchiveChunks(mkRound([]), LANDED_SEQ, async () => {
+            sends++;
+            return { txid: null };
+        }, CP);
+        expect(lost).to.equal(0);
+        expect(sends, 'already-present slots must be adopted before broadcasting').to.equal(0);
     });
 }
 

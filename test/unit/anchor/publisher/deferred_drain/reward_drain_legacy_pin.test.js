@@ -145,7 +145,6 @@ function registerParityCases() {
     it('reaches the indexer mint decision for every proven-gate scenario', async function () {
         if (!siblingsHere(this)) return;
         const above = timesAround(TIP - 100);
-        const below = timesAround(TIP + 1000);
         const pinnedOver = { publisher: PINNED.publisher, txid: PINNED.txid,
             roundReference: PINNED.snapshot, snapshotBlock: PINNED.snapshot };
         const pinnedRow = bundleRow({ version: 0, publisher: PINNED.publisher, snapshot_block: PINNED.snapshot });
@@ -155,13 +154,10 @@ function registerParityCases() {
             checkpoint_chain: null, block_index_doge: 67980000 });
         const cases = [
             ['v6 archive only, gate on', [archiveRow], above, archiveOver, false],
-            ['v6 archive only, gate off', [archiveRow], below, archiveOver, true],
             ['v7 only, gate on', [bundleRow()], above, {}, false],
-            ['v7 only, gate off', [bundleRow()], below, {}, true],
             ['v0, gate on', [bundleRow({ version: 0 })], above, {}, true],
             ['v7 beside v0, gate on', [bundleRow(), bundleRow({ version: 0, action_index: 1 })], above, {}, true],
             ['pinned tuple, gate on', [pinnedRow], above, pinnedOver, false],
-            ['pinned tuple, gate off', [pinnedRow], below, pinnedOver, true],
             ['v7 only on mainnet', [bundleRow({ checkpoint_network: 'mainnet' })], above, { network: 'mainnet' }, true]
         ];
         // Each case also names the mint it must reach, so a harness that answered one way for all would fail.
@@ -170,6 +166,34 @@ function registerParityCases() {
             const hubWrites = pub.written.length === 1;
             expect(await indexerMints(anchors, times, entry(over)), label + ' (indexer)').to.equal(mints);
             expect(hubWrites, label).to.equal(mints);
+        }
+    });
+
+    it('does not write an entry the indexer rejects while the hub gate is unproven', async function () {
+        if (!siblingsHere(this)) return;
+        const above = timesAround(TIP - 100);
+        const belowMargin = timesAround(TIP - 6);
+        const archiveOver = { rewardType: 'anchor_archive', roundReference: 42,
+            snapshotBlock: 156000, anchorVersion: 1 };
+        const families = [
+            [[bundleRow()], {}],
+            [[bundleRow({ version: 6, snapshot_block: 156000, match_batch_seq: 42,
+                checkpoint_chain: null, block_index_doge: 67980000 })], archiveOver]
+        ];
+        for (const [anchors, over] of families) {
+            const scenarios = [
+                ['unreachable', null, null],
+                ['wrong network', above, 'mainnet'],
+                ['median below instant', belowMargin, null]
+            ];
+            for (const [label, hubTimes, replyNetwork] of scenarios) {
+                const e = entry(over);
+                const pub = makePub(anchors, hubTimes, replyNetwork || e.network);
+                pub._deferredRewardAttest.set('k', e);
+                await pub.runRewardAttestDrain();
+                expect(await indexerMints(anchors, above, e), label + ' indexer').to.equal(false);
+                expect(pub.written, label + ' hub').to.deep.equal([]);
+            }
         }
     });
 }
@@ -192,9 +216,10 @@ function registerGateVerdictCases() {
 
     it('proves the gate from the median time past six blocks below the tip, not from the tip block', async function () {
         // Only the last eleven blocks are past the instant, so the tip and its own median are,
-        // but the median six blocks down is not: the gate is unproven and the v7 row still binds.
+        // but the median six blocks down is not: the gate is unproven and the entry is held.
         let pub = await drain([bundleRow()], timesAround(TIP - 6));
-        expect(pub.written).to.deep.equal([TXID]);
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
         let proven = await drain([bundleRow()], timesAround(TIP - 11));
         expect(proven.written).to.deep.equal([]);
     });
@@ -205,7 +230,8 @@ function registerProofReadCases() {
     it('keeps today\'s verdict, writing the row, when the BTC indexer cannot prove the gate', async function () {
         let pub = await drain([bundleRow()], null);
         expect(pub.btcCalls).to.equal(1);
-        expect(pub.written).to.deep.equal([TXID]);
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
     });
 
     it('keeps today\'s verdict when the BTC indexer answers for another network', async function () {
@@ -213,7 +239,22 @@ function registerProofReadCases() {
         let pub = makePub([bundleRow()], timesAround(TIP - 100), 'mainnet');
         pub._deferredRewardAttest.set('k', e);
         await pub.runRewardAttestDrain();
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
+    });
+
+    it('writes when both legacy-gate verdicts agree despite an unavailable BTC indexer', async function () {
+        let pub = await drain([bundleRow(), bundleRow({ version: 0, action_index: 1 })], null);
         expect(pub.written).to.deep.equal([TXID]);
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('holds a pinned tuple while the legacy gate is unproven', async function () {
+        let pub = await drain([bundleRow({ version: 0, publisher: PINNED.publisher,
+            snapshot_block: PINNED.snapshot })], null, { publisher: PINNED.publisher, txid: PINNED.txid,
+            roundReference: PINNED.snapshot, snapshotBlock: PINNED.snapshot });
+        expect(pub.written).to.deep.equal([]);
+        expect(pub._deferredRewardAttest.size).to.equal(1);
     });
 
     it('reads no BTC block for an anchor set without a legacy byte, or on an unarmed network', async function () {

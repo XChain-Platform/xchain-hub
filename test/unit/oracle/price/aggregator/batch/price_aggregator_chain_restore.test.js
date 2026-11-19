@@ -17,9 +17,9 @@ function validator() {
     return { pubkey, sign: payload => crypto.sign(null, Buffer.from(payload), privateKey).toString('hex') };
 }
 
-function signedPayload(agg, validators, badSignature) {
+function signedPayload(agg, validators, badSignature, pairs) {
     let rounds = [{ round: 300, timestamp: 1700000000, btc_block_height: 799200,
-        pairs: [{ pair: 'BTC/USD', price: '50000.00' }] }];
+        pairs: pairs || [{ pair: 'BTC/USD', price: '50000.00' }] }];
     let canonical = agg.buildPriceBatchPayload(300, 300, 799200,
         rounds.map(r => ({ round: r.round, timestamp: r.timestamp,
             btcBlockHeight: r.btc_block_height, pairs: r.pairs })));
@@ -114,6 +114,29 @@ function registerValidationCases() {
         expect(wrongChain).to.include({ ran: true, restored: 0, refused: 1 });
         expect(wrongAction).to.include({ ran: true, restored: 0, refused: 1 });
         expect(hub.db.setBatchPriceSnapshotRound.called).to.equal(false);
+    });
+
+    it('fills an incomplete present round once and memoises its payload coverage', async function () {
+        const pairs = [{ pair: 'BTC/USD', price: '50000.00' },
+            { pair: 'LTC/USD', price: '70.00' }];
+        const payload = signedPayload(agg, validators, false, pairs);
+        installPublisher(hub, payload);
+        hub.db.findPriceSnapshotRowsForRounds.resolves([{
+            round_number: 300, coin_pair: 'BTC/USD', status: 'finalized'
+        }]);
+        hub.db.findPriceSnapshotsForRound = sinon.stub().resolves([
+            { round_number: 300, coin_pair: 'BTC/USD', status: 'finalized' },
+            { round_number: 300, coin_pair: 'LTC/USD', status: 'finalized' }
+        ]);
+
+        const first = await agg.repairPriceRoundsFromChain([{ first: 300, last: 300 }]);
+        const second = await agg.repairPriceRoundsFromChain([{ first: 300, last: 300 }]);
+
+        expect(first).to.include({ ran: true, restored: 1, filled: 1 });
+        expect(hub.db.setBatchPriceSnapshotRound.firstCall.args[1].map(pair => pair.pair))
+            .to.deep.equal(['LTC/USD']);
+        expect(hub.oraclePublisher.fetchLandedBatchPayload.calledOnce).to.equal(true);
+        expect(second).to.include({ ran: true, restored: 0, filled: 0 });
     });
 }
 

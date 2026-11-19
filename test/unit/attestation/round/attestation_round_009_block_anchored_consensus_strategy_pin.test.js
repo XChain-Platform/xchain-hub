@@ -70,6 +70,7 @@ function makeProviderRegistry(overrides) {
         // already exercised; the anchoring itself is covered in ProviderRegistry.test.js
         // and the fail-closed branch below.
         getConsensusStrategy: sinon.stub().returns('byte_equality'),
+        getMaxResponseBytes: sinon.stub().returns(32768),
         ...(overrides || {})
     };
 }
@@ -199,5 +200,20 @@ describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hoo
                 expect(ar.rounds.size, strategy + ' must still start a round').to.equal(1);
                 expect([...ar.rounds.values()][0].pinnedConsensusStrategy).to.equal(strategy);
             }
+        }); }); });
+
+describe('AttestationRound', function () { beforeEach(hookAt3853); afterEach(hookAt3913); describe('block-anchored response cap pin', function () { it('uses the request-block cap for both fetch and consensus state', async function () {
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getDef: sinon.stub().returns({ max_response_bytes: 4096 }),
+                getMaxResponseBytes: sinon.stub().returns(32768),
+                getModule: sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, 'computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar.startRound(makeRequest(), 4242);
+            expect(reg.getMaxResponseBytes.calledWith('http_get', 4242)).to.equal(true);
+            expect(fetchStub.firstCall.args[1].maxResponseBytes).to.equal(32768);
+            expect([...ar.rounds.values()][0].pinnedMaxResponseBytes).to.equal(32768);
         }); }); });
 }

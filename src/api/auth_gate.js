@@ -167,7 +167,8 @@ function authGate(ctx) {
         // off an array leaves it undefined, which would let a batch smuggle gated
         // methods past the check unauthenticated.
         // The batch cap runs after this gate so authentication wins over a 400.
-        // middleware.js keeps this pre-cap walk bounded with its 100 KB parser limit.
+        // middleware.js keeps this pre-cap walk bounded with its 100 KB method-size
+        // gate, including arrays presented by callers who can use the attest parser.
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let provided = req.headers['x-api-key'] || '';
         let unauthorized = () => res.status(401).json({
@@ -242,4 +243,4 @@ function feedPortAllowlist() {
     };
 }
 
-module.exports = { authGate, feedPortAllowlist };
+module.exports = { authGate, bulkKeyMatches, feedPortAllowlist };

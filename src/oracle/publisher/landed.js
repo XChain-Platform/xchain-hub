@@ -76,9 +76,9 @@ module.exports = {
         for (let w = this.windowIndexOf(f); w <= this.windowIndexOf(l); w++) {
             let range = this.windowPlan.rangeOf(w);
             if (this.bufferedRange(range.first, range.last).length > 0) continue;
-            // An exact list can have holes. A window the batch does not wholly carry
-            // stays unmemoized, so a hole round this hub finalizes later still publishes.
-            if (exact && !this.spanFullyLanded(exact, Math.max(f, range.first), Math.min(l, range.last))) continue;
+            // Memoize only when the whole window is in this batch or was already
+            // recorded as landed. A later round must remain publishable.
+            if (!this.windowFullyLanded(range, f, l, exact)) continue;
             this.noteAssembled(w);
             let state = this._windows.get(w);
             if (state && state.timer) clearTimeout(state.timer);
@@ -113,10 +113,11 @@ module.exports = {
         return !!(this._landedRounds && this._landedRounds.has(round));
     },
 
-    // Every round in [first,last] is in `exact` or already recorded as landed.
-    spanFullyLanded(exact, first, last) {
-        for (let r = first; r <= last; r++) {
-            if (!exact.has(r) && !this.isRoundLanded(r)) return false;
+    // Every round in the publisher window is in this batch or already landed.
+    windowFullyLanded(range, first, last, exact) {
+        for (let r = range.first; r <= range.last; r++) {
+            const inBatch = exact ? exact.has(r) : r >= first && r <= last;
+            if (!inBatch && !this.isRoundLanded(r)) return false;
         }
         return true;
     },

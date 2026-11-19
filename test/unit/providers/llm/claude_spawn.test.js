@@ -12,6 +12,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
+const assert     = require('assert');
 const proxyquire = require('proxyquire');
 const EventEmitter = require('events');
 const os         = require('os');
@@ -230,10 +231,55 @@ describe('claude-spawn runClaudePrint()', function () {
     });
 
     it('rejects (rather than crashing the process) on an async stdin EPIPE', async function () {
-        let { runClaudePrint } = loadClaudeSpawn({ stdinError: 'async' });
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ stdinError: 'async' });
         let threw = false;
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
         catch (e) { threw = true; expect(e.message).to.include('stdin error'); }
         expect(threw).to.be.true;
+        sinon.assert.calledWith(spawnStub.firstCall.returnValue.kill, 'SIGTERM');
+    });
+
+    it('terminates the child after a synchronous stdin write failure', async function () {
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ stdinError: 'sync' });
+        let threw = false;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { threw = true; expect(e.message).to.include('stdin write failed'); }
+        expect(threw).to.be.true;
+        sinon.assert.calledWith(spawnStub.firstCall.returnValue.kill, 'SIGTERM');
+    });
+
+    it('escalates a stdin failure to SIGKILL when the child does not exit', async function () {
+        let clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ stdinError: 'async' });
+        let pending = runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        let rejection = assert.rejects(pending, /stdin error/);
+        await new Promise((resolve) => setImmediate(resolve));
+        await rejection;
+        await clock.tickAsync(2000);
+        sinon.assert.calledWith(spawnStub.firstCall.returnValue.kill, 'SIGKILL');
+        clock.restore();
+    });
+
+    it('cancels SIGKILL escalation once the child closes', async function () {
+        let clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ stdinError: 'async' });
+        let pending = runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        let rejection = assert.rejects(pending, /stdin error/);
+        await new Promise((resolve) => setImmediate(resolve));
+        await rejection;
+        let child = spawnStub.firstCall.returnValue;
+        child.emit('close', 1);
+        await clock.tickAsync(2000);
+        expect(child.kill.calledWith('SIGKILL')).to.equal(false);
+        clock.restore();
+    });
+
+    it('sends SIGTERM once when stdin reports more than one error', async function () {
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ stdinError: 'async' });
+        let pending = runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        await assert.rejects(pending, /stdin error/);
+        let child = spawnStub.firstCall.returnValue;
+        child.stdin.emit('error', new Error('second EPIPE'));
+        expect(child.kill.withArgs('SIGTERM').callCount).to.equal(1);
     });
 });

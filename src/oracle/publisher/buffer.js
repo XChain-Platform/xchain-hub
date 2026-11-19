@@ -260,22 +260,30 @@ module.exports = {
                 first + '..' + last + '; leaving them buffered: ', e && e.message));
             return 0;
         }
-        // Prune the whole range each observed batch CLAIMS, not just the rows that
-        // carry its proof. receiveBatch dedupes per round: a round already
-        // finalized from the v0 rail is counted a duplicate and keeps its v0 proof, so
-        // a landed six-round batch typically stamps only the one round this hub was
-        // missing. Keying the prune on the stamped rows alone therefore left five of
-        // six rounds buffered after a window had demonstrably published, and every
-        // later leader re-proposed that published window forever. The proof's own
-        // header names the range it covers, so use it.
+        // A stamped row proves its own round landed. Proof bounds identify other
+        // candidates, but sparse batches require exact chain membership before prune.
         let pruned = 0;
+        const candidates = new Set();
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
             if (Number.isFinite(r) && this._buffer.delete(r)) pruned++;
             let covered = this.batchProofRange(row.consensus_proof);
             if (!covered) continue;
             for (let n of Array.from(this._buffer.keys())) {
-                if (n >= covered.first && n <= covered.last && this._buffer.delete(n)) pruned++;
+                if (n >= covered.first && n <= covered.last) candidates.add(n);
+            }
+        }
+        if (candidates.size > 0) {
+            try {
+                const carried = await this.roundsCarriedByChain(Array.from(candidates));
+                if (carried instanceof Set) {
+                    for (const n of candidates) {
+                        if (carried.has(n) && this._buffer.delete(n)) pruned++;
+                    }
+                }
+            } catch (e) {
+                logger.warn(nodeUtil.format('OraclePublisher: cannot confirm exact batch membership in ' +
+                    first + '..' + last + '; leaving candidate rounds buffered: ', e && e.message));
             }
         }
         if (pruned > 0) {
