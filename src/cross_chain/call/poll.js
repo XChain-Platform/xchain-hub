@@ -30,6 +30,31 @@ const logger = getLogger();
 // Repeat a failing chain's dispatch-poll warn at most this often (one line per tick otherwise).
 const DISPATCH_POLL_WARN_MS = 5 * 60 * 1000;
 
+function relayResultRow(engine, dispatch, coin, roundId, callId, snapshotBlock, resultStatus, res){
+    return {
+        round_id:              roundId,
+        call_id:               callId,
+        phase:                 'result',
+        snapshot_block:        Number(snapshotBlock),
+        network:               String(dispatch.network),
+        source_chain:          String(dispatch.source_chain),
+        source_action_index:   Number(dispatch.source_action_index),
+        source_contract_index: Number(dispatch.source_contract_index),
+        target_chain:          coin,
+        target_contract_index: Number(dispatch.target_contract_index),
+        method:                String(dispatch.method),
+        params_json:           String(dispatch.params_json),
+        gas_limit:             Number(dispatch.gas_limit),
+        cross_hops:            Number(dispatch.cross_hops) || 0,
+        effective_time:        engine.relayEffectiveTime(String(dispatch.source_chain)),
+        result_status:         resultStatus,
+        return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64),
+        // Inherit the source generation from the dispatch row so the source-keyed
+        // reorg retraction fences this result phase by the same generation.
+        push_generation:       Number(dispatch.push_generation) || 0
+    };
+}
+
 module.exports = {
     // Return operator-visible relay backlog depth and lifetime failure counters.
     // Mirrors getattestationstats: pending_relay_count is the number of dispatch
@@ -296,28 +321,7 @@ module.exports = {
         let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
-        let row = {
-            round_id:              roundId,
-            call_id:               callId,
-            phase:                 'result',
-            snapshot_block:        Number(snapshotBlock),
-            network:               String(dispatch.network),
-            source_chain:          String(dispatch.source_chain),
-            source_action_index:   Number(dispatch.source_action_index),
-            source_contract_index: Number(dispatch.source_contract_index),
-            target_chain:          coin,
-            target_contract_index: Number(dispatch.target_contract_index),
-            method:                String(dispatch.method),
-            params_json:           String(dispatch.params_json),
-            gas_limit:             Number(dispatch.gas_limit),
-            cross_hops:            Number(dispatch.cross_hops) || 0,
-            effective_time:        this.relayEffectiveTime(String(dispatch.source_chain)),
-            result_status:         resultStatus,
-            return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64),
-            // Inherit the source generation from the dispatch row so the source-keyed
-            // reorg retraction fences this result phase by the same generation.
-            push_generation:       Number(dispatch.push_generation) || 0
-        };
+        let row = relayResultRow(this, dispatch, coin, roundId, callId, snapshotBlock, resultStatus, res);
 
         // Park on a refused admission stamp: the caller clears backoff on anything but false.
         if(!await this.stampAdmission(row)) return false;

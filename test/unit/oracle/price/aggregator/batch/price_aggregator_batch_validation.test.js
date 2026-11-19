@@ -312,7 +312,9 @@ function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
 
         expect(inserts.length).to.equal(0);
     });
+}
 
+function registerPriceaggregatorReceivevalidatedbatch1Tests4() {
     it('rejects a batch with an empty round list, a bad window or a missing block_time', async function () {
         stubDb([]);
         let empty = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds: [] }));
@@ -360,4 +362,5 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
     registerPriceaggregatorReceivevalidatedbatch1Tests1();
     registerPriceaggregatorReceivevalidatedbatch1Tests3();
+    registerPriceaggregatorReceivevalidatedbatch1Tests4();
 });

@@ -79,7 +79,9 @@ function registerValidationCases() {
         expect(result).to.include({ ran: true, restored: 0, refused: 1 });
         expect(hub.db.setBatchPriceSnapshotRound.called).to.equal(false);
     });
+}
 
+function registerIndexerBackoffCase() {
     it('backs off an old indexer, logs once per disarm and re-arms without a restart', async function () {
         let now = 1000;
         sinon.stub(agg, 'priceRestoreNow').callsFake(() => now);
@@ -102,7 +104,9 @@ function registerValidationCases() {
         expect(retried).to.include({ ran: true, restored: 1 });
         expect(hub.oraclePublisher.fetchLandedBatchPayload.callCount).to.equal(callsAtDisarm + 1);
     });
+}
 
+function registerRestorePayloadCases() {
     it('refuses a payload whose source chain or action index does not match the request', async function () {
         let payload = signedPayload(agg, validators, false);
         installPublisher(hub, Object.assign({}, payload, { source_chain: 'LTC' }));
@@ -318,6 +322,8 @@ function registerCarriedRoundCases() {
 describe('PriceAggregator active-chain PRICE repair', function () {
     installHooks();
     registerValidationCases();
+    registerIndexerBackoffCase();
+    registerRestorePayloadCases();
     registerQueueCases();
     registerStopCases();
     registerBackgroundWalkCases();

@@ -232,7 +232,8 @@ it('fails closed when no capability snapshot resolves at the anchor', async func
         expect(result.accepted).to.equal(false);
         expect(result.reason).to.match(/no attestation capability snapshot/);
     });
-
+}
+function registerBatchStructureBoundaryTests() {
     it('refuses a batch that is structurally not this hub\'s', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers });
@@ -269,7 +270,8 @@ it('fails closed when no capability snapshot resolves at the anchor', async func
             expect(badHub.db.table.length).to.equal(0);
         }
     });
-
+}
+function registerBatchLandingTests() {
     it('records the window as landed so no hub pays to publish it again', async function () {
         let signers = identities(2);
         let hub = makeHub({ signers });
@@ -388,6 +390,8 @@ describe('pushattestbatch: the hub receive half', function () {
     registerBatchValidationTests();
 
     registerBatchBoundaryTests();
+    registerBatchStructureBoundaryTests();
+    registerBatchLandingTests();
 
     registerBatchReplayTests();
 });

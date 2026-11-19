@@ -67,9 +67,7 @@ function makeEngine() {
     return { engine, db, stored };
 }
 
-describe('CrossChainCallEngine insert-window retraction fence', function () {
-    afterEach(function () { sinon.restore(); });
-
+function registerCoveredInsertRetractionTest() {
     it('waits for a covered insert, retracts it, and suppresses its mirror and event', async function () {
         const { engine, db, stored } = makeEngine();
         const entered = deferred();
@@ -99,7 +97,9 @@ describe('CrossChainCallEngine insert-window retraction fence', function () {
         expect(engine._inflight.has('round-1')).to.equal(false);
         expect(engine._retractionFence).to.deep.equal([]);
     });
+}
 
+function registerOutsideRetractionTest() {
     it('does not wait on or suppress a write outside the retraction range', async function () {
         const { engine, db, stored } = makeEngine();
         const entered = deferred();
@@ -124,7 +124,9 @@ describe('CrossChainCallEngine insert-window retraction fence', function () {
         expect(engine.mirrorCallRow.calledOnce).to.equal(true);
         expect(engine.emit.calledWith('call:dispatch')).to.equal(true);
     });
+}
 
+function registerPendingRetractionTest() {
     it('cancels a covered pending round even when no row was persisted', async function () {
         const { engine } = makeEngine();
         const pendingRow = row();
@@ -140,7 +142,9 @@ describe('CrossChainCallEngine insert-window retraction fence', function () {
         expect(engine._resultBackoff.has(pendingRow.call_id)).to.equal(false);
         expect(engine.consensus.forgetFinalized.called).to.equal(false);
     });
+}
 
+function registerAdmissionRetractionTest() {
     it('fences a dispatch whose admission stamp was awaiting during retraction', async function () {
         const { engine } = makeEngine();
         const entered = deferred();
@@ -168,6 +172,15 @@ describe('CrossChainCallEngine insert-window retraction fence', function () {
         expect(engine._pendingProposals.size).to.equal(0);
         expect(engine._retractionFence).to.deep.equal([]);
     });
+}
+
+describe('CrossChainCallEngine insert-window retraction fence', function () {
+    afterEach(function () { sinon.restore(); });
+
+    registerCoveredInsertRetractionTest();
+    registerOutsideRetractionTest();
+    registerPendingRetractionTest();
+    registerAdmissionRetractionTest();
 });
 
 describe('CrossChainDexConsensus cancellation', function () {

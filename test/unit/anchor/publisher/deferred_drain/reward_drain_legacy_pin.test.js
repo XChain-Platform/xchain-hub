@@ -141,7 +141,9 @@ function registerParityCases() {
         // The hub mirrors the time columns only, so the indexer's block columns must stay unset.
         expect(row.slice(5)).to.deep.equal([0, 0, 0]);
     });
+}
 
+function registerMintParityCases() {
     it('reaches the indexer mint decision for every proven-gate scenario', async function () {
         if (!siblingsHere(this)) return;
         const above = timesAround(TIP - 100);
@@ -285,6 +287,7 @@ function registerProofReadCases() {
 
 describe('reward drain: LEGACY_ANCHOR_REWARD_PIN', function () {
     registerParityCases();
+    registerMintParityCases();
     registerGateVerdictCases();
     registerProofReadCases();
 });
