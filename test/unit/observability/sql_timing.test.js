@@ -38,7 +38,7 @@ async function listen(app) {
   };
 }
 
-describe('observability/sql_timing', function () {
+function registerNormalizationTest() {
   it('matches every normalization vector and keeps normalized SQL fixed', function () {
     expect(vectors.length).to.be.at.least(40);
     for (const vector of vectors) {
@@ -46,7 +46,9 @@ describe('observability/sql_timing', function () {
       expect(normalizeStatement(vector.normalized), vector.normalized).to.equal(vector.normalized);
     }
   });
+}
 
+function registerContractLineTest() {
   it('emits a contract line with all six required fields', async function () {
     const lines = [];
     const timing = createSqlTiming({
@@ -79,7 +81,9 @@ describe('observability/sql_timing', function () {
       await server.close();
     }
   });
+}
 
+function registerRpcBatchTest() {
   it('emits one child line per method in an RPC batch', async function () {
     const lines = [];
     const timing = createSqlTiming({
@@ -118,7 +122,9 @@ describe('observability/sql_timing', function () {
       await server.close();
     }
   });
+}
 
+function registerUnmatchedPathTest() {
   it('emits nothing for an unmatched path', async function () {
     const lines = [];
     const timing = createSqlTiming({
@@ -138,7 +144,9 @@ describe('observability/sql_timing', function () {
       await server.close();
     }
   });
+}
 
+function registerDisabledBehaviorTest() {
   it('returns pools, methods, promises and middleware behavior unchanged when disabled', async function () {
     const timing = createSqlTiming({ env: {} });
     const promise = Promise.resolve('same');
@@ -152,7 +160,9 @@ describe('observability/sql_timing', function () {
     expect(nextCalls).to.equal(1);
     await timing.stop();
   });
+}
 
+function registerDirectCredentialsTest() {
   it('accepts credentials as direct create options while the flag remains env-gated', async function () {
     const timing = createSqlTiming({
       project: 'xchain-platform',
@@ -167,7 +177,9 @@ describe('observability/sql_timing', function () {
     expect(timing.enabled).to.equal(true);
     await timing.stop();
   });
+}
 
+function registerPromiseIdentityTest() {
   it('keeps the original database promise while accounting asynchronously', async function () {
     const timing = createSqlTiming({
       env: timingEnv(),
@@ -179,7 +191,9 @@ describe('observability/sql_timing', function () {
     expect(pool.query('SELECT 1')).to.equal(original);
     await timing.stop();
   });
+}
 
+function registerConnectionAcquisitionTest() {
   it('wraps acquired connections without replacing the acquisition promise', async function () {
     const lines = [];
     const connection = { execute: () => Promise.resolve('done') };
@@ -211,7 +225,9 @@ describe('observability/sql_timing', function () {
       await server.close();
     }
   });
+}
 
+function registerMountedRouterTest() {
   it('uses the service prefix with a mounted router route', async function () {
     const lines = [];
     const timing = createSqlTiming({
@@ -234,4 +250,16 @@ describe('observability/sql_timing', function () {
       await server.close();
     }
   });
+}
+
+describe('observability/sql_timing', function () {
+  registerNormalizationTest();
+  registerContractLineTest();
+  registerRpcBatchTest();
+  registerUnmatchedPathTest();
+  registerDisabledBehaviorTest();
+  registerDirectCredentialsTest();
+  registerPromiseIdentityTest();
+  registerConnectionAcquisitionTest();
+  registerMountedRouterTest();
 });

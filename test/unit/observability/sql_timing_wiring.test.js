@@ -102,14 +102,12 @@ function restoreEnv(previous) {
     }
 }
 
-describe('SQL timing application wiring', function () {
-    this.timeout(10000);
+let previousEnv;
+let previousFetch;
+let server;
+let installed;
 
-    let previousEnv;
-    let previousFetch;
-    let server;
-    let installed;
-
+function registerLifecycleHooks() {
     beforeEach(function () {
         previousEnv = Object.fromEntries(Object.keys(TIMING_ENV).map(name => [name, process.env[name]]));
         Object.assign(process.env, TIMING_ENV);
@@ -126,7 +124,9 @@ describe('SQL timing application wiring', function () {
         installed = null;
         server = null;
     });
+}
 
+function registerRpcTimingTest() {
     it('emits the RPC method route with its wrapped pool query count', async function () {
         const requests = [];
         global.fetch = async (url, options) => {
@@ -161,7 +161,9 @@ describe('SQL timing application wiring', function () {
         expect(line.route).to.equal('POST /xchain-hub/rpc/timed');
         expect(line.query_count).to.equal(1);
     });
+}
 
+function registerInheritedNameTest() {
     it('keeps inherited names out of the wrapped RPC method table', async function () {
         global.fetch = async () => ({ status: 200, body: { cancel: () => Promise.resolve() } });
         const rpcController = Object.assign(Object.create(null), { ping: async () => ({ ok: true }) });
@@ -178,4 +180,11 @@ describe('SQL timing application wiring', function () {
         const ping = await postRpc(server, 'ping');
         expect(ping.body.result).to.deep.equal({ ok: true });
     });
+}
+
+describe('SQL timing application wiring', function () {
+    this.timeout(10000);
+    registerLifecycleHooks();
+    registerRpcTimingTest();
+    registerInheritedNameTest();
 });

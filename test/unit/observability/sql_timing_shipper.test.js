@@ -33,14 +33,16 @@ function sink() {
   return { errors, error: line => errors.push(line), log: line => errors.push(line) };
 }
 
-describe('observability/sql_timing_shipper', function () {
+function registerConfigurationTest() {
   it('stays disabled unless the complete HTTPS configuration is present', function () {
     expect(readSqlTimingEnv({}).enabled).to.equal(false);
     expect(readSqlTimingEnv(timingEnv({ SQL_TIMING_KEY: '' })).enabled).to.equal(false);
     expect(readSqlTimingEnv(timingEnv({ SQL_TIMING_URL: 'http://timing.invalid' })).enabled).to.equal(false);
     expect(readSqlTimingEnv(timingEnv()).enabled).to.equal(true);
   });
+}
 
+function registerSuccessfulDeliveryTest() {
   it('posts NDJSON with the timing key header and clears a 200 batch', async function () {
     const requests = [];
     const shipper = createSqlTimingShipper({
@@ -57,7 +59,9 @@ describe('observability/sql_timing_shipper', function () {
     expect(requests[0].body).to.equal('{"route":"GET /xchain-hub/health"}\n');
     await shipper.stop();
   });
+}
 
+function registerDroppedResponseTests() {
   for (const status of [400, 413]) {
     it(`drops and counts a ${status} batch`, async function () {
       const shipper = createSqlTimingShipper({
@@ -74,7 +78,9 @@ describe('observability/sql_timing_shipper', function () {
       await shipper.stop();
     });
   }
+}
 
+function registerRetriedResponseTests() {
   for (const status of [429, 503]) {
     it(`re-queues a ${status} batch within the buffer cap`, async function () {
       const shipper = createSqlTimingShipper({
@@ -92,7 +98,9 @@ describe('observability/sql_timing_shipper', function () {
       await shipper.stop();
     });
   }
+}
 
+function registerBufferCapTest() {
   it('drops the oldest line when the queue reaches its cap', async function () {
     const shipper = createSqlTimingShipper({
       env: timingEnv({ SQL_TIMING_MAX_BUFFER: '2' }),
@@ -106,7 +114,9 @@ describe('observability/sql_timing_shipper', function () {
     expect(shipper.stats.dropped).to.equal(1);
     await shipper.stop();
   });
+}
 
+function registerRedactionTest() {
   it('never writes the API key into a stderr note', async function () {
     const output = sink();
     const shipper = createSqlTimingShipper({
@@ -121,7 +131,9 @@ describe('observability/sql_timing_shipper', function () {
     shipper.config.enabled = false;
     await shipper.stop();
   });
+}
 
+function registerRegistryCountersTest() {
   it('publishes shipped, dropped and failure counters when given a registry', async function () {
     const registry = new Registry();
     const shipper = createSqlTimingShipper({
@@ -138,7 +150,9 @@ describe('observability/sql_timing_shipper', function () {
     expect(text).to.include('sql_timing_ship_failures_total 1');
     await shipper.stop();
   });
+}
 
+function registerRequestLineLimitTest() {
   it('limits one request to 2000 contract lines', async function () {
     const requests = [];
     const shipper = createSqlTimingShipper({
@@ -152,4 +166,15 @@ describe('observability/sql_timing_shipper', function () {
     expect(shipper.buffer).to.have.lengthOf(1);
     await shipper.stop();
   });
+}
+
+describe('observability/sql_timing_shipper', function () {
+  registerConfigurationTest();
+  registerSuccessfulDeliveryTest();
+  registerDroppedResponseTests();
+  registerRetriedResponseTests();
+  registerBufferCapTest();
+  registerRedactionTest();
+  registerRegistryCountersTest();
+  registerRequestLineLimitTest();
 });
