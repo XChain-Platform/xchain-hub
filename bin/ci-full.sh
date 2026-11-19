@@ -178,7 +178,7 @@ export TEST_DB_PASS="${TEST_DB_PASS:-${CI_DB_PASS:-}}"
 export TEST_DB_NAME="${TEST_DB_NAME:-${CI_DB_NAME:-xchain_hub_test}}"
 
 need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm xchain-decoder \
-         xchain-encoder xchain-utxo-tracker xchain-sync xchain-dashboard
+         xchain-encoder xchain-utxo-tracker xchain-sync
 
 # --- local guard: frozen carrier set (check:frozen-set) --------------------
 # No ci.yml job runs this; it is wired in here anyway (see THE ONE EXCEPTION,

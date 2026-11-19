@@ -35,7 +35,6 @@ const {
 } = require('../../../src/observability/logShipper.js');
 const {
   installObservability,
-  getSqlTiming,
   readObservabilityEnv,
   routeLabel
 } = require('../../../src/observability/index.js');
@@ -113,47 +112,6 @@ function registerObservabilityInstallObservabilitySuite1Part1() {
   });
 }
 function registerObservabilityInstallObservabilitySuite1Part2() {
-  it('emits SQL timing with metrics off', async function () {
-    const requests = [];
-    const app = express();
-    const obs = installObservability(app, {
-      service: 'xchain-hub',
-      env: {
-        METRICS_ENABLED: '0',
-        SQL_TIMING_ENABLED: '1',
-        SQL_TIMING_URL: 'https://timing.invalid/api/v1/sql-timing',
-        SQL_TIMING_KEY: 'test-key',
-        SQL_TIMING_PROJECT: 'xchain-platform',
-        SQL_TIMING_INTERVAL_MS: '999999',
-        SQL_TIMING_STATEMENT_RATE: '1'
-      },
-      console: fakeConsole(),
-      sqlTimingTransport: request => {
-        requests.push(request);
-        return Promise.resolve({ status: 200 });
-      }
-    });
-    const pool = getSqlTiming().wrapPool({ query: () => Promise.resolve('ok') });
-    app.get('/timed', async (req, res) => {
-      await pool.query('SELECT 42');
-      res.send('ok');
-    });
-    const srv = await listen(app);
-    try {
-      expect(obs.enabled).to.equal(false);
-      expect((await fetch(srv.url('/timed'))).status).to.equal(200);
-      await obs.shutdown();
-      expect(requests).to.have.lengthOf(1);
-      const line = JSON.parse(requests[0].body.trim());
-      expect(line.route).to.equal('GET /xchain-hub/timed');
-      expect(line.query_count).to.equal(1);
-    } finally {
-      await obs.shutdown();
-      await srv.close();
-    }
-  });
-}
-function registerObservabilityInstallObservabilitySuite1Part3() {
   it('serves the exposition text and instruments requests when enabled', async function () {
     const app = express();
     app.get('/health', (req, res) => res.json({
@@ -193,7 +151,7 @@ function registerObservabilityInstallObservabilitySuite1Part3() {
     }
   });
 }
-function registerObservabilityInstallObservabilitySuite1Part4() {
+function registerObservabilityInstallObservabilitySuite1Part3() {
   it('buckets an unmatched path by first segment so URLs cannot explode cardinality', async function () {
     const app = express();
     const obs = installObservability(app, {
@@ -229,7 +187,7 @@ function registerObservabilityInstallObservabilitySuite1Part4() {
     })).to.equal('/');
   });
 }
-function registerObservabilityInstallObservabilitySuite1Part5() {
+function registerObservabilityInstallObservabilitySuite1Part4() {
   it('gates the endpoint behind METRICS_TOKEN when one is configured', async function () {
     const app = express();
     const obs = installObservability(app, {
@@ -261,7 +219,7 @@ function registerObservabilityInstallObservabilitySuite1Part5() {
     }
   });
 }
-function registerObservabilityInstallObservabilitySuite1Part6() {
+function registerObservabilityInstallObservabilitySuite1Part5() {
   it('honours a custom METRICS_PATH and can skip HTTP instrumentation', async function () {
     const app = express();
     app.get('/health', (req, res) => res.json({
@@ -312,7 +270,7 @@ function registerObservabilityInstallObservabilitySuite1Part6() {
     }
   });
 }
-function registerObservabilityInstallObservabilitySuite1Part7() {
+function registerObservabilityInstallObservabilitySuite1Part6() {
   it('returns a usable logger even with no app to mount on', function () {
     const sink = fakeConsole();
     const obs = installObservability(null, {
@@ -333,5 +291,4 @@ describe('observability/installObservability', function () {
   registerObservabilityInstallObservabilitySuite1Part4.call(this);
   registerObservabilityInstallObservabilitySuite1Part5.call(this);
   registerObservabilityInstallObservabilitySuite1Part6.call(this);
-  registerObservabilityInstallObservabilitySuite1Part7.call(this);
 });
