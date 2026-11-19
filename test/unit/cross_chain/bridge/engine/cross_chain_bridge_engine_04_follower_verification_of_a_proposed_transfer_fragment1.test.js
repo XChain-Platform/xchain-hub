@@ -167,6 +167,13 @@ function registerFeature6followerVerificationOfAProposedTransferFragment1Part1()
     feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
     expect(await engine.validateProposedMatch(feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine))).to.equal(true);
   });
+  it('refuses an uppercase transfer id because the signed spelling is noncanonical', async function () {
+    const { engine } = makeEngine();
+    feature6followerVerificationOfAProposedTransferFragment1WithLeg(engine, {});
+    const row = feature6followerVerificationOfAProposedTransferFragment1ProposedRow(engine);
+    row.transfer_id = row.transfer_id.toUpperCase();
+    expect(await engine.validateTransfer(row)).to.equal(false);
+  });
 
   // DEFECT 1's follower half (row 15 drive 11): validateTransfer had NO
   // source-uniqueness test, so a mesh that already finalized one transfer for a source

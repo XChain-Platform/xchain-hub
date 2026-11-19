@@ -280,6 +280,16 @@ function registerFeature7policySnapshotsNested7Part1() {
     feature7policySnapshotsWithPolicy(engine);
     expect(await engine.validateProposedMatch(feature7policySnapshotsNested7ProposedPolicy(engine))).to.equal(true);
   });
+  it('refuses uppercase snapshot ids and policy hashes signed as written', async function () {
+    const { engine } = makeEngine();
+    feature7policySnapshotsWithPolicy(engine);
+    const upperId = feature7policySnapshotsNested7ProposedPolicy(engine);
+    upperId.snapshot_id = upperId.snapshot_id.toUpperCase();
+    expect(await engine.validateProposedMatch(upperId)).to.equal(false);
+    const upperHash = feature7policySnapshotsNested7ProposedPolicy(engine);
+    upperHash.policy_hash = upperHash.policy_hash.toUpperCase();
+    expect(await engine.validateProposedMatch(upperHash)).to.equal(false);
+  });
   it('refuses when its own read at the same origin_block yields a different hash', async function () {
     const {
       engine

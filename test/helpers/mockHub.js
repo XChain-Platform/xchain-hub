@@ -50,6 +50,24 @@ DB_METHODS.withTransaction = async function (work) {
     return work({ query: (sql, args) => this.doQuery(sql, args) });
 };
 
+// Consensus-state callers need to observe their own INSERT IGNORE in unit
+// doubles whose doQuery stub otherwise returns [] for every statement. Keep
+// issuing the real SQL so query assertions and explicit failures still work.
+const createConsensusStateIfAbsent = DB_METHODS.createConsensusStateIfAbsent;
+const findConsensusState = DB_METHODS.findConsensusState;
+DB_METHODS.createConsensusStateIfAbsent = async function (key, value) {
+    const result = await createConsensusStateIfAbsent.call(this, key, value);
+    const state = this.__mockConsensusState || (this.__mockConsensusState = new Map());
+    if(!state.has(key)) state.set(key, String(value));
+    return result;
+};
+DB_METHODS.findConsensusState = async function (key) {
+    const rows = await findConsensusState.call(this, key);
+    if(rows && rows.length) return rows;
+    const state = this.__mockConsensusState;
+    return state && state.has(key) ? [{ value: state.get(key) }] : rows;
+};
+
 /**
  * Create a mock hub object suitable for injecting into any xchain-hub class.
  * Every dependency is a sinon stub so callers can assert on interactions.

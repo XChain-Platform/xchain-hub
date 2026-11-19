@@ -28,6 +28,7 @@
 const { setSourceLiveness } = require('./hub_metrics_source_liveness');
 const { installHubAttestationMetrics } = require('./hub_metrics_attestation');
 const { installHubCheckpointMetrics } = require('./hub_metrics_checkpoint');
+const { installHubReorgRetractionMetrics } = require('./hub_metrics_reorg_retraction');
 const { installHubOraclePublisherMetrics } = require('./hub_metrics_oracle_publisher');
 const { LEVELS } = require('../validators/stake_share/levels.js');
 
@@ -335,5 +336,6 @@ module.exports = {
     installHubGovernanceOverdueMetrics,
     installHubAttestationMetrics,
     installHubCheckpointMetrics,
+    installHubReorgRetractionMetrics,
     installHubOraclePublisherMetrics
 };

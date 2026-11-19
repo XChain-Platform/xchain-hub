@@ -24,7 +24,7 @@ const { policyHash } = require('../../../../cross_chain/bridge/policy_hash.js');
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
-const { comparable, unheldRowRefusal } = require('../unheld_row.js');
+const { comparable, archivedIdRefusal, unheldRowRefusal } = require('../unheld_row.js');
 const logger = getLogger();
 
 const LIST_SHARE_PRODUCER_GATE = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
@@ -33,7 +33,8 @@ function policyList(raw, refsAllowed){
     return parsePolicyColumn(raw, refsAllowed);
 }
 
-// Either case: validate.js co-signs an id case-insensitively, so a held row may carry upper case.
+// New co-sign admission requires lowercase. Either case remains valid here for
+// legacy rows signed before that rule, which recovery also accepts.
 const HEX64 = /^[0-9a-f]{64}$/i;
 
 // The reason a row does not belong in its archive array, or null. The shared canonical
@@ -42,12 +43,13 @@ const HEX64 = /^[0-9a-f]{64}$/i;
 function rowShapeRefusal(row, idKey, otherKey){
     if(!row || typeof row !== 'object' || Array.isArray(row)) return 'is not a row object';
     // Require this array's own id as a derived sha256 hex id
-    // (a held row refused here is re-selected every wake, so this must admit every id quorum signs)
+    // (a legacy held row refused here is re-selected every wake, so the archive
+    // verifier must keep accepting ids that an earlier quorum signed)
     if(typeof row[idKey] !== 'string' || !HEX64.test(row[idKey])) return 'has a malformed ' + idKey;
     // Refuse a row that also carries the other kind's id
     const other = row[otherKey];
     if(other !== undefined && other !== null && other !== '') return 'also carries ' + otherKey;
-    return null;
+    return archivedIdRefusal(row);
 }
 
 // Admit either status on an unheld transfer: one is retracted in place and archived again,

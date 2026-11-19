@@ -40,6 +40,7 @@ function publisher(){
         archiveRankLocked: () => false,
         archiveWire: () => ({ crc: '00000000', b64: '', chunks: ['chunk'] }),
         archiveCanonical: () => 'canonical',
+        claimArchiveWrapperSlot: async () => true,
         archiveSigningSet: async () => [{ pubkey: 'me' }, { pubkey: 'peer' }],
         archiveSigningSetUnresolved: () => false,
         openArchiveRound: () => ({ signatures: new Map([['me', 'sig']]), quorum: 1 }),

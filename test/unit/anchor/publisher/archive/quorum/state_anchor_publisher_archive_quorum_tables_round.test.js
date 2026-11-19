@@ -23,6 +23,7 @@ const CP_ROW = {
 };
 
 function emptyDb(overrides){
+    const consensusState = new Map();
     return Object.assign({
         findCrossChainMatchesByBatchSeq: async () => [],
         findCrossChainCallsByBatchSeq: async () => [],
@@ -33,7 +34,12 @@ function emptyDb(overrides){
         findStateCheckpointsByBatchSeq: async () => [],
         findPriceSnapshotRoundsByBatchSeq: async () => [],
         findPriceSnapshotsForArchiveRounds: async () => [],
-        findPriceTombstonesByBatchSeq: async () => []
+        findPriceTombstonesByBatchSeq: async () => [],
+        createConsensusStateIfAbsent: async (key, value) => {
+            if(!consensusState.has(key)) consensusState.set(key, String(value));
+        },
+        findConsensusState: async key => consensusState.has(key) ?
+            [{ value: consensusState.get(key) }] : []
     }, overrides || {});
 }
 

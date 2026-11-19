@@ -131,6 +131,24 @@ oraclePublisherTests('readQueueState()', function () {
     });
 });
 
+oraclePublisherTests('getStats() queueDepth over an unreadable queue', function () {
+    it('reports null for a read failure so the monitor can tell it from an empty queue', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.throws(ioError('EIO'));
+        expect(pub.getStats().queueDepth).to.equal(null);
+        fsMock.readFileSync.throws(ioError('EACCES'));
+        expect(pub.getStats().queueDepth).to.equal(null);
+    });
+
+    it('reports 0 for a missing queue file and the entry count for a readable one', function () {
+        let pub = new OraclePublisher(makeHub());
+        fsMock.readFileSync.throws(ioError('ENOENT'));
+        expect(pub.getStats().queueDepth).to.equal(0);
+        fsMock.readFileSync.returns(JSON.stringify({ round: 1 }) + '\n' + JSON.stringify({ round: 2 }) + '\n');
+        expect(pub.getStats().queueDepth).to.equal(2);
+    });
+});
+
 oraclePublisherTests('rebuildQueueAfterPass() over an unreadable or corrupt queue', function () {
     it('skips the rewrite and keeps the dedup guard armed when the fresh read fails', function () {
         let pub = new OraclePublisher(makeHub());

@@ -103,7 +103,7 @@ module.exports = {
         if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
             return this.noteArchiveSignReqRefusal('archive_diverges_from_local', d, sender);
         }
-        this.coSignArchive(d, sender, archive, canonical, myPubkey);
+        await this.coSignArchive(d, sender, archive, canonical, myPubkey);
     },
 
     // Every follower refusal is readable without letting a repeated bad request flood
@@ -248,8 +248,9 @@ module.exports = {
     // rows this batch may later mark archived. Record it BEFORE co-signing: the
     // signature about to go out is part of what carries this exact archive to DOGE,
     // and the FINALIZED that closes the round is checked against it.
-    coSignArchive(d, sender, archive, canonical, myPubkey){
+    async coSignArchive(d, sender, archive, canonical, myPubkey){
         this.recordObservedArchiveContent(Number(d.batch_seq), sender, archive);
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return;
 
         this.peerManager.broadcast(XANC_SIGN, {
             batch_seq: Number(d.batch_seq), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)

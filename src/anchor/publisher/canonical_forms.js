@@ -107,6 +107,7 @@ const foldPublisherMethods = {
         if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
         let wire = this.archiveWire(archive.json, splitter);
         let canonical = foldArchiveCanonical(wrapper, batchSeq, archive.count, wire.crc, wire.chunks.length);
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return null;
         let signatures = [];
         if(me && signingSet.some(v => String(v.pubkey).toLowerCase() === me))
             signatures.push({ pubkey: me, sig: this.identity.sign(canonical) });
@@ -141,6 +142,7 @@ const foldPublisherMethods = {
     },
 
     foldArchiveRequest(round){
+        if(!this.archiveWrapperSlotHeld(round.canonical)) return null;
         return {
             checkpoint: round.cp, wrapper_section_index: round.wrapperSectionIndex,
             batch_seq: round.batchSeq, match_count: round.count,
@@ -182,6 +184,7 @@ const foldPublisherMethods = {
         if(!signingSet.some(v => String(v.pubkey).toLowerCase() === myPubkey)) return null;
         let archive = this.decodeArchiveProposal(a);
         if(!archive || !(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))) return null;
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return null;
         return {
             batchSeq: Number(a.batch_seq), sender, cp, archive,
             reply: {
@@ -191,9 +194,11 @@ const foldPublisherMethods = {
         };
     },
 
-    armFoldArchiveRound(round){
+    armFoldArchiveRound(round, bundle){
         let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
                                          Number(this.roundTimeoutMs) || 30000));
+        round.bundleNetwork = String(bundle && bundle.network != null ? bundle.network : round.cp.network);
+        round.bundleSnapshotBlock = Number(bundle && bundle.snapshot_block != null ? bundle.snapshot_block : round.cp.snapshot_block);
         round.signatures = new Map((round.signatures || []).map(s => [String(s.pubkey).toLowerCase(), String(s.sig)]));
         round.done = false;
         round.result = new Promise(resolve => { round.resolve = resolve; });
@@ -202,7 +207,6 @@ const foldPublisherMethods = {
         if(round.timer.unref) round.timer.unref();
         this.checkFoldArchiveQuorum(round);
     },
-
     finishFoldArchiveRound(round, result){
         if(!round || round.done) return;
         round.done = true;
@@ -211,7 +215,6 @@ const foldPublisherMethods = {
         if(this._foldArchiveRound === round) this._foldArchiveRound = null;
         round.resolve(result);
     },
-
     checkFoldArchiveQuorum(round){
         if(!round || round.done) return;
         let signatures = Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig }));
@@ -223,8 +226,7 @@ const foldPublisherMethods = {
     acceptFoldArchiveSignature(d){
         let round = this._foldArchiveRound;
         if(!round || round.done || !d || !d.archive_sig) return;
-        if(String(d.network) !== String(round.cp.network) ||
-           Number(d.snapshot_block) !== Number(round.cp.snapshot_block)) return;
+        if(String(d.network) !== round.bundleNetwork || Number(d.snapshot_block) !== round.bundleSnapshotBlock) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!round.validators.some(v => String(v.pubkey).toLowerCase() === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.archive_sig), pubkey)) return;

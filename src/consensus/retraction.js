@@ -105,6 +105,11 @@ class RetractionConsensus {
         this.localIntents = new Map();   // intent key -> arrival ts (what OUR indexers pushed to us)
         this.finalized    = new Set();   // round ids already streamed (dedup leader/finalized double-delivery)
 
+        // Process-lifetime counts the scrape reads: signing rounds that timed out
+        // below quorum, and every unsigned broadcast by why it was sent.
+        this._roundTimeouts = 0;
+        this.unsignedFallbackCount = { round_timeout: 0, out_of_class: 0, no_signing_deps: 0, gate_inactive: 0 };
+
         if(this.peerManager){
             this._messageHandler = (envelope) => this.handleMessage(envelope);
             this.peerManager.on('message', this._messageHandler);

@@ -42,6 +42,18 @@ async function archivedSeqs(pending){
     return rows.checkpoints.map(row => Number(row.checkpoint_seq));
 }
 
+async function coSignerAccepts(checkpoints){
+    const pub = publisherReading([]);
+    pub.verifyArchivedStateCheckpoint = async () => true;
+    pub.archivedSnapshotGroups = () => new Map();
+    pub.seedRequiredSnapshotGroups = () => true;
+    pub.verifyArchivedSnapshotGroups = async () => true;
+    return pub.verifyArchiveAgainstLocal({
+        matches: [], calls: [], rewards: [], capability_snapshots: [],
+        state_checkpoints: checkpoints, price_snapshots: [], price_tombstones: []
+    }, 100);
+}
+
 describe('archive checkpoint selection beside a superseding marker', function () {
     it('keeps a row back when a marker in the same page supersedes it', async function () {
         const pending = [checkpoint(100, 500, null), checkpoint(101, 520, 450)];
@@ -69,5 +81,25 @@ describe('archive checkpoint selection beside a superseding marker', function ()
             checkpoint(102, 520, 505)];
         const kept = await archivedSeqs(pending);
         expect(kept).to.deep.equal([100, 102]);
+    });
+});
+
+describe('archive checkpoint co-signer beside a superseding marker', function () {
+    it('refuses a checkpoint superseded by a sibling marker', async function () {
+        const rows = [checkpoint(100, 500, null), checkpoint(101, 520, 450)];
+        expect(await coSignerAccepts(rows)).to.equal(false);
+    });
+
+    it('accepts non-conflicting checkpoints and isolated rows', async function () {
+        expect(await coSignerAccepts([checkpoint(100, 500, null), checkpoint(101, 620, 600)]))
+            .to.equal(true);
+        expect(await coSignerAccepts([checkpoint(100, 500, null)])).to.equal(true);
+        expect(await coSignerAccepts([checkpoint(101, 520, 450)])).to.equal(true);
+    });
+
+    it('keeps chain and network boundaries independent', async function () {
+        const rows = [checkpoint(100, 500, null, { chain: 'LTC' }),
+            checkpoint(101, 520, 450), checkpoint(102, 520, null, { network: 'testnet' })];
+        expect(await coSignerAccepts(rows)).to.equal(true);
     });
 });

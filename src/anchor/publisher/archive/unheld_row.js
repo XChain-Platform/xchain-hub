@@ -25,6 +25,17 @@ function comparable(row){
     return out;
 }
 
+// The integer form indexer recovery requires of an archived column: a non-negative safe number.
+function archivedInteger(value){
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+// id is a per-hub cursor, so the compare leaves it out; recovery still rejects a row whose id is
+// not an integer, so a co-signer checks its shape instead of its value.
+function archivedIdRefusal(row){
+    return archivedInteger(row && row.id) ? null : 'has a malformed id';
+}
+
 function reserializeRefusal(row, serialized){
     if(JSON.stringify(comparable(serialized)) !== JSON.stringify(comparable(row)))
         return 'does not re-serialize unchanged with no held row';
@@ -51,4 +62,7 @@ function samePriceKey(first, second){
     return priceKeyFold(first) === priceKeyFold(second);
 }
 
-module.exports = { comparable, reserializeRefusal, unheldRowRefusal, priceKeyFold, samePriceKey };
+module.exports = {
+    comparable, archivedInteger, archivedIdRefusal, reserializeRefusal, unheldRowRefusal,
+    priceKeyFold, samePriceKey
+};

@@ -26,6 +26,7 @@ const { allCanonicalInts } = require('../../lib/canonical_int.js');
 const { ALLOWED_CHAINS, PENDING_PAGE, TRANSFER_CANONICAL_INT_FIELDS, POLICY_CANONICAL_INT_FIELDS, SNAPSHOT_BLOCK_TOLERANCE } = require('./constants.js');
 const { parsePolicyColumn } = require('./policy_column.js');
 const { proofReadyActive, proofReadySnapshot, anchorProofReadyActive, anchorProofReadySnapshot } = require('./proof_ready_snapshot.js');
+const LOWER_HEX64 = /^[0-9a-f]{64}$/;
 
 module.exports = {
     // sha256(XBRIDGE | network | src_chain:src_action_index | dest_chain:dest_address): one
@@ -116,6 +117,9 @@ module.exports = {
     },
 
     async validateTransfer(row){
+        // These ids are signed as written, and recovery accepts new rows only in
+        // their canonical lowercase sha256 spelling.
+        if(!LOWER_HEX64.test(String(row.transfer_id || ''))) return false;
         if(!(await this.transferGuardsHold(row))) return false;
 
         let res;
@@ -167,7 +171,7 @@ module.exports = {
         // this hub's own tip window in validateProposedMatch and is otherwise adopted.
         let derived = this.deriveTransferId(row.network, row.src_chain, Number(row.src_action_index),
                                              row.dest_chain, row.dest_address);
-        return String(derived).toLowerCase() === String(row.transfer_id).toLowerCase();
+        return String(derived) === String(row.transfer_id);
     },
 
     // What a proposed transfer must clear before this hub reads its own indexer: canonical
@@ -209,7 +213,8 @@ module.exports = {
         if(!ALLOWED_CHAINS.includes(row.origin_chain)) return false;
         if(String(row.network || '') !== String(this.network || '')) return false;
         if(!Number.isInteger(Number(row.policy_seq)) || Number(row.policy_seq) < 1) return false;
-        if(!/^[0-9a-f]{64}$/.test(String(row.policy_hash || '').toLowerCase())) return false;
+        if(!LOWER_HEX64.test(String(row.snapshot_id || '')) ||
+           !LOWER_HEX64.test(String(row.policy_hash || ''))) return false;
 
         // Never co-sign a SECOND content at a seq we already finalized: that is exactly the
         // conflicting-canonical shape SLASH judges, and signing it would make this validator
@@ -232,7 +237,7 @@ module.exports = {
         let shaped = this.shapePolicy(policy, row.snapshot_block);
         if(!shaped || shaped.oversized) return false;
         let hash = this.policyHash(shaped.allow, shaped.block, shaped.sleeping);
-        if(hash !== String(row.policy_hash).toLowerCase()) return false;
+        if(hash !== String(row.policy_hash)) return false;
 
         // The transport sides must hash to the hash we just agreed on, or every destination
         // would refuse the row after we had already signed it.
@@ -255,6 +260,6 @@ module.exports = {
 
         let derived = this.deriveSnapshotId(row.network, row.origin_chain, row.tick,
                                              Number(row.policy_seq), Number(row.snapshot_block));
-        return String(derived).toLowerCase() === String(row.snapshot_id).toLowerCase();
+        return String(derived) === String(row.snapshot_id);
     },
 };

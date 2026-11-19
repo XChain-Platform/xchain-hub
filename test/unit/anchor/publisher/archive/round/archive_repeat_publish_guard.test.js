@@ -55,6 +55,7 @@ function leader(pending, opts){
         archiveRankLocked: () => false,
         archiveWire: () => ({ crc: '00000000', b64: '', chunks: ['c0'] }),
         archiveCanonical: () => 'canonical',
+        claimArchiveWrapperSlot: async () => true,
         archiveSigningSet: async () => [{ pubkey: 'aa', amount: '1', source: '' }],
         collectArchiveAttestation: async () => ({ attested: false, sigs: [] }),
         archiveHeadPayload: () => 'head',

@@ -64,6 +64,22 @@ function answer(batches, truncated){
     return { batches, truncated: !!truncated };
 }
 
+async function assertTruncationIsolation(publisher, markers){
+    publisher.indexerRpc.callsFake(async (url, key, method, params) => {
+        if(params.window_start_from === 80)
+            return answer([{ window_start: 80, window_end: 90, row_count: 3 }], true);
+        if(params.window_start_from === 90)
+            return answer([{ window_start: 90, window_end: 101, row_count: 1 }], true);
+        return answer([]);
+    });
+    await publisher.sweep(120);
+    await publisher.sweep(120);
+    expect(markers.get(80)).to.deep.include({ status: 'landed', row_count: 3 });
+    expect(publisher.publishWindow.callCount).to.equal(2);
+    expect(publisher.publishWindow.alwaysCalledWith(100, 0, undefined)).to.equal(true);
+    expect(publisher.getStats().windowsDeferred).to.equal(2);
+}
+
 function registerLandedTests(){
     it('records a chain-landed window and does not publish it', async function(){
         let { publisher, markers } = makePublisher([{ windowStart: 100, age: 0 }]);
@@ -141,6 +157,13 @@ function registerFailureTests(){
         expect(publisher.publishWindow.called).to.equal(false);
         expect(markers.get(90)).to.deep.include({ status: 'landed', row_count: 7, txid: null });
         expect(publisher.getStats().windowsDeferred).to.equal(2);
+        let isolationPending = [
+            { windowStart: 80, age: 2 },
+            { windowStart: 90, age: 1 },
+            { windowStart: 100, age: 0 }
+        ];
+        let isolation = makePublisher(isolationPending);
+        await assertTruncationIsolation(isolation.publisher, isolation.markers);
     });
 }
 
@@ -157,11 +180,12 @@ function registerRangeTests(){
 
         await publisher.sweep(120);
 
-        expect(publisher.indexerRpc.calledOnce).to.equal(true);
-        expect(publisher.indexerRpc.firstCall.args.slice(2)).to.deep.equal([
-            'getattestbatches',
-            { window_start_from: 70, window_start_to: 100, limit: 500 }
-        ]);
+        expect(publisher.indexerRpc.callCount).to.equal(4);
+        expect(publisher.indexerRpc.getCalls().map(call => call.args.slice(2))).to.deep.equal(
+            [100, 70, 90, 80].map(start => [
+                'getattestbatches',
+                { window_start_from: start, window_start_to: start, limit: 8 }
+            ]));
         expect(publisher.publishWindow.callCount).to.equal(4);
     });
 }

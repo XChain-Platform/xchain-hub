@@ -358,7 +358,8 @@ module.exports = {
                     return null;
                 })
                 : null;
-            if(archiveSection) this.armFoldArchiveRound(archiveSection);
+            if(archiveSection) this.armFoldArchiveRound(archiveSection,
+                { network: network, snapshot_block: snapshotBlock });
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
             if(!attestation){
                 if(archiveSection) this.finishFoldArchiveRound(archiveSection, null);

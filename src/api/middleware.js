@@ -36,6 +36,7 @@ const {
     installHubGovernanceOverdueMetrics,
     installHubAttestationMetrics,
     installHubCheckpointMetrics,
+    installHubReorgRetractionMetrics,
     installHubOraclePublisherMetrics
 } = require('./hub_metrics');
 const { authGate, feedPortAllowlist } = require('./auth_gate');
@@ -258,6 +259,7 @@ function installMetrics(app, ctx) {
     // engine has a detector that does not depend on its stats RPC.
     installHubAttestationMetrics(observability, hub);
     installHubCheckpointMetrics(observability, hub);
+    installHubReorgRetractionMetrics(observability, hub);
     installHubOraclePublisherMetrics(observability, hub);
     return observability;
 }

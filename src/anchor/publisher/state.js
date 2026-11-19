@@ -66,6 +66,8 @@ module.exports = {
         // claimAttestSlot), and how many second payloads it has refused.
         this._attestSlots        = new Map();
         this._attestSlotRefusals = 0;
+        this._archiveWrapperSlots = new Map();
+        this._archiveWrapperSlotRefusals = 0;
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
         this._callHandler      = null;
         this._flushing         = false;

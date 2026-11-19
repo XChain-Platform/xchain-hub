@@ -48,10 +48,14 @@ module.exports = {
     // Snapshot of the publish rail's health for operator diagnostics. Intended to
     // be surfaced through a JSON-RPC status method (e.g. getoraclepublisherstatus)
     // alongside the sibling publishers' getStats accessors. All fields are cheap,
-    // in-memory reads; queueDepth touches the durable queue file.
+    // in-memory reads; queueDepth touches the durable queue file and is null when
+    // that file cannot be read (a missing file is an empty queue, depth 0).
     getStats() {
-        let queueDepth = 0;
-        try { queueDepth = this.readQueue().length; } catch (e) { queueDepth = null; }
+        let queueDepth = null;
+        try {
+            const state = this.readQueueState();
+            queueDepth = state ? state.entries.length : null;
+        } catch (e) { queueDepth = null; }
         let oldestUnconfirmed = this.oldestUnconfirmedPublish();
         // Assembled in the order the fields were always emitted, because this object is
         // a status RPC's payload: each helper below contributes its own block and the

@@ -115,11 +115,13 @@ function classifierView(e){
     if(response === undefined && statusMatch) response = { status: Number(statusMatch[1]) };
     const directCode = safeGet(e, 'rpcCode');
     const directData = safeGet(e, 'rpcData');
+    const directMethod = safeGet(e, 'rpcMethod');
     return {
         message: safeGet(e, 'message'), code, response,
         neverSent: safeGet(e, 'neverSent'), fundsCommitted: safeGet(e, 'fundsCommitted'),
         rpcCode: directCode !== undefined ? directCode : safeGet(rpcError, 'code'),
-        rpcData: directData !== undefined ? directData : safeGet(rpcError, 'data')
+        rpcData: directData !== undefined ? directData : safeGet(rpcError, 'data'),
+        rpcMethod: directMethod !== undefined ? directMethod : safeGet(details, 'method')
     };
 }
 
@@ -172,6 +174,14 @@ function isAmbiguousSendError(e){
     if (isNodeRejectedTx(view)) return false;
     const message = String(safeGet(view, 'message') || '');
     const response = safeGet(view, 'response');
+    // A broadcast_tx -32603 can be raised after the node accepted the bytes but
+    // returned no txid. Build-only methods are safe to retry; an unlabelled call
+    // takes the fail-safe possibly-landed path.
+    if (Number(safeGet(view, 'rpcCode')) === -32603) {
+        if (response && Number(safeGet(response, 'status')) < 500) return false;
+        if (SDK_PRE_SEND_METHODS.has(String(safeGet(view, 'rpcMethod') || ''))) return false;
+        return true;
+    }
     // A definitive rejection and an ambiguous transport failure share the SAME
     // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.
     // Guarded on the absence of a sub-500 HTTP response, the one shape that does prove

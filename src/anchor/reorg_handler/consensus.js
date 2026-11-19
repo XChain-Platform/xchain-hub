@@ -34,6 +34,7 @@ function armLeaderTimeout(self, reorgId, pending) {
     pending.timer = setTimeout(() => {
         if (pending.finalized) return;
         logger.warn('Reorg: Consensus timeout for ' + reorgId);
+        self._roundTimeouts = (self._roundTimeouts || 0) + 1;
         self.emit('reorg:timeout', {
             reorgId,
             sourceChain:    pending.chain,
@@ -67,7 +68,10 @@ async function openRoundFromPrepare(self, envelope, fields, auth) {
     }
 
     let verified = await self.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
-    if (!verified) return false;
+    if (!verified) {
+        self._selfVerifyAbstains = (self._selfVerifyAbstains || 0) + 1;
+        return false;
+    }
     let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
     if (!self.timestampConsistentWithBlockTime(timestamp, observedBlockTimeMs)) return false;
     if (!self.pendingReorgs.has(reorgId)) {
@@ -111,7 +115,10 @@ module.exports = {
 
         // Independent observation: co-sign only what our own indexer confirms.
         let verified = await this.verifyReorgAgainstOwnNode(chain, parseInt(reorgHeight), oldHash, newHash);
-        if (!verified) return;
+        if (!verified) {
+            this._selfVerifyAbstains = (this._selfVerifyAbstains || 0) + 1;
+            return;
+        }
         let observedBlockTimeMs = Number.isFinite(verified.blockTimeMs) ? verified.blockTimeMs : null;
         // Abstain from a round whose timestamp predates the reorged block itself
         // (over-rollback attempt); an honest majority abstaining denies it quorum.
@@ -269,6 +276,7 @@ module.exports = {
                 // Same silent-discard fix as initiateReorgConsensus: emit the
                 // dropped rollback so it isn't lost without a signal.
                 logger.warn('Reorg: Consensus timeout for ' + reorgId);
+                this._followerRoundTimeouts = (this._followerRoundTimeouts || 0) + 1;
                 this.emit('reorg:timeout', {
                     reorgId,
                     sourceChain:    pending.chain,
@@ -357,6 +365,7 @@ module.exports = {
             ).then(() => {
                 this.pendingReorgs.delete(reorgId);
             }).catch(err => {
+                this._rollbackFailures = (this._rollbackFailures || 0) + 1;
                 logger.error(nodeUtil.format('Reorg: Error executing rollback for %s:', reorgId, err.message));
                 this.pendingReorgs.delete(reorgId);
             });

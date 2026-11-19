@@ -48,9 +48,9 @@ module.exports = {
         this.localIntents.set(retractionClass().intentKey(evt), Date.now());
 
         if(!QUORUM_CLASS_TABLES.has(String(evt.table)))
-            return broadcastUnsigned(this, evt, 'the table is outside the quorum class');
+            return broadcastUnsigned(this, evt, 'the table is outside the quorum class', 'out_of_class');
         if(!this.identity || !this.peerManager || !this.capSnapshot)
-            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable');
+            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable', 'no_signing_deps');
 
         return submitQuorumRetraction(this, evt, null);
     }
@@ -66,7 +66,7 @@ async function submitQuorumRetraction(self, evt, deferral){
         if(deferral)
             logger.info(retryLabel(deferral) + 'resolved below the signing gate; broadcasting unsigned');
         clearDeferral(self, evt, deferral);
-        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock);
+        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock, 'gate_inactive');
     }
 
     let validators = await self.resolveCapabilityValidators('cross_chain', snapshotBlock, self.network);
@@ -203,8 +203,9 @@ function openSigningRound(self, ctx){
             // Liveness over the signature tier: mirrors past the gate refuse the
             // unsigned event anyway (fail closed there), mirrors below it still
             // converge under the activation fences. Never silently drop a retraction.
+            self._roundTimeouts = (self._roundTimeouts || 0) + 1;
             broadcastUnsigned(self, evt, 'round ' + id.substring(0, 16) + '... timed out at ' +
-                pending.signatures.size + '/' + pending.quorum + ' signatures');
+                pending.signatures.size + '/' + pending.quorum + ' signatures', 'round_timeout');
         }
     }, self.roundTimeoutMs);
     if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
@@ -212,7 +213,11 @@ function openSigningRound(self, ctx){
     self.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
 }
 
-function broadcastUnsigned(self, evt, reason){
+// `kind` names the cause for the scrape; the warn below is deduped per intent key,
+// the count is not.
+function broadcastUnsigned(self, evt, reason, kind){
+    if(!self.unsignedFallbackCount) self.unsignedFallbackCount = {};
+    self.unsignedFallbackCount[kind] = (self.unsignedFallbackCount[kind] || 0) + 1;
     if(!self.unsignedRetractionWarnings) self.unsignedRetractionWarnings = new Set();
     const key = retractionClass().intentKey(evt);
     if(!self.unsignedRetractionWarnings.has(key)){

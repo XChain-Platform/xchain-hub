@@ -69,7 +69,8 @@ module.exports = {
     },
 
     // Read all queue entries (used by processQueue and on restart). An unreadable
-    // queue reads as empty here; only the rebuild needs the difference (readQueueState).
+    // queue reads as empty here; the rebuild and the status snapshot need the
+    // difference (readQueueState).
     readQueue() {
         let state = this.readQueueState();
         return state ? state.entries : [];

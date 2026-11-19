@@ -73,7 +73,9 @@ const DEFAULT_ENCODER_TIMEOUT_MS = 120000;
 //     messages therefore pass through untouched.
 //
 // Both branches also mirror the encoder's STRUCTURED error onto the thrown
-// error as `rpcCode` and `rpcData`. create_tx and create_envelope_cancel_tx
+// error as `rpcCode` and `rpcData`. The call site adds `rpcMethod`, so retry
+// classifiers can distinguish build failures from an uncertain broadcast.
+// create_tx and create_envelope_cancel_tx
 // answer their operational failures (no UTXOs, insufficient funds, missing
 // change address, tracker unavailable) with code -32010 and a stable
 // machine-readable `data.reason`, and that field exists precisely so a caller
@@ -140,9 +142,15 @@ class EncoderClient {
         try {
             response = await axios.post(this.encoderUrl, body, { headers: headers, timeout: this.timeout });
         } catch (err) {
-            throw unwrapTransportError(err);
+            let unwrapped = unwrapTransportError(err);
+            unwrapped.rpcMethod = method;
+            throw unwrapped;
         }
-        return resultOrRpcError(response);
+        try { return resultOrRpcError(response); }
+        catch (err) {
+            err.rpcMethod = method;
+            throw err;
+        }
     }
 
     // Fetch UTXOs for an address (proxies to UTXO tracker via encoder).

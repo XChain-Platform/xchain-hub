@@ -31,6 +31,7 @@ const canonicalForms = require('../canonical_forms.js');
 const { archiveCapabilityWants } = require('./capability_wants.js');
 const { archiveWithinRowCaps } = require('./archive_row_caps.js');
 const { unheldRowRefusal } = require('./unheld_row.js');
+const { supersededBySeq } = require('../../checkpoint_engine/superseded_rule.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const ark = require('../../anchor_reward_key.js');
@@ -73,8 +74,18 @@ module.exports = {
         for(const list of (archive.list_snapshots || [])){
             if(!(await this.verifyArchivedListSnapshot(list, archive))) return false;
         }
-        for(const checkpoint of (archive.state_checkpoints || [])){
+        const checkpoints = archive.state_checkpoints || [];
+        for(const checkpoint of checkpoints){
             if(!(await this.verifyArchivedStateCheckpoint(checkpoint, archive))) return false;
+        }
+        // Match both the builder's deferral rule and recovery's refusal rule.
+        for(const checkpoint of checkpoints){
+            const supersedingSeq = supersededBySeq(checkpoint, checkpoints);
+            if(supersedingSeq === null) continue;
+            logger.warn('StateAnchorPublisher: archive checkpoint ' + checkpoint.chain + '/' +
+                        checkpoint.network + '/' + checkpoint.checkpoint_seq +
+                        ' is superseded by seq ' + supersedingSeq + ' in the same archive; NOT signing');
+            return false;
         }
         if(!(await this.verifyArchivedPriceSnapshots(archive.price_snapshots || [], archive))) return false;
         for(const tombstone of (archive.price_tombstones || [])){

@@ -112,6 +112,19 @@ class ReorgHandler extends EventEmitter {
         // every peer per entry (REORG-INBOUND-UNBOUNDED-ROUNDS-1). Rounds self-expire on
         // the timeout, so this only bounds a burst; a real reorg needs one round per chain.
         this.maxPendingReorgs = parseInt(hubConfig.REORG_MAX_PENDING) || 64;
+
+        this.initRoundCounts();
+    }
+
+    // Process-lifetime counts the scrape reads: rounds this hub opened or joined
+    // that timed out below quorum, rollbacks run and failed, and reorg claims this
+    // hub declined to co-sign after its own node check.
+    initRoundCounts() {
+        this._roundTimeouts = 0;
+        this._followerRoundTimeouts = 0;
+        this._rollbacksExecuted = 0;
+        this._rollbackFailures = 0;
+        this._selfVerifyAbstains = 0;
     }
 
     // The two blast-radius bounds and the timestamp skew tolerance, read in the order

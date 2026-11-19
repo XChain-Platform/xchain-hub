@@ -87,10 +87,10 @@ module.exports = {
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
         if(!this.identity) throw new Error('no validator identity: cannot sign archives');
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
-
         let signingSet = await this.archiveSigningSet(cp);
         if(this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return this.archiveFlushStatus('none', 'signing_set_unresolved');
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return this.archiveFlushStatus('none', 'wrapper_slot_already_signed');
+        let mySig = this.identity.sign(canonical);
         let round = this.openArchiveRound({ cp, batchSeq, wire, canonical, signer, electionBlock, archive, rows, rewardRows, signingSet, myPubkey, mySig });
         if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
 

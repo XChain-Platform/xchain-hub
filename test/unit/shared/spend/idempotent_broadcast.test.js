@@ -19,6 +19,7 @@ const {
 } = require('chai');
 const {
   isAmbiguousSendError,
+  isNeverSentError,
   AtMostOnce,
   broadcastOnce
 } = require('../../../../src/lib/guards/idempotent_broadcast.js');
@@ -75,6 +76,26 @@ function registerIsAmbiguousSendErrorSuite1Part1() {
   });
 }
 function registerIsAmbiguousSendErrorSuite1Part2() {
+  it('treats a broadcast_tx -32603 with no txid as AMBIGUOUS independent of message text', function () {
+    for (const message of [
+      'Encoder RPC error: Error broadcasting transaction: empty result',
+      'Encoder RPC error: node returned no identifier'
+    ]) {
+      const error = Object.assign(new Error(message), {
+        rpcCode: -32603,
+        rpcMethod: 'broadcast_tx'
+      });
+      expect(isAmbiguousSendError(error)).to.equal(true);
+      expect(isNeverSentError(error)).to.equal(false);
+    }
+  });
+  it('keeps pre-send and sub-500 -32603 failures DEFINITIVE', function () {
+    expect(isAmbiguousSendError({ rpcCode: -32603, rpcMethod: 'create_tx' })).to.equal(false);
+    expect(isAmbiguousSendError({ rpcCode: -32603, rpcMethod: 'get_utxos' })).to.equal(false);
+    expect(isAmbiguousSendError({
+      rpcCode: -32603, rpcMethod: 'broadcast_tx', response: { status: 429 }
+    })).to.equal(false);
+  });
   it('keeps a sub-500 HTTP refusal DEFINITIVE even when it carries that message', function () {
     // A 4xx body proves the encoder refused the call before the node ever saw it,
     // so there is nothing ambiguous to defer for.

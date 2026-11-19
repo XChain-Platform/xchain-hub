@@ -42,7 +42,7 @@ function makeHub(snapshot) {
 }
 
 function activation(over) {
-    return { type: 'CAPABILITY_ACTIVATED', sender: 'peerA',
+    return { type: 'CAPABILITY_ACTIVATED', sender: 'peerA', sig_pubkey: PUBKEY,
         data: Object.assign({ pubkey: PUBKEY, capability: CAP, block_at: 100 }, over) };
 }
 

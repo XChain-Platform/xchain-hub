@@ -40,6 +40,7 @@ function publisher(held, broadcasts){
     const pub = new StateAnchorPublisher({
         db: {
             ...DB_METHODS,
+            doQuery: async () => [],
             getStateCheckpointByChainAndNetwork: async () => [CP_ROW],
             findPriceSnapshotsForRound: async () => held
         },

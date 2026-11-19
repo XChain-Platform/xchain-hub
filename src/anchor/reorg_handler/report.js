@@ -194,6 +194,8 @@ module.exports = {
             (Number.isFinite(observedBlockTimeMs) ? ' (block_time-anchored)' : ' (reported timestamp)') +
             ' invalidated');
 
+        this._rollbacksExecuted = (this._rollbacksExecuted || 0) + 1;
+
         this.emit('reorg:confirmed', {
             reorgId, sourceChain: chain, reorgHeight, timestamp, affectedChains
         });

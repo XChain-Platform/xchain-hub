@@ -20,6 +20,7 @@
 
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const { reserializeRefusal, priceKeyFold, samePriceKey } = require('../unheld_row.js');
+const { priceRecoveryRefusal } = require('./price_recovery_shape.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
 const logger = getLogger();
@@ -205,6 +206,15 @@ module.exports = {
     },
 
     async verifyArchivedPriceGroup(group, archive){
+        // Shape first: a held row's id, proof and count are outside the compare below
+        for(const row of group){
+            const shape = priceRecoveryRefusal(row);
+            if(shape){
+                logger.warn('StateAnchorPublisher: archive price ' + (row && row.round_number) + '/' +
+                            (row && row.coin_pair) + ' ' + shape + '; NOT signing');
+                return false;
+            }
+        }
         const first = group[0];
         if(!Number.isFinite(Number(first.round_number)) ||
            group.some(row => !sameSignedPriceFields(first, row))){
