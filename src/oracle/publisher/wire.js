@@ -83,9 +83,7 @@ module.exports = {
     // place in `rounds`. Rounds already on chain are exempt: shed after landing, or
     // carried by a batch the landing chain's indexer reports. True when the proposal
     // may go ahead, false when the window must be withheld.
-    async fillWindowToBounds(signer, first, last, rounds, anchor) {
-        // A signer without the bounds fill still runs its in-span fill at signing.
-        if (typeof signer.fillWindowBounds !== 'function') return true;
+    async fillWindowToBounds(signer, first, last, rounds, anchor, exemptOut) {
         let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = [];
         let exempt = new Set();
@@ -93,11 +91,20 @@ module.exports = {
             if (held.has(n)) continue;
             if (this.isRoundLanded(n)) exempt.add(n); else gaps.push(n);
         }
+        const publishExempt = () => {
+            if (!(exemptOut instanceof Set)) return;
+            exemptOut.clear();
+            for (let n of exempt) exemptOut.add(n);
+        };
+        publishExempt();
         if (gaps.length === 0) return true;
         let carried = new Set();
         try { carried = await this.roundsCarriedByChain(gaps); } catch (e) { /* fails open: fill them */ }
         for (let n of carried) exempt.add(n);
+        publishExempt();
         if (gaps.every(n => exempt.has(n))) return true;
+        // A signer without the bounds fill still runs its in-span fill at signing.
+        if (typeof signer.fillWindowBounds !== 'function') return true;
 
         let ok = false;
         try {
@@ -122,6 +129,25 @@ module.exports = {
         return true;
     },
 
+    // Cut only where an already-landed round lies between held rounds. Ordinary gaps
+    // stay in one range so the signer can prove that no validator finalized them.
+    splitAtExemptRounds(segment, exempt) {
+        if (!(exempt instanceof Set) || exempt.size === 0 || segment.length < 2) return [segment];
+        let runs = [], current = [segment[0]];
+        for (let i = 1; i < segment.length; i++) {
+            let previous = parseInt(segment[i - 1].round);
+            let next = parseInt(segment[i].round);
+            let cut = false;
+            for (let n = previous + 1; n < next; n++) {
+                if (exempt.has(n)) { cut = true; break; }
+            }
+            if (cut) { runs.push(current); current = []; }
+            current.push(segment[i]);
+        }
+        if (current.length > 0) runs.push(current);
+        return runs;
+    },
+
     // How many entries of `segment`, from `idx`, a signed range accounts for. The signing
     // round fills in-span gaps into the range in place, so the range can come back longer
     // than the segment slice it was cut from; its length is not a cursor step. The last
@@ -140,7 +166,7 @@ module.exports = {
     //
     // Returns { wire, bytes, rounds, ... } on success, a { unpublishable: true } record
     // when a single round cannot fit at all, or null when quorum was not reached.
-    async signAndSizeRange(signer, range) {
+    async signAndSizeRange(signer, range, exempt) {
         let candidate = range;
         while (candidate.length >= 1) {
             let first  = parseInt(candidate[0].round);
@@ -149,7 +175,7 @@ module.exports = {
 
             let result;
             try {
-                result = await signer.collectBatchSignatures(first, last, anchor, candidate);
+                result = await signer.collectBatchSignatures(first, last, anchor, candidate, exempt);
             } catch (e) {
                 logger.error(nodeUtil.format('OraclePublisher: batch-signing round for [' + first + ',' + last +
                     '] threw; window stays unpublished: ', e));

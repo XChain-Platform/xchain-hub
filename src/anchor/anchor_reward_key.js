@@ -22,9 +22,10 @@
  * so a divergence lets the hub conserve a reward the indexer pays, or refuse to co-sign
  * an archive the indexer derives.
  *
- * The hub reads it at the three sites that key on the reduced identity: the cross-pubkey
+ * The hub reads it at the four sites that key on the reduced identity: the cross-pubkey
  * dedup guard (RewardTracker.recordAnchorReward), the follower co-sign cross-check
- * (StateAnchorPublisher.verifyArchiveAgainstLocal) and the archive batch_seq stamp.
+ * (StateAnchorPublisher.verifyArchiveAgainstLocal), the FINALIZED observed-body
+ * membership check and the archive batch_seq stamp.
  *
  ********************************************************************/
 

@@ -19,6 +19,7 @@
 'use strict';
 
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
+const checkpointForms = require('../../../checkpoint_engine/canonical_forms.js');
 const { reserializeRefusal, priceKeyFold, samePriceKey } = require('../unheld_row.js');
 const { priceRecoveryRefusal } = require('./price_recovery_shape.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
@@ -26,6 +27,9 @@ const { getLogger } = require('../../../../observability');
 const logger = getLogger();
 
 const HEX64 = /^[0-9a-f]{64}$/;
+const UNSIGNED_BELOW_GATE_ROOT_KEYS = [
+    'state_root', 'state_root_version', 'block_merkle_root', 'block_merkle_version'
+];
 
 function withoutKeys(row, keys){
     const out = Object.assign({}, row);
@@ -164,7 +168,12 @@ module.exports = {
         const held = await this.db.getStateCheckpointByChainAndNetworkAndCheckpointSeq(
             row.chain, row.network, Number(row.checkpoint_seq));
         if(held && held.length){
-            if(!sameRow(this.serializeStateCheckpoint(held[0]), row)){
+            const local = this.serializeStateCheckpoint(held[0]);
+            // Below the gate roots are unsigned, so honest hubs may hold different values.
+            const matches = checkpointForms.isCheckpointCommitmentActive(row)
+                ? sameRow(local, row)
+                : sameRowExcept(local, row, ['id'].concat(UNSIGNED_BELOW_GATE_ROOT_KEYS));
+            if(!matches){
                 logger.warn('StateAnchorPublisher: archive checkpoint ' + row.chain + '/' +
                             row.network + '/' + row.checkpoint_seq +
                             ' differs from our row; NOT signing');

@@ -35,6 +35,7 @@ const { activeAt } = require('../../consensus/gate_registry.js');
 const { foldArchiveSuffix } = require('./fold/wrapper_canonical.js');
 const { foldArchiveSplitter, NO_HEAD_ROOM } = require('./fold/archive_head_budget.js');
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
+const rewardMembershipKeys = require('./archive/reward_membership/keys.js');
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
 async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock, rewards, splitter){
     try {
@@ -392,9 +393,6 @@ module.exports = {
             block_index:      Number(r.block_index)
         };
     },
-    // Reward identity shared by the archive body and FINALIZED reward list.
-    archiveRewardKey(r){
-        return String(r.reward_type) + '|' + String(Number(r.round_number)) + '|' +
-               String(r.validator_pubkey).toLowerCase();
-    }
+    archiveBodyRewardKey: rewardMembershipKeys.archiveBodyRewardKey,
+    finalizedRewardKey: rewardMembershipKeys.finalizedRewardKey
 };

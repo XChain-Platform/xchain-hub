@@ -35,7 +35,9 @@ let logs;
 async function followerOf(opts) {
     opts = opts || {};
     let snapshots = [];
-    if (opts.landed) snapshots.push({ round_number: opts.landed, batch: true, status: 'finalized' });
+    let landed = Array.isArray(opts.landed) ? opts.landed : (opts.landed ? [opts.landed] : []);
+    for (let round of landed)
+        snapshots.push({ round_number: round, batch: true, status: 'finalized' });
     for (let r = 0; r < 12; r++) snapshots.push({ round_number: r, status: 'finalized' });
     let h = makePublisher({
         publishers: [ME, PEER1, PEER2],
@@ -71,8 +73,7 @@ describe('oracle publisher batch: takeover declined on an unreadable on-chain ch
     });
 
     it('leaves the read-error count alone when the window really is on chain', async function () {
-        // Window 1 covers rounds 6..11; seeing round 7 land is a readable "observed".
-        let h = await followerOf({ landed: 7 });
+        let h = await followerOf({ landed: [6, 7, 8, 9, 10, 11] });
         expect(await h.p.attemptTakeover(1)).to.equal(false);
         expect(h.p.getStats().takeoverDeclinedReadError).to.equal(0);
         expect(h.broadcasts).to.have.length(0);

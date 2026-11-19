@@ -107,6 +107,7 @@ const landingPart      = require('./publisher/landing.js');
 const lifecyclePart    = require('./publisher/lifecycle.js');
 const rotationPart     = require('./publisher/rotation.js');
 const queuePart        = require('./publisher/queue.js');
+const queueBatchPart   = require('./publisher/queue_batch.js');
 const bufferPart       = require('./publisher/buffer.js');
 const takeoverPart     = require('./publisher/takeover.js');
 const schedulerPart    = require('./publisher/scheduler.js');
@@ -117,7 +118,7 @@ const publishPassPart  = require('./publisher/publish_pass.js');
 const publishEntryPart = require('./publisher/publish_entry.js');
 const statsPart        = require('./publisher/stats.js');
 const PARTS = [optionsPart, batchOptionsPart, broadcastPart, landingPart, lifecyclePart,
-               rotationPart, queuePart, bufferPart, takeoverPart, schedulerPart, landedPart,
+               rotationPart, queuePart, queueBatchPart, bufferPart, takeoverPart, schedulerPart, landedPart,
                assemblyPart, wirePart, publishPassPart, publishEntryPart, statsPart];
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/common/validator.js

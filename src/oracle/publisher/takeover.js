@@ -71,14 +71,16 @@ module.exports = {
         // The plan's range, so the guards below check the rounds assembleWindow publishes.
         let { first, last } = this.windowPlan.rangeOf(windowIndex);
 
-        // 1. The leader published after all. Nothing to do; prune our copy, and a
-        // takeover of ours that never reached the queue is no longer owed.
-        if (await this.pruneObservedWindow(first, last) > 0 ||
-            await this.windowObservedOnChain(first, last)) {
-            this._takeoverUnlanded.delete(windowIndex);
+        // 1. Prune what landed and decline only when the complete buffered remainder
+        // is covered. A failed read stays fail-closed against duplicate publication.
+        let readState = {};
+        await this.pruneObservedWindow(first, last, readState);
+        if (!readState.readable) {
+            this.takeoverDeclinedReadError = (this.takeoverDeclinedReadError || 0) + 1;
+            logger.warn('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
+                ' are already on chain; declining takeover');
             return false;
         }
-
         // 2. FAIL CLOSED when this hub has never observed ANY batch on chain. The
         // observation feed is the indexer pushing landed PRICE actions back to this
         // hub, and a hub that receives no pushes cannot tell "the leader published
@@ -96,6 +98,11 @@ module.exports = {
                     'silent leader from a deaf follower. Point this network\'s indexer HUB_API_URL at this ' +
                     'federation so landed batches are pushed back, then takeover arms itself.');
             }
+            return false;
+        }
+
+        if (this.bufferedRange(first, last).length === 0) {
+            this._takeoverUnlanded.delete(windowIndex);
             return false;
         }
 
@@ -222,23 +229,6 @@ module.exports = {
         }, Math.max(1, delay));
         if (timer.unref) timer.unref();
         this._takeoverTimers.set(windowIndex, timer);
-    },
-
-    // Is any round in [first,last] already carried by a batch this hub has seen land
-    // on chain? Fail CLOSED on a DB error (report observed), so an unreadable hub DB
-    // suppresses takeover instead of licensing a blind duplicate broadcast.
-    async windowObservedOnChain(first, last) {
-        if (!this.db) return true;
-        try {
-            let rows = await this.db.hasPriceSnapshotsByRoundNumber(first, last);
-            return !!(rows && rows.length);
-        } catch (e) {
-            // Count it, so the polled status cannot read this hub's own DB fault as "the leader landed".
-            this.takeoverDeclinedReadError = (this.takeoverDeclinedReadError || 0) + 1;
-            logger.warn(nodeUtil.format('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
-                ' are already on chain; declining takeover: ', e && e.message));
-            return true;
-        }
     },
 
     // Has a landed batch EVER reached this hub? Memoized true only: a feed that is

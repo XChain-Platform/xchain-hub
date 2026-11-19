@@ -166,6 +166,10 @@ describe('price snapshot catch-up verifier', function () {
             .to.deep.equal({ ok: false, reason: 'row does not match signed round' });
         expect(await verifyPriceSnapshot(Object.assign({}, row, { consensus_round: 2 }), context))
             .to.deep.equal({ ok: false, reason: 'row does not match signed round' });
+        context.priceProof.roundData = Object.assign({}, data, { push_generation: '3junk' });
+        expect(await verifyPriceSnapshot(row, context))
+            .to.deep.equal({ ok: false, reason: 'row does not match signed round' });
+        context.priceProof.roundData = data;
 
         const forgedProof = data.sigs.map(item => ({ pubkey: item.pubkey, sig: 'ab'.repeat(64) }));
         const forgedRow = Object.assign({}, row, { consensus_proof: JSON.stringify(forgedProof) });
@@ -182,6 +186,10 @@ describe('price snapshot catch-up verifier', function () {
         expect(await verifyPriceSnapshot(row, context)).to.deep.equal({ ok: true });
         expect(await verifyPriceSnapshot(Object.assign({}, row, { consensus_round: 2 }), context))
             .to.deep.equal({ ok: false, reason: 'row does not match signed batch' });
+        context.priceProof.batchData = Object.assign({}, data, { push_generation: '4junk' });
+        expect(await verifyPriceSnapshot(row, context))
+            .to.deep.equal({ ok: false, reason: 'row does not match signed batch' });
+        context.priceProof.batchData = data;
         const forged = Object.assign({}, row, { consensus_proof: row.consensus_proof.replace(/.$/, '0') });
         expect((await verifyPriceSnapshot(forged, context)).ok).to.equal(false);
     });

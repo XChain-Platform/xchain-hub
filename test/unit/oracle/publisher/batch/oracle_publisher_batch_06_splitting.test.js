@@ -206,6 +206,44 @@ const testCase8 = async function () {
             expect(wires.map(w => w.rounds.map(r => r.round))).to.deep.equal([[100, 101, 102], [103]]);
         };
 
+const testCase9 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    for (let r of [0, 1, 4, 5]) h.p._buffer.set(r, bufferedFixture(r));
+    for (let r of [2, 3]) {
+        h.p.markRoundLanded(r);
+        h.p._publishedRounds.mark(r);
+    }
+
+    await h.p.assembleWindow(0);
+
+    expect(h.signer.calls.map(call => call.rounds)).to.deep.equal([[0, 1], [4, 5]]);
+    expect(h.broadcasts).to.have.length(2);
+};
+
+const testCase10 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    for (let r of [0, 1, 4, 5]) h.p._buffer.set(r, bufferedFixture(r));
+    sinon.stub(h.p, 'roundsCarriedByChain').resolves(new Set([2, 3]));
+
+    await h.p.assembleWindow(0);
+
+    expect(h.signer.calls.map(call => call.rounds)).to.deep.equal([[0, 1], [4, 5]]);
+    expect(h.broadcasts).to.have.length(2);
+};
+
+const testCase11 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    let rounds = [0, 1, 4, 5].map(r => bufferedFixture(r));
+
+    let wires = await h.p.signWindowWires(h.signer, rounds, 800005, 1, new Set());
+
+    expect(h.signer.calls.map(call => [call.first, call.last])).to.deep.equal([[0, 5]]);
+    expect(wires).to.have.length(1);
+};
+
 function registerSuite1() {
     it('advances past the rounds a range really covered when its in-span fill grew it', testCase7);
     it('still signs the tail round when a filled range shrinks to fit', testCase8);
@@ -215,6 +253,9 @@ function registerSuite1() {
     it('emits only wires the READER accepts: the inflated body is capped at the same 8189', testCase4);
     it('refuses to build a body whose header anchor is not the last round\'s anchor', testCase5);
     it('does not split a window that sits entirely on one side of every flag day', testCase6);
+    it('splits around landed interior rounds so neighboring wires still broadcast', testCase9);
+    it('splits around interior rounds reported as carried by the chain', testCase10);
+    it('does not split around an ordinary missing round', testCase11);
 }
 
 function registerOuterSuite6() {

@@ -46,6 +46,8 @@ describe('oracle publisher batch: exact observed-batch prune', function () {
         expect(await h.p.pruneObservedWindow(0, 5)).to.equal(5);
         expect(Array.from(h.p._buffer.keys())).to.deep.equal([2, 6, 7]);
         expect(readJsonl(h.bufferPath).map(row => row.round)).to.deep.equal([2, 6, 7]);
+        expect([0, 1, 3, 4, 5].every(round => h.p.isRoundLanded(round))).to.equal(true);
+        expect(h.p.isRoundLanded(2)).to.equal(false);
     });
 
     it('keeps unstamped candidates when exact membership cannot be read', async function () {
@@ -57,5 +59,6 @@ describe('oracle publisher batch: exact observed-batch prune', function () {
         const remaining = [0, 1, 2, 4, 5, 6, 7];
         expect(Array.from(h.p._buffer.keys())).to.deep.equal(remaining);
         expect(readJsonl(h.bufferPath).map(row => row.round)).to.deep.equal(remaining);
+        expect(h.p.isRoundLanded(3)).to.equal(true);
     });
 });

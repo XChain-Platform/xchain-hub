@@ -37,9 +37,9 @@ function verifiedSignatures(signatures, validators, canonical){
     return verified;
 }
 
-// The row to persist: the normalized checkpoint the signatures were verified against
-// plus only the verified signatures, so a catch-up row is byte-identical to the row the
-// finalize path writes for the same checkpoint and carries nothing the quorum did not sign.
+// The row to persist uses the normalized checkpoint and only verified signatures.
+// Commitment roots below their gate remain unsigned wire values; archive comparison
+// ignores those columns there while retaining the fixed DB shape.
 function canonicalRow(row, checkpoint, verified){
     return Object.assign({}, row, checkpoint, {
         state_root: checkpoint.state_root || null,

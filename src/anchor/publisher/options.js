@@ -24,7 +24,8 @@
 
 const EncoderClient = require('../../peers/encoder_client.js');
 const SpendGuard = require('../../lib/spend_guard.js');
-const { resolveCheckpointCadence } = require('../checkpoint_cadence.js');
+const { resolveCheckpointCadence,
+        resolveAnchorElectionToleranceBlocks } = require('../checkpoint_cadence.js');
 const { DEFAULT_ANCHOR_ROUND_TIMEOUT_MS } = require('../../constants.js');
 const { positiveIntConfig } = require('../../lib/config_int.js');
 const hubConfig = require('../../config');
@@ -35,7 +36,8 @@ module.exports = {
         // Derivation of the ANCHOR sizing/timing magnitudes.
         // Read this before retuning any of them. What is load-bearing is the
         // RELATIONSHIP each number encodes, not the round figure; none of these is
-        // consensus data (they are per-hub operator knobs), but two of them have a
+        // consensus data. Most are per-hub operator knobs, but the election tolerance
+        // is fleet-uniform off regtest because peers use it in shared verdicts. Two have a
         // hard on-chain ceiling behind them. The arithmetic below is pinned by
         // test/unit/anchor/publisher/state_anchor_publisher_constant_derivations.test.js, so a retune
         // that breaks a bound fails there instead of on-chain.
@@ -117,8 +119,9 @@ module.exports = {
         // cost the federation a whole day of anchoring. Anything in ~6..144 blocks
         // (1h..24h) preserves both bounds; below the DOGE burial window it burns
         // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
-        // Never a divergence risk: concurrent unlocked publishers build identical archive
-        // bodies, and the per-publisher XANCPUB tail is signed once per slot (claimAttestSlot).
+        // Concurrent unlocked publishers build identical archive bodies, and the
+        // per-publisher XANCPUB tail is signed once per slot (claimAttestSlot). The
+        // tolerance itself must be fleet-uniform because followers recompute the unlock.
         //
         // SCOPE: both legs age from content that stays pending until it anchors. The
         // archive election anchors to its oldest cargo row; the v0 CHECKPOINT BUNDLE leg
@@ -132,8 +135,7 @@ module.exports = {
         // property there is the DB byte-match).
         // Require a strictly positive tolerance: it divides in rankUnlocked (0 unlocks every rank
         // at once) and bounds the follower anti-spam check (NaN would make that check never fire).
-        this.electionToleranceBlocks = positiveIntConfig(hubConfig.ANCHOR_ELECTION_TOLERANCE_BLOCKS ||
-            cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS, 36, 'ANCHOR_ELECTION_TOLERANCE_BLOCKS');
+        this.electionToleranceBlocks = resolveAnchorElectionToleranceBlocks(cfg, this.network);
         // Failover wake. The ladder above only unlocks a rank when
         // something RE-EVALUATES it, and rank is evaluated only inside flush(); with
         // flush on the 24h interval plus size triggers, the "ranks 1-3 get a slot

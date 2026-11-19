@@ -148,6 +148,16 @@ function registerLocalFillTests() {
         expect(res.met).to.equal(false);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
+
+    it('refuses a signing span that contains an exempt landed round', async function () {
+        mesh = buildMesh(1, { timeoutMs: 400 });
+        let signer = mesh.nodes[0].signer;
+        let rounds = withoutMissing(baseRounds());
+        let res = await signer.collectBatchSignatures(100, 105, 5005, rounds, new Set([MISSING]));
+        expect(res.met).to.equal(false);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 104, 105]);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+    });
 }
 
 function registerPublicationTests() {

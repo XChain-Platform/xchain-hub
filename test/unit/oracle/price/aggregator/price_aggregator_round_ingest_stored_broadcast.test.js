@@ -35,13 +35,13 @@ const PAIRS = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '8
 const PRODUCER_BLOCK = 798990;
 const PRODUCER_PROOF = '["producer-sig"]';
 
-function signedRound() {
+function signedRound(overrides) {
     const payload = JSON.stringify({ round: ROUND, timestamp: 1700000000, btc_block_height: BTC_HEIGHT,
         pairs: PAIRS.map(p => ({ pair: p.pair, price: p.price })) });
-    return {
+    return Object.assign({
         round: ROUND, timestamp: 1700000000, btc_block_height: BTC_HEIGHT, block_index: 800000,
         action_index: 42, pairs: PAIRS, sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(payload) }))
-    };
+    }, overrides);
 }
 
 const heldRows = () => [
@@ -58,6 +58,7 @@ describe('PriceAggregator pushed round broadcasts the rows it holds', function (
 
     beforeEach(function () {
         hub = createMockHub({ network: 'mainnet' });
+        hub.hubDbBroadcaster = { subscribers: new Set([{}]), dropAllForResync: sinon.stub() };
         agg = new PriceAggregator(hub);
         hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
             capability: 'price', blockIndex: 800000, count: V.length,
@@ -87,11 +88,27 @@ describe('PriceAggregator pushed round broadcasts the rows it holds', function (
         expect(emitted.map(row => row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
     });
 
-    it('keeps a stored round accepted and emits the built rows when the re-read fails', async function () {
+    it('keeps a stored round accepted and resyncs instead of emitting unconfirmed rows', async function () {
         reread = async () => { throw new Error('read lost'); };
         const result = await agg.receiveValidatedRound('BTC', signedRound());
         expect(result).to.deep.equal({ accepted: true });
-        expect(emitted.map(row => row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
-        expect(emitted.every(row => row.source_action_index === 42)).to.equal(true);
+        expect(emitted).to.deep.equal([]);
+        expect(hub.hubDbBroadcaster.dropAllForResync.calledOnce).to.equal(true);
+    });
+
+    it('treats an empty authoritative re-read as a resync gap', async function () {
+        reread = async () => [];
+        const result = await agg.receiveValidatedRound('BTC', signedRound());
+        expect(result).to.deep.equal({ accepted: true });
+        expect(emitted).to.deep.equal([]);
+        expect(hub.hubDbBroadcaster.dropAllForResync.calledOnce).to.equal(true);
+    });
+
+    it('rejects a malformed round generation before storing', async function () {
+        for (const generation of ['6junk', null]) {
+            const result = await agg.receiveValidatedRound('BTC', signedRound({ push_generation: generation }));
+            expect(result).to.deep.equal({ accepted: false, reason: 'invalid push_generation' });
+        }
+        expect(inserts).to.deep.equal([]);
     });
 });

@@ -64,6 +64,15 @@ module.exports = {
         return set.size > 0 ? set : null;
     },
 
+    // A quorum-zero snapshot is a solo round only for its sole member. This is
+    // the oracle equivalent of the config-PBFT and DEX sole-self guards.
+    isNonMemberSnapshot(snapshot) {
+        let members = this.memberPubkeySet(snapshot);
+        if(!members) return false;
+        let self = this.selfPubkey();
+        return !self || !members.has(String(self).toLowerCase());
+    },
+
     // Oracle M1: restrict a sender-keyed submission map to validators that are
     // members of the round's locked price snapshot, one submission per PUBKEY.
     // Quorum is sized from the snapshot, so submissions from merely-REGISTERED

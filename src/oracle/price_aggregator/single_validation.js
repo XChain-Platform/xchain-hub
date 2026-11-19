@@ -40,16 +40,35 @@ function validateOraclePriceValue(priceData, network, coin) {
     return null;
 }
 
+// Only an omitted field takes the legacy zero: every producer sends a whole
+// number, so a supplied null, prefix string or unsafe integer is refused rather
+// than coerced into the reorg fence, the dedupe compare and the monotonic upsert.
+function parsePushGeneration(value) {
+    if (value === undefined) return { value: 0 };
+    if (typeof value === 'number') {
+        return Number.isSafeInteger(value) && value >= 0
+            ? { value }
+            : { reason: 'invalid push_generation' };
+    }
+    if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) {
+        return { reason: 'invalid push_generation' };
+    }
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed)
+        ? { value: parsed }
+        : { reason: 'invalid push_generation' };
+}
+
 function validateOraclePriceWireFields(priceData) {
-    let pushGeneration = parseInt(priceData.push_generation);
-    if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+    const parsedGeneration = parsePushGeneration(priceData.push_generation);
+    if (parsedGeneration.reason) return parsedGeneration;
     if (!/^[0-9]+$/.test(String(priceData.action_index)) ||
         !Number.isSafeInteger(Number(priceData.action_index))) return { reason: 'invalid action_index' };
     if (!/^[0-9]+$/.test(String(priceData.block_time)) ||
         !Number.isSafeInteger(Number(priceData.block_time)) || Number(priceData.block_time) <= 0) {
         return { reason: 'invalid block_time' };
     }
-    return { pushGeneration, actionIndex: parseInt(priceData.action_index, 10) };
+    return { pushGeneration: parsedGeneration.value, actionIndex: parseInt(priceData.action_index, 10) };
 }
 
 function effectiveAtFor(blockTime) {
@@ -60,5 +79,6 @@ module.exports = {
     validateOraclePriceIdentity,
     validateOraclePriceValue,
     validateOraclePriceWireFields,
+    parsePushGeneration,
     effectiveAtFor
 };

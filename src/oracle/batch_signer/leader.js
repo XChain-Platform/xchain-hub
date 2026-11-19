@@ -44,7 +44,7 @@ module.exports = {
     // has co-signed, or { met:false } on timeout / short quorum / an unresolvable
     // set. On met:false the caller publishes NOTHING for this window: the sigs
     // collected so far are returned for observability only, never for a wire.
-    async collectBatchSignatures(firstRound, lastRound, btcBlockHeight, rounds){
+    async collectBatchSignatures(firstRound, lastRound, btcBlockHeight, rounds, exempt){
         let first  = parseInt(firstRound);
         let last   = parseInt(lastRound);
         let anchor = parseInt(btcBlockHeight);
@@ -54,6 +54,15 @@ module.exports = {
            first < 0 || last < first) return empty;
         if(!Array.isArray(rounds) || rounds.length === 0 || rounds.length > PRICE_BATCH_MAX_ROUND_COUNT) return empty;
         if(!this.identity) return empty;
+
+        let exemptInside = exempt instanceof Set
+            ? Array.from(exempt).filter(n => Number.isFinite(n) && n >= first && n <= last)
+            : [];
+        if(exemptInside.length > 0){
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] spans landed round(s) ' +
+                         exemptInside.sort((a, b) => a - b).join(',') + '; window must be split before signing');
+            return empty;
+        }
 
         this.stats.batchSignRounds++;
 
@@ -74,7 +83,7 @@ module.exports = {
         if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return empty;
         let snapCount = signingSet.length;
 
-        let held = await this.fillWindowGaps(first, last, rounds, signingSet, me);
+        let held = await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt);
         if(held === null){
             logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
                          'that this proposal lacks; window skipped');

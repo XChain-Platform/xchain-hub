@@ -194,6 +194,43 @@ function registerObservabilityInstallObservabilitySuite1Part3() {
   });
 }
 function registerObservabilityInstallObservabilitySuite1Part4() {
+  it('labels a client disconnect as aborted and releases the in-flight gauge', async function () {
+    let enterRoute;
+    let releaseRoute;
+    let responseClosed;
+    const entered = new Promise(resolve => { enterRoute = resolve; });
+    const gate = new Promise(resolve => { releaseRoute = resolve; });
+    const closed = new Promise(resolve => { responseClosed = resolve; });
+    const app = express();
+    app.get('/slow', async (req, res) => {
+      res.once('close', responseClosed);
+      enterRoute();
+      await gate;
+      if (!res.destroyed) res.status(503).json({ ok: false });
+    });
+    const obs = installObservability(app, {
+      service: 'svc', env: { METRICS_ENABLED: '1' }, console: fakeConsole()
+    });
+    const srv = await listen(app);
+    try {
+      const request = http.get(srv.url('/slow'));
+      request.on('error', () => {});
+      await entered;
+      request.destroy();
+      await closed;
+      releaseRoute();
+      await new Promise(resolve => setImmediate(resolve));
+      const body = await (await fetch(srv.url('/metrics'))).text();
+      expect(body).to.include('http_requests_total{method="GET",route="/slow",status="aborted"} 1');
+      expect(body).to.not.include('route="/slow",status="200"');
+      expect(body).to.not.include('route="/slow",status="503"');
+      expect(body).to.include('http_requests_in_flight 0');
+    } finally {
+      releaseRoute();
+      await obs.shutdown();
+      await srv.close();
+    }
+  });
   it('buckets an unmatched path by first segment so URLs cannot explode cardinality', async function () {
     const app = express();
     const obs = installObservability(app, {

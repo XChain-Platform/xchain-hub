@@ -270,6 +270,46 @@ describe('archive verifiers refuse unheld match and call rows the builder could 
     }
 });
 
+describe('archive checkpoint compare across the commitment gate', () => {
+    function rootedAt(block){
+        return Object.assign(checkpointRow(), {
+            network: 'mainnet', snapshot_block: block,
+            state_root: 'a'.repeat(64), state_root_version: 1,
+            block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
+        });
+    }
+
+    function rootlessAt(block){
+        return Object.assign(rootedAt(block), {
+            state_root: null, state_root_version: null,
+            block_merkle_root: null, block_merkle_version: null
+        });
+    }
+
+    it('ignores unsigned root differences below the gate', async () => {
+        const held = rootlessAt(960999);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(rootedAt(960999));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(true);
+    });
+
+    it('keeps root comparison strict at the gate', async () => {
+        const held = rootlessAt(961000);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(rootedAt(961000));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(false);
+    });
+
+    it('keeps signed columns strict below the gate', async () => {
+        const held = rootlessAt(960999);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(Object.assign(rootedAt(960999), {
+            block_hash: 'c'.repeat(64)
+        }));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(false);
+    });
+});
+
 describe('archive verifiers shape-check unheld checkpoint and price rows', () => {
     it('accepts a builder-shaped checkpoint and refuses shape drift or missing active roots', async () => {
         const pub = buildPub({});

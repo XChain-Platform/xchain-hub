@@ -20,6 +20,7 @@ const {
 } = require('chai');
 const OracleConsensus = require('../../../../src/oracle/consensus');
 const OracleRound = require('../../../../src/oracle/round');
+const swq = require('../../../../src/consensus/stake_weighted_quorum.js');
 const {
   createMockHub
 } = require('../../../helpers/mockHub');
@@ -305,5 +306,67 @@ describe('OracleRound: submission ingest dedup by verified pubkey (Oracle M1)', 
     submit(VALIDATORS_3[1].addr, '100000');
     submit(VALIDATORS_3[2].addr, '100050');
     expect(round.getSubmissions(7).size).to.equal(2);
+  });
+});
+
+function soloSnapshotHarness(weighted, own, member) {
+  const hub = createMockHub();
+  const pm = hub._peerManager;
+  pm.validatorAddr = own.addr;
+  pm.validatorPubkeys = registryFor([own, member]);
+  hub._identity.getPubkeyHex.returns(own.pubkey);
+  const snapshot = {
+    capability: 'price', blockIndex: 100, count: 1,
+    validators: [{ pubkey: member.pubkey, source: member.addr, weight: '100' }]
+  };
+  hub.capabilitySnapshot = {
+    getSnapshot: sinon.stub().resolves(snapshot),
+    getWeightSnapshot: sinon.stub().resolves(snapshot),
+    getQuorum: sinon.stub().returns(0)
+  };
+  const oracleRound = { getSubmissions: sinon.stub().returns(buildSubmissions([{
+    sender: member.addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }]
+  }])) };
+  const consensus = new OracleConsensus(hub, oracleRound);
+  consensus.minSubmissions = 1;
+  consensus.setValidatorSet([own, member]);
+  sinon.stub(swq, 'isStakeWeightedQuorumActive').returns(weighted);
+  return consensus;
+}
+
+async function expectNonMemberSoloSkip(weighted) {
+  const consensus = soloSnapshotHarness(weighted, NONMEMBER, VALIDATORS_3[0]);
+  const skipped = sinon.stub(consensus, 'storeSkippedRound').resolves();
+  const stored = sinon.stub(consensus, 'storeSnapshot').resolves();
+  const finalized = sinon.spy(consensus, 'markFinalized');
+  await consensus.finalizeRound(2, 100, 1700000000);
+  expect(skipped.calledOnce).to.equal(true);
+  expect(skipped.firstCall.args[3]).to.equal('this hub is not a member of the price snapshot');
+  expect(stored.called).to.equal(false);
+  expect(finalized.called).to.equal(false);
+}
+
+describe('OracleConsensus: quorum-zero snapshot authorization', function () {
+  afterEach(function () { sinon.restore(); });
+
+  it('skips a count-mode solo round on a non-member hub', async function () {
+    await expectNonMemberSoloSkip(false);
+  });
+
+  it('skips a weighted solo round on a non-member hub', async function () {
+    await expectNonMemberSoloSkip(true);
+  });
+
+  it('keeps solo finalization for the snapshot member', async function () {
+    const consensus = soloSnapshotHarness(false, VALIDATORS_3[0], VALIDATORS_3[0]);
+    const skipped = sinon.stub(consensus, 'storeSkippedRound').resolves();
+    const stored = sinon.stub(consensus, 'storeSnapshot').resolves();
+    const finalized = sinon.spy(consensus, 'markFinalized');
+
+    await consensus.finalizeRound(2, 100, 1700000000);
+
+    expect(skipped.called).to.equal(false);
+    expect(stored.calledOnce).to.equal(true);
+    expect(finalized.calledOnce).to.equal(true);
   });
 });

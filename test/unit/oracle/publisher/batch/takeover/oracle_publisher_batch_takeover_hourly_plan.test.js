@@ -34,7 +34,8 @@ const { createWindowPlan } = require('../../../../../../src/oracle/publisher/win
 const SWITCHED = { firstRound: 12, smallRounds: 2, largeRounds: 6 };
 
 async function switchedFollower(opts) {
-    let snapshots = [{ round_number: opts.landed, batch: true, status: 'finalized' }];
+    let landed = Array.isArray(opts.landed) ? opts.landed : [opts.landed];
+    let snapshots = landed.map(round => ({ round_number: round, batch: true, status: 'finalized' }));
     let h = makePublisher({
         publishers: [ME, PEER1, PEER2],
         db:  makeDb({ snapshots: snapshots }),
@@ -51,7 +52,7 @@ describe('oracle publisher batch: takeover under a switched hourly window plan',
     afterEach(function () { cleanupPublisherBatch(); });
 
     it('declines when the leader landed a round inside the plan range of the window', async function () {
-        let h = await switchedFollower({ landed: 20 });
+        let h = await switchedFollower({ landed: [18, 19, 20, 21, 22, 23] });
         sinon.stub(console, 'warn');
         expect(await h.p.attemptTakeover(7)).to.equal(false);
         expect(h.p.getStats().takeoverAttempts).to.equal(0);
@@ -59,11 +60,20 @@ describe('oracle publisher batch: takeover under a switched hourly window plan',
     });
 
     it('asks the co-signature memo about the plan range of the window', async function () {
-        let h = await switchedFollower({ landed: 99 });
+        let h = await switchedFollower({ landed: 20 });
         sinon.stub(console, 'warn');
         h.signer.coSignedAt = sinon.stub().returns(Date.now() - 1000);
         expect(await h.p.attemptTakeover(7)).to.equal(false);
         expect(h.signer.coSignedAt.firstCall.args).to.deep.equal([18, 23]);
         expect(h.p.getStats().takeoverDeferred).to.equal(1);
+    });
+
+    it('takes over the unpublished remainder of a partly landed window', async function () {
+        let h = await switchedFollower({ landed: 20 });
+        sinon.stub(console, 'warn');
+        expect(await h.p.attemptTakeover(7)).to.equal(true);
+        expect(h.p.getStats().takeoverAttempts).to.equal(1);
+        expect(h.signer.calls.flatMap(call => call.rounds)).to.deep.equal([18, 19, 21, 22, 23]);
+        expect(h.broadcasts).to.have.length(2);
     });
 });

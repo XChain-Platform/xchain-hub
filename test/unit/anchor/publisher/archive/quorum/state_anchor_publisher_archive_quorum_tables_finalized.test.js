@@ -149,6 +149,55 @@ describe('archive quorum-table FINALIZED observation binding', function () {
 
 });
 
+describe('archive reward FINALIZED qualifier binding', function () {
+    function check(pub, sender, reward){
+        return pub.finalizedOutsideObservedArchive(7, sender, [], [], [reward], [], [], [], [], []);
+    }
+
+    it('rejects a reissued archive reward with a different qualifier', function () {
+        const { pub } = publisher();
+        const sender = 'AA';
+        pub.recordObservedArchiveContent(7, sender, { rewards: [{
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'BB', block_index: 100
+        }] });
+
+        expect(check(pub, 'aa', {
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'bb', round_qualifier: 200
+        })).to.match(/^reward /);
+        expect(check(pub, 'aa', {
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'bb', round_qualifier: 100
+        })).to.equal(null);
+    });
+
+    it('fails closed on an absent or malformed archive qualifier', function () {
+        const { pub } = publisher();
+        pub.recordObservedArchiveContent(7, 'pk', { rewards: [{
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'pk', block_index: 100
+        }] });
+        const base = { reward_type: 'anchor_archive', round_number: 5, validator_pubkey: 'PK' };
+
+        expect(check(pub, 'PK', base)).to.match(/^reward /);
+        expect(check(pub, 'PK', { ...base, round_qualifier: 1.5 })).to.match(/^reward /);
+    });
+
+    it('normalizes ordinary rewards to qualifier zero', function () {
+        const { pub } = publisher();
+        pub.recordObservedArchiveContent(7, 'pk', { rewards: [{
+            reward_type: 'anchor_publish', round_number: 9,
+            validator_pubkey: 'pk', block_index: 100
+        }] });
+        const base = { reward_type: 'anchor_publish', round_number: 9, validator_pubkey: 'PK' };
+
+        expect(check(pub, 'PK', { ...base, round_qualifier: 0 })).to.equal(null);
+        expect(check(pub, 'PK', base)).to.equal(null);
+        expect(check(pub, 'PK', { ...base, round_qualifier: 7 })).to.match(/^reward /);
+    });
+});
+
 describe('archive quorum-table deferred FINALIZED staging', function () {
     it('extends deferred staging to mutable rows only', async function () {
         const { pub } = publisher();

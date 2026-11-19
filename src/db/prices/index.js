@@ -158,12 +158,6 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
         return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE '{"batch":%' LIMIT 1`);
     },
 
-    // Probes for a matching row in price_snapshots.
-    // Moved here from src/oracle/publisher.js:1669.
-    async hasPriceSnapshotsByRoundNumber(first, last) {
-        return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND consensus_proof LIKE '{"batch":%' LIMIT 1`, [first, last]);
-    },
-
     // Updates price_snapshots.
     // Moved here from src/anchor/reorg_handler.js:637.
     async updatePriceSnapshotByBlockTimestamp(bound) {

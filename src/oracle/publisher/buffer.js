@@ -250,7 +250,8 @@ module.exports = {
     // a bare signature array, so the prefix discriminates exactly (the same test
     // PriceAggregator's retraction path uses). Best-effort: a DB error just leaves the
     // rounds buffered until the bound above collects them.
-    async pruneObservedWindow(first, last) {
+    async pruneObservedWindow(first, last, readState) {
+        if (readState) readState.readable = false;
         if (!this.db) return 0;
         let rows;
         try {
@@ -260,13 +261,17 @@ module.exports = {
                 first + '..' + last + '; leaving them buffered: ', e && e.message));
             return 0;
         }
+        if (readState) readState.readable = true;
         // A stamped row proves its own round landed. Proof bounds identify other
         // candidates, but sparse batches require exact chain membership before prune.
         let pruned = 0;
         const candidates = new Set();
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
-            if (Number.isFinite(r) && this._buffer.delete(r)) pruned++;
+            if (Number.isFinite(r) && this._buffer.delete(r)) {
+                this.markRoundLanded(r);
+                pruned++;
+            }
             let covered = this.batchProofRange(row.consensus_proof);
             if (!covered) continue;
             for (let n of Array.from(this._buffer.keys())) {
@@ -278,7 +283,10 @@ module.exports = {
                 const carried = await this.roundsCarriedByChain(Array.from(candidates));
                 if (carried instanceof Set) {
                     for (const n of candidates) {
-                        if (carried.has(n) && this._buffer.delete(n)) pruned++;
+                        if (carried.has(n) && this._buffer.delete(n)) {
+                            this.markRoundLanded(n);
+                            pruned++;
+                        }
                     }
                 }
             } catch (e) {

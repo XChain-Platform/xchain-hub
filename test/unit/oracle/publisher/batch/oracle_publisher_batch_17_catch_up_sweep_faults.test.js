@@ -23,6 +23,7 @@ const {
     ME,
     PEER1,
     PEER2,
+    readJsonl,
     cleanupPublisherBatch
 } = require('./oracle_publisher_batch.test.js');
 
@@ -144,6 +145,123 @@ function registerSuite2() {
     it('arms takeover normally again after a stop and start cycle', testCase7);
 }
 
+function signedWires() {
+    return [[0, 1, 2], [3, 4, 5]].map((rounds, index) => ({
+        firstRound: rounds[0],
+        lastRound: rounds[rounds.length - 1],
+        anchor: 800000 + rounds[rounds.length - 1],
+        rounds: rounds.map(round => bufferedFixture(round)),
+        sigCount: 1,
+        compressed: false,
+        wire: 'signed-wire-' + index
+    }));
+}
+
+function queuedEntry(wire, index, count) {
+    return {
+        round: wire.firstRound,
+        batch: {
+            windowIndex: 0,
+            firstRound: wire.firstRound,
+            lastRound: wire.lastRound,
+            anchor: wire.anchor,
+            rounds: wire.rounds.map(round => round.round),
+            sigCount: wire.sigCount,
+            compressed: wire.compressed,
+            wireIndex: index,
+            wireCount: count
+        },
+        wire: wire.wire
+    };
+}
+
+async function publisherWithTwoWires() {
+    let h = makePublisher();
+    await h.p.start();
+    for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+    sinon.stub(h.p, 'signWindowWires').resolves(signedWires());
+    sinon.stub(h.p, 'processQueue').resolves();
+    return h;
+}
+
+const testCase8 = async function () {
+    let h = await publisherWithTwoWires();
+    let rewrite = sinon.stub(h.p, 'rewriteDurableFile').throws(new Error('EIO'));
+    let error;
+    try { await h.p.assembleWindow(0); } catch (caught) { error = caught; }
+    expect(error && error.message).to.equal('EIO');
+    expect(h.p._assembledWindows.has(0)).to.equal(false);
+    expect(h.p.pendingCatchupWindows()).to.include(0);
+    expect(readJsonl(h.queuePath)).to.deep.equal([]);
+
+    rewrite.restore();
+    await h.p.assembleWindow(0);
+    expect(readJsonl(h.queuePath).map(entry => entry.batch.rounds))
+        .to.deep.equal([[0, 1, 2], [3, 4, 5]]);
+    expect(h.p._assembledWindows.has(0)).to.equal(true);
+};
+
+const testCase9 = async function () {
+    let h = await publisherWithTwoWires();
+    let original = h.p.rewriteDurableFile.bind(h.p);
+    let writes = 0;
+    sinon.stub(h.p, 'rewriteDurableFile').callsFake((filePath, text) => {
+        writes++;
+        original(filePath, text);
+        if (writes === 1) throw new Error('late EIO');
+    });
+    try { await h.p.assembleWindow(0); } catch (error) { /* retry below */ }
+    expect(h.p._assembledWindows.has(0)).to.equal(false);
+
+    await h.p.assembleWindow(0);
+    expect(writes).to.equal(1);
+    expect(readJsonl(h.queuePath).map(entry => entry.batch.rounds))
+        .to.deep.equal([[0, 1, 2], [3, 4, 5]]);
+    expect(h.p._assembledWindows.has(0)).to.equal(true);
+};
+
+const testCase10 = async function () {
+    let h = await publisherWithTwoWires();
+    sinon.stub(h.p, 'readQueueState').returns(null);
+    let error;
+    try { await h.p.assembleWindow(0); } catch (caught) { error = caught; }
+    expect(error && error.message).to.equal('durable queue is unreadable');
+    expect(h.p._assembledWindows.has(0)).to.equal(false);
+    expect(readJsonl(h.queuePath)).to.deep.equal([]);
+};
+
+const testCase11 = async function () {
+    let h = await publisherWithTwoWires();
+    let wires = signedWires();
+    await h.p.enqueue(queuedEntry(wires[0], 0, wires.length));
+
+    await h.p.assembleWindow(0);
+
+    expect(readJsonl(h.queuePath).map(entry => entry.batch.rounds))
+        .to.deep.equal([[0, 1, 2], [3, 4, 5]]);
+    expect(h.p._assembledWindows.has(0)).to.equal(true);
+};
+
+const testCase12 = async function () {
+    let h = await publisherWithTwoWires();
+    let wires = signedWires();
+    await h.p.enqueue(queuedEntry(wires[0], 0, wires.length));
+    h.p._sweeping = true;
+    let error;
+    try { await h.p.assembleWindow(0); } catch (caught) { error = caught; }
+    expect(error && error.message).to.match(/partial window/);
+    expect(readJsonl(h.queuePath).map(entry => entry.batch.rounds)).to.deep.equal([[0, 1, 2]]);
+    expect(h.p._assembledWindows.has(0)).to.equal(false);
+};
+
+function registerSuite3() {
+    it('keeps every wire retryable when the atomic window enqueue fails', testCase8);
+    it('recognizes a window write that landed before reporting failure', testCase9);
+    it('leaves the window unmemoized when the durable queue cannot be read', testCase10);
+    it('atomically replaces a legacy partial window when no publish pass is active', testCase11);
+    it('does not replace a legacy partial window during an active publish pass', testCase12);
+}
+
 function registerOuterSuite() {
     beforeEach(function () {
         logs = { log: [], warn: [], error: [] };
@@ -156,6 +274,7 @@ function registerOuterSuite() {
     });
     describe('a catch-up sweep tick that faults', registerSuite1);
     describe('work in flight when stop() runs', registerSuite2);
+    describe('a window queue write that faults', registerSuite3);
 }
 
 describe('OraclePublisher PRICE batch rail', registerOuterSuite);

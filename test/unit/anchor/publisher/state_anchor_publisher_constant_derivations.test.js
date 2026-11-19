@@ -34,8 +34,8 @@ const SIG_PAIR_BYTES = 64 + 128 + 2;
 const ENV_KEYS = ['ANCHOR_CHUNK_MAX_BYTES', 'ANCHOR_MATCH_BATCH_SIZE', 'ANCHOR_MAX_BATCH',
     'ANCHOR_ELECTION_TOLERANCE_BLOCKS', 'ANCHOR_INTERVAL_MS', 'ANCHOR_ROUND_TIMEOUT_MS'];
 
-function mkPub(){
-    return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+function mkPub(network){
+    return new StateAnchorPublisher({ db: {}, network, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
 }
 
 function hex(n){ return 'a'.repeat(n); }
@@ -114,9 +114,9 @@ function registerAnchorDefaultTests() {
     });
 
     // Build one publisher with a single env knob set, restoring it afterwards.
-    function mkPubWith(key, value){
+    function mkPubWith(key, value, network){
         process.env[key] = value;
-        try { return mkPub(); }
+        try { return mkPub(network); }
         finally { delete process.env[key]; }
     }
 
@@ -126,7 +126,13 @@ function registerAnchorDefaultTests() {
             expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', bad).electionToleranceBlocks, 'tolerance ' + bad).to.equal(36);
         }
         expect(mkPubWith('ANCHOR_ROUND_TIMEOUT_MS', '45000').roundTimeoutMs).to.equal(45000);
-        expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12').electionToleranceBlocks).to.equal(12);
+        expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12', 'regtest').electionToleranceBlocks).to.equal(12);
+    });
+
+    it('pins the election tolerance on live and standalone networks', function () {
+        for(const network of ['mainnet', 'testnet', ''])
+            expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12', network).electionToleranceBlocks,
+                network || 'standalone').to.equal(36);
     });
 
     it('resolves the round timeout to the same value as the admission watermark for every input', function () {

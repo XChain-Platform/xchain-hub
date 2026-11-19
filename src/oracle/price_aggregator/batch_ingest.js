@@ -23,6 +23,8 @@
 const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
         refuseUnanchoredOrStraddlingBatch, validateBatchSigs } = require('./batch_validation.js');
 const { verifyBatchQuorum } = require('./batch_verification.js');
+const { parsePushGeneration } = require('./single_validation.js');
+const { storedRoundRows } = require('./stored_round_rows.js');
 const { isProducerRoundRow } = require('../../peers/hub_db/price_round_groups.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
@@ -35,8 +37,9 @@ const logger = getLogger();
 function batchFenceInputs(batchData) {
     let sourceActionIndex = batchData.action_index === undefined || batchData.action_index === null
         ? null : batchData.action_index;
-    let pushGeneration = parseInt(batchData.push_generation);
-    if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+    const parsedGeneration = parsePushGeneration(batchData.push_generation);
+    if (parsedGeneration.reason) return parsedGeneration;
+    let pushGeneration = parsedGeneration.value;
     let batchActionIndex = parseInt(sourceActionIndex);
     return { sourceActionIndex, pushGeneration, batchActionIndex };
 }
@@ -59,33 +62,6 @@ function rowsByRound(rows) {
         grouped.get(round).push(row);
     }
     return grouped;
-}
-
-// Column semantics pinned so a v2-sourced row is indistinguishable from a
-// v0-sourced one (§5.7): block_timestamp is the ROUND's own timestamp (the
-// field the fee path reads), and reference_block is the PUSH's block_index,
-// the landing block on the landing chain (D8), NOT the round's BTC anchor.
-// Two consensus readers read reference_block, so a v2 row that differed here
-// would fork them.
-//
-// batch_block_time is the LANDING BLOCK's own clock, and it is a different
-// quantity from every other time column here: block_timestamp is when the
-// round was priced, this is when the chain could first show it. Fee pricing
-// bounds itself on it so a hub-connected node and a chain-only node select
-// the same round. The round's admission map lands in its per-chain columns,
-// every federation column named so a legacy round NULLs them rather than
-// leaving a default a later schema edit could change under a signed row.
-function batchSnapshotRows(r, sourceChain, head, verified, fence, createdAt, admitCols) {
-    return r.pairs.map(pair => ({
-        round_number: r.round, coin_pair: pair.pair, price: pair.price,
-        reference_block: head.referenceBlock, reference_chain: sourceChain || null,
-        block_timestamp: r.timestamp, validator_count: verified.validatorCount,
-        consensus_round: 1, consensus_proof: verified.proofJson, status: 'finalized',
-        source_chain: sourceChain || null, source_action_index: fence.sourceActionIndex,
-        push_generation: fence.pushGeneration, batch_block_time: head.blockTime,
-        created_at: createdAt, admit_block_btc: admitCols.admit_block_btc,
-        admit_block_ltc: admitCols.admit_block_ltc, admit_block_doge: admitCols.admit_block_doge
-    }));
 }
 
 // ONE multi-row INSERT PER ROUND, not one for the whole batch: a single
@@ -174,20 +150,10 @@ async function fillMissingBatchPairs(r, sourceChain, head, verified, fence, crea
     return true;
 }
 
-// Mirror what this hub holds, or a replaying node's mirror never fills: the
-// upsert keeps a producer row finalized after the presence read. The round is
-// stored, so a failed re-read falls back to the built rows.
-async function emitStoredBatchRows(r, builtRows) {
-    let heldRows = null;
-    try { heldRows = await this.db.findPriceSnapshotsForRound(r.round); } catch (err) {
-        logger.warn(nodeUtil.format('PriceAggregator: could not re-read stored batch round ' + r.round + ':', err));
-    }
-    const storedRows = Array.isArray(heldRows) && heldRows.length > 0 ? heldRows : builtRows;
-    const signedPairs = new Set(r.pairs.map(pair => pair.pair));
-    for (const row of storedRows) {
-        if (row && row.status !== 'skipped' && signedPairs.has(row.coin_pair))
-            this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
-    }
+async function emitStoredBatchRows(r) {
+    const storedRows = await storedRoundRows.call(this, r.round, r.pairs);
+    for (const row of storedRows)
+        this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
 }
 
 async function handleDuplicateBatchRound(sourceChain, r, head, verified, fence, createdAt,
@@ -252,7 +218,6 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence, opti
         }
 
         let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
-        const builtRows = batchSnapshotRows(r, sourceChain, head, verified, fence, createdAt, admitCols);
         try {
             await batchRoundInsert.call(this, r, sourceChain, head, verified, fence, createdAt, admitCols);
         } catch (err) {
@@ -263,7 +228,7 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence, opti
                 reason: 'db error'
             };
         }
-        await emitStoredBatchRows.call(this, r, builtRows);
+        await emitStoredBatchRows.call(this, r);
         stored++;
 
         // Diagnostics only, and guarded: the round is already stored and must never
@@ -372,6 +337,7 @@ module.exports = {
         if (structural.reason) return refuse(structural.reason);
 
         let fence = batchFenceInputs(batchData);
+        if (fence.reason) return refuse(fence.reason);
         if (Number.isFinite(fence.batchActionIndex)) {
             let wm = await this.db.getPriceIngestWatermark(sourceChain || '', this.fenceNetwork());
             if (wm && fence.pushGeneration <= wm.retraction_generation && fence.batchActionIndex >= wm.from_action_index) {

@@ -62,6 +62,11 @@ module.exports = {
         return !!set && set.has(String(pubkey || '').toLowerCase());
     },
 
+    hasObservedArchiveContent(batchSeq, pubkey){
+        const byProposer = this._observedArchiveContents.get(Number(batchSeq));
+        return !!byProposer && byProposer.has(String(pubkey || '').toLowerCase());
+    },
+
     // Record the member ids of an archive body this hub verified against its own rows
     // (called from handleSignReq once verifyArchiveAgainstLocal passes, so the parse
     // is already paid for). Keyed by PROPOSER, because the failover ladder legitimately
@@ -88,7 +93,7 @@ module.exports = {
         for(let c of (archive.calls || []))
             if(c && c.call_id != null) entry.calls.add(String(c.call_id) + '|' + String(c.phase));
         for(let r of (archive.rewards || []))
-            if(r && r.reward_type != null) entry.rewards.add(canonicalForms.archiveRewardKey(r));
+            if(r && r.reward_type != null) entry.rewards.add(canonicalForms.archiveBodyRewardKey(r));
         for(const b of (archive.bridge_transfers || []))
             if(b && b.transfer_id != null) entry.bridges.add(String(b.transfer_id));
         for(const p of (archive.policy_snapshots || []))
@@ -132,7 +137,7 @@ module.exports = {
             if(c && c.call_id != null && !entry.calls.has(String(c.call_id) + '|' + String(c.phase)))
                 return 'call ' + String(c.call_id).substring(0, 16) + '... (' + c.phase + ')';
         for(let r of (rewards || []))
-            if(r && r.reward_type != null && !entry.rewards.has(canonicalForms.archiveRewardKey(r)))
+            if(r && r.reward_type != null && !entry.rewards.has(canonicalForms.finalizedRewardKey(r)))
                 return 'reward ' + String(r.reward_type) + '/#' + String(r.round_number);
         for(const b of (bridges || []))
             if(b && b.transfer_id != null && !entry.bridges.has(String(b.transfer_id)))

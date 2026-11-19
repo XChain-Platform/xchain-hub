@@ -9,7 +9,7 @@ const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
         refuseUnanchoredOrStraddlingBatch, validateBatchSigs } = require('./batch_validation.js');
 const { verifyBatchQuorum } = require('./batch_verification.js');
 const { validateOraclePriceIdentity, validateOraclePriceValue,
-        validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
+        validateOraclePriceWireFields, parsePushGeneration, effectiveAtFor } = require('./single_validation.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
 const { isProducerRoundRow, groupKey, groupAgrees, sameValue } = require('../../peers/hub_db/price_round_groups.js');
@@ -50,14 +50,15 @@ function matchingPair(row, pairs) {
 }
 
 function roundRowMatches(row, sourceChain, roundData, aggregator) {
+    const generation = parsePushGeneration(roundData.push_generation);
+    if (generation.reason) return false;
     if (!sameValue(row.round_number, roundData.round) ||
         !sameValue(row.block_timestamp, roundData.timestamp) ||
         !sameValue(row.reference_block, roundData.block_index) ||
         !sameValue(row.consensus_round, 1) ||
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, roundData.action_index == null ? null : roundData.action_index) ||
-        !sameValue(row.push_generation, Number.isFinite(parseInt(roundData.push_generation))
-            && parseInt(roundData.push_generation) >= 0 ? parseInt(roundData.push_generation) : 0) ||
+        !sameValue(row.push_generation, generation.value) ||
         !matchingPair(row, roundData.pairs)) return false;
     return rowHasAdmission(row, admissionColumns(aggregator, roundData.admit_blocks));
 }
@@ -98,6 +99,8 @@ async function verifyBatchBody(aggregator, sourceChain, batchData) {
 }
 
 function batchRowMatches(row, sourceChain, batchData, checked, aggregator) {
+    const parsedGeneration = parsePushGeneration(batchData.push_generation);
+    if (parsedGeneration.reason) return false;
     const round = checked.rounds.find(item => sameValue(item.round, row.round_number));
     if (!round || !matchingPair(row, round.pairs) ||
         !sameValue(row.block_timestamp, round.timestamp) ||
@@ -106,9 +109,7 @@ function batchRowMatches(row, sourceChain, batchData, checked, aggregator) {
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, batchData.action_index == null ? null : batchData.action_index) ||
         !sameValue(row.batch_block_time, checked.head.blockTime)) return false;
-    let generation = parseInt(batchData.push_generation);
-    if (!Number.isFinite(generation) || generation < 0) generation = 0;
-    if (!sameValue(row.push_generation, generation)) return false;
+    if (!sameValue(row.push_generation, parsedGeneration.value)) return false;
     return rowHasAdmission(row, admissionColumns(aggregator, round.admitBlocks));
 }
 

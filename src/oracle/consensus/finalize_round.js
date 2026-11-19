@@ -286,6 +286,13 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
     let quorum = snapshot
         ? this.hub.capabilitySnapshot.getQuorum(snapshot)
         : this.getQuorum();
+    if (quorum === 0 && this.isNonMemberSnapshot(snapshot)) {
+        logger.warn('Oracle: refusing solo finalization for round ' + round +
+            ' at price snapshot ' + snapshot.blockIndex + '; this hub is not a member');
+        await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+            'this hub is not a member of the price snapshot');
+        return;
+    }
     if (quorum === 0) return finalizeSoloRound.call(this, round, btcBlockHeight, btcBlockTime, submissions);
 
     // Past every early-skip branch: this hub has a usable submission set and a

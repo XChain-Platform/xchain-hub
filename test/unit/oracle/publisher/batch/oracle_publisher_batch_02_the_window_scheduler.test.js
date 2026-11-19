@@ -89,7 +89,9 @@ const testCase3 = async function () {
 async function followerOf(opts) {
                 opts = opts || {};
                 let snapshots = [];
-                if (opts.landed) snapshots.push({ round_number: opts.landed, batch: true, status: 'finalized' });
+                let landed = Array.isArray(opts.landed) ? opts.landed : (opts.landed ? [opts.landed] : []);
+                for (let round of landed)
+                    snapshots.push({ round_number: round, batch: true, status: 'finalized' });
                 for (let r = 0; r < 12; r++) snapshots.push({ round_number: r, status: 'finalized' });
                 let h = makePublisher({
                     publishers: [ME, PEER1, PEER2],
@@ -137,8 +139,7 @@ const testCase6 = async function () {
             };
 
 const testCase7 = async function () {
-                // Window 1 covers rounds 6..11; seeing one of them land is proof.
-                let h = await followerOf({ landed: 7 });
+                let h = await followerOf({ landed: [6, 7, 8, 9, 10, 11] });
                 let took = await h.p.attemptTakeover(1);
                 expect(took).to.equal(false);
                 expect(h.broadcasts).to.have.length(0);

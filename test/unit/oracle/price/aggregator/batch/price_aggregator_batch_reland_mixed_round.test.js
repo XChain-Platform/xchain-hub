@@ -39,7 +39,7 @@ const ACTION = 91;
 const PRODUCER_BLOCK = 799300;
 const PRODUCER_PROOF = '["sig-a","sig-b"]';
 const PAIRS = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '70' }];
-let agg, table, upserts;
+let agg, table, upserts, resync;
 
 function makeBatch(overrides) {
     const rounds = [{ round: ROUND, timestamp: 1700000000, btc_block_height: ANCHOR, pairs: PAIRS }];
@@ -86,6 +86,8 @@ function installDb(db) {
 function registerHooks() {
     beforeEach(function () {
         const hub = createMockHub({ network: 'mainnet' });
+        resync = sinon.stub();
+        hub.hubDbBroadcaster = { subscribers: new Set([{}]), dropAllForResync: resync };
         agg = new PriceAggregator(hub);
         hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
             capability: 'price', blockIndex: 800500, count: V.length,
@@ -172,6 +174,18 @@ describe('PriceAggregator batch ingest mirrors the rows it holds', function () {
         agg.on('row:inserted', event => emitted.push(event.row));
         const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
         expect(result).to.deep.equal({ accepted: true, stored: 1, duplicates: 0, rejected: 0 });
-        expect(emitted.map(row => row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
+        expect(emitted).to.deep.equal([]);
+        expect(resync.calledOnce).to.equal(true);
+    });
+
+    it('rejects a malformed batch generation before storing', async function () {
+        table = [];
+        for (const generation of ['6junk', null]) {
+            const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: generation }));
+            expect(result).to.deep.equal({
+                accepted: false, stored: 0, duplicates: 0, rejected: 1, reason: 'invalid push_generation'
+            });
+        }
+        expect(upserts).to.deep.equal([]);
     });
 });
