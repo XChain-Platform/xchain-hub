@@ -30,6 +30,34 @@ const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../../price_batch_compression.j
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+async function resolveBatchSigningSet(anchor, first, last) {
+    try {
+        return await this.resolvePriceSet(anchor);
+    } catch(e){
+        logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
+                    ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
+        return null;
+    }
+}
+
+async function prepareBatchCanonical(first, last, anchor, rounds, signingSet, me, exempt) {
+    const held = await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt);
+    if(held === null){
+        logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
+                    'that this proposal lacks; window skipped');
+        return null;
+    }
+    const canonical = this.leaderCanonical(first, last, anchor, rounds);
+    if(canonical === null) return null;
+    const missing = this.missingProposalRounds(held, rounds);
+    if(missing.length){
+        logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
+                    missing.join(',') + ' immediately before signing; window skipped');
+        return null;
+    }
+    return canonical;
+}
+
 module.exports = {
 
     // ---------------------------------------------------------------- leader
@@ -66,40 +94,19 @@ module.exports = {
 
         this.stats.batchSignRounds++;
 
-        // The SIGNING set is the price-capable set at the BATCH ANCHOR, which is the
-        // same set (and the same anchor) the indexer's _parseV0 resolves the wire's
-        // quorum against. Resolving it anywhere else would let this hub collect a
-        // quorum the chain then rejects, spending a DOGE fee for an invalid action.
-        let signingSet;
-        try {
-            signingSet = await this.resolvePriceSet(anchor);
-        } catch(e){
-            logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
-                         ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
-            return empty;
-        }
+        const signingSet = await resolveBatchSigningSet.call(this, anchor, first, last);
+        if(signingSet === null) return empty;
 
-        let me = this.leaderInSigningSet(signingSet, anchor, first, last);
+        const me = this.leaderInSigningSet(signingSet, anchor, first, last);
         if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return empty;
-        let snapCount = signingSet.length;
+        const snapCount = signingSet.length;
 
-        let held = await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt);
-        if(held === null){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
-                         'that this proposal lacks; window skipped');
-            return empty;
-        }
-        let canonical = this.leaderCanonical(first, last, anchor, rounds);
+        const canonical = await prepareBatchCanonical.call(
+            this, first, last, anchor, rounds, signingSet, me, exempt);
         if(canonical === null) return empty;
-        let missing = this.missingProposalRounds(held, rounds);
-        if(missing.length){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
-                         missing.join(',') + ' immediately before signing; window skipped');
-            return empty;
-        }
 
-        let mySig      = this.identity.sign(canonical);
-        let signatures = new Map();
+        const mySig      = this.identity.sign(canonical);
+        const signatures = new Map();
         signatures.set(me, mySig);
 
         // Genuine single-member set (membership proven above): this hub's own

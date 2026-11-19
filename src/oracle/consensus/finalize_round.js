@@ -185,6 +185,22 @@ function memberSubmissionSkip(round, submissions) {
     return null;
 }
 
+function snapshotMemberSubmissions(round, submissions, snapshot) {
+    const memberPubkeys = this.memberPubkeySet(snapshot);
+    submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
+    return {
+        memberPubkeys,
+        submissions,
+        skip: memberSubmissionSkip.call(this, round, submissions)
+    };
+}
+
+async function refreshClampReference(round, btcBlockHeight) {
+    if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+        await this.refreshLastFinalizedForRound(round);
+    }
+}
+
 // The single-node bypass (quorum 0): aggregate, sign and store the round here, then announce it.
 async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submissions) {
     let aggregated = this.aggregateAll(submissions);
@@ -256,32 +272,16 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
         return;
     }
 
-    // Oracle M1: everything below (aggregation, minSubmissions floor, leader/
-    // fallback election) must only see submissions from snapshot MEMBERS, one
-    // per verified pubkey. Quorum is sized from the snapshot; letting any
-    // merely-registered validator's submission through hands a no-stake key a
-    // vote in the trimmed median every hub then co-signs. Null snapshot keeps
-    // the unfiltered legacy map (graceful degradation, same as the quorum
-    // fallback below).
-    let memberPubkeys = this.memberPubkeySet(snapshot);
-    submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
-    skip = memberSubmissionSkip.call(this, round, submissions);
+    const members = snapshotMemberSubmissions.call(this, round, submissions, snapshot);
+    const memberPubkeys = members.memberPubkeys;
+    submissions = members.submissions;
+    skip = members.skip;
     if (skip) {
         await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, skip);
         return;
     }
 
-    // Before ANY path aggregates, bootstrap included: a hub clamping against an
-    // older round emits a median its peers will not co-sign. After every skip
-    // guard, so a skipped round costs no read.
-    //
-    // GATED on oracle_clamp_reference_activation.js, keyed on the round's own BTC
-    // block height (the value that locked this round's snapshot above). Below it
-    // the reference keeps its pre-alignment writers only, so a mixed-version fleet
-    // never judges one round against two different references.
-    if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
-        await this.refreshLastFinalizedForRound(round);
-    }
+    await refreshClampReference.call(this, round, btcBlockHeight);
 
     let quorum = snapshot
         ? this.hub.capabilitySnapshot.getQuorum(snapshot)
