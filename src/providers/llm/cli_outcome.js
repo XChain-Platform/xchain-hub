@@ -38,8 +38,7 @@ const AVAILABILITY_ERROR_TYPES = ['overloaded_error', 'rate_limit_error'];
 // A DETERMINISTIC refusal never heals, so it must outrank an availability match: the
 // refusal wording can carry a status token of its own, and re-asking a different model
 // would be shopping for an answer the first judge already gave. Same precedence the
-// resolved fallback contract needs, and the same one the sibling classifier in
-// prometheus-guardrails learned from live payloads.
+// resolved fallback contract needs; live payloads confirmed it.
 const REFUSAL_TEXT_RE = /safeguards flagged|flagged by (?:our|the) safeguards|content[ _-]?(?:policy|filter)\s*(?:violation|refusal)|blocked by (?:our|the) (?:content|safety) (?:policy|filter|system)/i;
 
 function statusOf(value) {
