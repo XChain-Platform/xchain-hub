@@ -26,6 +26,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../../helpers/mockHub');
+const { answerRoundRereadFromInserts } = require('../../../../../helpers/prices/inserted_round_rows.js');
 
 function makeValidator() {
     let { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -103,9 +104,11 @@ function makeValidator() {
     }
 
     // Record every statement, answer the dedupe SELECT from `finalizedRounds`, and
-    // answer the stamp re-read from `stampedRows`.
+    // answer the stamp re-read from `stampedRows` and the post-insert round re-read
+    // from the rows the recorded INSERTs stored.
     function stubDb(finalizedRounds = [], stampedRows = []) {
         let log = { inserts: [], updates: [], selects: [] };
+        answerRoundRereadFromInserts(hub.db);
         hub.db.findPriceSnapshotRowsForRounds = async rounds => rounds
             .filter(round => finalizedRounds.includes(round))
             .map(round_number => ({ round_number, status: 'finalized' }));

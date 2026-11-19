@@ -15,6 +15,7 @@ const sinon            = require('sinon');
 const { expect }       = require('chai');
 const PriceAggregator  = require('../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../helpers/mockHub');
+const { answerRoundRereadFromInserts } = require('../../../../helpers/prices/inserted_round_rows.js');
 
 // Mirror of the canonical PRICE v0 payload (xchain-indexer/src/consensus/ed25519.js)
 // buildPriceV0Payload. Tests sign these exact bare-JSON bytes for fixtures whose
@@ -42,10 +43,7 @@ function makeValidator() {
     };
 }
 
-
-
     let hub, agg;
-
 
     // Four price-qualified validators → PBFT quorum 2*floor(3/3)+1 = 3
     const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
@@ -88,9 +86,11 @@ function makeValidator() {
     }
 
 
-    // doQuery stub: dedup SELECT misses, INSERTs are captured
+    // doQuery stub: dedup SELECT misses, INSERTs are captured, and the post-insert
+    // round re-read returns the rows those INSERTs stored
     function stubDb() {
         let inserts = [];
+        answerRoundRereadFromInserts(hub.db);
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
             if (/^INSERT INTO price_snapshots/.test(sql)) { inserts.push(params); return {}; }

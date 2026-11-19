@@ -25,6 +25,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../../helpers/mockHub');
+const { answerRoundRereadFromInserts } = require('../../../../../helpers/prices/inserted_round_rows.js');
 const { CANONICAL_REORG_BUFFER } = require('../../../../../../src/consensus/snapshot_reorg_buffer.js');
 // The pair-name flag day's own map. Every shipped network is genesis-on since the
 // 2026-09-09 ruling, so the D14 case below straddles a threshold it installs itself.
@@ -126,9 +127,11 @@ function makeValidator() {
 
 
     // doQuery stub. `finalizedRounds` names round_numbers that already have a
-    // non-'skipped' row, i.e. the dedupe SELECT hits for them.
+    // non-'skipped' row, i.e. the dedupe SELECT hits for them. The post-insert round
+    // re-read returns the rows the recorded INSERTs stored.
     function stubDb(finalizedRounds = []) {
         let inserts = [];
+        answerRoundRereadFromInserts(hub.db);
         hub.db.findPriceSnapshotRowsForRounds = async rounds => rounds
             .filter(round => finalizedRounds.includes(round))
             .map(round_number => ({ round_number, status: 'finalized' }));
