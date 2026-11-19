@@ -83,7 +83,7 @@ const transactionMixin      = require('./schema/transaction.js');
 const mirrorColumns         = require('./schema/mirror_columns.js');
 const sqlMigrationFiles     = require('./schema/sql_migration_files.js');
 const nodeUtil = require('node:util');
-const { getLogger, getSqlTiming } = require('../observability');
+const { getLogger } = require('../observability');
 const hubConfig = require('../config');
 const logger = getLogger();
 const { isPoolSaturation } = require('./schema/pool_saturation.js');
@@ -160,7 +160,7 @@ class Database {
         this.pass   = pass;
 
         this.connectionPoolParams = buildPoolParams(this.host, this.port, this.dbName, this.user, this.pass);
-        this.pool = getSqlTiming().wrapPool(mariadb.createPool(this.connectionPoolParams));
+        this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
 
         // Circuit breaker state

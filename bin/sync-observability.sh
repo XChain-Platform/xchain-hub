@@ -26,7 +26,7 @@
 # only: no npm script, no workflow and no gate invoked it, so "byte-identical by
 # construction" was a claim nothing measured, and the indexer's copy sat drifted
 # for weeks with every suite green. It is now wired in two places that both have
-# the seven consumers laid out beside the hub:
+# the six consumers laid out beside the hub:
 #
 #   - npm run check:observability-sync, which bin/ci-full.sh runs as a drift
 #     tier, so the pre-push venue gate reddens before the push, and
@@ -34,7 +34,7 @@
 #
 # A MISSING consumer checkout is a FAILURE in --check, not a skip. Skipping is
 # how a cross-repo guard reports green having compared nothing: the gates above
-# run where all seven are present, so absence there means the layout broke, not
+# run where all six are present, so absence there means the layout broke, not
 # that there is less to check. Hand runs on a partial checkout pass
 # --allow-missing to opt back into skipping.
 #
@@ -55,11 +55,9 @@ HUB_ROOT="$(cd "$HERE/.." && pwd)"
 PLATFORM_ROOT="${XCHAIN_PLATFORM_ROOT:-$(cd "$HUB_ROOT/.." && pwd)}"
 
 SRC_DIR="$HUB_ROOT/src/observability"
-FILES=(metrics.js logShipper.js sql_timing.js sql_timing_shipper.js index.js README.md)
+FILES=(metrics.js logShipper.js index.js README.md)
 
 CONSUMERS=(xchain-indexer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-explorer xchain-sync)
-# Private repos get copies too, but public CI cannot clone them, so --check skips one that is absent.
-PRIVATE_CONSUMERS=(xchain-dashboard)
 
 CHECK_ONLY=0
 ALLOW_MISSING=0
@@ -85,13 +83,8 @@ skipped=0
 missing=0
 compared=0
 
-for consumer in "${CONSUMERS[@]}" "${PRIVATE_CONSUMERS[@]}"; do
+for consumer in "${CONSUMERS[@]}"; do
     dest_root="$PLATFORM_ROOT/$consumer"
-    if [[ ! -d "$dest_root/src" && " ${PRIVATE_CONSUMERS[*]} " == *" $consumer "* ]]; then
-        echo "skip   $consumer (private, no checkout at $dest_root)"
-        skipped=$((skipped + 1))
-        continue
-    fi
     if [[ ! -d "$dest_root/src" ]]; then
         # In check mode an absent consumer is a hole in the evidence, so it is
         # reported red unless the caller asked for a partial run.
@@ -142,7 +135,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
         exit 1
     fi
     echo "OK: $compared vendored observability file(s) match the canonical module" \
-         "($(( ${#CONSUMERS[@]} + ${#PRIVATE_CONSUMERS[@]} - skipped )) of $(( ${#CONSUMERS[@]} + ${#PRIVATE_CONSUMERS[@]} )) consumers checked)"
+         "($((${#CONSUMERS[@]} - skipped)) of ${#CONSUMERS[@]} consumers checked)"
     exit 0
 fi
 

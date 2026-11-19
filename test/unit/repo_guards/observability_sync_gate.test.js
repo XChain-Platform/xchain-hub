@@ -65,7 +65,6 @@ function bashArray(name) {
   return match ? match[1].split(/\s+/).filter(Boolean) : [];
 }
 const CONSUMERS = bashArray('CONSUMERS');
-const PRIVATE_CONSUMERS = bashArray('PRIVATE_CONSUMERS');
 const FILES = bashArray('FILES');
 
 /** A throwaway platform root holding an in-sync vendored copy per consumer. */
@@ -162,24 +161,6 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part2() {
     });
   });
 }
-function registerObservabilityShimTheVendoredCopyParityGateSuite1Part2b() {
-  describe('private consumers', function () {
-    it('skips an absent private consumer, which public CI cannot clone', function () {
-      expect(PRIVATE_CONSUMERS).to.include('xchain-dashboard');
-      expect(CONSUMERS, 'a private repo never sits in the public roster').to.not.include.members(PRIVATE_CONSUMERS);
-      const res = runCheck(observabilityShimTheVendoredCopyParityGateSuite1Fixture());
-      expect(res.status, res.stdout + res.stderr).to.equal(0);
-      expect(res.stdout).to.contain(`skip   ${PRIVATE_CONSUMERS[0]} (private`);
-    });
-    it('still compares a private consumer when its checkout is present', function () {
-      const root = observabilityShimTheVendoredCopyParityGateSuite1Fixture([...CONSUMERS, ...PRIVATE_CONSUMERS]);
-      fs.appendFileSync(path.join(root, PRIVATE_CONSUMERS[0], 'src', 'observability', FILES[0]), '\n// drift\n');
-      const res = runCheck(root);
-      expect(res.status).to.equal(1);
-      expect(res.stdout).to.contain(`DRIFT  ${PRIVATE_CONSUMERS[0]}/src/observability/${FILES[0]}`);
-    });
-  });
-}
 function registerObservabilityShimTheVendoredCopyParityGateSuite1Part3() {
   describe('wiring: the check is reachable from something that runs', function () {
     it('is exposed as the check:observability-sync npm script', function () {
@@ -245,7 +226,6 @@ function registerObservabilityShimTheVendoredCopyParityGateSuite1Part4() {
 describe('observability shim: the vendored-copy parity gate', function () {
   registerObservabilityShimTheVendoredCopyParityGateSuite1Part1.call(this);
   registerObservabilityShimTheVendoredCopyParityGateSuite1Part2.call(this);
-  registerObservabilityShimTheVendoredCopyParityGateSuite1Part2b.call(this);
   registerObservabilityShimTheVendoredCopyParityGateSuite1Part3.call(this);
   registerObservabilityShimTheVendoredCopyParityGateSuite1Part4.call(this);
 });

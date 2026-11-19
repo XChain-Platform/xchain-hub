@@ -33,7 +33,6 @@ const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
 const { snapshotCapWarnings } = require('./snapshot_read_caps');
 const { mountTelemetryRoutes } = require('./rest/telemetry');
 const { mountRegistryRoutes } = require('./rest/registry');
-const { getSqlTiming } = require('../observability');
 
 function createApp(ctx) {
     const { express, hubConfig } = ctx;
@@ -41,9 +40,7 @@ function createApp(ctx) {
     const app = express();
     for (const warning of snapshotCapWarnings(hubConfig)) ctx.logger.warn(warning);
     const observability = installMiddleware(app, ctx);
-    // Keep the method table prototype-free (the router dispatches inherited names like "constructor").
-    const jsonRpcController = Object.assign(Object.create(null),
-        getSqlTiming().wrapRpcMethods(ctx.rpcController || buildRpcController(ctx)));
+    const jsonRpcController = ctx.rpcController || buildRpcController(ctx);
     mountSnapshotRoutes(app, ctx);
     mountTelemetryRoutes(app, ctx);
     mountRegistryRoutes(app, ctx);
