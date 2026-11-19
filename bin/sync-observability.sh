@@ -57,9 +57,7 @@ PLATFORM_ROOT="${XCHAIN_PLATFORM_ROOT:-$(cd "$HUB_ROOT/.." && pwd)}"
 SRC_DIR="$HUB_ROOT/src/observability"
 FILES=(metrics.js logShipper.js sql_timing.js sql_timing_shipper.js index.js README.md)
 
-CONSUMERS=(xchain-indexer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-explorer xchain-sync)
-# Private repos get copies too, but public CI cannot clone them, so --check skips one that is absent.
-PRIVATE_CONSUMERS=(xchain-dashboard)
+CONSUMERS=(xchain-indexer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-explorer xchain-sync xchain-dashboard)
 
 CHECK_ONLY=0
 ALLOW_MISSING=0
@@ -85,13 +83,8 @@ skipped=0
 missing=0
 compared=0
 
-for consumer in "${CONSUMERS[@]}" "${PRIVATE_CONSUMERS[@]}"; do
+for consumer in "${CONSUMERS[@]}"; do
     dest_root="$PLATFORM_ROOT/$consumer"
-    if [[ ! -d "$dest_root/src" && " ${PRIVATE_CONSUMERS[*]} " == *" $consumer "* ]]; then
-        echo "skip   $consumer (private, no checkout at $dest_root)"
-        skipped=$((skipped + 1))
-        continue
-    fi
     if [[ ! -d "$dest_root/src" ]]; then
         # In check mode an absent consumer is a hole in the evidence, so it is
         # reported red unless the caller asked for a partial run.
@@ -142,7 +135,7 @@ if [[ $CHECK_ONLY -eq 1 ]]; then
         exit 1
     fi
     echo "OK: $compared vendored observability file(s) match the canonical module" \
-         "($(( ${#CONSUMERS[@]} + ${#PRIVATE_CONSUMERS[@]} - skipped )) of $(( ${#CONSUMERS[@]} + ${#PRIVATE_CONSUMERS[@]} )) consumers checked)"
+         "($((${#CONSUMERS[@]} - skipped)) of ${#CONSUMERS[@]} consumers checked)"
     exit 0
 fi
 

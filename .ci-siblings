@@ -38,3 +38,4 @@ xchain-decoder
 xchain-encoder
 xchain-utxo-tracker
 xchain-sync
+xchain-dashboard
