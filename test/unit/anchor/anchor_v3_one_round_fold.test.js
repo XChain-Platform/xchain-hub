@@ -290,15 +290,20 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
         let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
         let txid = 'ab'.repeat(32);
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub.indexerCall = async (coin, method, params) => method === 'getanchoraction'
-            ? { exists: true, status: 'valid', version: 91, txid,
-                checkpoint_chain: params.chain, checkpoint_network: params.network,
-                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-            : Object.assign({ exists: true, status: 'valid', version: 2, txid }, params);
+        let asked = [];
+        pub.indexerCall = async (coin, method, params) => {
+            asked.push({ method, params });
+            return method === 'getanchoraction'
+                ? { exists: true, status: 'valid', version: params.version, txid,
+                    checkpoint_chain: params.chain, checkpoint_network: params.network,
+                    block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
+                : Object.assign({ exists: true, status: 'valid', version: 91, txid }, params);
+        };
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
         ], { batchSeq: 7 });
         expect(found).to.deep.equal({ exists: true, txid });
+        expect(asked.find(a => a.method === 'getanchoraction').params.version).to.equal(3);
     });
 
     it('rejects indexer rows that do not match the requested folded row attributes', async function () {
@@ -332,6 +337,37 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
             catch(e){ error = e; }
             expect(error, field).to.be.an('error');
         }
+    });
+});
+
+describe('ANCHOR v3 one-round archive fold section version', function () {
+    registerFoldHooks();
+
+    it('refuses a v1 archive head or other non-v3 row as an existing folded section', async function () {
+        let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+        let section = { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 };
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        let answer;
+        pub.indexerCall = async (coin, method, params) => Object.assign({
+            exists: true, status: 'valid', txid: 'cd'.repeat(32),
+            checkpoint_chain: params.chain, checkpoint_network: params.network,
+            block_index: params.block_index, checkpoint_seq: params.checkpoint_seq
+        }, answer);
+        for(let version of [1, 0, undefined]){
+            answer = { version };
+            let error, found;
+            try { found = await pub.findExistingFoldedBundle([section], null); }
+            catch(e){ error = e; }
+            expect(found, 'v' + version).to.equal(undefined);
+            expect(error, 'v' + version).to.be.an('error');
+        }
+        answer = { exists: false, txid: null };
+        expect(await pub.findExistingFoldedBundle([section], null)).to.equal(null);
+
+        answer = { version: 1 };
+        pub.getAnchorIntent = async () => ({ intent_at: 'now' });
+        pub.anchorIntentHolds = () => true;
+        expect(await pub.bundleHeldByIntent([section], 'BTC', 'regtest', 1, true)).to.equal(true);
     });
 });
 

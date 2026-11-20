@@ -37,6 +37,8 @@ const { foldArchiveSplitter, NO_HEAD_ROOM } = require('./fold/archive_head_budge
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
 const rewardMembershipKeys = require('./archive/reward_membership/keys.js');
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
+// Folds send and reward only v3; a non-v3 row (say a v1 archive head) is undetermined, never adopted
+const FOLD_SECTION_VERSION = 3;
 async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock, rewards, splitter){
     try {
         return await ctx.buildSizedArchive(network, batchSeq, rows, snapshotBlock, rewards, splitter);
@@ -266,11 +268,11 @@ const foldPublisherMethods = {
         };
         for(let section of (sections || [])){
             let requested = {
-                chain: String(section.chain), network: String(section.network),
+                chain: String(section.chain), network: String(section.network), version: FOLD_SECTION_VERSION,
                 block_index: Number(section.block_index), checkpoint_seq: Number(section.checkpoint_seq)
             };
             let row = await this.indexerCall('DOGE', 'getanchoraction', requested);
-            let found = accept(row, r => isCheckpointAnchorRow(r) &&
+            let found = accept(row, r => isCheckpointAnchorRow(r) && Number(r.version) === FOLD_SECTION_VERSION &&
                 String(r.checkpoint_chain) === requested.chain &&
                 String(r.checkpoint_network) === requested.network &&
                 Number(r.block_index) === requested.block_index &&
