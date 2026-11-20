@@ -12,7 +12,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const nock       = require('nock');
+const nock       = require('nock').default;
 const PriceFetcher = require('../../../src/oracle/price_fetcher');
 const OracleRound  = require('../../../src/oracle/round');
 const { PRICE_MAX } = require('../../../src/constants');

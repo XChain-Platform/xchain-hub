@@ -29,7 +29,7 @@
 
 const { expect } = require('chai');
 const sinon      = require('sinon');
-const nock       = require('nock');
+const nock       = require('nock').default;
 const path = require('path');
 const os = require('os');
 

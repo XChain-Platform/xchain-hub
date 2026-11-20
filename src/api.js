@@ -22,7 +22,7 @@
  ********************************************************************/
 
 const dotenv = require('dotenv');
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Before anything else logs. The env-validation failures immediately below are
 // exactly the lines an operator needs levelled and timestamped, and

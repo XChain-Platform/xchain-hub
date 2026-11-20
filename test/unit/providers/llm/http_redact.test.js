@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const { expect } = require('chai');
-const nock       = require('nock');
+const nock       = require('nock').default;
 const { redactVendorText, httpStatusError, settleOnce, callOpenAi } = require('../../../../src/providers/llm/http.js');
 const { closeOutcome } = require('../../../../src/providers/llm/cli_outcome.js');
 const SpendAudit = require('../../../../src/providers/llm/spend.js');

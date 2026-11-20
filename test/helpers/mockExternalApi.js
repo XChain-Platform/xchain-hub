@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const nock = require('nock');
+const nock = require('nock').default;
 
 const COINGECKO_BASE = 'https://api.coingecko.com';
 const CMC_BASE       = 'https://pro-api.coinmarketcap.com';
@@ -110,7 +110,7 @@ function mockCoinGeckoTimeout(delayMs) {
     return nock(COINGECKO_BASE)
         .get('/api/v3/simple/price')
         .query(true)
-        .delayConnection(delayMs || 15000)
+        .delay(delayMs || 15000)
         .reply(200, DEFAULT_COINGECKO_RESPONSE);
 }
 

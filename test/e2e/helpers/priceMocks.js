@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const nock = require('nock');
+const nock = require('nock').default;
 
 const COINGECKO_BASE = 'https://api.coingecko.com';
 const CMC_BASE       = 'https://pro-api.coinmarketcap.com';

@@ -24,7 +24,7 @@
 
 const { expect } = require('chai');
 const sinon      = require('sinon');
-const nock       = require('nock');
+const nock       = require('nock').default;
 
 function _withEnv(extra, fn){
     const saved = {};

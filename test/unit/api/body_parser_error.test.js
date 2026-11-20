@@ -29,6 +29,7 @@ const helmet     = require('helmet');
 const cors       = require('cors');
 const rateLimit  = require('express-rate-limit');
 const http       = require('http');
+const nock       = require('nock').default;
 const { installTransportMiddleware, terminalErrorHandler } = require('../../../src/api/middleware.js');
 
 const LEAK = /node_modules|body-parser|raw-body|\bat .*\(|SyntaxError|PayloadTooLargeError|\.js:\d+/;
@@ -79,10 +80,21 @@ function envelope(r) {
 
 // Boots the hub transport stack with NODE_ENV cleared (the leak-prone setting) for one describe block.
 function useBootedTransport() {
-    before(async () => { savedEnv = process.env.NODE_ENV; delete process.env.NODE_ENV; await boot(); });
+    let restoreNock = false;
+    before(async () => {
+        savedEnv = process.env.NODE_ENV;
+        delete process.env.NODE_ENV;
+        // Native HTTP must carry malformed compressed bytes to the real listener.
+        restoreNock = nock.isActive();
+        if (restoreNock) nock.restore();
+        await boot();
+    });
     after((done) => {
         if (savedEnv !== undefined) process.env.NODE_ENV = savedEnv;
-        server.close(() => done());
+        server.close(() => {
+            if (restoreNock && !nock.isActive()) nock.activate();
+            done();
+        });
     });
 }
 

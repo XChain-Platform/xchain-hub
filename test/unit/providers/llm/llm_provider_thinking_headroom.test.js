@@ -22,7 +22,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const nock = require('nock');
+const nock = require('nock').default;
 const models = require('../../../../src/providers/llm/models');
 
 function reloadProvider() {
