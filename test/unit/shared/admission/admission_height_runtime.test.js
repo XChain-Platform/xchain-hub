@@ -11,6 +11,8 @@
 // contact legal@dankest.llc.
 
 const { expect } = require('chai');
+const sinon = require('sinon');
+const logger = require('../../../../src/observability').getLogger();
 
 const ERA_MODULES = [
     '../../../../src/consensus/gates/mirror_admission_gate.js',
@@ -134,43 +136,61 @@ describe('XChainHub.resolveAdmissionTip: the DECODER tip, ungated by lag', () =>
 });
 
 describe('XChainHub.admissionTipFresh: per chain, and a refusal is not a guess', () => {
+    let clock;
+    beforeEach(() => { clock = sinon.useFakeTimers({ now: 1700000000000, toFake: ['Date'] }); });
+    afterEach(() => clock.restore());
     it('takes a first sighting, and takes any height that has ADVANCED', () => {
         let h = freshnessHubStub();
         expect(h.admissionTipFresh('BTC', 1000)).to.equal(true);
+        clock.tick(4000 * 1000);
         expect(h.admissionTipFresh('BTC', 1001)).to.equal(true);
+        expect(h._admissionTipSeen.get('BTC')).to.deep.equal({ height: 1001, atMs: Date.now() });
     });
 
-    it('refuses a tip that has not advanced past the chain\'s own stall window', () => {
+    it('accepts an equal tip within its window and refuses it past the window', () => {
         let h = freshnessHubStub();
         expect(h.admissionTipFresh('DOGE', 500)).to.equal(true);
-        // Backdate the observation past DOGE's window (6 blocks of 60 s = 360 s) but
-        // well inside BTC's (6 blocks of 600 s = 3600 s).
-        h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 400 * 1000 });
+        clock.tick(360 * 1000);
+        expect(h.admissionTipFresh('DOGE', 500)).to.equal(true);
+        clock.tick(1000);
         expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
+    });
 
+    it('dates an equal tip against each chain\'s own stall window', () => {
         let b = freshnessHubStub();
         expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
-        b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 400 * 1000 });
+        clock.tick(400 * 1000);
         // THE POINT: the same 400 s of no movement is stale on DOGE and fresh on BTC.
         // A flat window would call one of these wrong.
         expect(b.admissionTipFresh('BTC', 500)).to.equal(true);
-        b._admissionTipSeen.set('BTC', { height: 500, atMs: Date.now() - 4000 * 1000 });
+        clock.tick(3600 * 1000);
         expect(b.admissionTipFresh('BTC', 500)).to.equal(false);
     });
 
-    it('a frozen chain stays refused, and an advance clears it', () => {
+    it('re-baselines a lower tip, then refuses it if the new history freezes', () => {
         let h = freshnessHubStub();
-        h._admissionTipSeen.set('DOGE', { height: 500, atMs: Date.now() - 4000 * 1000 });
-        expect(h.admissionTipFresh('DOGE', 500)).to.equal(false);
-        expect(h.admissionTipFresh('DOGE', 501)).to.equal(true);
+        const warn = sinon.stub(logger, 'warn');
+        try {
+            expect(h.admissionTipFresh('DOGE', 500)).to.equal(true);
+            clock.tick(400 * 1000);
+            expect(h.admissionTipFresh('DOGE', 400)).to.equal(true);
+            expect(h._admissionTipSeen.get('DOGE')).to.deep.equal({ height: 400, atMs: Date.now() });
+            expect(warn.calledOnceWith(sinon.match(/DOGE.*500.*400/))).to.equal(true);
+            clock.tick(400 * 1000);
+            expect(h.admissionTipFresh('DOGE', 400)).to.equal(false);
+            expect(warn.callCount).to.equal(2);
+        } finally {
+            warn.restore();
+        }
     });
 
     it('keeps an unchanged regtest tip usable while testnet still refuses it', () => {
         const regtest = Object.assign(freshnessHubStub(), { network: 'regtest' });
         const testnet = Object.assign(freshnessHubStub(), { network: 'testnet' });
-        const stale = { height: 500, atMs: Date.now() - 4000 * 1000 };
+        const stale = { height: 500, atMs: Date.now() };
         regtest._admissionTipSeen.set('DOGE', stale);
         testnet._admissionTipSeen.set('DOGE', stale);
+        clock.tick(4000 * 1000);
         expect(regtest.admissionTipFresh('DOGE', 500)).to.equal(true);
         expect(testnet.admissionTipFresh('DOGE', 500)).to.equal(false);
     });

@@ -84,6 +84,10 @@
     "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": {
       "regtest chain-tip identity purge uses scoped SQL for cross-chain rows and an unfiltered snapshot delete": "regtest chain-tip identity purge uses scoped SQL for cross-chain and checkpoint rows and an unfiltered capability delete",
       "regtest chain-tip identity purge purges all three tables before replacing a changed BTC regtest tip": "regtest chain-tip identity purge purges all stale chain tables before replacing a changed BTC regtest tip"
+    },
+    "test/unit/shared/admission/admission_height_runtime.test.js": {
+      "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess refuses a tip that has not advanced past the chain's own stall window": "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess dates an equal tip against each chain's own stall window",
+      "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess a frozen chain stays refused, and an advance clears it": "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess re-baselines a lower tip, then refuses it if the new history freezes"
     }
   }
 }
