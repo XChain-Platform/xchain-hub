@@ -15,7 +15,7 @@ const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/oracle/consensus');
 const { createMockHub }       = require('../helpers/mockHub');
 const { waitUntil }           = require('../helpers/waitUntil');
-const { VALIDATORS_4, buildSubmissions } = require('../helpers/fixtures');
+const { VALIDATORS_4, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
 // =================================================================
 // OracleConsensus: trimmed median
@@ -41,6 +41,7 @@ function registerSuitePart1() {
           function registerNestedSuite2Part1() {
     beforeEach(function () {
                 oc.setValidatorSet(VALIDATORS_4);
+                hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_4);
                 pm.validatorAddr = VALIDATORS_4[0].addr;
             });
 }
