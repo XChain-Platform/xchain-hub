@@ -10,17 +10,17 @@
   },
   "dependencies": {
     "acorn": "8.16.0",
-    "axios": "^1.20.0",
+    "axios": "^1.21.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "express-json-rpc-router": "^1.4.0",
-    "express-rate-limit": "^8.5.2",
+    "express-rate-limit": "^8.7.5",
     "geoip-lite": "^2.0.2",
-    "helmet": "^8.2.0",
-    "mariadb": "3.5.4",
+    "helmet": "^8.3.0",
+    "mariadb": "3.5.5",
     "mathjs": "15.2.0",
-    "ws": "^8.21.0"
+    "ws": "^8.23.0"
   },
   "scripts": {
     "api": "node ./src/api.js",
@@ -58,7 +58,7 @@
     "c8": "^12.0.0",
     "chai": "^4.5.0",
     "eslint": "^10.15.0",
-    "fast-check": "^4.6.0",
+    "fast-check": "^4.10.3",
     "mocha": "^11.7.5",
     "nock": "^14.0.0",
     "proxyquire": "^2.1.3",
