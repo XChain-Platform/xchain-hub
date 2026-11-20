@@ -132,8 +132,11 @@ module.exports = {
             // feed (takeoverArmed alone cannot tell that from failover never being needed).
             takeoverDeclinedUnproven:     this.takeoverDeclinedUnproven,
             // Nonzero means this hub's own DB blocked a takeover, which would otherwise read as
-            // "the leader landed"; the window is not retried by this hub.
+            // "the leader landed"; the window is re-armed a bounded number of times.
             takeoverDeclinedReadError:    this.takeoverDeclinedReadError,
+            // Windows this hub stopped covering because the DB stayed unreadable through
+            // every retry; each stays unpublished here until a restart.
+            takeoverReadRetryExhausted:   this.takeoverReadRetryExhausted,
             // Takeovers past the election that never reached enqueueWindowWires. An oldest
             // window that stays put across polls is a takeover wedged before the queue.
             takeoverUnlandedWindows:      this._takeoverUnlanded.size,
@@ -219,11 +222,13 @@ module.exports = {
             // Drain observability. batchWindowsAwaitingRetry alone cannot tell a rail
             // that is walking its backlog from one pinned on the same four windows:
             // batchCatchupCursor moves on every sweep that spends a slot, and
-            // batchCatchupRetiredWindows counts windows given up on rather than published.
-            // A non-zero retired count is a real loss of history and belongs in a report,
-            // not just a log line.
+            // batchCatchupRetiredWindows counts every retirement to the slow retry lane;
+            // batchCatchupRetiredPending is how many still wait there unpublished, and a
+            // value that never falls is history the federation will not co-sign.
             batchCatchupCursor:         this._catchupCursor,
             batchCatchupRetiredWindows: this.batchCatchupRetiredWindows,
+            batchCatchupRetiredPending:   this._retiredWindows.size,
+            batchCatchupRetiredRecovered: this.batchCatchupRetiredRecovered,
             batchCatchupBacklogIntervalMs: this.batchCatchupBacklogIntervalMs,
             // Landed-batch pruning. bufferedWindowsPending climbing while
             // both pruned counters stay flat is a hub that hears no batch pushes AND

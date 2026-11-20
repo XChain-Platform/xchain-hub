@@ -177,14 +177,25 @@ module.exports = {
                 let v = await this.verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid),
                                                                    { rejectVersions: [0, 2] });
                 if(v === 'verified'){
-                    this._deferredFinalized.delete(key);
-                    if(!(await this.verifyFinalizedAgainstLocal(
-                        d.matches, entry.calls, entry.rewards, entry.quorumRows))){
-                        logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
-                                     'announced content no longer matches our DB; dropping the back-fill');
+                    // A content mismatch is a decided rejection and drops the entry; a
+                    // thrown read or write keeps it for the next pass. A retry is safe:
+                    // backfillBatch stamps only rows still archive-eligible, and the TTL
+                    // above still bounds the entry.
+                    try {
+                        if(!(await this.verifyFinalizedAgainstLocal(
+                            d.matches, entry.calls, entry.rewards, entry.quorumRows))){
+                            this._deferredFinalized.delete(key);
+                            logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
+                                         'announced content no longer matches our DB; dropping the back-fill');
+                            continue;
+                        }
+                        await this.applyFinalized(d, entry.sender, entry.calls, entry.rewards, entry.quorumRows);
+                    } catch(werr){
+                        logger.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but ' +
+                                     'its back-fill FAILED (' + (werr && werr.message) + '); entry retained for a later drain');
                         continue;
                     }
-                    await this.applyFinalized(d, entry.sender, entry.calls, entry.rewards, entry.quorumRows);
+                    this._deferredFinalized.delete(key);
                     logger.info('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE; stamped');
                 } else if(String(v).startsWith('rejected')){
                     this._deferredFinalized.delete(key);

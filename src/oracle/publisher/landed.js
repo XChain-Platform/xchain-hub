@@ -85,6 +85,7 @@ module.exports = {
             this._windows.delete(w);
             let takeover = this._takeoverTimers.get(w);
             if (takeover) { clearTimeout(takeover); this._takeoverTimers.delete(w); }
+            this._takeoverReadRetries.delete(w);
             this._takeoverUnlanded.delete(w);
         }
         if (pruned > 0) {
@@ -162,7 +163,9 @@ module.exports = {
     // failure is logged once per distinct reason and counted, so a hub that is
     // silently re-publishing duplicates is visible in getoraclepublisherstatus.
     async reconcileBacklogAgainstChain() {
-        let pending = this.pendingCatchupWindows();
+        // Due retired windows are about to be re-proposed too, so one the chain already
+        // carries is shed here rather than signed again.
+        let pending = this.pendingCatchupWindows().concat(this.dueRetiredWindows()).sort((a, b) => a - b);
         if (pending.length === 0) return 0;
         let first = this.windowPlan.rangeOf(pending[0]).first;
         let last  = this.windowPlan.rangeOf(pending[pending.length - 1]).last;
@@ -180,7 +183,7 @@ module.exports = {
         }
         if (pruned > 0) {
             this.chainReconcilePrunedRounds += pruned;
-            let remaining = this.pendingCatchupWindows().length;
+            let remaining = this.pendingCatchupWindows().length + this.dueRetiredWindows().length;
             logger.info('OraclePublisher: ' + pruned + ' buffered round(s) in [' + first + ',' + last +
                 '] are already carried by ' + answer.batches.length + ' valid PRICE batch(es) on ' +
                 PRICE_LANDING_COIN + '; ' + (windowsBefore - remaining) + ' of ' + windowsBefore +

@@ -176,7 +176,10 @@ module.exports = {
     // A txid-filtered miss on a checkpoint that already carries an earlier anchor (the v1
     // archive head's normal state while our own tx is unmined) reads 'absent:other-anchor'
     // and retries here too; 'rejected:txid' needs a returned row naming a different txid
-    // and stays retained. 'rejected:status' (the indexer's decoded-invalid verdict, e.g. a
+    // and stays retained. A node-class-dependent status (NODE_CLASS_DEPENDENT_STATUS) is not
+    // a rejection here, as the shared binding's isRewardCandidateRow does not reject it; it
+    // goes on to the depth, txid, version, hash and binding checks like any other row.
+    // 'rejected:status' (the indexer's decoded-invalid verdict, e.g. a
     // CHECKPOINT_SEQ replay guard) is checked BEFORE that same depth gate, so a still-shallow
     // txid can reach it, one whose ordering a pending reorg can still rewrite: today's "stale
     // replay" against a competing anchor can undecide itself once the chain resettles, so
@@ -270,7 +273,8 @@ module.exports = {
                 // byte-matches the decoded on-chain payload against it.
                 let rows = await this.db.getStateCheckpointByChain(String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq));
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
-                let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
+                let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion),
+                                                                  allowNodeClassStatus: true });
                 if(v === 'verified') await this.drainVerifiedRewardAttest(key, e);
                 else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     await this.dropDeferredRewardAttest(key);

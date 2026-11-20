@@ -197,6 +197,9 @@ module.exports = {
         this.takeoverDeclinedUnproven = 0;
         // Takeovers declined because the hub DB could not answer whether the window is on chain.
         this.takeoverDeclinedReadError = 0;
+        // windowIndex -> read-error retries spent; and takeovers given up after the last one.
+        this._takeoverReadRetries = new Map();
+        this.takeoverReadRetryExhausted = 0;
         // How long an armed follower waits, once something says a batch for
         // the window may ALREADY be on the wire, before it treats that tx as gone and
         // publishes its own. Mirrors AttestationPublisher's

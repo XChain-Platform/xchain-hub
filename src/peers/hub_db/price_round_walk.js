@@ -17,6 +17,8 @@ const MAX_POOLED_ROWS_PER_ROUND = 256;
 const MAX_POOLED_BYTES_PER_ROUND = 2 * 1024 * 1024;
 const MAX_POOLED_BYTES_PER_WALK = 32 * 1024 * 1024;
 const MAX_SPLIT_RETRY_ROUNDS = 64;
+// Consecutive walks a table may be held behind only because each one queued a new split round.
+const MAX_SPLIT_RETRY_HOLDS = 3;
 const MAX_CAPACITY_KEYS_PER_WALK = 65536;
 const MAX_SETTLED_SPLIT_ROUNDS = MAX_CAPACITY_KEYS_PER_WALK + MAX_POOLED_ROUNDS + MAX_SPLIT_RETRY_ROUNDS;
 // Per-walk cap on individual refusal lines; the walk summary carries the full count, so a restart with an empty memo stays bounded.
@@ -288,9 +290,20 @@ async function settlePooledRounds(catchup, walk) {
         await finishEntry(catchup, walk, key, entry);
     }
     if (!catchup.splitRetryRounds) catchup.splitRetryRounds = new Map();
+    const previous = retryRounds(catchup, walk.table);
     const queued = queuedSplitRetries(catchup, walk);
     catchup.splitRetryRounds.set(walk.table, queued);
     walk.splitRetryQueued = queued.size;
+    // A newly queued split round keeps the table behind for one retry walk, so the retry timer
+    // runs it. One that already had its reserved walk stays queued without holding the table
+    // behind again, or a round the byte cap keeps turning away would pin admission forever. A
+    // peer serving a fresh turned-away round on every walk gets a bounded run of such holds,
+    // and the run ends only at a walk that queues nothing new.
+    if (!catchup.splitRetryHolds) catchup.splitRetryHolds = new Map();
+    const fresh = Array.from(queued).some(digest => !previous.has(digest));
+    const holds = fresh ? (catchup.splitRetryHolds.get(walk.table) || 0) + 1 : 0;
+    catchup.splitRetryHolds.set(walk.table, holds);
+    if (fresh && holds <= MAX_SPLIT_RETRY_HOLDS) walk.leftBehind = true;
 }
 
 module.exports = {

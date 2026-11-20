@@ -175,6 +175,7 @@ function installPublisher(carried) {
     publisher = Object.assign({}, queueMethods, {
         _publishedRounds: new Set([BATCH_ROUND, SELF_ROUND]),
         _assembledWindows: new Set([0]),
+        _retiredWindows: new Map(),
         _landed: [],
         roundsCarriedByChain: async (rounds) => new Set(rounds.filter(r => carried.includes(r))),
         markRoundLanded(r) { this._landed.push(r); }, unmarkRoundLanded(r) { this._landed = this._landed.filter(x => x !== r); },

@@ -154,6 +154,7 @@ module.exports = {
         this._windows.clear();
         for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
         this._takeoverTimers.clear();
+        this._takeoverReadRetries.clear();
         this._takeoverUnlanded.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
         if (this._catchupSweepTimer) { clearTimeout(this._catchupSweepTimer); this._catchupSweepTimer = null; }

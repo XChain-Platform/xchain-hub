@@ -30,6 +30,11 @@ const logger = getLogger();
 // takeoverAmbiguousCooldownMs, so this is generous by orders of magnitude.
 const AMBIGUOUS_WINDOW_MEMO_MAX = 256;
 
+// Re-attempts after a takeover declined because the hub DB could not answer. The
+// timer that brought the attempt here is gone and the window is memoized, so without
+// a re-arm one transient DB fault cancels this hub's cover for the window.
+const TAKEOVER_READ_RETRY_MAX = 6;
+
 module.exports = {
 
     // ----- Rank-staggered takeover -----
@@ -79,6 +84,7 @@ module.exports = {
             this.takeoverDeclinedReadError = (this.takeoverDeclinedReadError || 0) + 1;
             logger.warn('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
                 ' are already on chain; declining takeover');
+            this.retryTakeoverAfterReadError(windowIndex);
             return false;
         }
         // 2. FAIL CLOSED when this hub has never observed ANY batch on chain. The
@@ -87,10 +93,14 @@ module.exports = {
         // and I did not hear" from "the leader is dark". Taking over on that
         // ambiguity double-pays DOGE and puts a duplicate batch on chain, so a hub
         // with an unproven feed declines every takeover and says so once.
-        if (!(await this.observationFeedProven())) {
+        let feedState = {};
+        if (!(await this.observationFeedProven(feedState))) {
             // Count every decline (a DB error in the proof check lands here too), so the
             // polled status can tell a deaf feed from failover that was never needed.
+            // Only the DB error re-arms: a feed that read cleanly and is still dark
+            // declines for good, as documented.
             this.takeoverDeclinedUnproven = (this.takeoverDeclinedUnproven || 0) + 1;
+            if (feedState.readError) this.retryTakeoverAfterReadError(windowIndex);
             if (!this._takeoverDarkWarned) {
                 this._takeoverDarkWarned = true;
                 logger.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
@@ -100,6 +110,7 @@ module.exports = {
             }
             return false;
         }
+        this._takeoverReadRetries.delete(windowIndex);
 
         if (this.bufferedRange(first, last).length === 0) {
             this._takeoverUnlanded.delete(windowIndex);
@@ -231,17 +242,46 @@ module.exports = {
         this._takeoverTimers.set(windowIndex, timer);
     },
 
+    // Re-arm a takeover that declined on an unreadable DB, a bounded number of times. Every
+    // retry re-enters runTakeoverAttempt from the top, so the on-chain check still has to
+    // read cleanly before anything is published.
+    retryTakeoverAfterReadError(windowIndex) {
+        if (this._stopped || !this.db) return;
+        let used = (this._takeoverReadRetries.get(windowIndex) || 0) + 1;
+        if (used > TAKEOVER_READ_RETRY_MAX) {
+            this._takeoverReadRetries.delete(windowIndex);
+            this.takeoverReadRetryExhausted++;
+            logger.error('OraclePublisher: takeover of window ' + windowIndex + ' still cannot read the hub ' +
+                'DB after ' + TAKEOVER_READ_RETRY_MAX + ' retries; this hub no longer covers it until restart');
+            return;
+        }
+        this._takeoverReadRetries.set(windowIndex, used);
+        logger.warn('OraclePublisher: re-arming takeover of window ' + windowIndex + ' after a DB read ' +
+            'error (retry ' + used + ' of ' + TAKEOVER_READ_RETRY_MAX + ')');
+        this.rearmTakeover(windowIndex, this.takeoverReadRetryDelayMs());
+    },
+
+    // One full rotation of the rank stagger. Every peer's slot sits at a distinct step
+    // below one rotation, so a retry spaced a whole rotation apart lands on a step that no
+    // other rank's first attempt or read-error retry uses.
+    takeoverReadRetryDelayMs() {
+        let count = (this._lastRankState && this._lastRankState.publisherCount) || 2;
+        return Math.max(1, count * this.failoverWindowBlocks * this.approxBlockMs);
+    },
+
     // Has a landed batch EVER reached this hub? Memoized true only: a feed that is
     // dark now can come up later, and a fresh federation legitimately has nothing to
     // observe until its first window lands, so this arms itself rather than needing
-    // an operator to flip it.
-    async observationFeedProven() {
+    // an operator to flip it. `state.readError` is set when the answer is false only
+    // because the DB could not be read.
+    async observationFeedProven(state) {
         if (this._observationProven) return true;
         if (!this.db) return false;
         try {
             let rows = await this.db.hasPriceSnapshotsByConsensusProof();
             if (rows && rows.length) this._observationProven = true;
         } catch (e) {
+            if (state) state.readError = true;
             logger.warn(nodeUtil.format('OraclePublisher: cannot confirm the on-chain observation feed; ' +
                 'takeover stays disarmed: ', e && e.message));
         }

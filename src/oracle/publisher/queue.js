@@ -190,6 +190,7 @@ module.exports = {
             // The window memo is the third suppressor: an assembled window is never
             // re-assembled, so a retracted window would never be rebuilt without this.
             this._assembledWindows.delete(this.windowIndexOf(r));
+            this._retiredWindows.delete(this.windowIndexOf(r));
         }
         // The fourth: the buffer itself, which noteBatchLanded shed when the batch
         // landed. Without the material back, an un-suppressed window has nothing to

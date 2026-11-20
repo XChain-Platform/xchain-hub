@@ -23,6 +23,7 @@
 'use strict';
 
 const axios = require('axios');
+const { NODE_CLASS_DEPENDENT_STATUS } = require('../anchor_proof_binding.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -67,6 +68,11 @@ module.exports = {
     //                    {1,2}, the archive-carrying set ARCHIVE_VERSIONS names in
     //                    findExistingCheckpointAnchor, so an archive anchor cannot pose
     //                    as a checkpoint anchor).
+    //   expect.allowNodeClassStatus - when true, a NODE_CLASS_DEPENDENT_STATUS 'invalid'
+    //                    status does not short-circuit to 'rejected:status' and must still
+    //                    pass every depth, txid, version and hash check below. Only the
+    //                    reward-attestation drain sets it, matching isRewardCandidateRow;
+    //                    BUNDLE_DONE stamping and the archive gate stay strict.
     // Without `expect` this only proves "this checkpoint is anchored at depth".
     //
     // FAIL CLOSED against an un-upgraded indexer: one that predates the txid filter
@@ -109,7 +115,9 @@ module.exports = {
             if(wantTxid && res && res.checkpoint_anchored) return 'absent:other-anchor';
             return 'absent';
         }
-        if(/^invalid/i.test(String(res.status || ''))) return 'rejected:status';
+        let status = String(res.status || '');
+        if(/^invalid/i.test(status) &&
+           !(want.allowNodeClassStatus === true && NODE_CLASS_DEPENDENT_STATUS.test(status))) return 'rejected:status';
         if(!(Number(res.confirmations) >= this.dogeConfirmations)) return 'shallow';
         // Re-check the binding client-side. The indexer already filtered, so this only
         // fires against an indexer that ignored the filter (pre-upgrade) or answered

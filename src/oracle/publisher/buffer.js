@@ -104,13 +104,15 @@ module.exports = {
 
     // Do two buffer entries carry the same signable content? Compares exactly the
     // fields buildPriceBatchPayload reads, pair order included only through a sorted
-    // key, since the builder normalizes ordering itself. bufferedAt is metadata and is
-    // deliberately excluded: re-stamping it would rewrite the file on every replay.
+    // key, since the builder normalizes ordering itself, and the admission map with
+    // its presence, since an absent map is a legacy round. bufferedAt is metadata and
+    // is deliberately excluded: re-stamping it would rewrite the file on every replay.
     sameBufferedRound(a, b) {
         if (parseInt(a.round) !== parseInt(b.round)) return false;
         if (parseInt(a.timestamp) !== parseInt(b.timestamp)) return false;
         if (parseInt(a.btcBlockHeight) !== parseInt(b.btcBlockHeight)) return false;
-        return this.pairKey(a.pairs) === this.pairKey(b.pairs);
+        if (this.pairKey(a.pairs) !== this.pairKey(b.pairs)) return false;
+        return this.admitKey(a.admitBlocks) === this.admitKey(b.admitBlocks);
     },
 
     pairKey(pairs) {
@@ -118,6 +120,18 @@ module.exports = {
             .map(p => String(p.coinPair || p.pair) + '=' + String(p.price))
             .sort()
             .join('|');
+    },
+
+    // '' for a legacy round, else the canonical encoding the signed bytes carry. A map
+    // that cannot be encoded gets a raw key no canonical encoding can equal, so it
+    // never matches a signable map and an identical copy still matches itself.
+    admitKey(map) {
+        if (map === null || map === undefined) return '';
+        try {
+            return this.admission.encodeAdmitBlocks(map);
+        } catch (e) {
+            return '!' + JSON.stringify(Object.keys(map).sort().map(k => [k, String(map[k])]));
+        }
     },
 
     // The buffer file split into usable round entries and the raw lines that are not
