@@ -24,7 +24,9 @@ const { policyHash } = require('../../../../cross_chain/bridge/policy_hash.js');
 const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
-const { comparable, archivedIdRefusal, unheldRowRefusal } = require('../unheld_row.js');
+const {
+    comparable, archivedIdRefusal, archivedSignaturesRefusal, unheldRowRefusal
+} = require('../unheld_row.js');
 const logger = getLogger();
 
 const LIST_SHARE_PRODUCER_GATE = 'list_share_producer_activation.LIST_SHARE_PRODUCER_ACTIVATION';
@@ -49,7 +51,7 @@ function rowShapeRefusal(row, idKey, otherKey){
     // Refuse a row that also carries the other kind's id
     const other = row[otherKey];
     if(other !== undefined && other !== null && other !== '') return 'also carries ' + otherKey;
-    return archivedIdRefusal(row);
+    return archivedIdRefusal(row) || archivedSignaturesRefusal(row);
 }
 
 // Admit either status on an unheld transfer: one is retracted in place and archived again,

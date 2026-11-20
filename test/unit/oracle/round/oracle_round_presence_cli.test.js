@@ -161,11 +161,12 @@ function paramsOf(call) {
                 ['node', 'cli', '--hubs', [HUB_A, HUB_B, HUB_C].join(',')], {}));
 
             expect(code).to.equal(0);
-            // One probe (hub A answered usably), then three pinned asks.
-            expect(post.callCount).to.equal(4);
+            // Every hub is probed before the three pinned asks.
+            expect(post.callCount).to.equal(6);
             expect(post.getCall(0).args[0]).to.equal(HUB_A);
+            expect(paramsOf(post.getCall(3))).to.deep.equal({ from_round: 10, to_round: 12 });
+            expect(paramsOf(post.getCall(5))).to.deep.equal({ from_round: 10, to_round: 12 });
         }
-
         async function givesUpWithExit2OnlyTest15() {
             const { cli } = loadCli({
                 [HUB_A]: p => p.to_round == null ? emptyPresence() : presence(p.from_round, p.to_round, { 25: 'missing', 26: 'missing', 27: 'missing' }),

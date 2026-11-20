@@ -24,7 +24,8 @@
 
 const archivePublishGate = require('../../archive_publish_gate.js');
 
-// The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock.
+// The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock;
+// verifyArchiveAgainstLocal has already bound archive.network to the follower's own wrapper row.
 function archiveWrapperCapability(archive, wrapperSnapshotBlock){
     return archivePublishGate.isArchivePublishActive(wrapperSnapshotBlock, archive.network)
         ? 'archive_publish' : 'oracle_publish';

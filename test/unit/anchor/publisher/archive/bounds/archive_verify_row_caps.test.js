@@ -30,7 +30,7 @@ function buildPub(){
 }
 
 function archive(over){
-    return Object.assign({ matches: [] }, over);
+    return Object.assign({ network: 'regtest', matches: [] }, over);
 }
 
 function rows(count, prefix){
@@ -44,7 +44,7 @@ function registerRowKindTests(){
         for(const key of keys){
             for(const value of [{}, 1]){
                 const { pub, calls } = buildPub();
-                expect(await pub.verifyArchiveAgainstLocal(archive({ [key]: value }), 1), key)
+                expect(await pub.verifyArchiveAgainstLocal(archive({ [key]: value }), 1, 'regtest'), key)
                     .to.equal(false);
                 expect(calls.bridge + calls.checkpoint + calls.tombstone, key).to.equal(0);
             }
@@ -56,7 +56,7 @@ function registerRowKindTests(){
             calls: [], rewards: [], capability_snapshots: [], bridge_transfers: [],
             policy_snapshots: [], list_snapshots: [], state_checkpoints: [],
             price_snapshots: [], price_tombstones: []
-        }), 1)).to.equal(true);
+        }), 1, 'regtest')).to.equal(true);
     });
 }
 
@@ -65,7 +65,7 @@ describe('archive verifier row caps', () => {
         const { pub, calls } = buildPub();
         expect(await pub.verifyArchiveAgainstLocal(archive({
             policy_snapshots: rows(ARCHIVE_MAX_POLICY_ROWS + 1, 'p')
-        }), 1)).to.equal(false);
+        }), 1, 'regtest')).to.equal(false);
         expect(calls.policy).to.equal(0);
     });
 
@@ -74,7 +74,7 @@ describe('archive verifier row caps', () => {
         expect(await pub.verifyArchiveAgainstLocal(archive({
             policy_snapshots: rows(ARCHIVE_MAX_POLICY_ROWS, 'p'),
             list_snapshots: rows(ARCHIVE_MAX_LIST_ROWS, 'l')
-        }), 1)).to.equal(true);
+        }), 1, 'regtest')).to.equal(true);
         expect(calls.policy).to.equal(ARCHIVE_MAX_POLICY_ROWS);
         expect(calls.list).to.equal(ARCHIVE_MAX_LIST_ROWS);
     });
@@ -83,7 +83,7 @@ describe('archive verifier row caps', () => {
         const { pub, calls } = buildPub();
         expect(await pub.verifyArchiveAgainstLocal(archive({
             list_snapshots: rows(ARCHIVE_MAX_LIST_ROWS + 1, 'l')
-        }), 1)).to.equal(false);
+        }), 1, 'regtest')).to.equal(false);
         expect(calls.list).to.equal(0);
     });
 
@@ -91,13 +91,13 @@ describe('archive verifier row caps', () => {
         const atCap = Array.from({ length: ARCHIVE_MAX_PRICE_ROUNDS }, (_, round) =>
             [0, 1, 2].map(pair => ({ round_number: round, coin_pair: String(pair) }))).flat();
         const accepted = buildPub();
-        expect(await accepted.pub.verifyArchiveAgainstLocal(archive({ price_snapshots: atCap }), 1))
+        expect(await accepted.pub.verifyArchiveAgainstLocal(archive({ price_snapshots: atCap }), 1, 'regtest'))
             .to.equal(true);
         expect(accepted.calls.price).to.equal(1);
 
         const refused = buildPub();
         const overCap = atCap.concat({ round_number: ARCHIVE_MAX_PRICE_ROUNDS, coin_pair: '0' });
-        expect(await refused.pub.verifyArchiveAgainstLocal(archive({ price_snapshots: overCap }), 1))
+        expect(await refused.pub.verifyArchiveAgainstLocal(archive({ price_snapshots: overCap }), 1, 'regtest'))
             .to.equal(false);
         expect(refused.calls.price).to.equal(0);
     });
@@ -108,13 +108,13 @@ describe('archive verifier row caps', () => {
             { list_snapshots: rows(2, 'same').map(row => ({ snapshot_id: 'same' })) },
             { policy_snapshots: 'not-an-array' }
         ]){
-            expect(await buildPub().pub.verifyArchiveAgainstLocal(archive(over), 1)).to.equal(false);
+            expect(await buildPub().pub.verifyArchiveAgainstLocal(archive(over), 1, 'regtest')).to.equal(false);
         }
     });
 
     registerRowKindTests();
 
     it('allows an archive with none of the capped keys', async () => {
-        expect(await buildPub().pub.verifyArchiveAgainstLocal(archive({}), 1)).to.equal(true);
+        expect(await buildPub().pub.verifyArchiveAgainstLocal(archive({}), 1, 'regtest')).to.equal(true);
     });
 });

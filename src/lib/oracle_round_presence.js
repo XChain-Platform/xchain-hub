@@ -42,8 +42,8 @@
 const crypto = require('crypto');
 
 // Outcome classes, most-to-least authoritative. A round with ANY finalized pair
-// finalized here; one with only skipped rows was recorded as lost here; 'disputed'
-// is the reorg-retraction state; 'missing' is the absence this module exists for.
+// finalized here. Any disputed pair records a reorg retraction; skipped wins only
+// when every recognized row is skipped. Missing is the absence this module exposes.
 const STATUS_FINALIZED = 'finalized';
 const STATUS_SKIPPED   = 'skipped';
 const STATUS_DISPUTED  = 'disputed';
@@ -118,8 +118,8 @@ function summarizeRoundPresence(rows, fromRound, toRound) {
             continue;
         }
         entry.status = entry.finalized_pairs > 0 ? STATUS_FINALIZED
-                     : entry.skipped_pairs   > 0 ? STATUS_SKIPPED
                      : entry.disputed_pairs  > 0 ? STATUS_DISPUTED
+                     : entry.skipped_pairs   > 0 ? STATUS_SKIPPED
                      : STATUS_MISSING;   // rows with an unrecognised status: presence unproven
         out.push(entry);
     }

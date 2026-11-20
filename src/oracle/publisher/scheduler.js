@@ -106,6 +106,7 @@ module.exports = {
     // carries, THEN re-propose what is left. Never throws: the sweep must run even
     // when the reconcile cannot, or a hub with no indexer would never catch up.
     async reconcileThenSweep() {
+        if (this._stopped) return 0;
         try { await this.reconcileBacklogAgainstChain(); }
         catch (e) { logger.error(nodeUtil.format('OraclePublisher: backlog reconcile against the chain failed:', e)); }
         try { return this.sweepBufferCatchup(); }
@@ -202,9 +203,6 @@ module.exports = {
             // Retiring costs no slot: a hopeless window must not displace a window that
             // could still publish, which is the whole point of retiring it.
             if (this.retireExhaustedWindow(w)) { retired.push(w); continue; }
-            let seen = this._catchupAttempts.get(w);
-            if (seen) seen.count++;
-            else      this._catchupAttempts.set(w, { count: 1, firstAt: Date.now() });
             take.push(w);
         }
         if (take.length === 0 && retired.length === 0) return 0;
@@ -219,6 +217,14 @@ module.exports = {
         }
         for (let w of take) this.queueWindowAssembly(w);
         return take.length;
+    },
+
+    // Only a completed signing round that came back short counts toward
+    // retirement. Withholds before signing remain eligible for later sweeps.
+    noteSigningShortfall(windowIndex) {
+        const seen = this._catchupAttempts.get(windowIndex);
+        if (seen) seen.count++;
+        else      this._catchupAttempts.set(windowIndex, { count: 1, firstAt: Date.now() });
     },
 
     // Retire one window from the catch-up sweep when it has failed enough attempts, for

@@ -141,6 +141,7 @@ module.exports = {
     // Start watching broadcasts to confirmation. Unref'd so it never holds the process
     // open, and a no-op when the cadence is disabled or nothing could ever be read.
     startConfirmationWatchdog() {
+        if (this._stopped) return;
         if (this._confirmTimer) return;
         if (!this.confirmCheckIntervalMs) return;
         if (!this.encoder || !this.dogeAddress) return;

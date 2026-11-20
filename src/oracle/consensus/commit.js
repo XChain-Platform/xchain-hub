@@ -182,13 +182,16 @@ module.exports = {
         // cleared quorum (item 4941).
         let validatorCount = this.countDistinctMembers(pending, pending.prepares);
         let proof = JSON.stringify(sortedSignatures(pending));
+        const requireCapabilityRows = pending.memberPubkeys instanceof Set &&
+            pending.memberPubkeys.size > 0;
 
         const maxAttempts = 3;
         let storedAttempt = 0;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 await this.storeSnapshot(round, pending.prices, validatorCount, proof,
-                    pending.btcBlockHeight, pending.btcBlockTime, pending.admitBlocks);
+                    pending.btcBlockHeight, pending.btcBlockTime, pending.admitBlocks,
+                    { requireCapabilityRows });
                 storedAttempt = attempt;
                 break;
             } catch (err) {

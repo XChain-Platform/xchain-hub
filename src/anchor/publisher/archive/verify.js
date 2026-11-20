@@ -30,7 +30,7 @@
 const canonicalForms = require('../canonical_forms.js');
 const { archiveCapabilityWants } = require('./capability_wants.js');
 const { archiveWithinRowCaps } = require('./archive_row_caps.js');
-const { unheldRowRefusal } = require('./unheld_row.js');
+const { archivedSignaturesRefusal, unheldRowRefusal } = require('./unheld_row.js');
 const { supersededBySeq } = require('../../checkpoint_engine/superseded_rule.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
@@ -41,6 +41,19 @@ const logger = getLogger();
 const UNHELD_MATCH_STATUSES = Object.freeze(['finalized', 'retracted']);
 const UNHELD_CALL_STATUSES = Object.freeze(['finalized', 'retracted']);
 
+function boundToWrapperNetwork(archive, wrapperNetwork){
+    if(wrapperNetwork != null && archive && String(archive.network) === String(wrapperNetwork)) return true;
+    logger.warn('StateAnchorPublisher: archive body network ' + String(archive && archive.network) +
+                ' differs from wrapper network ' + String(wrapperNetwork) + '; NOT signing');
+    return false;
+}
+
+function signaturesShapeOk(row, label){
+    const refusal = archivedSignaturesRefusal(row);
+    if(!refusal) return true;
+    logger.warn('StateAnchorPublisher: archive ' + label + ' ' + refusal + '; NOT signing');
+    return false;
+}
 module.exports = {
 
     // Every archived match's TERMS must byte-equal our own cross_chain_matches
@@ -53,11 +66,10 @@ module.exports = {
     // resolution (set equality, not subset, so a leader can neither inject a
     // fake validator nor omit a real one).
     //
-    // `wrapperSnapshotBlock` is the archive wrapper checkpoint's snapshot_block (the
-    // caller's own byte-matched row, never the archive body), needed because the
-    // completeness check below has to know which oracle_publish group buildArchive
-    // was obliged to emit for the wrapper itself.
-    async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
+    // Callers pass the block and network of their own byte-matched wrapper row. The block picks the
+    // required wrapper group; the network must be present and equal the body's, as it picks recovery's quorum rules.
+    async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock, wrapperNetwork){
+        if(!boundToWrapperNetwork(archive, wrapperNetwork)) return false;
         if(!archiveWithinRowCaps(archive, logger)) return false;
         for(let am of archive.matches){
             if(!(await this.verifyArchivedMatch(am))) return false;
@@ -116,6 +128,7 @@ module.exports = {
 
     // One archived match against our own row and the cross_chain set at its block.
     async verifyArchivedMatch(am){
+        if(!signaturesShapeOk(am, 'match ' + String(am && am.match_id).substring(0, 16) + '...')) return false;
         let rows = await this.db.getCrossChainMatchByMatchId(am.match_id);
         if(rows && rows.length > 0){
             let localTerms    = canonicalForms.serializeMatch(rows[0]);
@@ -163,6 +176,8 @@ module.exports = {
 
     // One archived XCALL relay record, the same way.
     async verifyArchivedCall(ac){
+        if(!signaturesShapeOk(ac, 'call ' + String(ac && ac.call_id).substring(0, 16) +
+           '... (' + String(ac && ac.phase) + ')')) return false;
         let rows = await this.db.getCrossChainCallByCallIdAndPhase(ac.call_id, ac.phase);
         if(rows && rows.length > 0){
             let localTerms    = canonicalForms.serializeCall(rows[0]);

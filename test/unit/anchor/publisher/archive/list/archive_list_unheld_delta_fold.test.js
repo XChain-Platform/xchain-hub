@@ -112,13 +112,22 @@ describe('archive list follower unheld delta rows', function () {
         expect(await pub.verifyArchivedListSnapshot(forgedRemoved, archiveOf([forgedRemoved]))).to.equal(false);
     });
 
+    it('refuses an unheld full row whose removed array was rewritten after signing', async function () {
+        const pub = publisher();
+        const { first } = chainFor(pub);
+        const forged = { ...first, removed: JSON.stringify(['bc1qmemberalpha']) };
+
+        expect(await pub.verifyArchivedListSnapshot(first, archiveOf([first]))).to.equal(true);
+        expect(await pub.verifyArchivedListSnapshot(forged, archiveOf([forged]))).to.equal(false);
+    });
+
     it('folds an unheld delta onto a predecessor carried in the same archive', async function () {
         const pub = publisher();
         const { first, second } = chainFor(pub);
         const forged = { ...second, added: JSON.stringify(['doge1qmemberforged']) };
 
-        expect(await pub.verifyArchiveAgainstLocal(archiveOf([second, first]), null)).to.equal(true);
-        expect(await pub.verifyArchiveAgainstLocal(archiveOf([forged, first]), null)).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archiveOf([second, first]), null, NETWORK)).to.equal(true);
+        expect(await pub.verifyArchiveAgainstLocal(archiveOf([forged, first]), null, NETWORK)).to.equal(false);
     });
 
     it('refuses an unheld delta with no predecessor here or in the archive', async function () {

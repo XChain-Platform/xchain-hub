@@ -37,6 +37,7 @@ function oracleConsensusQuorumFinalizedSnapshotStorSuite1MakePending() {
     }],
     btcBlockHeight: 100,
     btcBlockTime: 1700000000,
+    memberPubkeys: new Set(['pkA', 'pkB', 'pkC']),
     finalized: true // set by checkCommitQuorum before store
   };
 }
@@ -62,6 +63,7 @@ function registerOracleConsensusQuorumFinalizedSnapshotStorSuite1Part1() {
     oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.on('round:finalized', e => events.push(e));
     await oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalizeCommittedRound(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND);
     expect(store.calledOnce).to.be.true;
+    expect(store.firstCall.args[7]).to.deep.equal({ requireCapabilityRows: true });
     expect(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.pendingRounds.has(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND)).to.be.false; // state cleared only after success
     expect(oracleConsensusQuorumFinalizedSnapshotStorSuite1Oc.finalized.has(oracleConsensusQuorumFinalizedSnapshotStorSuite1ROUND)).to.be.true;
     expect(events).to.have.length(1);

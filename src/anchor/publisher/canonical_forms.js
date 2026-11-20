@@ -186,7 +186,8 @@ const foldPublisherMethods = {
         let signingSet = await this.archiveSigningSet(mine);
         if(!signingSet.some(v => String(v.pubkey).toLowerCase() === myPubkey)) return null;
         let archive = this.decodeArchiveProposal(a);
-        if(!archive || !(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))) return null;
+        if(!archive || !(await this.verifyArchiveAgainstLocal(
+            archive, Number(mine.snapshot_block), mine.network))) return null;
         if(!(await this.claimArchiveWrapperSlot(canonical))) return null;
         return {
             batchSeq: Number(a.batch_seq), sender, cp, archive,
@@ -282,8 +283,7 @@ const foldPublisherMethods = {
             else if(txid !== found) return null;
         }
         if(archiveSection){
-            let requested = { match_batch_seq: Number(archiveSection.batchSeq),
-                              author: String(this.dogeAddress || '') };
+            let requested = { match_batch_seq: Number(archiveSection.batchSeq), author: String(this.dogeAddress || '') };
             let row = await this.indexerCall('DOGE', 'getarchiveanchor', requested);
             let found = accept(row, r => isArchiveAnchorRow(r) &&
                 Number(r.match_batch_seq) === requested.match_batch_seq &&
@@ -292,7 +292,7 @@ const foldPublisherMethods = {
             if(txid === null) txid = found;
             else if(txid !== found) return null;
         }
-        return txid ? { exists: true, txid } : null;
+        return txid ? { exists: true, txid, version: FOLD_SECTION_VERSION } : null;
     },
 
     async completeFoldArchive(archiveSection, signer, txid){

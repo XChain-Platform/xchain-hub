@@ -55,6 +55,14 @@ function row(round, status, extra) {
             expect(s.rounds.map(r => r.status)).to.deep.equal(['skipped', 'disputed']);
         }
 
+        function classifiesAMixedRetractedRoundAsDisputed() {
+            const s = summarizeRoundPresence([
+                row(6, 'disputed'), Object.assign(row(6, 'disputed'), { coin_pair: 'LTC/USD' }),
+                Object.assign(row(6, 'skipped'), { coin_pair: 'DOGE/USD' })
+            ], 6, 6);
+            expect(s.rounds[0]).to.include({ status: 'disputed', pairs: 3, disputed_pairs: 2, skipped_pairs: 1 });
+        }
+
         function takesTheRoundAnchorFromTheTest7() {
             let s = summarizeRoundPresence([
                 Object.assign(row(3, 'skipped'), { reference_block: 900, block_timestamp: 1700000900 }),
@@ -105,6 +113,7 @@ function row(round, status, extra) {
             it('reports a round with no rows at all as missing, not as absent from the answer', reportsARoundWithNoRowsTest4);
             it('classifies a round with any finalized pair as finalized', classifiesARoundWithAnyFinalizedTest5);
             it('classifies an all-skipped round as skipped and an all-disputed round as disputed', classifiesAnAllSkippedRoundAsTest6);
+            it('classifies a retracted round with a skip marker as disputed', classifiesAMixedRetractedRoundAsDisputed);
             it('takes the round anchor from the lowest reference_block/block_timestamp it sees', takesTheRoundAnchorFromTheTest7);
             it('ignores rows outside the requested range', ignoresRowsOutsideTheRequestedRangeTest8);
             it('returns an empty answer for a nonsensical range rather than inventing rounds', returnsAnEmptyAnswerForATest9);
@@ -236,6 +245,19 @@ function row(round, status, extra) {
             expect(c.agreed).to.be.false;
         }
 
+        function agreesOnRetractedRoundsWithDifferentSkipMarkers() {
+            const producer = summarizeRoundPresence([
+                row(6, 'disputed'), Object.assign(row(6, 'skipped'), { coin_pair: 'DOGE/USD' })
+            ], 6, 6);
+            const caughtUp = summarizeRoundPresence([row(6, 'disputed')], 6, 6);
+            const compared = comparePresence([
+                { hub: 'producer', presence: producer }, { hub: 'caught-up', presence: caughtUp }
+            ]);
+            expect(producer.digest).to.equal(caughtUp.digest);
+            expect(compared.agreed).to.equal(true);
+            expect(compared.divergent).to.deep.equal([]);
+        }
+
         function comparepresenceSuite21() {
             it('names every round the hubs disagree about, with each hub\'s status', namesEveryRoundTheHubsDisagreeTest22);
             it('agrees once every hub records the lost round (the post-fix state)', agreesOnceEveryHubRecordsTheTest23);
@@ -243,6 +265,7 @@ function row(round, status, extra) {
             it('counts one vote per hub identity, so a repeated endpoint is not a second opinion', countsOneVotePerHubIdentityTest25);
             it('drops an answer with no rounds array instead of counting it toward the gate', dropsAnAnswerWithNoRoundsTest26);
             it('treats a hub that omitted a round entirely as missing for that round', treatsAHubThatOmittedATest27);
+            it('agrees on a retracted round when only one view retains a skip marker', agreesOnRetractedRoundsWithDifferentSkipMarkers);
         }
 
         registercomparepresence20 = function registerSuite() {

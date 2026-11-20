@@ -302,7 +302,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
         ], { batchSeq: 7 });
-        expect(found).to.deep.equal({ exists: true, txid });
+        expect(found).to.deep.equal({ exists: true, txid, version: 3 });
         expect(asked.find(a => a.method === 'getanchoraction').params.version).to.equal(3);
     });
 

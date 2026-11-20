@@ -199,8 +199,8 @@ function makeTerminator(child) {
 function runCli(args, prompt, cwd, auth, timeoutMs) {
     return new Promise((resolve, reject) => {
         let settled = false;
-        let stdout = '';
-        let stderr = '';
+        const stdoutChunks = [];
+        const stderrChunks = [];
         const safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
         const safeReject  = (e) => { if (!settled) { settled = true; reject(e); } };
 
@@ -227,8 +227,8 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
             rejectTransient('claude-spawn: timeout after ' + timeoutMs + 'ms');
         }, timeoutMs);
 
-        child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
-        child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+        child.stdout.on('data', (chunk) => { stdoutChunks.push(chunk); });
+        child.stderr.on('data', (chunk) => { stderrChunks.push(chunk); });
 
         rejectOnChildErrors(child, timer, terminate, rejectTransient);
 
@@ -236,6 +236,8 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
         child.on('close', (code) => {
             clearTimeout(timer);
             clearEscalation();
+            const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+            const stderr = Buffer.concat(stderrChunks).toString('utf8');
             const outcome = closeOutcome(code, stdout, stderr);
             if (outcome.transient === true)       rejectTransient(outcome.message);
             else if (outcome.transient === false) rejectHard(outcome.message, outcome.kind);

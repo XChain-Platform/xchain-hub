@@ -224,6 +224,36 @@ describe('JSON-RPC router errors on versionless, bodyless and batch requests', f
     });
 });
 
+describe('JSON-RPC null params normalization', function () {
+    this.timeout(10000);
+    const srv = serveApp({ rpcController: {
+        ping: () => 'pong',
+        echo: ({ limit }) => ({ limit: limit === undefined ? null : limit })
+    } });
+
+    it('treats null params like omitted params for a destructuring handler', async () => {
+        const r = await postJson(srv(), { jsonrpc: '2.0', method: 'echo', params: null, id: 1 });
+        expect(r.json).to.deep.equal({ jsonrpc: '2.0', result: { limit: null }, id: 1 });
+        expect(r.text).to.not.match(/Cannot destructure|TypeError/);
+    });
+
+    it('keeps no-argument methods working with null params', async () => {
+        const r = await postJson(srv(), { jsonrpc: '2.0', method: 'ping', params: null, id: 2 });
+        expect(r.json).to.deep.equal({ jsonrpc: '2.0', result: 'pong', id: 2 });
+    });
+
+    it('normalizes only null params in a batch', async () => {
+        const r = await postJson(srv(), [
+            { jsonrpc: '2.0', method: 'echo', params: null, id: 1 },
+            { jsonrpc: '2.0', method: 'echo', params: { limit: 5 }, id: 2 }
+        ]);
+        expect(r.json).to.deep.equal([
+            { jsonrpc: '2.0', result: { limit: null }, id: 1 },
+            { jsonrpc: '2.0', result: { limit: 5 }, id: 2 }
+        ]);
+    });
+});
+
 describe('createApp ingress middleware order', function () {
     it('registers every security layer in its required runtime order', () => {
         const { app } = createApp(buildCtx());
@@ -241,7 +271,8 @@ describe('createApp ingress middleware order', function () {
         expect(position('feedPortAllowlistMiddleware')).to.be.lessThan(firstRoute);
         expect(firstRoute).to.be.lessThan(position('rpcBatchGuard'));
         expect(position('rpcBatchGuard')).to.be.lessThan(position('reqBodyShim'));
-        expect(position('reqBodyShim')).to.be.lessThan(position('jsonRpcEnvelopeRepair'));
+        expect(position('reqBodyShim')).to.be.lessThan(position('rpcNullParamsShim'));
+        expect(position('rpcNullParamsShim')).to.be.lessThan(position('jsonRpcEnvelopeRepair'));
         expect(names[names.length - 1]).to.equal('handleTerminalError');
     });
 

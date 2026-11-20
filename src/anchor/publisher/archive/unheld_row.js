@@ -36,6 +36,12 @@ function archivedIdRefusal(row){
     return archivedInteger(row && row.id) ? null : 'has a malformed id';
 }
 
+// validator_signatures is left out of comparisons, but recovery requires a string.
+function archivedSignaturesRefusal(row){
+    return row && typeof row.validator_signatures === 'string'
+        ? null : 'has malformed validator_signatures';
+}
+
 function reserializeRefusal(row, serialized){
     if(JSON.stringify(comparable(serialized)) !== JSON.stringify(comparable(row)))
         return 'does not re-serialize unchanged with no held row';
@@ -63,6 +69,6 @@ function samePriceKey(first, second){
 }
 
 module.exports = {
-    comparable, archivedInteger, archivedIdRefusal, reserializeRefusal, unheldRowRefusal,
-    priceKeyFold, samePriceKey
+    comparable, archivedInteger, archivedIdRefusal, archivedSignaturesRefusal,
+    reserializeRefusal, unheldRowRefusal, priceKeyFold, samePriceKey
 };

@@ -95,7 +95,7 @@ describe('archive checkpoint signature set against our held row', () => {
         const pub = buildPub({ checkpoint: copy(held) });
         expect(await pub.verifyArchiveAgainstLocal(archive({
             state_checkpoints: [pub.serializeStateCheckpoint(held)]
-        }))).to.equal(true);
+        }), null, 'regtest')).to.equal(true);
     });
 
     it('refuses a checkpoint whose signature set differs from our held row, as the anchor body requires', async () => {
@@ -107,7 +107,7 @@ describe('archive checkpoint signature set against our held row', () => {
             pub.parseSigs(archived.validator_signatures), SET, false)).to.equal(true);
         expect(await pub.verifyArchiveAgainstLocal(archive({
             state_checkpoints: [archived]
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 });
 
@@ -118,7 +118,7 @@ describe('archive checkpoint and price follower verification', () => {
         const prices = signPrices(pub, signaturePrices());
         expect(await pub.verifyArchiveAgainstLocal(archive({
             state_checkpoints: [cp], price_snapshots: prices
-        }))).to.equal(true);
+        }), null, 'regtest')).to.equal(true);
     });
 
     it('refuses a forged checkpoint signature', async () => {
@@ -129,7 +129,7 @@ describe('archive checkpoint and price follower verification', () => {
         }]);
         expect(await pub.verifyArchiveAgainstLocal(archive({
             state_checkpoints: [cp]
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses a signature-proofed round with its price group dropped', async () => {
@@ -138,7 +138,7 @@ describe('archive checkpoint and price follower verification', () => {
         expect(await pub.verifyArchiveAgainstLocal(archive({
             price_snapshots: prices,
             capability_snapshots: snapshots().filter(row => row.capability !== 'price')
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses a batch-proofed row the follower does not hold', async () => {
@@ -146,7 +146,7 @@ describe('archive checkpoint and price follower verification', () => {
         const batchRow = copy(vectors.P.inputs.prices.find(row => row.round_number === 12));
         expect(await pub.verifyArchiveAgainstLocal(archive({
             price_snapshots: [batchRow]
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses a batch_block_time mismatch against a held price row', async () => {
@@ -158,7 +158,7 @@ describe('archive checkpoint and price follower verification', () => {
         pub.db.findPriceSnapshotsForRound = async () => local;
         expect(await pub.verifyArchiveAgainstLocal(archive({
             price_snapshots: archived
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 
 });
@@ -182,7 +182,7 @@ describe('archive checkpoint and price follower verification', () => {
             const pub = buildPub();
             let lookups = 0;
             pub.db.findPriceSnapshotsForRound = async () => { lookups++; return []; };
-            expect(await pub.verifyArchiveAgainstLocal(archive({ price_tombstones: [row] })))
+            expect(await pub.verifyArchiveAgainstLocal(archive({ price_tombstones: [row] }), null, 'regtest'))
                 .to.equal(false);
             expect(lookups).to.equal(0);
         }
@@ -193,18 +193,18 @@ describe('archive checkpoint and price follower verification', () => {
         const pub = buildPub({ prices: [live] });
         expect(await pub.verifyArchiveAgainstLocal(archive({
             price_tombstones: [{ round_number: live.round_number, coin_pair: live.coin_pair }]
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
 
         const unheld = buildPub();
         const prices = signPrices(unheld, signaturePrices());
         const collision = { round_number: prices[0].round_number, coin_pair: prices[0].coin_pair };
         expect(await unheld.verifyArchiveAgainstLocal(archive({
             price_snapshots: prices, price_tombstones: [collision]
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
         expect(await unheld.verifyArchiveAgainstLocal(archive({
             price_snapshots: prices,
             price_tombstones: [{ round_number: prices[0].round_number, coin_pair: 'XCP/USD' }]
-        }))).to.equal(true);
+        }), null, 'regtest')).to.equal(true);
     });
 
     it('refuses a tombstone whose pair differs from an archived price row only by case or padding', async () => {
@@ -216,7 +216,7 @@ describe('archive checkpoint and price follower verification', () => {
             expect(await unheld.verifyArchiveAgainstLocal(archive({
                 price_snapshots: prices,
                 price_tombstones: [{ round_number: prices[0].round_number, coin_pair: spelling }]
-            }))).to.equal(false);
+            }), null, 'regtest')).to.equal(false);
         }
     });
 });

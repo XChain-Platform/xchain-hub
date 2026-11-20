@@ -144,4 +144,23 @@ function registerPublishOrderCase() {
         expect(announced, 'peers still hear the bundle is anchored').to.equal(1);
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
+
+    it('stamps an adopted reward with the mined bundle version', async function () {
+        let pub = makePub({ exists: true });
+        let recordedVersion = null;
+        pub.identity = { getPubkeyHex: () => ME };
+        pub.bundlePublisherOrder = async () => [ME];
+        pub.standsDownFromBundle = () => false;
+        pub.bundleHeldByIntent = async () => false;
+        pub.collectBundleAttestation = async () => ({ attested: true, attestSigs: SIGS });
+        pub.buildBundleWire = () => 'wire';
+        pub.sendBundle = async () => ({ exists: true, txid: TXID, version: 3 });
+        pub.stampBundleSections = async () => {};
+        pub.completeFoldArchive = async () => {};
+        pub.noteBundlePublished = () => {};
+        pub.announceBundleDone = () => {};
+        pub.recordBundleReward = async (...args) => { recordedVersion = args[8]; return 'ours'; };
+        await pub.publishBundle({}, 'regtest', GROUP, SNAP, false, [], { rows: 0 }, null);
+        expect(recordedVersion).to.equal(3);
+    });
 }

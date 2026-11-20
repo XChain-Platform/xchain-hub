@@ -20,7 +20,9 @@
 const listCanonical = require('../../../../cross_chain/list/canonical.js');
 const { archivedListRowRefusal } = require('../../../../cross_chain/list/archive_checks.js');
 const { getLogger } = require('../../../../observability');
-const { comparable, archivedIdRefusal, unheldRowRefusal } = require('../unheld_row.js');
+const {
+    comparable, archivedIdRefusal, archivedSignaturesRefusal, unheldRowRefusal
+} = require('../unheld_row.js');
 const logger = getLogger();
 
 // Admit only finalized unheld list snapshots because the table has no retraction path.
@@ -86,7 +88,8 @@ module.exports = {
     },
 
     async verifyArchivedListSnapshot(row, archive){
-        const refusal = archivedListRowRefusal(row) || archivedIdRefusal(row);
+        const refusal = archivedListRowRefusal(row) || archivedIdRefusal(row) ||
+            archivedSignaturesRefusal(row);
         if(refusal){
             logger.warn('StateAnchorPublisher: archive list snapshot ' +
                         String(row && row.snapshot_id).substring(0, 16) +

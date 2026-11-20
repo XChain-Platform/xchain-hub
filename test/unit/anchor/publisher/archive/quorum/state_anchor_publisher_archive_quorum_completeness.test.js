@@ -137,6 +137,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     const GROUP = SET.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                   signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
 
+    // Testnet keeps the wrapper group at oracle_publish at BLOCK, the group these cases strip.
     function verifier(resolved) {
         let { pub } = buildPub({});                         // no local reward rows: late-joiner path
         pub.resolveCapabilitySet = async () => (resolved === undefined ? SET : resolved);
@@ -146,13 +147,13 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     it('accepts a COMPLETE archive (control)', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK)).to.equal(true);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK, 'testnet')).to.equal(true);
     });
 
     it('REFUSES an archive whose reward group was stripped, though every present group is honest', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: [] }, BLOCK)).to.equal(false);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: [] }, BLOCK, 'testnet')).to.equal(false);
     });
 
     it('REFUSES an archive whose WRAPPER oracle_publish group was stripped', async () => {
@@ -161,7 +162,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // ever visits it without the completeness derivation.
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK + 6)).to.equal(false);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK + 6, 'testnet')).to.equal(false);
     });
 
     it('does NOT false-reject a group our own resolution also finds empty', async () => {
@@ -170,15 +171,15 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // on honest rounds; the completeness check compares sizes instead.
         let pub = verifier([]);
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [], capability_snapshots: [] }, BLOCK)).to.equal(true);
+            { network: 'testnet', matches: [], calls: [], rewards: [], capability_snapshots: [] }, BLOCK, 'testnet')).to.equal(true);
     });
 
     it('REFUSES an archive demanding a group at a non-numeric block', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [],
+            { network: 'testnet', matches: [], calls: [],
               rewards: [Object.assign({}, REWARD, { block_index: 'not-a-block' })],
-              capability_snapshots: GROUP }, BLOCK)).to.equal(false);
+              capability_snapshots: GROUP }, BLOCK, 'testnet')).to.equal(false);
     });
 });
 

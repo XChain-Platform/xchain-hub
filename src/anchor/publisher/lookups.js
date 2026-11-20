@@ -235,12 +235,16 @@ module.exports = {
                 if(r && r.exists && Number(r.version) !== Number(v))
                     throw new Error('getanchoraction ignored the version filter (asked v' + v +
                                     ', answered v' + r.version + '); cannot rule out an existing anchor');
-                if(usable(r)) return { exists: true, txid: r.txid || null };
+                if(usable(r)) return { exists: true, txid: r.txid || null,
+                    version: r.version != null && Number.isFinite(Number(r.version))
+                        ? Number(r.version) : null };
             }
             return null;
         }
         if(!usable(res)) return null;
-        return { exists: true, txid: res.txid || null };
+        return { exists: true, txid: res.txid || null,
+            version: res.version != null && Number.isFinite(Number(res.version))
+                ? Number(res.version) : null };
     },
 
     // Existence check for a whole BUNDLE (spec §2.4), the failover-race guard on the
@@ -260,6 +264,7 @@ module.exports = {
     // section we would have published.
     async findExistingBundle(sections){
         let txid = null;
+        let version;
         for(let s of sections || []){
             let r = await this.findExistingCheckpointAnchor(s);   // throws when undetermined
             if(!(r && r.exists)) return null;                      // one section absent: not this bundle
@@ -267,8 +272,10 @@ module.exports = {
             if(!t) return null;                                    // cannot prove one transaction carried the set
             if(txid === null) txid = t;
             else if(txid !== t) return null;                       // sections anchored by DIFFERENT transactions
+            if(version === undefined) version = r.version;
+            else if(version !== r.version) return null;            // sections must share one anchor version
         }
-        return txid ? { exists: true, txid: txid } : null;
+        return txid ? { exists: true, txid: txid, version: version } : null;
     },
 
     // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1 head + its v2

@@ -256,7 +256,7 @@ function registerBridgePolicyTest(state){
             rowDb(inputs, stamps), state.sets, inputs.rewards[0].source);
         const result = await buildArchive(publisher, inputs);
         const archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(stamps.map(stamp => stamp[0])).to.deep.equal([
             'match', 'call', 'reward', 'bridge', 'bridge', 'policy'
@@ -285,7 +285,7 @@ function registerCheckpointTest(state){
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
         const result = await buildArchive(publisher, inputs);
         const archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(stamps.map(stamp => stamp[0])).to.deep.equal(['checkpoint', 'checkpoint']);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
@@ -304,7 +304,7 @@ function registerPriceTest(state){
         const inputs = signedPriceInputs(state.oracleKeys), stamps = [];
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
         const result = await buildArchive(publisher, inputs), archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(archive.price_snapshots.map(row => [row.round_number, row.coin_pair, row.status]))
             .to.deep.equal([[11, 'BTC/USD', 'finalized'], [11, 'LTC/USD', 'finalized'],

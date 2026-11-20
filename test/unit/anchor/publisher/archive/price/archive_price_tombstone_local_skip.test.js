@@ -47,33 +47,33 @@ describe('archive price tombstone local skipped rows', () => {
     it('accepts a tombstone over a held skipped marker', async () => {
         const pub = buildPub([price('BTC/USD', 'skipped', null)]);
 
-        expect(await pub.verifyArchiveAgainstLocal(archive())).to.equal(true);
+        expect(await pub.verifyArchiveAgainstLocal(archive(), null, 'regtest')).to.equal(true);
     });
 
     it('refuses a tombstone over a held finalized row', async () => {
         const pub = buildPub([price('BTC/USD', 'finalized', '62000.00')]);
 
-        expect(await pub.verifyArchiveAgainstLocal(archive())).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive(), null, 'regtest')).to.equal(false);
     });
 
     for(const spelling of ['btc/usd', 'BTC/USD ']){
         it('refuses a ' + JSON.stringify(spelling) + ' tombstone over the folded live key', async () => {
             const pub = buildPub([price('BTC/USD', 'finalized', '62000.00')]);
 
-            expect(await pub.verifyArchiveAgainstLocal(archive(spelling))).to.equal(false);
+            expect(await pub.verifyArchiveAgainstLocal(archive(spelling), null, 'regtest')).to.equal(false);
         });
     }
 
     it('still accepts a folded tombstone over a skipped marker', async () => {
         const pub = buildPub([price('BTC/USD', 'skipped', null)]);
 
-        expect(await pub.verifyArchiveAgainstLocal(archive('btc/usd'))).to.equal(true);
+        expect(await pub.verifyArchiveAgainstLocal(archive('btc/usd'), null, 'regtest')).to.equal(true);
     });
 
     it('accepts a tombstone beside a different finalized pair', async () => {
         const pub = buildPub([price('ETH/USD', 'finalized', '2400.00')]);
 
-        expect(await pub.verifyArchiveAgainstLocal(archive())).to.equal(true);
+        expect(await pub.verifyArchiveAgainstLocal(archive(), null, 'regtest')).to.equal(true);
     });
 });
 

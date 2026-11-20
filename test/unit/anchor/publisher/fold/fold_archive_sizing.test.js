@@ -147,6 +147,20 @@ async function passesResolvedFoldState(){
     expect(foldActive).to.equal(true);
 }
 
+async function defersUnresolvedFoldState(){
+    const pub = publisher();
+    const candidate = Object.assign(section('BTC', 1), { network: 'testnet' });
+    let splitCalls = 0;
+    pub.identity = { getPubkeyHex: () => hex(64) };
+    pub.getActiveOraclePublishPubkeys = async () => [hex(64)];
+    pub.hub = { resolveDogeLatestBlock: async () => null };
+    pub.splitBundle = () => { splitCalls++; return { bundles: [], oversize: [] }; };
+    await pub.publishNetworkBundles({}, 'testnet', [candidate], 68000000, false, [], { rows: 0 });
+    expect(splitCalls).to.equal(0);
+    expect(pub._bundlesDeferredFoldUnresolved).to.equal(1);
+    expect(pub.getAnchorStats().bundlesDeferredFoldUnresolved).to.equal(1);
+}
+
 describe('StateAnchorPublisher folded archive byte sizing', function () {
     it('keeps legacy chunks uniform while using a shorter folded head chunk', keepsLegacyChunksUniform);
     it('sizes archive-less folded groups with the v3 wire shape', sizesArchiveLessFoldedGroups);
@@ -155,4 +169,5 @@ describe('StateAnchorPublisher folded archive byte sizing', function () {
     it('reserves the final chunk-count width for an untrimmed legacy archive', reservesFinalChunkCountWidth);
     it('skips archive signing when its fixed v3 fields leave no head room', skipsSigningWithoutHeadRoom);
     it('passes the resolved fold state into bundle splitting', passesResolvedFoldState);
+    it('defers bundle splitting while the fold state is unresolved', defersUnresolvedFoldState);
 });

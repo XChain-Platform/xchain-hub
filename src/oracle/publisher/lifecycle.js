@@ -61,6 +61,8 @@ module.exports = {
             }
         }
 
+        // stop() may have run while marker hydration was pending.
+        if (this._stopped) return;
         this.armPublishRails();
 
         logger.info('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
@@ -71,6 +73,7 @@ module.exports = {
     // after the durable state is hydrated, so nothing fires against a half-loaded
     // buffer or an unread marker table.
     armPublishRails() {
+        if (this._stopped) return;
         // Subscribe to oracle finalization events
         if (this.hub.oracleConsensus) {
             // Kept on the instance so stop() can detach it: a handler that outlives stop()

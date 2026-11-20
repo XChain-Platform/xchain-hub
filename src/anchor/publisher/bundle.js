@@ -64,7 +64,7 @@ function appendPublisherTail(parts, publisher, attestSigs){
 }
 
 async function resolveFoldBlock(ctx){
-    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return null;
+    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return undefined;
     try {
         const resolved = await ctx.hub.resolveDogeLatestBlock();
         if(resolved == null || !Number.isFinite(Number(resolved))) return null;
@@ -230,7 +230,14 @@ module.exports = {
         // refuse sections that anchor fine today; at/above it an unmet attestation
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
         const foldBlock = await resolveFoldBlock(this);
-        const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
+        if(foldBlock === null){
+            this._bundlesDeferredFoldUnresolved++;
+            logger.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
+                ' deferred: DOGE tip unresolved; fold state unknown (fail closed)');
+            return;
+        }
+        const foldActive = foldBlock !== undefined &&
+            canonicalForms.isAnchorFoldActive(foldBlock, network);
         const attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
         const split = this.splitBundle(sections, me, attestTail, foldActive);
         for(let refused of split.oversize){
@@ -266,7 +273,7 @@ module.exports = {
         for(let [network, sections] of this.groupSectionsByNetwork(rows))
             await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
         const foldBlock = await resolveFoldBlock(this);
-        if(this.network && foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
+        if(this.network && foldBlock != null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
             this.suppressLegacyArchiveLeg();
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when

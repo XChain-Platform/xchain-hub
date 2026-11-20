@@ -91,7 +91,7 @@ module.exports = {
 
         let wires = await this.signWindowWires(signer, rounds, anchor, election.publisherCount, exempt);
         // A short quorum publishes nothing and stays unmemoized for a later pass.
-        if (wires === null) return;
+        if (wires === null) { if (!takeover) this.noteSigningShortfall(windowIndex); return; }
 
         if (wires.length === 0) {
             this.noteAssembled(windowIndex);

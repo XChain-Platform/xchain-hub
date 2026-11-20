@@ -94,6 +94,7 @@ module.exports = {
         // operator's post-deploy check, not for a dashboard tile.
         this._sectionsAnchored = 0;
         this._bundlesOversize  = 0;
+        this._bundlesDeferredFoldUnresolved = 0;
         this._foldArchiveNoHeadRoom = 0;
         this._foldArchiveNoHeadRoomStreak = {};
         this._foldArchiveDroppedOversize = 0;

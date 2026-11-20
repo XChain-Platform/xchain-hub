@@ -98,6 +98,15 @@ describe('archived list row array and hash refusals', function () {
         );
     });
 
+    it('refuses a full row with removed members', function () {
+        for (const removed of [JSON.stringify(['a']), ['a']]) {
+            assert.strictEqual(
+                archivedListRowRefusal(withChanges(full, { removed })),
+                'full row has removed members'
+            );
+        }
+    });
+
     it('returns the first failing reason', function () {
         assert.strictEqual(
             archivedListRowRefusal(withChanges(full, {

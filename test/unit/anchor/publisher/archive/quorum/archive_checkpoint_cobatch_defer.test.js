@@ -48,10 +48,10 @@ async function coSignerAccepts(checkpoints){
     pub.archivedSnapshotGroups = () => new Map();
     pub.seedRequiredSnapshotGroups = () => true;
     pub.verifyArchivedSnapshotGroups = async () => true;
-    return pub.verifyArchiveAgainstLocal({
+    return pub.verifyArchiveAgainstLocal({ network: 'regtest',
         matches: [], calls: [], rewards: [], capability_snapshots: [],
         state_checkpoints: checkpoints, price_snapshots: [], price_tombstones: []
-    }, 100);
+    }, 100, 'regtest');
 }
 
 describe('archive checkpoint selection beside a superseding marker', function () {

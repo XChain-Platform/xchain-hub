@@ -53,6 +53,17 @@ function createApp(ctx) {
         if (req.body === undefined) req.body = {};
         next();
     });
+    // The router defaults missing params but passes null through to handlers,
+    // where signature destructuring would turn caller input into an internal error.
+    app.use(function rpcNullParamsShim(req, res, next) {
+        const calls = Array.isArray(req.body) ? req.body : [req.body];
+        for (const call of calls) {
+            if (call && typeof call === 'object' && !Array.isArray(call) && call.params === null) {
+                call.params = {};
+            }
+        }
+        next();
+    });
     // The router's error envelopes drop a falsy id (0 becomes null) and echo the
     // caller's jsonrpc member; the wrapper repairs both on the way out.
     app.use(withEnvelopeRepair(jsonRouter({ methods: jsonRpcController })));

@@ -350,15 +350,15 @@ class HubDbPeerCatchup {
             throw error;
         }
     }
-
     async endWalk(walk) {
         await settlePooledRounds(this, walk);
         if (walk.refused > 0) this.logger.warn('Hub DB peer catch-up: ' + walk.refused + ' ' + walk.table +
-            ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)' + suppressedNote(walk));
+            ' row(s) from ' + walk.peer + ' refused (' + walk.knownRefused + ' already known)' +
+            ((walk.capacityTurnedAway || walk.splitRetryQueued) ? '; ' + (walk.capacityTurnedAway || 0) +
+            ' capacity turn-away(s); ' + (walk.splitRetryQueued || 0) + ' split round(s) queued' : '') + suppressedNote(walk));
         this.refusals.flush();
         return walk.leftBehind;
     }
-
     async processBatch(walk, rows) {
         for (const row of rows) {
             if (groupKey(row) !== null) continue;
