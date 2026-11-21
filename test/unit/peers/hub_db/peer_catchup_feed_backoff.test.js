@@ -70,6 +70,22 @@ function registerRequestTests() {
             await new Promise(resolve => server.close(resolve));
         }
     });
+
+    it('rejects an oversized declared response before reading its body', async function () {
+        const server = http.createServer((req, res) => {
+            res.writeHead(200, { 'Content-Length': String(HubDbPeerCatchup.MAX_RESPONSE_BYTES + 1) });
+            res.flushHeaders();
+        });
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        try {
+            const url = new URL('http://127.0.0.1:' + server.address().port + '/snapshot');
+            const err = await HubDbPeerCatchup.requestJson(url, '', 5000).then(() => null, e => e);
+            expect(err.code).to.equal(HubDbPeerCatchup.RESPONSE_TOO_LARGE);
+            expect(err.contentLength).to.equal(HubDbPeerCatchup.MAX_RESPONSE_BYTES + 1);
+        } finally {
+            await new Promise(resolve => server.close(resolve));
+        }
+    });
 }
 
 function registerBackoffTests() {

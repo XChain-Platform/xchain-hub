@@ -112,6 +112,7 @@ function emptyResult(level, reason) {
         sourceCount:              null,
         operatorSourceCount:      0,
         configuredSourceCount:    0,
+        matchedOperatorSources:   [],
         unmatchedOperatorSources: [],
         meetsGate:                null,
         headroom:                 null,

@@ -34,6 +34,7 @@ const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { foldArchiveSuffix } = require('./fold/wrapper_canonical.js');
 const { foldArchiveSplitter, NO_HEAD_ROOM } = require('./fold/archive_head_budget.js');
+const { foldArchiveAnchorRequest, foldArchiveRowMatches } = require('./fold/archive_existence.js');
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
 const rewardMembershipKeys = require('./archive/reward_membership/keys.js');
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
@@ -156,7 +157,8 @@ const foldPublisherMethods = {
         };
     },
 
-    async coSignFoldArchiveRequest(envelope){
+    // Never checks the sender's election, so it claims the wrapper slot only once `admitted` (this envelope's bundle verdict) is true.
+    async coSignFoldArchiveRequest(envelope, admitted){
         let d = envelope && envelope.data;
         let a = d && d.archive;
         if(!this.identity || !a || !a.checkpoint || !Array.isArray(d.sections)) return null;
@@ -188,7 +190,7 @@ const foldPublisherMethods = {
         let archive = this.decodeArchiveProposal(a);
         if(!archive || !(await this.verifyArchiveAgainstLocal(
             archive, Number(mine.snapshot_block), mine.network))) return null;
-        if(!(await this.claimArchiveWrapperSlot(canonical))) return null;
+        if((await admitted) !== true || !(await this.claimArchiveWrapperSlot(canonical))) return null;
         return {
             batchSeq: Number(a.batch_seq), sender, cp, archive,
             reply: {
@@ -283,11 +285,9 @@ const foldPublisherMethods = {
             else if(txid !== found) return null;
         }
         if(archiveSection){
-            let requested = { match_batch_seq: Number(archiveSection.batchSeq), author: String(this.dogeAddress || '') };
+            let requested = foldArchiveAnchorRequest(archiveSection, this.dogeAddress);
             let row = await this.indexerCall('DOGE', 'getarchiveanchor', requested);
-            let found = accept(row, r => isArchiveAnchorRow(r) &&
-                Number(r.match_batch_seq) === requested.match_batch_seq &&
-                String(r.author) === requested.author);
+            let found = accept(row, r => foldArchiveRowMatches(r, requested, archiveSection));
             if(found === null) return null;
             if(txid === null) txid = found;
             else if(txid !== found) return null;

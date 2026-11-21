@@ -256,7 +256,8 @@ module.exports = {
         let myProposal = pending.proposals.get(pending.myPubkey);
         if(myProposal){
             if(pending.pinnedConsensusStrategy === 'judge_model'){
-                if(!this.coSignJudgeWinner(pending, rid, body, meta, status, myProposal)) return false;
+                // Abstaining only withholds our signature; the adopted winner still runs the PREPARE tail.
+                this.coSignJudgeWinner(pending, rid, body, meta, status, myProposal);
             } else {
                 this.coSignByteEqualWinner(pending, rid, verified.canonical, body, meta, status, myProposal);
             }

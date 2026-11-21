@@ -283,6 +283,14 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
     });
 });
 
+// A folded archive section and the indexer's content-key getarchiveanchor reply for it.
+const FOLD_ARCHIVE = { cp: { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }, batchSeq: 7, crc: '0a1b2c3d', count: 5, chunks: ['c0'] };
+function foldArchiveReply(params, extra){
+    return Object.assign({ exists: true, status: 'valid', version: 3, author: params.author,
+        checkpoint_chain: params.chain, checkpoint_network: params.network, block_index: params.block_index,
+        checkpoint_seq: params.checkpoint_seq, match_batch_seq: 7, match_count: params.match_count,
+        batch_crc32: params.batch_crc32, total_chunks: 1 }, extra);
+}
 describe('ANCHOR v3 one-round archive fold guard', function () {
     registerFoldHooks();
 
@@ -297,11 +305,11 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
                 ? { exists: true, status: 'valid', version: params.version, txid,
                     checkpoint_chain: params.chain, checkpoint_network: params.network,
                     block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-                : Object.assign({ exists: true, status: 'valid', version: 91, txid }, params);
+                : foldArchiveReply(params, { version: 91, txid });
         };
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
-        ], { batchSeq: 7 });
+        ], FOLD_ARCHIVE);
         expect(found).to.deep.equal({ exists: true, txid, version: 3 });
         expect(asked.find(a => a.method === 'getanchoraction').params.version).to.equal(3);
     });
@@ -317,7 +325,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
                 ? { exists: true, status: 'valid', version: 3, txid,
                 checkpoint_chain: params.chain, checkpoint_network: params.network,
                 block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-                : Object.assign({ exists: true, status: 'valid', version: 3, txid }, params);
+                : foldArchiveReply(params, { txid });
             if(mismatch && mismatch.method === method) row[mismatch.field] = mismatch.value;
             return row;
         };
@@ -333,7 +341,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
         for(let [method, field, value] of cases){
             mismatch = { method, field, value };
             let error;
-            try { await pub.findExistingFoldedBundle([section], { batchSeq: 7 }); }
+            try { await pub.findExistingFoldedBundle([section], FOLD_ARCHIVE); }
             catch(e){ error = e; }
             expect(error, field).to.be.an('error');
         }

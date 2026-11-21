@@ -78,9 +78,8 @@ function matchOperatorSources(validators, configured) {
 
 // The evaluation when none of the configured sources is in the snapshot.
 function unmatchedResult(configured, sources, S) {
-    // Not "halted": a share of zero here is far more likely a wrong or
-    // stale address list than the operator's stake actually being gone, and
-    // paging on a config typo teaches an operator to ignore this monitor.
+    // Treat zero matches as likely stale address lists, not halted operators.
+    // Promote only sources with measurements recorded by the monitor.
     let res = emptyResult(LEVELS.UNCONFIGURED,
         'none of the ' + configured.length + ' configured operator staking sources appear in this ' +
         'snapshot of ' + sources.weightBySource.size + ' staking sources, so the share cannot be measured. ' +
@@ -198,6 +197,7 @@ function evaluateStakeShare(opts) {
         sourceCount:              weightBySource.size,
         operatorSourceCount:      matched.length,
         configuredSourceCount:    configured.length,
+        matchedOperatorSources:   matched,
         unmatchedOperatorSources: unmatched,
         meetsGate:                margin.meetsGate,
         headroom:                 margin.headroom,

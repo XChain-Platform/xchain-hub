@@ -1,7 +1,5 @@
 'use strict';
 
-const http = require('http');
-const https = require('https');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const registry = require('./catchup_verifiers.js');
@@ -17,68 +15,18 @@ const { processRoundGroup, settlePooledRounds, verifierAccepted, refusalReason, 
     KNOWN_REFUSAL, MAX_POOLED_ROUNDS, MAX_POOLED_ROWS_PER_ROUND,
     MAX_POOLED_BYTES_PER_ROUND, MAX_POOLED_BYTES_PER_WALK } = require('./price_round_walk.js');
 const { connectedSignerPeers } = require('./signer_peers.js');
+const { peerFeedUrl, requestJson, MAX_RESPONSE_BYTES, RESPONSE_TOO_LARGE } = require('./peer_feed_http.js');
 
 // The snapshot routes serve at most 10000 rows a page; asking for fewer only multiplies requests.
 const DEFAULT_PAGE_SIZE = 10000, DEFAULT_WARN_INTERVAL_MS = 60000;
 const DEFAULT_RETRY_INTERVAL_MS = 5000, DEFAULT_MAX_RETRY_INTERVAL_MS = 300000;
 const DEFAULT_INDEXER_READ_INTERVAL_MS = 200;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000, DEFAULT_BOOT_GRACE_MS = 30000;
-const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 // How a table walk ended: complete, served with a failed indexer read, or served by no peer.
 const WALK_COMPLETE = 'complete', WALK_LEFT_BEHIND = 'left_behind', WALK_UNSERVED = 'unserved';
 
 function positiveOr(value, fallback) {
     return Number(value) > 0 ? Number(value) : fallback;
-}
-
-function peerFeedUrl(peerAddr, table, cursor, limit) {
-    let value = String(peerAddr || '');
-    if (!/^[a-z]+:\/\//i.test(value)) value = 'ws://' + value;
-    const url = new URL(value);
-    if (url.protocol === 'ws:') url.protocol = 'http:';
-    else if (url.protocol === 'wss:') url.protocol = 'https:';
-    else if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        throw new Error('Unsupported peer URL protocol: ' + url.protocol);
-    }
-    url.pathname = '/hub-db/snapshot/' + table;
-    url.search = '';
-    url.searchParams.set('since_id', String(cursor));
-    url.searchParams.set('limit', String(limit));
-    return url;
-}
-
-// Keeps the status and Retry-After so the caller can back off a refusing peer.
-function refusedRequestError(res) {
-    const err = new Error('Snapshot request returned HTTP ' + res.statusCode);
-    const retryAfterSeconds = Number(res.headers && res.headers['retry-after']);
-    err.statusCode = res.statusCode;
-    err.retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0 ? retryAfterSeconds * 1000 : null;
-    return err;
-}
-
-function requestJson(url, feedKey, timeoutMs) {
-    return new Promise((resolve, reject) => {
-        const transport = url.protocol === 'https:' ? https : http;
-        const headers = feedKey ? { 'x-api-key': feedKey } : {};
-        const req = transport.request(url, { method: 'GET', headers }, (res) => {
-            let size = 0;
-            const chunks = [];
-            res.on('data', (chunk) => {
-                size += chunk.length;
-                if (size > MAX_RESPONSE_BYTES) req.destroy(new Error('Hub DB catch-up response exceeded byte limit'));
-                else chunks.push(chunk);
-            });
-            res.on('end', () => {
-                const body = Buffer.concat(chunks).toString('utf8');
-                if (res.statusCode < 200 || res.statusCode >= 300) return reject(refusedRequestError(res));
-                try { resolve(JSON.parse(body)); }
-                catch (e) { reject(new Error('Snapshot response was not valid JSON')); }
-            });
-        });
-        req.setTimeout(timeoutMs, () => req.destroy(new Error('Snapshot request timed out')));
-        req.on('error', reject);
-        req.end();
-    });
 }
 
 // Refused rows that got no individual line (not already known, past the cap).
@@ -93,6 +41,7 @@ class HubDbPeerCatchup {
         this.feedKey = opts.feedKey || '';
         this.network = opts.network != null ? String(opts.network) : '';
         this.pageSize = Math.min(positiveOr(opts.pageSize, DEFAULT_PAGE_SIZE), DEFAULT_PAGE_SIZE);
+        this.pageLimits = new Map();
         this.maxPooledRounds = positiveOr(opts.maxPooledRounds, MAX_POOLED_ROUNDS);
         this.maxPooledRowsPerRound = positiveOr(opts.maxPooledRowsPerRound, MAX_POOLED_ROWS_PER_ROUND);
         this.maxPooledBytesPerRound = positiveOr(opts.maxPooledBytesPerRound, MAX_POOLED_BYTES_PER_ROUND);
@@ -326,10 +275,11 @@ class HubDbPeerCatchup {
 
     async catchUpTable(peer, table, verifier, peerIdentity, reads) {
         const walk = { peer, table, verifier, peerIdentity, reads, cursor: 0, leftBehind: false, carry: [],
-            refused: 0, knownRefused: 0, refusalLines: 0 };
+            refused: 0, knownRefused: 0, refusalLines: 0,
+            limit: this.pageLimits.get(peer + '\u0000' + table) || this.pageSize };
         try {
             for (;;) {
-                const page = await this.fetchPage(peer, table, walk.cursor, this.pageSize);
+                const page = await this.fetchPageWithResize(walk);
                 if (!page || page.table !== table || !Array.isArray(page.rows)) throw new Error('Invalid snapshot page for ' + table);
                 // A stale or newer peer's rows may carry columns this hub cannot interpret; the throw
                 // lands in walkTable's catch, which backs the feed off and tries the next peer.
@@ -338,7 +288,7 @@ class HubDbPeerCatchup {
                         ', expected ' + HUB_SCHEMA_VERSION);
                 }
                 walk.cursor = advanceCursor(walk.cursor, page.rows);
-                const full = page.rows.length >= this.pageSize;
+                const full = page.rows.length >= walk.limit;
                 const batch = holdTrailingGroup(walk.carry.concat(page.rows), full);
                 walk.carry = batch.held;
                 await this.processBatch(walk, batch.ready);
@@ -348,6 +298,22 @@ class HubDbPeerCatchup {
             await settlePooledRounds(this, walk);
             this.refusals.flush();
             throw error;
+        }
+    }
+    async fetchPageWithResize(walk) {
+        for (;;) {
+            try { return await this.fetchPage(walk.peer, walk.table, walk.cursor, walk.limit); }
+            catch (error) {
+                if (!error || error.code !== RESPONSE_TOO_LARGE || walk.limit <= 1) throw error;
+                const oldLimit = walk.limit;
+                let next = Math.max(1, Math.floor(oldLimit / 2));
+                if (Number(error.contentLength) > 0) next = Math.min(next,
+                    Math.max(1, Math.floor(oldLimit * 0.9 * MAX_RESPONSE_BYTES / Number(error.contentLength))));
+                walk.limit = next;
+                this.pageLimits.set(walk.peer + '\u0000' + walk.table, next);
+                this.logger.warn('Hub DB peer catch-up: reducing ' + walk.table + ' page limit for ' +
+                    walk.peer + ' from ' + oldLimit + ' to ' + next + ' after an oversized response');
+            }
         }
     }
     async endWalk(walk) {
@@ -397,4 +363,5 @@ class HubDbPeerCatchup {
 }
 
 module.exports = Object.assign(HubDbPeerCatchup, {
-    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow, DEFAULT_PAGE_SIZE, DEFAULT_REFUSAL_MEMO_PATH });
+    connectedSignerPeers, peerFeedUrl, requestJson, rowAlreadyHeld, storeVerifiedRow, DEFAULT_PAGE_SIZE,
+    DEFAULT_REFUSAL_MEMO_PATH, MAX_RESPONSE_BYTES, RESPONSE_TOO_LARGE });

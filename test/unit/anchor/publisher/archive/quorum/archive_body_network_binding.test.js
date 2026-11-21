@@ -139,7 +139,8 @@ function foldCoSigner(bodyNetwork) {
             },
         },
     };
-    return () => forms.foldPublisherMethods.coSignFoldArchiveRequest.call(pub, envelope);
+    // `true` stands in for the bundle co-sign verdict the attest hook passes.
+    return () => forms.foldPublisherMethods.coSignFoldArchiveRequest.call(pub, envelope, true);
 }
 
 describe('archive body network binding on the co-sign paths', function () {

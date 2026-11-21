@@ -149,6 +149,22 @@ function registerHubStakeShareMetricsSuite2Part2() {
     expect(out).to.not.match(/xchain_stake_share_ratio\{[^}]*chain="BTC"/);
     expect(out).to.match(/^xchain_stake_share_alerting 1$/m);
   });
+  it('keeps gate-loss metrics active when previously matched sources disappear', function () {
+    const observability = realObservability();
+    const monitor = new StakeShareMonitor({ log: () => {} });
+    monitor.record('BTC', 'price', evaluateStakeShare({
+      validators: hubStakeShareMetricsSuite2Rows([['ours1', 100], ['c1', 10]]),
+      operatorSources: ['ours1']
+    }));
+    monitor.record('BTC', 'price', evaluateStakeShare({
+      validators: hubStakeShareMetricsSuite2Rows([['c1', 10]]), operatorSources: ['ours1']
+    }));
+    installHubStakeShareMetrics(observability, { stakeShareWatcher: { monitor } });
+    const out = observability.registry.render();
+    expect(out).to.match(/^xchain_stake_share_alerting 1$/m);
+    expect(out).to.match(/xchain_stake_share_meets_gate\{chain="BTC",capability="price"\} 0\b/);
+    expect(out).to.match(/xchain_stake_share_stakes_to_halt\{chain="BTC",capability="price"\} 0\b/);
+  });
 }
 function registerHubStakeShareMetricsSuite2Part3() {
   it('drops a healthy reading once the snapshot becomes unreadable, instead of repeating it', function () {

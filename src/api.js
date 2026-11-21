@@ -365,4 +365,12 @@ async function startApi(){
     startServer(app, ctx, observability);
 }
 
-startApi();
+// Startup rejection must terminate: the crash handler logs unhandled rejections
+// without exiting, and a running process that never listens is not restarted.
+startApi().catch(err => {
+    logger.error('FATAL_STARTUP_ERROR', {
+        err: err && err.message ? err.message : String(err),
+        stack: err && err.stack
+    });
+    process.exit(1);
+});

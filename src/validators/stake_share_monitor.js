@@ -92,6 +92,7 @@ class StakeShareMonitor {
         this._log = typeof opts.log === 'function' ? opts.log : (msg) => logger.error(msg);
         // key -> { chain, capability, at, ...evaluation }
         this.entries = new Map();
+        this._lastMatched = new Map();
         // key -> ms of the last line printed for this entry
         this._warnAt = {};
     }
@@ -100,12 +101,34 @@ class StakeShareMonitor {
         return String(chain) + ':' + String(capability);
     }
 
+    promoteDepartedSources(key, entry) {
+        const remembered = this._lastMatched.get(key) || [];
+        const unmatched = Array.isArray(entry.unmatchedOperatorSources) ? entry.unmatchedOperatorSources : [];
+        const departed = remembered.filter(source => unmatched.includes(source));
+        if (entry.level === LEVELS.UNCONFIGURED && entry.configuredSourceCount > 0 && departed.length > 0) {
+            const originalReason = entry.reason;
+            entry.level = LEVELS.HALTED;
+            entry.meetsGate = false;
+            entry.stakesToHalt = 0;
+            entry.operatorSourceCount = 0;
+            entry.departedOperatorSources = departed;
+            entry.reason = 'operator staking source(s) previously measured in this set are absent: ' +
+                departed.join(', ') + '. The operator tally is 0, so 3*0 > 2*S fails and rounds cannot ' +
+                'reach commit quorum on operator signatures. ' + originalReason;
+        }
+        if (Array.isArray(entry.matchedOperatorSources) && entry.matchedOperatorSources.length > 0) {
+            this._lastMatched.set(key, entry.matchedOperatorSources.slice());
+        }
+    }
+
     // Fold one evaluation in and log the transition. Returns the stored entry.
     record(chain, capability, evaluation) {
         let key  = this.buildKey(chain, capability);
         let now  = this._now();
         let prev = this.entries.get(key);
         let entry = Object.assign({ chain: String(chain), capability: String(capability), at: now }, evaluation);
+
+        this.promoteDepartedSources(key, entry);
 
         // Hold a standing alert through an unreadable snapshot: nothing was re-measured,
         // so the last real reading stands until a real one replaces it. No expiry, which

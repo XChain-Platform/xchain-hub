@@ -66,6 +66,10 @@ module.exports = {
         // Transition-only guard so a persistent capability-snapshot resolution failure
         // (which darks the publisher) is logged once per dark spell, not every round.
         this._snapshotDark      = false;
+        // Lifetime count of dark spells and the start of the current one, so a scrape
+        // can tell a dark hub from one that is simply not the rotation leader.
+        this.snapshotDarkSpells = 0;
+        this._snapshotDarkSince = null;
         // Lifetime published count + last-published markers + last-observed balance,
         // surfaced via getStats() so an operator RPC can see the publish rail's
         // health (a stalled rail is otherwise invisible: every price_snapshots row

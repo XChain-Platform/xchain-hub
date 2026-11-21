@@ -45,9 +45,23 @@ module.exports = {
     logSnapshotDark(detail, err) {
         if (this._snapshotDark) return;
         this._snapshotDark = true;
+        this.snapshotDarkSpells = (this.snapshotDarkSpells || 0) + 1;
+        this._snapshotDarkSince = Date.now();
         let suffix = err ? (': ' + (err && err.message ? err.message : err)) : '';
         logger.warn('OraclePublisher: oracle_publish capability snapshot ' + detail +
             '; failing closed, this hub will not publish until it resolves' + suffix);
+    },
+
+    // The other edge of a dark spell: one info line when the snapshot resolves again,
+    // so the log brackets each spell. A healthy steady state logs nothing per round.
+    logSnapshotRecovered(blockIndex) {
+        if (!this._snapshotDark) return;
+        let since = this._snapshotDarkSince;
+        let darkS = Number.isFinite(since) ? Math.max(0, Math.round((Date.now() - since) / 1000)) : null;
+        this._snapshotDark = false;
+        this._snapshotDarkSince = null;
+        logger.info('OraclePublisher: oracle_publish capability snapshot resolved again at block ' + blockIndex +
+            (darkS === null ? '' : ' after ' + darkS + 's dark') + '; publishing can resume');
     },
 
     // Get the count of active oracle_publish validators
@@ -73,7 +87,7 @@ module.exports = {
                     // Dedupe: weighted snapshots carry one row per (source, pubkey), and rank must see each key once.
                     let pubkeys = [...new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()))].sort();
                     if (pubkeys.length > 0) {
-                        this._snapshotDark = false;
+                        this.logSnapshotRecovered(blockIndex);
                         return pubkeys;
                     }
                     // An empty set elects no leader on any hub, so log it as loudly as the null path.

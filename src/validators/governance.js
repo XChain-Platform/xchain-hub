@@ -82,10 +82,9 @@ class Governance extends EventEmitter {
         // Catch the tick's rejection, the same idiom every other periodic loop in the
         // hub uses. checkExpiredProposals guards its two awaits but not the leader
         // check between them, so a data fault there (an unorderable proposal_id, a
-        // non-iterable result row set) rejects the tick's promise. The hub registers no
-        // process.on('unhandledRejection'), and Node's default turns an unhandled
-        // rejection into process death, so without this a per-tick fault kills the hub
-        // instead of logging and re-arming, which is what the tally path intends.
+        // non-iterable result row set) rejects the tick's promise. The crash handler logs
+        // an unhandled rejection but keeps the process running, so without this local
+        // catch the tick would be dropped instead of logging and re-arming.
         this._tallyTimer = setInterval(() => { this.runTallyTick(); }, this.tallyInterval);
 
         logger.info('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');

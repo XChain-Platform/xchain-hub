@@ -292,7 +292,10 @@ function registerBlockedStateTests() {
             validators: outageMinusOne(), operatorSources: ['OURS1', 'Ours2']
         });
         expect(allWrong.level).to.equal(LEVELS.UNCONFIGURED);
+        expect(allWrong.matchedOperatorSources).to.deep.equal([]);
         expect(allWrong.reason).to.contain('per chain');
+
+        expect(typo.matchedOperatorSources).to.deep.equal(['ours1']);
     });
 }
 
