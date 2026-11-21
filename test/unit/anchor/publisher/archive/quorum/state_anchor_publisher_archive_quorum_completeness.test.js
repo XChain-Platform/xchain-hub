@@ -96,7 +96,7 @@ describe('StateAnchorPublisher #4183 empty signing set is not a quorum of one', 
     // that does (or does not) contain it.
     function archiveRound(signingSetFor) {
         let { pub, identity } = buildPub({
-            'FROM cross_chain_matches WHERE batch_seq IS NULL': [MATCH_ROW],
+            'FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL': [MATCH_ROW],
             'FROM state_checkpoints':                           [CP_ROW]
         });
         let me = identity.getPubkeyHex().toLowerCase();
@@ -241,12 +241,9 @@ function registerFinalizedStampTests() {
         expect(stamped.length).to.equal(1);
         expect(stamped[0][1][0].status, 'the announced terminal status lands').to.equal('settled');
         expect(stamped[0][2], 'the confirmed txid is stamped').to.equal(TXID);
-        // The back-fill gate runs at ALL heights, so it keeps the reject-SET form rather
-        // than the reward gate's exact-v1 expectation. v0 (the checkpoint BUNDLE) must be
-        // in that set and must NOT be the archive head's own version, or the gate would
-        // reject every head the publisher now emits.
-        expect(asked[0].expect.rejectVersions, 'the head is checked against the reject SET, not exact v1')
-            .to.deep.equal([0, 2]);
+        // The helper probes exact v1 first. It only probes v3 and its bound archive row
+        // when the announced transaction has no v1 head.
+        expect(asked[0].expect).to.deep.equal({ version: 1 });
     });
 
     it('stamps ONLY the sentinel seq while the head is unconfirmed, and queues the rest', async () => {

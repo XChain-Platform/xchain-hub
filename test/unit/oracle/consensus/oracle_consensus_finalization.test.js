@@ -141,6 +141,7 @@ function registerFinalizeround2Tests1() {
             expect(storeSpy.callCount).to.equal(1);
             expect(emitCount).to.equal(1);
         });
+
 }
 
 function registerFinalizeround2Tests4() {

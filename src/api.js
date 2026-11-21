@@ -101,7 +101,10 @@ const HUB_RATE_LIMIT_RPM = parseInt(hubConfig.HUB_RATE_LIMIT_RPM) || 100;
 // OWN indexer replaying a batch-bearing chain pushes one pushpricebatch per batch
 // block as fast as it reads them. Keyed on req.ip (post-trust-proxy), so a public
 // client through a private-IP reverse proxy is still throttled; see rate_limit_policy.js.
-// Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
+// Setting HUB_RATE_LIMIT_EXEMPT_LOCAL=false caps each resolved client IP. A private
+// peer trusted by HUB_TRUST_PROXY can still select that IP via X-Forwarded-For, so
+// capping the peer itself also requires HUB_TRUST_PROXY=false or a list of only the real
+// proxy addresses.
 const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(hubConfig.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
 // cross-origin by several wallet shells at once. parseCorsOrigin is what makes

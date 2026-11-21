@@ -43,6 +43,13 @@ const {
 const { authGate, bulkKeyMatches, feedPortAllowlist } = require('./auth_gate');
 
 const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';
+// The eight CIDRs isLocalCaller treats as local, as Express names them, and one
+// address inside each.
+const LOCAL_RANGES = 'loopback, linklocal, uniquelocal';
+const LOCAL_RANGE_SAMPLES = [
+    '127.0.0.1', '::1', '10.0.0.1', '172.16.0.1', '192.168.0.1',
+    '169.254.0.1', 'fc00::1', 'fe80::1'
+];
 const DEFAULT_BODY_LIMIT_BYTES = 100 * 1024;
 const ATTEST_BATCH_BODY_LIMIT_BYTES = ATTEST_BATCH_MAX_INFLATED_BYTES + 64 * 1024;
 
@@ -52,6 +59,31 @@ function resolveTrustProxy(raw) {
     if (value === 'false') return false;
     if (/^\d+$/.test(value)) return parseInt(value);
     return value;
+}
+
+// Does the trust-proxy setting let any loopback or private-range peer set req.ip? Two
+// CIDR blocks either nest or are disjoint, so a trusted block overlaps a local range
+// exactly when it contains that range's sample (the trust function accepts it) or the
+// block's own address is local (it sits inside the range). Express parses that address
+// too, so mapped and hex IPv6 spellings resolve as they do for live peers. A hop count
+// trusts every peer, so its function accepts the samples, as it does for named ranges.
+function trustsLocalPeer(app, express) {
+    const setting = app.get('trust proxy');
+    if (setting === true) return true;
+    const trust = app.get('trust proxy fn');
+    if (typeof trust !== 'function') return false;
+    if (LOCAL_RANGE_SAMPLES.some((address) => trust(address, 0))) return true;
+    if (typeof setting !== 'string') return false;
+    const local = express().set('trust proxy', LOCAL_RANGES).get('trust proxy fn');
+    return setting.split(',').some((entry) => local(entry.trim().split('/')[0], 0));
+}
+
+function trustsAnyPeer(setting) {
+    return setting !== false && setting !== 0;
+}
+
+function usesHopCount(setting) {
+    return Number.isInteger(setting) && setting > 0;
 }
 
 // Returns the observability handle, whose shutdown() the signal handler flushes.
@@ -211,6 +243,15 @@ function installRateCounters(app, ctx) {
     const snapshotRpm = parseSnapshotRpm(hubConfig.HUB_SNAPSHOT_RATE_LIMIT_RPM);
     const authRpm = parseAuthRpm(hubConfig.HUB_AUTH_RATE_LIMIT_RPM, HUB_RATE_LIMIT_RPM);
     const isAuthenticated = authenticatedCaller(ctx);
+    const trustSetting = app.get('trust proxy');
+    const trustedLocal = trustsLocalPeer(app, ctx.express);
+    if (!HUB_RATE_LIMIT_EXEMPT_LOCAL && trustSetting !== true && trustedLocal) {
+        if (usesHopCount(trustSetting)) {
+            logger.warn('HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies limits per resolved client IP, but a numeric HUB_TRUST_PROXY hop count lets any direct peer, including a public peer, choose that IP and a new rate-limit bucket via X-Forwarded-For. Use a hop count only when every direct peer is a trusted proxy; otherwise set HUB_TRUST_PROXY=false or list only the real proxy addresses.');
+        } else {
+            logger.warn('HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies limits per resolved client IP, but loopback or private-range peers trusted by HUB_TRUST_PROXY can still choose that IP and a new rate-limit bucket via X-Forwarded-For. This is expected behind a same-host reverse proxy; if public traffic arrives with a private source address, set HUB_TRUST_PROXY=false or list only the real proxy addresses.');
+        }
+    }
     installRpcTier(app, rateLimit, surcharges, {
         rpm:         HUB_RATE_LIMIT_RPM,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
@@ -240,7 +281,13 @@ function installRateCounters(app, ctx) {
         snapshotRpm + ' req/min per IP on ' + SNAPSHOT_PATH_PREFIX + ', batches charged per call' +
         (HUB_RATE_LIMIT_EXEMPT_LOCAL
             ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
-            : ' (enforced for every caller, including loopback and private-range)'));
+            : usesHopCount(trustSetting)
+                ? ' (enforced per resolved client IP; a numeric HUB_TRUST_PROXY hop count lets any direct peer, including a public peer, set that IP via X-Forwarded-For)'
+                : trustedLocal
+                ? ' (enforced per resolved client IP; trusted loopback or private proxy peers still set that IP via X-Forwarded-For)'
+                : trustsAnyPeer(trustSetting)
+                    ? ' (enforced per resolved client IP, including loopback and private-range; only the HUB_TRUST_PROXY peers set that IP via X-Forwarded-For)'
+                    : ' (enforced for every caller, including loopback and private-range)'));
     return surcharges;
 }
 

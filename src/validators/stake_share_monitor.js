@@ -217,6 +217,8 @@ class StakeShareMonitor {
                 reason:                  e.reason,
                 total_stake:             e.totalStake,
                 operator_stake:          e.operatorStake,
+                operator_stake_nominal:  e.operatorStakeNominal,
+                shared_operator_keys:    e.sharedOperatorKeys,
                 share:                   e.shareRatio,
                 meets_gate:              e.meetsGate,
                 headroom:                e.headroom,

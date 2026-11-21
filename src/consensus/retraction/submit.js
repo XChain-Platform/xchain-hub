@@ -74,6 +74,10 @@ async function submitQuorumRetraction(self, evt, deferral){
         deferSigningRound(self, evt, 'validator set is empty', deferral);
         return;
     }
+    if(validators.truncated === true){
+        deferSigningRound(self, evt, 'validator set is truncated (raise VALIDATOR_QUERY_LIMIT fleet-wide)', deferral);
+        return;
+    }
     clearDeferral(self, evt, deferral);
 
     let signedEvt = Object.assign({}, evt, { snapshot_block: Number(snapshotBlock) });
@@ -149,7 +153,9 @@ function scheduleDeferredRetry(self, state){
         state.attempts++;
         submitQuorumRetraction(self, state.evt, state).catch(error => {
             logger.warn(retryLabel(state) + 'failed: ' + (error && error.message));
-            scheduleDeferredRetry(self, state);
+            if(self.pending.get(state.id) === state) scheduleDeferredRetry(self, state);
+            else deferSigningRound(self, state.evt,
+                'previous retry threw: ' + ((error && error.message) || 'unknown error'), null);
         });
     }, delay);
     if(state.retryTimer.unref) state.retryTimer.unref();

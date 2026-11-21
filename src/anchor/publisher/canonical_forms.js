@@ -112,7 +112,7 @@ const foldPublisherMethods = {
     async buildFoldArchiveSection(group, network){
         if(!this.db || typeof this.db.findCrossChainMatchesByBatchSeq !== 'function' ||
            typeof this.db.findCrossChainCallsByBatchSeq !== 'function') return null;
-        let rows = await this.gatherArchiveRows();
+        let rows = await this.gatherArchiveRows(network);
         if(!rows) return null;
         let ordered = this.orderedBundleSections(group);
         let wrapperSectionIndex = ordered.findIndex(s => String(s.chain) === 'BTC');
@@ -192,14 +192,14 @@ const foldPublisherMethods = {
             archive, Number(mine.snapshot_block), mine.network))) return null;
         if((await admitted) !== true || !(await this.claimArchiveWrapperSlot(canonical))) return null;
         return {
-            batchSeq: Number(a.batch_seq), sender, cp, archive,
+            batchSeq: Number(a.batch_seq), sender, cp, archive, batchCrc32: String(a.batch_crc32).toLowerCase(),
+            matchCount: Number(a.match_count), totalChunks: Number(a.total_chunks),
             reply: {
                 network: String(d.network), snapshot_block: Number(d.snapshot_block),
                 sig_pubkey: myPubkey, sig: '', archive_sig: this.identity.sign(canonical)
             }
         };
     },
-
     armFoldArchiveRound(round, bundle){
         let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
                                          Number(this.roundTimeoutMs) || 30000));

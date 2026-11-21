@@ -167,6 +167,10 @@ module.exports = {
         // lists to this set before anything is stamped. Recorded ONLY where the body was
         // already parsed, so no hub decompresses an extra archive on the p2p path.
         this._observedArchiveContents = new Map();
+        // Folded archive content keys observed per (batch_seq, proposer). A v3 wrapper
+        // checkpoint row exists even when no archive section rode the transaction, so
+        // FINALIZED must also bind the co-signed archive content before stamping rows.
+        this._observedFoldArchiveKeys = new Map();
         // Highest batch_seq this hub has learned the FEDERATION already consumed, from
         // evidence other than its own rows: an authenticated XANC_FINALIZED, a co-sign
         // refusal naming the refuser's own consumed seq, or an archive head resolved

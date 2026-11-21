@@ -63,7 +63,8 @@ function buildPub(rows, network){
 
 function singleMemberRound(cpRow){
     const { pub, identity } = buildPub({
-        'FROM cross_chain_matches WHERE batch_seq IS NULL': [MATCH_ROW],
+        'FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL':
+            [{ ...MATCH_ROW, network: cpRow.network }],
         'FROM state_checkpoints':                           [cpRow]
     });
     const me = identity.getPubkeyHex().toLowerCase();

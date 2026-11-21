@@ -504,11 +504,16 @@ function main() {
     }
 }
 
+function refusalLine(error) {
+    const message = error && error.message ? error.message : String(error);
+    return `consensus-identity: ${String(message).split(/\r?\n/, 1)[0]}`;
+}
+
 if (require.main === module) {
     // Caught here rather than left to Node's default uncaught-exception handler,
     // which exits 1 with a raw stack. Both copies share the exit-2 contract: one
     // clean stderr line prefixed "consensus-identity: ".
-    try { main(); } catch (e) { console.error(`consensus-identity: ${e.message}`); process.exit(2); }
+    try { main(); } catch (e) { console.error(refusalLine(e)); process.exit(2); }
 }
 
 module.exports = {
@@ -517,6 +522,7 @@ module.exports = {
     compare,
     checkPin,
     armingEnv,
+    refusalLine,
     setRepoRoot,
     // The measured checkout, as a call rather than a binding: a consumer that
     // captured the value at require time would keep reading the default after

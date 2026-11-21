@@ -15,8 +15,7 @@ const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
 const { isProducerRoundRow, groupKey, groupAgrees, sameValue } = require('../../peers/hub_db/price_round_groups.js');
 const { producerProofReason } = require('./producer_proof.js');
 const admissionHeight = require('../../lib/admission_height.js');
-
-const SOURCE_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
+const { SOURCE_CHAINS } = require('./source_chains.js');
 
 function refuse(reason) {
     return { ok: false, reason };

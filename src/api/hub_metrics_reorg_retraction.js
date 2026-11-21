@@ -57,6 +57,12 @@ const RETRACTION_SERIES = {
     counters: [
         countSpec('xchain_retraction_round_timeouts_total',
             'Retraction signing rounds this hub opened that timed out below quorum', '_roundTimeouts'),
+        countSpec('xchain_retraction_finalize_deferrals_total',
+            'Signed retraction finalizations deferred until their capability snapshot can persist',
+            '_finalizeDeferrals'),
+        countSpec('xchain_retraction_finalize_retries_exhausted_total',
+            'Signed retraction finalize retries that exhausted their configured attempt cap',
+            '_finalizeRetriesExhausted'),
         unsignedFallbackSpec('round_timeout'),
         unsignedFallbackSpec('out_of_class'),
         unsignedFallbackSpec('no_signing_deps'),

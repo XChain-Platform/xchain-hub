@@ -22,6 +22,7 @@ const { resolveQuorumNetwork } = require('../../../quorum_network.js');
 const checkpointForms = require('../../../checkpoint_engine/canonical_forms.js');
 const { reserializeRefusal, priceKeyFold, samePriceKey } = require('../unheld_row.js');
 const { priceRecoveryRefusal } = require('./price_recovery_shape.js');
+const { SOURCE_CHAINS } = require('../../../../oracle/price_aggregator/source_chains.js');
 const swq = require('../../../../consensus/stake_weighted_quorum.js');
 const { getLogger } = require('../../../../observability');
 const logger = getLogger();
@@ -58,11 +59,15 @@ function logUnheld(subject, basis){
 // Keep batch_block_time in the compare: no signature covers it, so this is the follower's only check.
 // A follower whose batch ingest lags (0 or a later landing) refuses an honest round, as finalized_apply
 // does; the row re-pends when its stamp changes, but a self-finalized row keeps an orphaned landing's stamp.
-// consensus_proof and validator_count are hub-local: hubs hold different signature subsets, while a
-// self-finalized count records PREPARE voters rather than proof signatures. The quorum check below proves
-// the signed fields; equating validator_count with its valid signer count would refuse honest rounds.
+// consensus_proof, validator_count and the three chain-shape columns are hub-local: hubs hold different
+// signature subsets, while producer and pushed writers retain different chain provenance. The quorum check
+// below proves the signed fields. reference_chain is separately restricted to a known chain because recovery
+// restores it, while recovery discards source_chain and source_action_index.
 function samePriceRow(local, archived, signatureProofed){
-    const keys = signatureProofed ? ['id', 'consensus_proof', 'validator_count'] : ['id'];
+    const keys = signatureProofed
+        ? ['id', 'consensus_proof', 'validator_count',
+            'reference_chain', 'source_chain', 'source_action_index']
+        : ['id'];
     return sameRowExcept(local, archived, keys);
 }
 
@@ -103,7 +108,8 @@ function sameSignedPriceFields(first, row){
 // signed round as finalized at consensus round 1. Skipped and disputed need a held twin.
 // The signature also leaves reference_chain, source_chain, source_action_index,
 // batch_block_time and validator_count uncovered, and honest hubs store differing shapes
-// for them, so for an unheld row those five columns rest on the co-signers alone.
+// for them. Held and unheld rows therefore use the same rule for the three chain-shape
+// columns; reference_chain must still name a supported chain.
 function unheldProofedPriceRefusal(row, serialized){
     const shape = reserializeRefusal(row, serialized);
     if(shape) return shape;
@@ -112,6 +118,38 @@ function unheldProofedPriceRefusal(row, serialized){
     if(Number(row.consensus_round) !== 1)
         return 'has consensus_round ' + row.consensus_round + ' with no held row';
     return null;
+}
+
+function archivedPriceRowsAgree(pub, group, held, signatureProofed){
+    let unheld = 0;
+    for(const row of group){
+        if(signatureProofed && !SOURCE_CHAINS.has(row.reference_chain)){
+            logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
+                        row.coin_pair + ' has unknown reference_chain ' + row.reference_chain +
+                        '; NOT signing');
+            return null;
+        }
+        const local = findHeldPriceRow(held, row, signatureProofed);
+        if(local && !samePriceRow(pub.serializePriceSnapshot(local), row, signatureProofed)){
+            logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
+                        row.coin_pair + ' differs from our row; NOT signing');
+            return null;
+        }
+        if(!local && !pub.isSignatureProofedPrice(row)){
+            logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
+                        row.coin_pair + ' has no verifiable proof or held row; NOT signing');
+            return null;
+        }
+        const refusal = local ? null :
+            unheldProofedPriceRefusal(row, pub.serializePriceSnapshot(row));
+        if(refusal){
+            logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
+                        row.coin_pair + ' ' + refusal + '; NOT signing');
+            return null;
+        }
+        if(!local) unheld++;
+    }
+    return unheld;
 }
 
 function checkpointInteger(value){
@@ -232,29 +270,8 @@ module.exports = {
         }
         const held = await this.db.findPriceSnapshotsForRound(Number(first.round_number));
         const signatureProofed = this.isSignatureProofedPrice(first);
-        let unheld = 0;
-        for(const row of group){
-            const local = findHeldPriceRow(held, row, signatureProofed);
-            if(local && !samePriceRow(this.serializePriceSnapshot(local), row, signatureProofed)){
-                logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
-                            row.coin_pair + ' differs from our row; NOT signing');
-                return false;
-            }
-            if(!local && !this.isSignatureProofedPrice(row)){
-                logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
-                            row.coin_pair + ' has no verifiable proof or held row; NOT signing');
-                return false;
-            }
-            // Refuse a relabelled proofed row we do not hold (columns outside the signature)
-            const refusal = local ? null :
-                unheldProofedPriceRefusal(row, this.serializePriceSnapshot(row));
-            if(refusal){
-                logger.warn('StateAnchorPublisher: archive price ' + row.round_number + '/' +
-                            row.coin_pair + ' ' + refusal + '; NOT signing');
-                return false;
-            }
-            if(!local) unheld++;
-        }
+        const unheld = archivedPriceRowsAgree(this, group, held, signatureProofed);
+        if(unheld === null) return false;
         if(unheld) logUnheld('price round ' + first.round_number + ' (' + unheld + ' pairs)',
                              'signature quorum');
         if(!signatureProofed) return true;

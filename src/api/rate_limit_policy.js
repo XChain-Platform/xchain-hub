@@ -48,8 +48,10 @@
  * req.ip to the leftmost address the trust chain does not vouch for, so a
  * public client arriving through a private-IP proxy still presents a public
  * req.ip and is still throttled. Only a caller that is genuinely on the host
- * or the private network is exempt. Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to
- * enforce the cap on every caller including those.
+ * or the private network is exempt. HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies
+ * the cap to each resolved client IP. A private peer trusted by HUB_TRUST_PROXY
+ * can still choose that IP via X-Forwarded-For, so capping the peer itself also
+ * requires HUB_TRUST_PROXY=false or a list of only the real proxy addresses.
  *
  * 3. ONE BUDGET SERVED TWO WORKLOADS THAT STARVE EACH OTHER, measured on the
  *    2026-09-16 fleet roll. Recreating the five testnet validator hubs made

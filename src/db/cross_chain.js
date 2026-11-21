@@ -100,8 +100,8 @@ module.exports = {
 
     // Reads rows from cross_chain_calls.
     // Moved here from src/anchor/publisher.js:2491.
-    async findCrossChainCallsByBatchSeq(maxBatch) {
-        return this.doQuery('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status ORDER BY call_id ASC, phase ASC LIMIT ?', [maxBatch]);
+    async findCrossChainCallsByBatchSeq(network, maxBatch) {
+        return this.doQuery('SELECT * FROM cross_chain_calls WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status) ORDER BY call_id ASC, phase ASC LIMIT ?', [String(network || ''), maxBatch]);
     },
 
     // Reads rows from cross_chain_calls: the REST bootstrap page a reconnecting mirror fills from.
@@ -122,8 +122,8 @@ module.exports = {
 
     // Reads rows from cross_chain_matches.
     // Moved here from src/anchor/publisher.js:2488.
-    async findCrossChainMatchesByBatchSeq(maxBatch) {
-        return this.doQuery('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status ORDER BY match_id ASC LIMIT ?', [maxBatch]);
+    async findCrossChainMatchesByBatchSeq(network, maxBatch) {
+        return this.doQuery('SELECT * FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status) ORDER BY match_id ASC LIMIT ?', [String(network || ''), maxBatch]);
     },
 
     // Reads rows from cross_chain_matches.

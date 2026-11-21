@@ -240,6 +240,7 @@ const config = {
     get REORG_TIMEOUT() { return process.env.REORG_TIMEOUT; },
     get REORG_TIMESTAMP_SKEW_MS() { return process.env.REORG_TIMESTAMP_SKEW_MS; },
     get REQUIRE_SIGNATURES() { return process.env.REQUIRE_SIGNATURES; },
+    get RETRACT_FINALIZE_MAX_ATTEMPTS() { return process.env.RETRACT_FINALIZE_MAX_ATTEMPTS; },
     get RETRACT_INTENT_TTL_MS() { return process.env.RETRACT_INTENT_TTL_MS; },
     get RETRACT_ROUND_TIMEOUT_MS() { return process.env.RETRACT_ROUND_TIMEOUT_MS; },
     get RETRACT_SIGN_RETRY_MS() { return process.env.RETRACT_SIGN_RETRY_MS; },

@@ -97,7 +97,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/publisher.js:2419.
     async findPriceSnapshotsByRoundNumberAndStatus(first, last, status) {
-        return this.doQuery('SELECT DISTINCT round_number, block_timestamp FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ?', [first, last, status]);
+        return this.doQuery('SELECT DISTINCT round_number, block_timestamp, LEFT(consensus_proof, 8) AS proof_head FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ?', [first, last, status]);
     },
 
     // Reads rows from price_snapshots.

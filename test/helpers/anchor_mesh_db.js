@@ -217,8 +217,9 @@ function oldestBlockQuery(sql, params, s) {
 
 function matchQuery(sql, params, s) {
     const { matches, calls, rewardRows } = s;
-    if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status')) {
-        return matches.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+    if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status)')) {
+        return matches.filter(r => r.network === params[0] &&
+            (r.batch_seq == null || r.archived_status !== r.status)).slice(0, params[1]);
     }
     if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id = ?')) {
         return matches.filter(r => r.match_id === params[0]).slice(0, 1);
@@ -270,8 +271,9 @@ function rewardQuery(sql, params, s) {
 
 function callQuery(sql, params, s) {
     const calls = s.calls;
-    if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status')) {
-        return calls.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+    if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status)')) {
+        return calls.filter(r => r.network === params[0] &&
+            (r.batch_seq == null || r.archived_status !== r.status)).slice(0, params[1]);
     }
     if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE call_id = ?')) {
         return calls.filter(r => r.call_id === params[0] && r.phase === params[1]).slice(0, 1);

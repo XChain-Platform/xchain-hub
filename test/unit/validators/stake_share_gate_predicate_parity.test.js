@@ -74,6 +74,7 @@ const PROJECTED_AMOUNTS = ['0', '1', '0.00000001', '50', '100', '25000', '100000
 describe('stake-share monitor gate verdict matches meetsStakeThreshold', function () {
 
     registerLiveReadingParity();
+    registerSharedKeyParity();
     registerProjectionParity();
     registerFailClosedParity();
 });
@@ -95,6 +96,49 @@ function registerLiveReadingParity() {
         // Both verdicts must occur, or the table could not catch a flipped comparison.
         expect(sawPass).to.equal(true);
         expect(sawFail).to.equal(true);
+    });
+}
+
+function registerSharedKeyParity() {
+    it('uses the source the gate credits when operator signing keys are shared', function () {
+        const cases = [
+            {
+                name: 'two operator sources, gate lost', ours: ['A', 'B'],
+                rows: [{ pubkey: 'K', source: 'A', weight: '60' },
+                    { pubkey: 'K', source: 'B', weight: '30' },
+                    { pubkey: 'C1', source: 'C', weight: '10' }], reachable: '30', nominal: '90'
+            },
+            {
+                name: 'two operator sources, gate held', ours: ['A', 'B'],
+                rows: [{ pubkey: 'K', source: 'A', weight: '5' },
+                    { pubkey: 'k', source: 'B', weight: '90' },
+                    { pubkey: 'C1', source: 'C', weight: '5' }], reachable: '90', nominal: '95'
+            },
+            {
+                name: 'third party wins row order', ours: ['A'],
+                rows: [{ pubkey: 'K', source: 'A', weight: '70' },
+                    { pubkey: 'k', source: 'C', weight: '20' }], reachable: '20', nominal: '70'
+            },
+            {
+                name: 'operator wins row order', ours: ['A'],
+                rows: [{ pubkey: 'k', source: 'C', weight: '20' },
+                    { pubkey: 'K', source: 'A', weight: '70' }], reachable: '70', nominal: '70'
+            }
+        ];
+        for (const c of cases) {
+            const signers = operatorSigners(c.rows, c.ours);
+            const gate = meetsStakeThreshold(c.rows, signers);
+            const result = evaluateStakeShare({ validators: c.rows, operatorSources: c.ours });
+            expect(result.meetsGate, c.name).to.equal(gate);
+            expect(result.operatorStake, c.name).to.equal(c.reachable);
+            expect(result.operatorStakeNominal, c.name).to.equal(c.nominal);
+            expect(result.sharedOperatorKeys, c.name).to.have.lengthOf(1);
+            expect(result.reason, c.name).to.contain('Shared signing keys resolve as k');
+            const projected = projectCompetingStake(result, '1');
+            const withRival = c.rows.concat([{ pubkey: 'rival', source: 'rival', weight: '1' }]);
+            expect(projected.meetsGate, c.name + ' projected').to.equal(
+                meetsStakeThreshold(withRival, signers));
+        }
     });
 }
 

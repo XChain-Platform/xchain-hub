@@ -31,6 +31,7 @@ function emptyDb(overrides){
         findArchivableAnchorRewards: async () => [],
         findBridgeTransfersByBatchSeq: async () => [],
         findPolicySnapshotsByBatchSeq: async () => [],
+        findListSnapshotsByBatchSeq: async () => [],
         findStateCheckpointsByBatchSeq: async () => [],
         findPriceSnapshotRoundsByBatchSeq: async () => [],
         findPriceSnapshotsForArchiveRounds: async () => [],
@@ -53,14 +54,38 @@ function buildPub(db){
     return { pub, identity };
 }
 
+function registerNetworkSelectionTest(){
+    it('passes the wrapper network to every network-bearing cargo selector', async function () {
+        const seen = [];
+        const capture = name => async network => { seen.push([name, network]); return []; };
+        const db = emptyDb({
+            findCrossChainMatchesByBatchSeq: capture('matches'),
+            findCrossChainCallsByBatchSeq: capture('calls'),
+            findBridgeTransfersByBatchSeq: capture('bridges'),
+            findPolicySnapshotsByBatchSeq: capture('policies'),
+            findListSnapshotsByBatchSeq: capture('lists'),
+            findStateCheckpointsByBatchSeq: capture('checkpoints')
+        });
+
+        await buildPub(db).pub.gatherArchiveRows('regtest');
+
+        expect(seen).to.deep.equal([
+            ['matches', 'regtest'], ['calls', 'regtest'], ['bridges', 'regtest'],
+            ['policies', 'regtest'], ['lists', 'regtest'], ['checkpoints', 'regtest']
+        ]);
+    });
+}
+
 describe('archive quorum-table selection', function () {
+    registerNetworkSelectionTest();
     it('gathers every stream, caps policies, and loads complete capped price rounds', async function () {
         const policies = Array.from({ length: ARCHIVE_MAX_POLICY_ROWS + 1 }, (_, i) => ({ snapshot_id: 'p' + i }));
         const priceRounds = Array.from({ length: ARCHIVE_MAX_PRICE_ROUNDS + 1 }, (_, i) => ({ round_number: i + 1 }));
         const requested = [];
         const db = emptyDb({
             findBridgeTransfersByBatchSeq: async () => [{ transfer_id: 'b1' }],
-            findPolicySnapshotsByBatchSeq: async (limit) => {
+            findPolicySnapshotsByBatchSeq: async (network, limit) => {
+                expect(network).to.equal('regtest');
                 expect(limit).to.equal(ARCHIVE_MAX_POLICY_ROWS + 1);
                 return policies;
             },
@@ -82,7 +107,7 @@ describe('archive quorum-table selection', function () {
             ]
         });
         const { pub } = buildPub(db);
-        const rows = await pub.gatherArchiveRows();
+        const rows = await pub.gatherArchiveRows('regtest');
         expect(rows.bridges).to.have.length(1);
         expect(rows.policies).to.have.length(ARCHIVE_MAX_POLICY_ROWS);
         expect(rows.checkpoints).to.have.length(1);
@@ -109,7 +134,7 @@ describe('archive quorum-table selection', function () {
             ]
         });
         const { pub } = buildPub(db);
-        const rows = await pub.gatherArchiveRows();
+        const rows = await pub.gatherArchiveRows('regtest');
         expect(rows.prices).to.have.length(1);
         expect(rows.tombstones).to.deep.equal([{ round_number: 3, coin_pair: 'XCP/USD' }]);
     });

@@ -41,6 +41,8 @@ function fakeReorgHandler(){
 function fakeRetraction(overrides = {}){
     return Object.assign({
         _roundTimeouts: 4,
+        _finalizeDeferrals: 3,
+        _finalizeRetriesExhausted: 1,
         unsignedFallbackCount: { round_timeout: 4, out_of_class: 9, no_signing_deps: 1, gate_inactive: 6 },
         _retractionSubmitDeferrals: new Map([['a', {}], ['b', {}]])
     }, overrides);
@@ -70,6 +72,8 @@ describe('hub reorg and retraction scrape series', function () {
     it('renders retraction timeouts, unsigned fallbacks by reason and the deferral gauge', function () {
         const out = install({ retractionConsensus: fakeRetraction() }).render();
         expect(sample(out, 'xchain_retraction_round_timeouts_total')).to.equal(4);
+        expect(sample(out, 'xchain_retraction_finalize_deferrals_total')).to.equal(3);
+        expect(sample(out, 'xchain_retraction_finalize_retries_exhausted_total')).to.equal(1);
         const fallbacks = 'xchain_retraction_unsigned_fallbacks_total';
         expect(sample(out, fallbacks, '{reason="round_timeout"}')).to.equal(4);
         expect(sample(out, fallbacks, '{reason="out_of_class"}')).to.equal(9);

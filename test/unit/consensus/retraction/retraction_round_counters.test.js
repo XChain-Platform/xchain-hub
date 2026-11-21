@@ -48,6 +48,8 @@ describe('RetractionConsensus round counters', function () {
     it('starts every count at zero', function () {
         const rc = new RetractionConsensus(makeHub({ identity: null, validators: [] }));
         assert.strictEqual(rc._roundTimeouts, 0);
+        assert.strictEqual(rc._finalizeDeferrals, 0);
+        assert.strictEqual(rc._finalizeRetriesExhausted, 0);
         assert.deepStrictEqual(rc.unsignedFallbackCount,
             { round_timeout: 0, out_of_class: 0, no_signing_deps: 0, gate_inactive: 0 });
         rc.stop();

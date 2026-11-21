@@ -38,7 +38,7 @@ function publisherReading(pending){
 }
 
 async function archivedSeqs(pending){
-    const rows = await publisherReading(pending).gatherArchiveRows();
+    const rows = await publisherReading(pending).gatherArchiveRows('regtest');
     return rows.checkpoints.map(row => Number(row.checkpoint_seq));
 }
 

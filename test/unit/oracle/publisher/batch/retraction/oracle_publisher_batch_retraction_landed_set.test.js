@@ -30,7 +30,8 @@ const WINDOW = [0, 1, 2, 3, 4, 5];
 async function landedWindow() {
     let db = makeDb();
     db.findV0PriceSnapshotsForRounds = async () => { throw new Error('read failed'); };
-    db.findPriceSnapshotsByRoundNumberAndStatus = async () => [{ round_number: 5 }];
+    db.findPriceSnapshotsByRoundNumberAndStatus = async () =>
+        [{ round_number: 5, proof_head: '[{"pubk' }];
     let h = makePublisher({ db: db, cfg: { ORACLE_BATCH_GRACE_MS: 60000 } });
     await h.p.start();
     for (let r of WINDOW) h.p._buffer.set(r, bufferedFixture(r));

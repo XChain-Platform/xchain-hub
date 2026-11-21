@@ -52,7 +52,7 @@ function buildPub() {
     let hub = {
         db: { ...DB_METHODS,
             async doQuery(sql) {
-                if (sql.indexOf('FROM cross_chain_matches WHERE batch_seq IS NULL') !== -1) return [MATCH_ROW];
+                if (sql.indexOf('FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL') !== -1) return [MATCH_ROW];
                 if (sql.indexOf('FROM state_checkpoints') !== -1) return [CP_ROW];
                 return [];
             }

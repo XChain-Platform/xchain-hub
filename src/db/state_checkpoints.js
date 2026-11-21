@@ -57,10 +57,11 @@ module.exports = {
     // Checkpoints the ANCHOR archive still owes a batch to. The table is append-only (a
     // reorged height gets a new row at a higher checkpoint_seq), so an unstamped row is
     // the whole pending predicate. Ordered as the archive array is.
-    async findStateCheckpointsByBatchSeq(limit) {
+    async findStateCheckpointsByBatchSeq(network, limit) {
         return this.doQuery(
-            'SELECT * FROM state_checkpoints WHERE batch_seq IS NULL ' +
-            'ORDER BY chain ASC, network ASC, checkpoint_seq ASC LIMIT ?', [limit]);
+            'SELECT * FROM state_checkpoints WHERE network = ? AND batch_seq IS NULL ' +
+            'ORDER BY chain ASC, network ASC, checkpoint_seq ASC LIMIT ?',
+            [String(network || ''), limit]);
     },
 
     // Stamps the archive batch a checkpoint was published in, once. Guarded on

@@ -174,8 +174,7 @@ module.exports = {
                 continue;
             }
             try {
-                let v = await this.verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid),
-                                                                   { rejectVersions: [0, 2] });
+                let v = await this.verifyFinalizedArchiveOnChain(d, entry.sender);
                 if(v === 'verified'){
                     // A content mismatch is a decided rejection and drops the entry; a
                     // thrown read or write keeps it for the next pass. A retry is safe:

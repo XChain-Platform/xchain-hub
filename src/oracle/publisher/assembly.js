@@ -324,8 +324,7 @@ module.exports = {
     // 'disputed' marks a reorg-retracted row, and the signing round refuses to sign
     // disputed content, so treating a disputed round as "present but unbuffered" would
     // stall the window forever waiting for something no peer will ever co-sign.
-    // No exemption for early rounds: batching is unconditional, so every round that
-    // finalized locally was buffered and an unbuffered one is a real coverage hole.
+    // Retraction deletes landed-batch copies, so an all-batch-sourced round is safe to exempt.
     async windowCoverageComplete(first, last, rounds) {
         if (!this.db) return true;
         let rows;
@@ -336,13 +335,14 @@ module.exports = {
                 '] against price_snapshots; withholding the batch (fail closed): ', e && e.message));
             return false;
         }
-        let have    = new Set(rounds.map(r => parseInt(r.round)));
-        let missing = [];
+        let have = new Set(rounds.map(r => parseInt(r.round))), coverageByRound = new Map();
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
             if (!Number.isFinite(r) || have.has(r)) continue;
-            missing.push(r);
+            let batchSourced = String(row.proof_head || '').indexOf('{"batch"') === 0;
+            coverageByRound.set(r, (coverageByRound.get(r) !== false) && batchSourced);
         }
+        let missing = Array.from(coverageByRound).filter(([, allBatch]) => !allBatch).map(([r]) => r);
         // A round shed after its batch landed has no buffered copy by design, and the
         // chain carries it: it is not a hole. Without this a window-size change leaves
         // the window's tail (rounds the old windows already landed) unpublishable.

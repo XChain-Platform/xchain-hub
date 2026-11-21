@@ -112,10 +112,9 @@ module.exports = {
     //
     // A hub that never parsed a body for this (batch_seq, proposer) abstains, so the
     // gate binds the co-signers rather than every listener. Closing the residual (the
-    // co-signed body is the one that reached DOGE) needs the archive head's crc32 and
-    // match_count read back from an author-agnostic getarchiveanchor, which today
-    // scopes its lookup to the CALLER's own DOGE address and so cannot answer for a
-    // peer's head.
+    // co-signed body is the one that reached DOGE) is closed for folded archives by
+    // reading the head's crc32 and match_count back through author-free
+    // getarchiveanchor. The legacy v1 path remains checkpoint-bound only.
     // True when the announcement names a row the archive this hub co-signed does not carry.
     finalizedCarriesStrayRows(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
@@ -213,12 +212,9 @@ module.exports = {
     //     faces is the confirmation-DEPTH question, the same one the already-landed v0
     //     gate faces at its own back-fill assertion (:283), and XANC-ELECTED-FORGE-1
     //     landed (31b7475) without editing that file.
-    // One residual stays open: the gate proves the CHECKPOINT is anchored, not the
-    // BATCH, since nothing binds match_batch_seq and two batch_seqs can share one
-    // checkpoint. getanchoraction neither ACCEPTS it (validateAnchorActionParams takes
-    // chain/network/block_index/checkpoint_seq/txid/version) nor EMITS it
-    // (ANCHOR_ACTIONS_SQL selects no batch column and buildAnchorActionResponse returns
-    // none), so binding it needs an xchain-indexer change before this hub can.
+    // Folded archives also bind the co-signed batch content through getarchiveanchor.
+    // The legacy v1 residual remains checkpoint-bound because this hub does not retain
+    // a peer v1 request's content key for an author-free lookup.
     async stageFinalizedBackfill(d, sender, calls, rewards, quorumRows){
         const q = quorumRows || this.finalizedQuorumRows(d);
         if(!d.txid){
@@ -230,15 +226,9 @@ module.exports = {
             await this.backfillBatch(...args);
             return;
         }
-        // Archive-head version SET {1}: publishArchive emits a v1 head at every height,
-        // attested or not (D4). This gate runs at ALL heights (row suppression has nothing
-        // to do with reward retirement), so it keeps the reject-set form rather than the
-        // reward gate's exact-v1 expectation. Rejecting {0,2} still stops a v0 checkpoint
-        // bundle or a v2 continuation chunk standing in for the head. v0 MUST be in the
-        // reject set and MUST NOT be the emitted head version: the bundle is the wire this
-        // gate exists to keep out.
-        const archiveOnChain = await this.verifyArchiveCheckpointOnChain(
-            Number(d.batch_seq), String(d.txid), { rejectVersions: [0, 2] });
+        // The accepted heads are a legacy v1 archive head, or a v3 wrapper plus the
+        // separately bound archive row whose content key this hub co-signed.
+        const archiveOnChain = await this.verifyFinalizedArchiveOnChain(d, sender);
         if(archiveOnChain === 'verified'){
             await this.applyFinalized(d, sender, calls, rewards, q);
             return;

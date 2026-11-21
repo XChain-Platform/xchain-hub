@@ -104,25 +104,27 @@ module.exports = {
     },
 
     // Every pending archive stream, with sentinel reads for the three protocol caps.
-    async gatherArchiveRows(){
+    // Cargo is scoped in SQL to the wrapper network before each LIMIT, matching the
+    // co-signer and recovery network checks without letting foreign rows starve a page.
+    async gatherArchiveRows(network){
         if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
             let [matches, calls, rewards] = await Promise.all([
-                this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
-                this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+                this.db.findCrossChainMatchesByBatchSeq(network, this.maxBatch),
+                this.db.findCrossChainCallsByBatchSeq(network, this.maxBatch),
                 this.pendingArchiveRewards()
             ]);
             return this.archiveRows(matches, calls, this.dropChainDerivedRewards(rewards));
         }
         let [matches, calls, rewards, bridges, policies, lists, checkpoints, priceRounds, tombstones] = await Promise.all([
-            this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
-            this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+            this.db.findCrossChainMatchesByBatchSeq(network, this.maxBatch),
+            this.db.findCrossChainCallsByBatchSeq(network, this.maxBatch),
             this.pendingArchiveRewards(),
-            this.db.findBridgeTransfersByBatchSeq(this.maxBatch),
-            this.db.findPolicySnapshotsByBatchSeq(ARCHIVE_MAX_POLICY_ROWS + 1),
+            this.db.findBridgeTransfersByBatchSeq(network, this.maxBatch),
+            this.db.findPolicySnapshotsByBatchSeq(network, ARCHIVE_MAX_POLICY_ROWS + 1),
             this.db.findListSnapshotsByBatchSeq
-                ? this.db.findListSnapshotsByBatchSeq(ARCHIVE_MAX_LIST_ROWS + 1)
+                ? this.db.findListSnapshotsByBatchSeq(network, ARCHIVE_MAX_LIST_ROWS + 1)
                 : Promise.resolve([]),
-            this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
+            this.db.findStateCheckpointsByBatchSeq(network, this.maxBatch),
             this.pendingPriceRounds(ARCHIVE_MAX_PRICE_ROUNDS + 1),
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);

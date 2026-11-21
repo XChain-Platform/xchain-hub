@@ -59,6 +59,7 @@ function installFoldAttestHooks(){
         let signed = await archiveReply;
         if(accepted && signed && peerManager){
             this.recordObservedArchiveLeader(signed.batchSeq, signed.sender, signed.cp);
+            this.recordObservedFoldArchiveKey(signed.batchSeq, signed.sender, signed);
             this.recordObservedArchiveContent(signed.batchSeq, signed.sender, signed.archive);
             peerManager.broadcast(XANCPUB_SIGN, signed.reply);
         }

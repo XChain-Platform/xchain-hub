@@ -252,6 +252,24 @@ async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submission
     });
 }
 
+async function handleWeightedSoleSelf(round, btcBlockHeight, btcBlockTime, submissions, weighted, snapshot, quorum) {
+    if (!weighted || quorum === 0 || !snapshot ||
+        !federation.isSoleSelfFederation(snapshot.validators, this.selfPubkey())) return false;
+    if (swq.meetsStakeThreshold(snapshot.validators, [this.selfPubkey()])) {
+        await finalizeSoloRound.call(this, round, btcBlockHeight, btcBlockTime, submissions);
+        return true;
+    }
+    const now = Date.now();
+    if (!this._soleSelfThresholdWarnAt || now - this._soleSelfThresholdWarnAt >= 60000) {
+        this._soleSelfThresholdWarnAt = now;
+        logger.error('Oracle: the sole validator key spans multiple stake sources, but one signature ' +
+            'is credited with only one source and cannot clear the weighted threshold enforced on-chain; ' +
+            'consolidate stake under one source or add validators');
+    }
+    await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+        'sole validator key spans multiple stake sources; one signature cannot clear the weighted threshold');
+    return true;
+}
 // Everything after the round's snapshot is locked: the snapshot guards, the member filter,
 // the clamp-reference refresh, then the solo bypass or the seat split.
 async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissions, weighted, snapshot) {
@@ -293,6 +311,8 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
             'this hub is not a member of the price snapshot');
         return;
     }
+    if (await handleWeightedSoleSelf.call(this, round, btcBlockHeight, btcBlockTime,
+        submissions, weighted, snapshot, quorum)) return;
     if (quorum === 0) return finalizeSoloRound.call(this, round, btcBlockHeight, btcBlockTime, submissions);
 
     // Past every early-skip branch: this hub has a usable submission set and a

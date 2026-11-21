@@ -24,6 +24,34 @@
 const canonicalForms = require('../canonical_forms.js');
 const { observedListIds, firstListOutside } = require('./list/list_observed.js');
 
+function sameNumber(a, b){
+    const numericType = value => typeof value === 'number' || typeof value === 'string';
+    if(!numericType(a) || !numericType(b)) return false;
+    if((typeof a === 'string' && !a.trim()) || (typeof b === 'string' && !b.trim())) return false;
+    const left = Number(a);
+    const right = Number(b);
+    return Number.isSafeInteger(left) && Number.isSafeInteger(right) && left === right;
+}
+
+function foldArchiveHeadVerdict(pub, row, observed, announced){
+    if(!row || !row.exists) return 'absent';
+    if(/^invalid/i.test(String(row.status || ''))) return 'rejected:status';
+    if(Number(row.version) !== 3) return 'rejected:version';
+    if(!row.txid || String(row.txid).toLowerCase() !== String(announced.txid).toLowerCase())
+        return 'rejected:txid';
+    if(!sameNumber(row.match_batch_seq, announced.batch_seq)) return 'rejected:batch-seq';
+    if(!sameNumber(row.match_count, observed.match_count)) return 'rejected:match-count';
+    if(String(row.batch_crc32 || '').toLowerCase() !== observed.batch_crc32)
+        return 'rejected:batch-crc32';
+    if(!sameNumber(row.total_chunks, observed.total_chunks)) return 'rejected:total-chunks';
+    if(String(row.checkpoint_chain) !== observed.cp.chain ||
+       String(row.checkpoint_network) !== observed.cp.network ||
+       !sameNumber(row.block_index, observed.cp.block_index) ||
+       !sameNumber(row.checkpoint_seq, observed.cp.checkpoint_seq)) return 'rejected:checkpoint';
+    if(!(Number(row.confirmations) >= pub.dogeConfirmations)) return 'shallow';
+    return 'verified';
+}
+
 module.exports = {
 
     // Record that `pubkey` validated as the elected archive leader for `batchSeq`
@@ -54,6 +82,7 @@ module.exports = {
             this._observedArchiveLeaders.delete(oldest);
             this._observedArchiveCheckpoints.delete(oldest);
             this._observedArchiveContents.delete(oldest);
+            if(this._observedFoldArchiveKeys) this._observedFoldArchiveKeys.delete(oldest);
         }
     },
 
@@ -65,6 +94,32 @@ module.exports = {
     hasObservedArchiveContent(batchSeq, pubkey){
         const byProposer = this._observedArchiveContents.get(Number(batchSeq));
         return !!byProposer && byProposer.has(String(pubkey || '').toLowerCase());
+    },
+
+    recordObservedFoldArchiveKey(batchSeq, pubkey, signed){
+        if(!Number.isFinite(batchSeq) || !pubkey || !signed || !signed.cp) return;
+        if(!/^[0-9a-f]{8}$/.test(String(signed.batchCrc32 || ''))) return;
+        if(!this._observedFoldArchiveKeys) this._observedFoldArchiveKeys = new Map();
+        let byProposer = this._observedFoldArchiveKeys.get(batchSeq);
+        if(!byProposer){
+            byProposer = new Map();
+            this._observedFoldArchiveKeys.set(batchSeq, byProposer);
+        }
+        byProposer.set(String(pubkey).toLowerCase(), {
+            cp: {
+                chain: String(signed.cp.chain), network: String(signed.cp.network),
+                block_index: Number(signed.cp.block_index),
+                checkpoint_seq: Number(signed.cp.checkpoint_seq)
+            },
+            batch_crc32: String(signed.batchCrc32).toLowerCase(),
+            match_count: Number(signed.matchCount), total_chunks: Number(signed.totalChunks)
+        });
+    },
+
+    observedFoldArchiveKey(batchSeq, pubkey){
+        if(!this._observedFoldArchiveKeys) return null;
+        const byProposer = this._observedFoldArchiveKeys.get(Number(batchSeq));
+        return byProposer && byProposer.get(String(pubkey || '').toLowerCase()) || null;
     },
 
     // Record the member ids of an archive body this hub verified against its own rows
@@ -178,21 +233,56 @@ module.exports = {
     // because an elected leader could reference a real-but-different anchored checkpoint
     // and still mirror itself the anchor_archive reward (below the flag-day;
     // at/above it the mirror is retired outright).
-    // `expect` overrides the version expectation for callers that run at ALL heights
-    // (the back-fill gate passes rejectVersions [0,2], i.e. the archive-head
-    // SET {1}); omitted, it keeps the reward gate's exact-v1 expectation below.
+    // `expect` overrides the version expectation for callers that run at all heights.
+    // The back-fill gate probes exact v1 before exact v3; omitted, this keeps the
+    // reward gate's exact-v1 expectation below.
     async verifyArchiveCheckpointOnChain(batchSeq, announcedTxid, expect){
         let id = this.observedArchiveCheckpoint(batchSeq);
         if(!id) return 'no-checkpoint-id';
+        return this.verifyArchiveIdentityOnChain(id, announcedTxid, expect);
+    },
+
+    async verifyArchiveIdentityOnChain(id, announcedTxid, expect){
         let rows = await this.db.getStateCheckpointByChain(id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq));
         if(!rows || rows.length === 0) return 'absent-local';
         if(!announcedTxid) return 'no-txid';
         // Default version 1 stays exact for the REWARD gate: that caller only runs BELOW
         // the archive-reward flag-day (at/above it the FINALIZED reward mirror is retired
         // outright), and every pre-flag-day archive head is a v1. The back-fill
-        // gate runs at every height and passes its own archive-head SET instead.
+        // gate runs at every height and passes each supported head version explicitly.
         return this.verifyAnchorOnChain(rows[0],
             Object.assign({ txid: String(announcedTxid) }, expect || { version: 1 }));
+    },
+
+    // Probe the announced transaction as a legacy v1 head first. A stale fold key can
+    // remain after a co-signed archive exceeded the v3 head budget and was omitted, so
+    // the cache alone cannot select the on-chain version. Only an actual v3 wrapper
+    // needs the author-free content-key archive row from the body this hub co-signed.
+    async verifyFinalizedArchiveOnChain(d, sender){
+        const batchSeq = Number(d.batch_seq);
+        const legacy = await this.verifyArchiveCheckpointOnChain(
+            batchSeq, String(d.txid), { version: 1 });
+        if(legacy === 'verified') return legacy;
+        if(legacy !== 'absent' && legacy !== 'absent:other-anchor') return legacy;
+        const fold = this.observedFoldArchiveKey(batchSeq, sender);
+        const id = fold ? fold.cp : this.observedArchiveCheckpoint(batchSeq);
+        if(!id) return legacy;
+        const wrapper = await this.verifyArchiveIdentityOnChain(id, String(d.txid), { version: 3 });
+        if(wrapper !== 'verified') return wrapper;
+        if(!fold) return 'rejected:unbound-fold';
+        const ix = this.indexers && this.indexers.DOGE;
+        if(!ix || !ix.url) return 'no-indexer';
+        let row;
+        try {
+            row = await this.indexerCall('DOGE', 'getarchiveanchor', {
+                chain: fold.cp.chain, network: fold.cp.network,
+                block_index: fold.cp.block_index, checkpoint_seq: fold.cp.checkpoint_seq,
+                batch_crc32: fold.batch_crc32, match_count: fold.match_count
+            });
+        } catch(_e){
+            return 'unreachable';
+        }
+        return foldArchiveHeadVerdict(this, row, fold, d);
     }
 
 };

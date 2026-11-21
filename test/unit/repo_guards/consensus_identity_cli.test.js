@@ -95,9 +95,7 @@ function registerHelpFlagTest() {
     });
 }
 
-describe('bin/consensus-identity.js: top-level error handling', function () {
-    this.timeout(20000);
-
+function registerHealthyPathTests() {
     it('exits 0 and still prints the identity on the healthy path', function () {
         const res = run(['--json']);
         expect(res.status, res.stderr).to.equal(0);
@@ -119,14 +117,22 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         const res = run(['--compare', PIN]);
         expect(res.status, res.stdout + res.stderr).to.equal(0);
     });
+}
 
+function registerErrorPathTests() {
     it('exits 2 with one clean stderr line, not a raw stack, on a thrown error', function () {
-        const res = run(['--compare', path.join(REPO, 'no-such-consensus-pin.json')]);
-        expect(res.status).to.equal(2);
-        expect(res.stderr).to.match(/^consensus-identity: /);
-        // A raw Node stack carries the module's own frames; the clean handler's
-        // one-liner carries none, so this is the line that tells the two apart.
-        expect(res.stderr).to.not.match(/^\s+at /m);
+        const missingRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'identity-root-')), 'missing');
+        const cases = [
+            run(['--compare', path.join(REPO, 'no-such-consensus-pin.json')]),
+            run(['--root', missingRoot])
+        ];
+        for (const res of cases) {
+            expect(res.status).to.equal(2);
+            expect(res.stderr).to.match(/^consensus-identity: /);
+            expect(res.stderr.trim().split('\n')).to.have.lengthOf(1);
+            expect(res.stderr).to.not.include('Require stack:');
+            expect(res.stderr).to.not.match(/^\s+at /m);
+        }
     });
 
     it('exits 2 naming an unknown flag instead of ignoring it', function () {
@@ -151,6 +157,12 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(res.stdout).to.equal('');
         expect(fs.existsSync(path.join(REPO, '--assert-no-absent'))).to.equal(false);
     });
+}
+
+describe('bin/consensus-identity.js: top-level error handling', function () {
+    this.timeout(20000);
+    registerHealthyPathTests();
+    registerErrorPathTests();
 });
 
 describe('bin/consensus-identity.js: child environment and registry-row refusal', function () {

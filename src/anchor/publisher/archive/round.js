@@ -26,6 +26,7 @@ const { listIdsOf } = require('./list/list_rows_select.js');
 const archivePublishGate = require('../../archive_publish_gate.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
+const { selectArchiveRoundInput } = require('./round_selection.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { XANC_SIGN_REQ } = require('../constants.js');
 const { getLogger } = require('../../../observability');
@@ -57,16 +58,10 @@ module.exports = {
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return this.archiveFlushStatus('none', 'election_not_admitted');
 
-        let rows = await this.gatherUnpublishedArchiveRows();
-        if(!rows) return this.archiveFlushStatus('none', 'no_pending_rows');
-
-        let cps = await this.latestArchiveWrapperRows();
-        if(!cps || cps.length === 0){
-            logger.info('StateAnchorPublisher: no state checkpoint yet; archive deferred');
-            return this.archiveFlushStatus('none', 'no_wrapper_checkpoint');
-        }
+        const selected = await selectArchiveRoundInput(this);
+        if(selected.status) return selected.status;
+        let { cps, network, rows } = selected;
         let cp = this.cpFromRow(cps[0]);
-        let network  = String(cps[0].network);
 
         let liveIntent = await this.getLiveArchiveIntent(network);
         if(this.archiveRoundIntentHeld(liveIntent, network)) return this.archiveFlushStatus('intent_held', 'live_intent_held');
@@ -183,8 +178,8 @@ module.exports = {
 
     // The pending rows, or null when there are none or they repeat the last complete
     // publish. Fingerprinted here, before buildSizedArchive trims the set in place.
-    async gatherUnpublishedArchiveRows(){
-        const rows = await this.gatherArchiveRows();
+    async gatherUnpublishedArchiveRows(network){
+        const rows = await this.gatherArchiveRows(network);
         if(!rows) return null;
         rows.rowsFingerprint = this.archiveRowsFingerprint(rows);
         return this.archiveRepeatsLastPublish(rows.rowsFingerprint) ? null : rows;

@@ -85,7 +85,7 @@ function buildPub(rows) {
 // as an entry in `published` rather than as a DOGE send.
 function archiveRound(signingSetFor) {
     let { pub, identity } = buildPub({
-        'FROM cross_chain_matches WHERE batch_seq IS NULL': [MATCH_ROW],
+        'FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL': [MATCH_ROW],
         'FROM state_checkpoints':                           [CP_ROW]
     });
     let me = identity.getPubkeyHex().toLowerCase();

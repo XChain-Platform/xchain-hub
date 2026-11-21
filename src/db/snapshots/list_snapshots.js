@@ -66,9 +66,10 @@ module.exports = Object.assign({
             'SELECT * FROM list_snapshots WHERE snapshot_id = ? LIMIT 1', [snapshotId]);
     },
 
-    async findListSnapshotsByBatchSeq(limit){
+    async findListSnapshotsByBatchSeq(network, limit){
         return this.doQuery(
-            'SELECT * FROM list_snapshots WHERE batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?', [limit]);
+            'SELECT * FROM list_snapshots WHERE network = ? AND batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?',
+            [String(network || ''), limit]);
     },
 
     async updateListSnapshotArchiveBatchSeq(batchSeq, txid, snapshotId){

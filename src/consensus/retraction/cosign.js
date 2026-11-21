@@ -169,6 +169,7 @@ module.exports = {
             ? swq.meetsStakeThreshold(vset, sigs.map(s => s.pubkey))
             : (sigs.length >= quorum);
         if(!met) return;                                           // sub-quorum, ignore
+        if(this.finalized.has(id)) return;                         // another delivery/retry won the await
         await this.finalize(evt, canonical, id, sigs, false);
     }
 };
