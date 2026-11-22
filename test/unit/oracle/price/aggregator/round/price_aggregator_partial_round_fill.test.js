@@ -51,9 +51,7 @@ function setup(heldRows) {
     return { hub, agg, inserts, insertSql };
 }
 
-describe('PriceAggregator partial pushed-round repair', function () {
-    afterEach(function () { sinon.restore(); });
-
+function registerPartialRoundFillTests() {
     it('verifies the complete round and writes only its missing pair', async function () {
         const { agg, inserts } = setup([{ coin_pair: 'BTC/USD', status: 'finalized' }]);
         const result = await agg.receiveValidatedRound('BTC', signedRound(agg));
@@ -84,7 +82,9 @@ describe('PriceAggregator partial pushed-round repair', function () {
         expect(inserts).to.have.length(1);
         expect(inserts[0][1]).to.equal('LTC/USD');
     });
+}
 
+function registerPartialRoundGuardTests() {
     it('guards a pair another writer can fill after the presence read', async function () {
         const { agg, insertSql } = setup([{ coin_pair: 'BTC/USD', status: 'finalized' }]);
         const result = await agg.receiveValidatedRound('BTC', signedRound(agg));
@@ -114,4 +114,10 @@ describe('PriceAggregator partial pushed-round repair', function () {
         expect(result.accepted).to.equal(true);
         expect(hub.db.doQuery.called).to.equal(false);
     });
+}
+
+describe('PriceAggregator partial pushed-round repair', function () {
+    afterEach(function () { sinon.restore(); });
+    registerPartialRoundFillTests();
+    registerPartialRoundGuardTests();
 });

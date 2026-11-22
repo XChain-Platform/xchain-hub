@@ -74,7 +74,6 @@ function snapshotOf(validators) {
 }
 const live = (r) => r.status !== 'skipped';
 const isBatchRow = (r) => typeof r.consensus_proof === 'string' && r.consensus_proof.startsWith('{"batch":');
-
 // The retraction tail every price_snapshots retraction statement shares.
 function inRetraction(r, chain, from, to, gen, bounded, fenced) {
     if (r.source_chain !== chain || r.source_action_index === null) return false;
