@@ -33,6 +33,8 @@
 
 'use strict';
 
+const { readParenthesized } = require('./sql_type_arguments.js');
+
 const NAME = '`?(\\w+)`?';
 
 // Statement and clause shapes the planner understands.
@@ -81,8 +83,10 @@ function columnExpectation(definition){
     const typeMatch = def.match(/^(\w+)/);
     const expect = { dataType: typeMatch ? typeMatch[1].toLowerCase() : null };
     if(expect.dataType === 'enum'){
-        const body = def.match(/^ENUM\s*\(([^)]*)\)/i);
-        expect.enumValues = body ? (body[1].match(/'((?:[^']|'')*)'/g) || []).map(v => v.slice(1, -1).toLowerCase()) : [];
+        const body = readParenthesized(def, typeMatch[0].length);
+        if(!body.complete) expect.enumUnreadable = true;
+        else expect.enumValues = (body.body.match(/'((?:[^']|'')*)'/g) || [])
+            .map(v => v.slice(1, -1).toLowerCase());
     }
     const length = def.match(/^(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)/i);
     if(length) expect.minLength = Number(length[1]);
@@ -181,6 +185,7 @@ function schemaModel(columnRows, indexRows){
 
 function columnShortfall(live, expect){
     if(expect.dataType && live.dataType !== expect.dataType) return 'is ' + live.dataType + ', not ' + expect.dataType;
+    if(expect.enumUnreadable) return 'ENUM definition could not be read';
     for(const v of expect.enumValues || [])
         if(live.columnType.indexOf("'" + v + "'") === -1) return 'lacks ENUM value ' + v;
     if(expect.minLength != null && !(live.maxLength >= expect.minLength))

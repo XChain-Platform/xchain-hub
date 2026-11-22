@@ -42,7 +42,11 @@ function reloadWithSpawnStub(spawnResolveValue) {
     const spawnKey = require.resolve('../../../../src/providers/llm/claude_spawn.js');
     savedCacheEntry = require.cache[spawnKey];
 
-    const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
+    const fakeRunClaudePrint = sinon.stub().callsFake((opts) => {
+        const json = { ...(spawnResolveValue.json || {}) };
+        if (!json.modelUsage) json.modelUsage = { [opts.model]: { outputTokens: 1 } };
+        return Promise.resolve({ ...spawnResolveValue, json });
+    });
     // Inject a fake module whose exports.runClaudePrint is our stub
     require.cache[spawnKey] = {
         id: spawnKey, filename: spawnKey, loaded: true,
@@ -129,10 +133,12 @@ function registerSpendAuditIntentTests() {
     it('writes the intent BEFORE the vendor is dialed, and settles it after', async function () {
         let sinkAtDispatch = null;
         const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
-        stub.callsFake(async () => {
+        stub.callsFake(async (opts) => {
             // Observed from inside the call: the durable record already exists.
             sinkAtDispatch = readSink();
-            return { result: 'ok', json: {} };
+            return { result: 'ok', json: {
+                modelUsage: { [opts.model]: { outputTokens: 1 } }
+            } };
         });
 
         await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));

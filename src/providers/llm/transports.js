@@ -108,6 +108,26 @@ function openAiText(result) {
     return text;
 }
 
+// The CLI can silently remap a requested model or fall back to another one. Its
+// JSON result reports the models that actually produced output, which is the
+// identity the signed response must bind to.
+function servedModelCheck(requestedModel, json) {
+    const usage = json && json.modelUsage;
+    if (!usage || typeof usage !== 'object' || Array.isArray(usage))
+        return { ok: false, reason: 'modelUsage missing', served: [] };
+    const served = Object.entries(usage)
+        .filter(([, entry]) => entry && Number(entry.outputTokens) > 0)
+        .map(([model]) => String(model));
+    if (served.length === 0)
+        return { ok: false, reason: 'no model produced output', served };
+    const escaped = String(requestedModel).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const snapshot = new RegExp('^' + escaped + '-\\d{8}$');
+    const unexpected = served.filter(model => model !== requestedModel && !snapshot.test(model));
+    if (unexpected.length > 0)
+        return { ok: false, reason: 'unexpected served model ' + unexpected.join(','), served };
+    return { ok: true, served };
+}
+
 // The Messages API request for a Claude-family model on the anthropic_api transport.
 function anthropicRequestBody(model, maxTokens, temperature, prompt, sys) {
     // Shape the outgoing value to the vendor contract the way the OpenAI branch
@@ -198,7 +218,18 @@ async function dispatchClaudeSpawn(deps, { prompt, model, timeoutMs, _usage }, s
         }
         _tokenUsage.calls += 1;
     }
+    const served = servedModelCheck(model, json);
+    if (!served.ok) {
+        let err = new Error('llm: claude_spawn answer served by ' +
+            (served.served.length ? served.served.join(',') : 'unknown') + ' (' + served.reason +
+            '), requested ' + model);
+        err.kind = 'model_mismatch';
+        err.transient = false;
+        err.requestedModel = model;
+        err.servedModels = served.served;
+        throw err;
+    }
     return result;
 }
 
-module.exports = { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn };
+module.exports = { anthropicRequestBody, anthropicText, dispatchOpenAi, dispatchClaudeSpawn, servedModelCheck };

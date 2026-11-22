@@ -43,7 +43,13 @@ function reloadWithSpawnStub(spawnResolveValue) {
     const spawnKey = require.resolve('../../../../src/providers/llm/claude_spawn.js');
     savedCacheEntry = require.cache[spawnKey];
 
-    const fakeRunClaudePrint = sinon.stub().resolves(spawnResolveValue);
+    const fakeRunClaudePrint = sinon.stub().callsFake((opts) => {
+        if (Object.prototype.hasOwnProperty.call(spawnResolveValue, 'json'))
+            return Promise.resolve(spawnResolveValue);
+        return Promise.resolve({ ...spawnResolveValue, json: {
+            modelUsage: { [opts.model]: { inputTokens: 1, outputTokens: 1 } }
+        } });
+    });
     // Inject a fake module whose exports.runClaudePrint is our stub
     require.cache[spawnKey] = {
         id: spawnKey, filename: spawnKey, loaded: true,
@@ -100,6 +106,7 @@ describe('llm provider, fetch via claude_spawn', function () {
     });
 
     registerSpawnFetchTests();
+    registerServedModelTests();
     registerSpawnBudgetCeilingTests();
 });
 
@@ -174,5 +181,40 @@ function registerSpawnBudgetCeilingTests() {
         expect(err).to.exist;
         expect(err.paused).to.equal(true);
         expect(stub.called).to.equal(false);
+    });
+}
+
+function registerServedModelTests() {
+    it('rejects text served by a different model before it can be labelled as requested', async function () {
+        const { llm } = reloadWithSpawnStub({ result: 'remapped', json: {
+            modelUsage: { 'claude-opus-5-5': { outputTokens: 3 } }
+        } });
+        let err;
+        try { await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {})); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.kind).to.equal('model_mismatch');
+        expect(err.servedModels).to.deep.equal(['claude-opus-5-5']);
+    });
+
+    it('fails closed when the successful CLI envelope omits modelUsage', async function () {
+        const { llm } = reloadWithSpawnStub({ result: 'unattributed', json: {} });
+        let err;
+        try { await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {})); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.kind).to.equal('model_mismatch');
+        expect(err.message).to.match(/modelUsage missing/);
+    });
+
+    it('ignores helper models with no output and accepts a dated requested snapshot', async function () {
+        const requested = 'claude-sonnet-4-6';
+        const { llm } = reloadWithSpawnStub({ result: 'dated', json: { modelUsage: {
+            [requested + '-20260101']: { outputTokens: 2 },
+            'claude-haiku-4-5': { inputTokens: 4, outputTokens: 0 }
+        } } });
+        const out = await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+        expect(out.body.toString('utf8')).to.equal('dated');
+        expect(out.meta).to.equal(requested);
     });
 }

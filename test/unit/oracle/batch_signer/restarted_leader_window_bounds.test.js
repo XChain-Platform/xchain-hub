@@ -147,6 +147,22 @@ function registerLandedTests() {
         expect(header(h.broadcasts[0])).to.equal('102|105|5005|4');
     });
 
+    it('splits around an interior landed copy when the chain lookup is unavailable', async function () {
+        mesh = buildMesh(4, { perNodeRounds: () => landedCopy([103]), timeoutMs: 400 });
+        quickFill(mesh);
+        let h = leaderPublisher(only([100, 101, 102, 104, 105]));
+        await h.p.assembleWindow(0);
+
+        expect(h.broadcasts.map(header)).to.deep.equal([
+            '100|102|5002|3',
+            '104|105|5005|2'
+        ]);
+        expect(sentOf(mesh.nodes[0], 'XPRICEB_SIGN_REQ').some(m =>
+            m.data.first_round === 100 && m.data.last_round === 105
+        )).to.equal(false);
+        expect(h.p._assembledWindows.has(0)).to.equal(true);
+    });
+
     it('treats a round a peer holds only as a landed batch\'s copy as on chain, not as withheld', async function () {
         mesh = buildMesh(4, { perNodeRounds: i => i === 0 ? only([102, 103, 104, 105])
                                                           : landedCopy([100, 101]), timeoutMs: 400 });

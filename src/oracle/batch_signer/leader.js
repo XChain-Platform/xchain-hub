@@ -137,7 +137,8 @@ module.exports = {
     // would propose a narrowed range: every co-signer re-derives that same narrowed
     // range and signs it, and the rounds its peers finalized while it was down are
     // never published by anyone. `exempt` names rounds that need no filling because the
-    // chain already carries them.
+    // chain already carries them. Locally proven landed copies are added to that
+    // set so the publisher can split the remaining proposal around them.
     //
     // Resolves true when `rounds` now holds every round any reachable hub finalized in
     // [first, last] (filled in place, ascending), false when it cannot be shown, which
@@ -188,7 +189,11 @@ module.exports = {
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
-            if(r.batchSourced){ gaps.delete(n); continue; }
+            if(r.batchSourced){
+                gaps.delete(n);
+                if(exempt instanceof Set) exempt.add(n);
+                continue;
+            }
             let { batchSourced, ...proposalRound } = r;
             rounds.push(proposalRound);
             held.add(n);

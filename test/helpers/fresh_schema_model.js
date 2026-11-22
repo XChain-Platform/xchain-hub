@@ -29,6 +29,7 @@
 const fs   = require('fs');
 const path = require('path');
 const Database = require('../../src/db');
+const { readParenthesized } = require('../../src/db/schema/sql_type_arguments.js');
 
 const SQL_DIR = path.join(__dirname, '..', '..', 'src', 'sql');
 const strip = (sql) => Database.prototype.stripSqlLineComments.call(null, sql);
@@ -56,13 +57,14 @@ function columnRow(table, line, tableCharset){
     if(!m) throw new Error('unparsed column line in ' + table + ': ' + line);
     const def = m[2].trim();
     const dt = def.match(/^(\w+)/)[1].toLowerCase();
-    const enumBody = def.match(/^ENUM\s*\(([^)]*)\)/i);
+    const enumBody = dt === 'enum' ? readParenthesized(def, dt.length) : null;
+    if(enumBody && !enumBody.complete) throw new Error('unparsed ENUM in ' + table + ': ' + line);
     const len = def.match(/^(?:VAR)?CHAR\s*\(\s*(\d+)\s*\)/i);
     const cs = def.match(/\bCHARACTER\s+SET\s+(\w+)/i);
     const textual = /char|text|enum/.test(dt);
     return {
         t: table, c: m[1], dt,
-        ct: enumBody ? 'enum(' + enumBody[1].replace(/\s+/g, '') + ')' : def.split(/\s+/)[0].toLowerCase(),
+        ct: enumBody ? 'enum(' + enumBody.body.replace(/\s+/g, '') + ')' : def.split(/\s+/)[0].toLowerCase(),
         cs: cs ? cs[1].toLowerCase() : (textual ? tableCharset : null),
         len: len ? Number(len[1]) : null
     };

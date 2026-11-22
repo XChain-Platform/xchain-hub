@@ -42,6 +42,19 @@ function registerColumnTests() {
                 .to.deep.equal(['validator_capabilities.capability lacks ENUM value full_node']);
         });
 
+        it('reads closing parentheses inside ENUM members', function () {
+            const stmt = ["ALTER TABLE `t` MODIFY `state` ENUM('a)','b') NOT NULL"];
+            expect(unmet(stmt, [col('t', 'state', 'enum', "enum('a)')")]))
+                .to.deep.equal(['t.state lacks ENUM value b']);
+            expect(unmet(stmt, [col('t', 'state', 'enum', "enum('a)','b')")])).to.deep.equal([]);
+        });
+
+        it('reports an incomplete ENUM definition instead of accepting an empty expectation', function () {
+            const stmt = ["ALTER TABLE `t` MODIFY `state` ENUM('a','b'"];
+            expect(unmet(stmt, [col('t', 'state', 'enum', "enum('a','b')")]))
+                .to.deep.equal(['t.state ENUM definition could not be read']);
+        });
+
         it('a charset restate holds only on the target charset', function () {
             const stmt = ['ALTER TABLE `attestation_responses` MODIFY `meta` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci'];
             expect(unmet(stmt, [col('attestation_responses', 'meta', 'text', 'text', 'utf8mb4')])).to.deep.equal([]);

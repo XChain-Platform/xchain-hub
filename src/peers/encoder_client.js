@@ -28,11 +28,11 @@ const axios = require('axios');
 //
 // The encoder's per-node-RPC budget is NODE_RPC_TIMEOUT (xchain-encoder
 // BlockchainConnector.js, default 30000), and the encoder cannot answer before its own
-// RPC finishes. The longest sequential chain one broadcast_tx can run is three of those:
-// _sendRaw, then an uncached chainName() for the isRegtest gate on the fee-cap recovery
-// path, then the retry _sendRaw. So the encoder's worst case is 90000 and this budget is
-// 4x the single hop, leaving a hop of margin for the hub -> encoder network leg and the
-// encoder's own work.
+// RPC finishes. The longest sequential chain one broadcast_tx can run is five of those:
+// chainName and the genesis lookup in the pre-send tier check, _sendRaw, an uncached
+// chainName for the isRegtest gate on fee-cap recovery, then the retry _sendRaw. The
+// encoder's worst case is 150000 and this budget leaves one hop of margin for the
+// hub -> encoder network leg and the encoder's own work.
 //
 // Equality is what made this load-bearing rather than cosmetic: an axios abort carries no
 // HTTP response and none of the never-sent error codes, so isAmbiguousSendError
@@ -47,12 +47,12 @@ const axios = require('axios');
 // a slow pass skips ticks rather than stacking overlapping money-path passes, and the
 // round deadlines these effectors honour are counted in BLOCKS, not in this many ms.
 //
-// An operator who raises NODE_RPC_TIMEOUT past 40000 re-inverts this. There is
+// An operator who raises NODE_RPC_TIMEOUT past 36000 re-inverts this. There is
 // deliberately no env override here: an env-only read would be a dead knob in an api.js
 // child, where the house pattern is `process.env.X || cfg.X` and every one of the eight
 // construction sites passes only (url, key). Making it configurable means threading it
 // from those call sites, which is its own change.
-const DEFAULT_ENCODER_TIMEOUT_MS = 120000;
+const DEFAULT_ENCODER_TIMEOUT_MS = 180000;
 
 // The encoder answers several failures with a non-2xx status AND a JSON-RPC error
 // body carrying the actual reason (401 -32001 Unauthorized, 429 -32029 Too many

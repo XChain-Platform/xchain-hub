@@ -51,23 +51,23 @@ function registerConstructorTests() {
         // The default has to be STRICTLY GREATER than the encoder's own worst-case
         // internal budget, not equal to it. Pinned as an inequality against the
         // encoder's shipped NODE_RPC_TIMEOUT (30000) times its longest sequential
-        // sendrawtransaction chain (3 hops: _sendRaw, an uncached chainName for the
-        // isRegtest gate, and the fee-cap retry _sendRaw), because equality is the
+        // broadcast chain (5 hops: chainName, genesis, _sendRaw, an uncached chainName
+        // for the isRegtest gate, and the fee-cap retry _sendRaw), because equality is the
         // defect: an abort here is classified ambiguous and dead-letters the round.
         it('defaults to a budget strictly greater than the encoder worst-case RPC chain', function () {
             let c = new EncoderClient('http://enc/rpc', '');
-            expect(c.timeout).to.be.above(3 * 30000);
-            expect(c.timeout).to.equal(120000);
+            expect(c.timeout).to.be.above(5 * 30000);
+            expect(c.timeout).to.equal(180000);
         });
 
         // A timeout is the one knob where 0 must NOT mean "explicitly set": axios reads
         // 0 as no timeout at all, which would wedge a publisher pass on a hung encoder
         // forever. Non-positive and non-finite values fall back rather than disarming.
         it('falls back to the default for a non-positive or non-finite timeout', function () {
-            expect(new EncoderClient('http://enc/rpc', '', 0).timeout).to.equal(120000);
-            expect(new EncoderClient('http://enc/rpc', '', -1).timeout).to.equal(120000);
-            expect(new EncoderClient('http://enc/rpc', '', NaN).timeout).to.equal(120000);
-            expect(new EncoderClient('http://enc/rpc', '', 'abc').timeout).to.equal(120000);
+            expect(new EncoderClient('http://enc/rpc', '', 0).timeout).to.equal(180000);
+            expect(new EncoderClient('http://enc/rpc', '', -1).timeout).to.equal(180000);
+            expect(new EncoderClient('http://enc/rpc', '', NaN).timeout).to.equal(180000);
+            expect(new EncoderClient('http://enc/rpc', '', 'abc').timeout).to.equal(180000);
         });
 
         it('initialises _rpcId to 0', function () {

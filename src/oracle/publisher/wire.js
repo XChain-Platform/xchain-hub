@@ -114,6 +114,7 @@ module.exports = {
                 '] threw; window stays unpublished: ', e && e.message));
             return false;
         }
+        publishExempt();
         let filled = rounds.map(r => parseInt(r.round)).filter(n => !held.has(n));
         if (!ok) {
             logger.warn('OraclePublisher: window [' + first + ',' + last + '] lacks round(s) ' +

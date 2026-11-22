@@ -137,6 +137,11 @@ class JudgeAgreement {
             this.logger.warn('llm: judge ' + jm + ' failed on vendor config, auth, or billing; advancing fallback chain');
             return false;
         }
+        if (e && e.kind === 'model_mismatch') {
+            this.logger.warn('llm: judge ' + jm + ' was served by a different model (' +
+                (e.servedModels || []).join(',') + '); advancing fallback chain');
+            return false;
+        }
         if (e && (e.kind === 'refusal' || e.transient === false)) {
             this.logger.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                 (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
