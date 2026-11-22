@@ -162,7 +162,9 @@ function registerLandedTests() {
         )).to.equal(false);
         expect(h.p._assembledWindows.has(0)).to.equal(true);
     });
+}
 
+function registerPeerLandedTests() {
     it('treats a round a peer holds only as a landed batch\'s copy as on chain, not as withheld', async function () {
         mesh = buildMesh(4, { perNodeRounds: i => i === 0 ? only([102, 103, 104, 105])
                                                           : landedCopy([100, 101]), timeoutMs: 400 });
@@ -197,4 +199,5 @@ describe('OraclePublisher PRICE batch rail: a restarted leader proposes the whol
     registerFillTests();
     registerWithholdTests();
     registerLandedTests();
+    registerPeerLandedTests();
 });
