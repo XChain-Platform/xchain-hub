@@ -359,7 +359,8 @@ jobs:
       # back-merges: the SDK folded its scripts into bin and renamed the
       # template-sync suite, and sync retired the utf8mb4 twin title when the
       # parity check moved into its own test file.
-      # The SDK baseline is re-taken again at its 2026-11-22 develop: the
+      # The SDK baseline is re-taken at its v0.28.0 master merge, since the
+      # sibling checkout above reads the SDK default branch (master): the
       # rate-limit window and flood tests moved into api_rate_limit_window.test.js
       # and the lint-core parity titles changed with the regex nesting gate.
       - name: Check out the re-taken hub suite-title pin
@@ -372,7 +373,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sdk
-          ref: 2e57e8cc47a636dfe1b8b8ca9c5168e1c69b435e
+          ref: 6196c44bf7be88ef030ec46ed02fd76055975d13
           path: suite-title-pins/sdk/xchain-sdk
 
       - name: Check out the re-taken sync suite-title pin
