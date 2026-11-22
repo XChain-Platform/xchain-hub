@@ -53,6 +53,7 @@ const { REORG_ALERT, XCHAIN_REORG_PREPARE, XCHAIN_REORG_COMMIT } = require('./re
 const reportMethods    = require('./reorg_handler/report.js');
 const consensusMethods = require('./reorg_handler/consensus.js');
 const probeMethods     = require('./reorg_handler/probe.js');
+const rollbackRetryMethods = require('./reorg_handler/rollback_retry.js');
 
 const DEFAULT_REORG_TIMEOUT = 60000; // 60 seconds
 
@@ -114,6 +115,7 @@ class ReorgHandler extends EventEmitter {
         this.maxPendingReorgs = parseInt(hubConfig.REORG_MAX_PENDING) || 64;
 
         this.initRoundCounts();
+        this.initRollbackRetry();
     }
 
     // Process-lifetime counts the scrape reads: rounds this hub opened or joined
@@ -239,6 +241,7 @@ class ReorgHandler extends EventEmitter {
             if (pending.timer) clearTimeout(pending.timer);
         }
         this.pendingReorgs.clear();
+        this.cancelRollbackRetries();
     }
 
     // Defense-in-depth: only tally votes from senders that are registered
@@ -319,6 +322,6 @@ class ReorgHandler extends EventEmitter {
 
 // Installed the way class syntax would put them: non-enumerable, and a name already on
 // the prototype throws at load rather than overwriting (install_parts.js).
-installParts(ReorgHandler.prototype, [reportMethods, consensusMethods, probeMethods]);
+installParts(ReorgHandler.prototype, [reportMethods, consensusMethods, probeMethods, rollbackRetryMethods]);
 
 module.exports = ReorgHandler;

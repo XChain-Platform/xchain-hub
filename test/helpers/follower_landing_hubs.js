@@ -104,7 +104,8 @@ function ingestQueries(rows) {
             return projectPresenceRows(rows.filter(r => wanted.has(r.round_number)));
         },
         async getPriceSnapshotByRoundNumber(round) {
-            return rows.filter(r => r.round_number === round && r.status !== 'skipped').slice(0, 1).map(r => ({ id: r.id }));
+            return rows.filter(r => r.round_number === round && r.status !== 'skipped')
+                .map(r => ({ coin_pair: r.coin_pair, status: r.status }));
         },
         async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount,
                                          proofJson, sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {

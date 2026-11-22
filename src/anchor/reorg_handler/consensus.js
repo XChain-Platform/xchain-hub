@@ -365,7 +365,11 @@ module.exports = {
             ).then(() => {
                 this.pendingReorgs.delete(reorgId);
             }).catch(err => {
-                this._rollbackFailures = (this._rollbackFailures || 0) + 1;
+                // Settles only after the retry budget is spent, so the finalized round stays
+                // in pendingReorgs meanwhile and a duplicate ALERT cannot reopen it. A
+                // shutdown that cancelled the retries is not a failed rollback.
+                if (!(err && err.rollbackCancelled === true))
+                    this._rollbackFailures = (this._rollbackFailures || 0) + 1;
                 logger.error(nodeUtil.format('Reorg: Error executing rollback for %s:', reorgId, err.message));
                 this.pendingReorgs.delete(reorgId);
             });

@@ -98,10 +98,10 @@ module.exports = {
         return this.doQuery(sql, params);
     },
 
-    // Deletes from attestations.
-    // Moved here from src/anchor/reorg_handler.js:626.
-    async deleteAttestation(chain, bound) {
-        return this.doQuery('DELETE FROM attestations WHERE source_chain = ? AND created_at > FROM_UNIXTIME(? / 1000)', [chain, bound]);
+    // Deletes from attestations. Connection-first: it runs inside the reorg rollback
+    // transaction, beside the price dispute and the reorg_attestations row.
+    async deleteAttestation(conn, chain, bound) {
+        return conn.query('DELETE FROM attestations WHERE source_chain = ? AND created_at > FROM_UNIXTIME(? / 1000)', [chain, bound]);
     },
 
     // Deletes from attestation_fetch_cache.

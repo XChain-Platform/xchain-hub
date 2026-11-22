@@ -135,7 +135,8 @@ function installFakeDb() {
             : { retraction_generation: gen, from_action_index: from };
     };
     db.getPriceSnapshotByRoundNumber = async (round) =>
-        table.filter(r => r.round_number === round && live(r)).slice(0, 1).map(r => ({ id: r.id }));
+        table.filter(r => r.round_number === round && live(r))
+            .map(r => ({ coin_pair: r.coin_pair, status: r.status }));
     installBatchPresenceRead(db);
     installBatchUpsert(db);
     db.findPriceSnapshotsForRound = async (round) =>

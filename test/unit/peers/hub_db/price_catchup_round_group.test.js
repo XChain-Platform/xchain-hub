@@ -233,3 +233,53 @@ describe('price catch-up of rows another hub recorded as its own outcome', funct
         expect(db.setFinalizedPriceSnapshotRound.called).to.equal(false);
     });
 });
+
+function routedRow(proof, extra) {
+    return Object.assign({
+        round_number: 9, coin_pair: 'BTC/USD', price: '50000', status: 'finalized',
+        reference_block: 800000, reference_chain: 'BTC', source_chain: 'BTC',
+        block_timestamp: 1700000000, validator_count: 3, consensus_proof: proof,
+        source_action_index: 42, push_generation: 4, batch_block_time: 1700000500,
+        created_at: new Date('2026-01-01T00:00:00Z'), admit_block_btc: null,
+        admit_block_ltc: null, admit_block_doge: null
+    }, extra);
+}
+
+function routedDb() {
+    return {
+        setPushedPriceSnapshotRound: sinon.stub().resolves({}),
+        setBatchPriceSnapshotRound: sinon.stub().resolves({}),
+        setFinalizedPriceSnapshotRound: sinon.stub().resolves({})
+    };
+}
+
+describe('price catch-up landing clock routing', function () {
+    afterEach(function () { sinon.restore(); });
+
+    it('drops a peer landing clock from an array-proof pushed row', async function () {
+        const db = routedDb();
+        await storePriceSnapshot(db, routedRow('[{"sig":"a"}]'));
+        expect(db.setPushedPriceSnapshotRound.calledOnce).to.equal(true);
+        expect(db.setBatchPriceSnapshotRound.called).to.equal(false);
+        expect(db.setPushedPriceSnapshotRound.firstCall.args).not.to.include(1700000500);
+    });
+
+    it('stores a verified batch-proof landing clock', async function () {
+        const db = routedDb();
+        const proof = JSON.stringify({ batch: { first_round: 9, last_round: 9 }, sigs: [] });
+        await storePriceSnapshot(db, routedRow(proof));
+        expect(db.setBatchPriceSnapshotRound.calledOnce).to.equal(true);
+        expect(db.setBatchPriceSnapshotRound.firstCall.args[9]).to.equal(1700000500);
+        expect(db.setPushedPriceSnapshotRound.called).to.equal(false);
+    });
+
+    it('still stores a producer row without a peer landing clock', async function () {
+        const db = routedDb();
+        const producer = routedRow('[{"sig":"a"}]', {
+            source_chain: 'DOGE', source_action_index: null, push_generation: 0
+        });
+        await storePriceSnapshot(db, producer);
+        expect(db.setFinalizedPriceSnapshotRound.calledOnce).to.equal(true);
+        expect(db.setBatchPriceSnapshotRound.called).to.equal(false);
+    });
+});

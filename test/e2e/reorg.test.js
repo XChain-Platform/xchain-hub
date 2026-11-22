@@ -48,6 +48,7 @@ function chainIsolationSuite() {
             let newHash = 'd'.repeat(64);
             cluster.stubIndexer.tip = 800050;
             cluster.stubIndexer.hashes[799999] = newHash;
+            cluster.stubIndexer.orphaned[799999] = 'c'.repeat(64);
             let reorgTimestamp = Date.now() - 60000;
             await callRpc(port, 'reportreorg', {
                 chain: 'BTC', reorg_height: 799999, timestamp: reorgTimestamp,
@@ -105,6 +106,7 @@ function rollbackCascadeSuite() {
             let newHash = 'b'.repeat(64);
             cluster.stubIndexer.tip = 800050;
             cluster.stubIndexer.hashes[799999] = newHash;
+            cluster.stubIndexer.orphaned[799999] = 'a'.repeat(64);
             let reorgRes = await callRpc(port, 'reportreorg', {
                 chain: 'BTC', reorg_height: 799999, timestamp: Date.now() - 3600000,
                 old_hash: 'a'.repeat(64), new_hash: newHash

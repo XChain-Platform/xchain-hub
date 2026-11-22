@@ -34,7 +34,7 @@ module.exports = {
 
     // Read a narrow projection of every row of a bounded set of rounds in one
     // statement; batch ingest and the repair pass use it as their sole presence
-    // read. The projection must carry every column isProducerRoundRow reads plus
+    // read. The projection must carry every column hasProducerProvenance reads plus
     // coin_pair, because the re-land path uses both to keep the pairs this hub
     // finalized itself out of the batch upsert.
     async findPriceSnapshotRowsForRounds(rounds) {

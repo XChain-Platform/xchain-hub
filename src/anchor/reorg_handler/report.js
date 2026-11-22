@@ -112,7 +112,14 @@ module.exports = {
         let quorum = snapshotContext.active ? snapshotContext.quorum : this.getQuorum();
         if (quorum === 0) {
             let proof = snapshotContext.active ? JSON.stringify([snapshotContext.selfPubkey]) : '[]';
-            await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, proof, observedBlockTimeMs);
+            try {
+                await this.executeRollback(chain, reorgHeight, timestamp, reorgId, 1, proof, observedBlockTimeMs);
+            } catch (err) {
+                // A rollback that never landed must not hold the chain's report budget, or
+                // the re-report that would apply it is refused for the rest of the window.
+                if (this.reorgRateTracker.get(chain) === now) this.reorgRateTracker.delete(chain);
+                throw err;
+            }
             return;
         }
 
@@ -151,7 +158,16 @@ module.exports = {
         // Warn, like the decoder and indexer reorg lines: this deletes attestations.
         logger.warn('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight +
             ' (' + reorgId + ')');
+        // Compute once here: the lookback floor moves with the clock, and a retried
+        // attempt must roll back exactly the scope the first one would have.
+        let bound = this.rollbackBound(timestamp, observedBlockTimeMs);
+        let rollback = { chain, reorgHeight, timestamp, reorgId, validatorCount, proof,
+            observedBlockTimeMs, bound };
+        await this.driveRollback(rollback);
+        await this.finishRollback(rollback);
+    },
 
+    rollbackBound(timestamp, observedBlockTimeMs) {
         // Rollback bound: anchor to OUR OWN node's block_time for reorgHeight
         // (captured during self-verification) rather than the reporter-supplied
         // timestamp. A reorg invalidates state derived from blocks AT AND ABOVE
@@ -169,24 +185,40 @@ module.exports = {
         let bound = Number.isFinite(observedBlockTimeMs) ? observedBlockTimeMs : parseInt(timestamp);
         let floor = Date.now() - this.maxLookbackMs;
         if (bound < floor) bound = floor;
+        return bound;
+    },
 
-        await this.db.deleteAttestation(chain, bound);
-
-        // price_snapshots.block_timestamp is Unix SECONDS (OracleConsensus / PriceAggregator
-        // write Math.floor(Date.now()/1000)), but the reorg bound is MILLISECONDS
-        // (block_time * 1000, or the ms timestamp validated against Date.now()). Divide to
-        // compare in the same unit, matching the attestations DELETE above; without this
-        // the seconds column never exceeds the ms literal and the dispute silently matches
-        // zero rows.
-        await this.db.updatePriceSnapshotByBlockTimestamp(bound);
-
+    // One database attempt. The three writes share one transaction, so a failure part-way
+    // (lock wait, dropped connection) rolls the attestation DELETE back with it instead of
+    // leaving attestations cut while the orphaned prices still read finalized.
+    async applyRollback(rollback) {
+        let { chain, reorgHeight, timestamp, reorgId, validatorCount, proof, bound } = rollback;
         let affectedChains = this.getAffectedChains(chain);
-        await this.db.setReorgAttestation(reorgId, chain, reorgHeight, timestamp, JSON.stringify(affectedChains), validatorCount, proof);
+        await this.db.withTransaction(async conn => {
+            await this.db.deleteAttestation(conn, chain, bound);
 
+            // price_snapshots.block_timestamp is Unix SECONDS (OracleConsensus / PriceAggregator
+            // write Math.floor(Date.now()/1000)), but the reorg bound is MILLISECONDS
+            // (block_time * 1000, or the ms timestamp validated against Date.now()). Divide to
+            // compare in the same unit, matching the attestations DELETE above; without this
+            // the seconds column never exceeds the ms literal and the dispute silently matches
+            // zero rows.
+            await this.db.updatePriceSnapshotByBlockTimestamp(conn, bound);
+
+            await this.db.setReorgAttestation(conn, reorgId, chain, reorgHeight, timestamp,
+                JSON.stringify(affectedChains), validatorCount, proof);
+        });
+    },
+
+    // Runs once after a transaction attempt commits. Keep this outside driveRollback:
+    // a synchronous event listener can throw, but that must not retry committed writes
+    // and then disappear behind the processed check on the next attempt.
+    async finishRollback(rollback) {
+        let { chain, reorgHeight, timestamp, reorgId, observedBlockTimeMs, bound } = rollback;
+        let affectedChains = this.getAffectedChains(chain);
         this.processed.add(reorgId);
 
-        // Last of the rollback's writes, so the mirror broadcast follows the hub's own
-        // durable state.
+        // After the commit, so the mirror broadcast follows the hub's own durable state.
         await this.emitDisputedPriceRows(bound);
 
         logger.warn('Reorg: Rollback complete for ' + reorgId +

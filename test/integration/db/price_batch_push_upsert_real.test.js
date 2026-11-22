@@ -20,13 +20,14 @@ async function producer(round, pairs) {
         '[{"own":1}]', ADMIT);
 }
 
-async function incoming(method, round, pairs, referenceChain, action, generation) {
+async function incoming(method, round, pairs, referenceChain, action, generation, replaceOnlySkipped) {
     const common = [round, pairs, 900, referenceChain, 1700000500, 5];
     if (method === 'setBatchPriceSnapshotRound') {
         return db[method](...common, '{"batch":{}}', action, generation,
             1700000600, CREATED, OTHER);
     }
-    return db[method](...common, '[{"pushed":1}]', action, generation, CREATED, OTHER);
+    return db[method](...common, '[{"pushed":1}]', action, generation, CREATED, OTHER,
+        replaceOnlySkipped);
 }
 
 function registerProducerAndPlaceholderCases() {
@@ -91,14 +92,29 @@ function registerMovableRowCases() {
         });
 
         it(method + ' keeps a disputed row disputed while landing metadata moves', async function () {
-            await producer(33, [{ coinPair: 'BTC/USD', price: '50000' }]);
+            await incoming('setBatchPriceSnapshotRound', 33,
+                [{ pair: 'BTC/USD', price: '50000' }], 'LTC', 40, 3);
             await db.doQuery("UPDATE price_snapshots SET status = 'disputed' WHERE round_number = 33");
             await incoming(method, 33, [{ pair: 'BTC/USD', price: '99999' }], 'DOGE', 42, 4);
             const row = (await rows(33))[0];
             expect(row.status).to.equal('disputed');
             expect(row.price).to.equal('99999');
             expect(Number(row.reference_block)).to.equal(900);
-            expect(row.consensus_proof).to.not.equal('[{"own":1}]');
+            expect(row.consensus_proof).to.not.equal('{"batch":{}}');
+        });
+
+        it(method + ' preserves disputed producer provenance', async function () {
+            await producer(35, [{ coinPair: 'BTC/USD', price: '50000' }]);
+            await db.doQuery("UPDATE price_snapshots SET status = 'disputed' WHERE round_number = 35");
+            await incoming(method, 35, [{ pair: 'BTC/USD', price: '99999' }], 'DOGE', 42, 4);
+            const row = (await rows(35))[0];
+            expect(row.status).to.equal('disputed');
+            expect(row.price).to.equal('50000');
+            expect(Number(row.reference_block)).to.equal(101);
+            expect(row.reference_chain).to.equal('BTC');
+            expect(row.consensus_proof).to.equal('[{"own":1}]');
+            expect([row.admit_block_btc, row.admit_block_ltc, row.admit_block_doge].map(Number))
+                .to.deep.equal([11, 12, 13]);
         });
     }
 }
@@ -146,6 +162,25 @@ function registerLandingClockAndMixedPairCases() {
     });
 }
 
+function registerPartialRepairRaceCase() {
+    it('preserves a pair catch-up finalizes after the repair presence read', async function () {
+        await db.setSkippedPriceSnapshotRound(36, ['LTC/USD'], 50, 1699999999);
+        expect(await db.getPriceSnapshotByRoundNumber(36)).to.deep.equal([]);
+
+        await incoming('setPushedPriceSnapshotRound', 36,
+            [{ pair: 'LTC/USD', price: '70' }], 'LTC', 7, 1);
+        await incoming('setPushedPriceSnapshotRound', 36,
+            [{ pair: 'LTC/USD', price: '80' }], 'BTC', 42, 4, true);
+
+        const row = (await rows(36))[0];
+        expect(row.status).to.equal('finalized');
+        expect(row.price).to.equal('70');
+        expect(row.reference_chain).to.equal('LTC');
+        expect(Number(row.source_action_index)).to.equal(7);
+        expect(Number(row.push_generation)).to.equal(1);
+    });
+}
+
 describe('Integration: batch and push upserts on a real MariaDB', function () {
     before(async function () {
         try {
@@ -170,4 +205,5 @@ describe('Integration: batch and push upserts on a real MariaDB', function () {
     registerProducerAndPlaceholderCases();
     registerMovableRowCases();
     registerLandingClockAndMixedPairCases();
+    registerPartialRepairRaceCase();
 });

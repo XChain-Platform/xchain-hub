@@ -8,7 +8,7 @@ const priceQueries = require('../../../../src/db/prices/index.js');
 
 const ADMIT = { admit_block_btc: 11, admit_block_ltc: 12, admit_block_doge: 13 };
 
-async function capture(method) {
+async function capture(method, replaceOnlySkipped) {
     const calls = [];
     const db = { async doQuery(sql, params) {
         calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
@@ -19,7 +19,7 @@ async function capture(method) {
         await priceQueries[method].call(db, ...common, 1700000000, 3, '[]', ADMIT);
     } else if (method === 'setPushedPriceSnapshotRound') {
         await priceQueries[method].call(db, ...common, 'DOGE', 1700000000, 3, '[]', 4, 5,
-            new Date('2026-01-01T00:00:00Z'), ADMIT);
+            new Date('2026-01-01T00:00:00Z'), ADMIT, replaceOnlySkipped);
     } else {
         await priceQueries[method].call(db, ...common, 'DOGE', 1700000000, 3, '{"batch":{}}', 4, 5,
             1700000100, new Date('2026-01-01T00:00:00Z'), ADMIT);
@@ -52,7 +52,8 @@ describe('finalized price snapshot upserts', () => {
     it('keeps canonical landing metadata mutable while the disputed status stays fixed', async () => {
         for (const method of ['setPushedPriceSnapshotRound', 'setBatchPriceSnapshotRound']) {
             const { update } = parts(await capture(method));
-            assert.match(update, /consensus_round\s*=\s*IF\(status\s*=\s*'finalized'/);
+            assert.match(update,
+                /consensus_round\s*=\s*IF\(status\s+IN\s*\(\s*'finalized'\s*,\s*'disputed'\s*\)/);
             for (const column of ['reference_block', 'source_action_index', 'push_generation']) {
                 const guarded = new RegExp(column + '\\s*=\\s*IF\\(consensus_round\\s*=\\s*2,\\s*' +
                     column + ',\\s*VALUES\\(' + column + '\\)\\)');
@@ -73,5 +74,18 @@ describe('finalized price snapshot upserts', () => {
         }
         assert.doesNotMatch(update, /\b(reference_chain|source_chain|source_action_index|push_generation|batch_block_time)\s*=/);
         assert.match(update, /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)\s*$/);
+    });
+
+    it('makes a partial-round repair conditional on the row still being skipped', async () => {
+        const { update } = parts(await capture('setPushedPriceSnapshotRound', true));
+        const guarded = ['price', 'reference_block', 'reference_chain', 'block_timestamp',
+            'validator_count', 'consensus_proof', 'source_chain', 'source_action_index',
+            'push_generation', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
+        for (const column of guarded) {
+            const pattern = new RegExp(column + "\\s*=\\s*IF\\(status\\s*=\\s*'skipped',\\s*VALUES\\(" +
+                column + '\\),\\s*' + column + '\\)');
+            assert.match(update, pattern, column);
+        }
+        assert.match(update, /status\s*=\s*IF\(status\s*=\s*'skipped',\s*'finalized',\s*status\)\s*$/);
     });
 });

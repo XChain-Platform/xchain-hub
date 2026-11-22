@@ -19,7 +19,7 @@ const crypto            = require('crypto');
 const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
-const { isProducerRoundRow } = require('../../../../../../src/peers/hub_db/price_round_groups');
+const { hasProducerProvenance } = require('../../../../../../src/peers/hub_db/price_round_groups');
 const { createMockHub } = require('../../../../../helpers/mockHub');
 const { projectPresenceRows } = require('../../../../../helpers/prices/presence_projection');
 
@@ -71,7 +71,7 @@ function installDb(db) {
         for (const p of pairs) {
             let row = table.find(r => r.coin_pair === p.pair);
             if (!row) { row = { id: table.length + 1, round_number: round, coin_pair: p.pair, batch_block_time: 0 }; table.push(row); }
-            if (isProducerRoundRow(row)) continue;
+            if (hasProducerProvenance(row)) continue;
             Object.assign(row, { price: p.price, reference_block: referenceBlock, reference_chain: referenceChain,
                 status: 'finalized', source_chain: referenceChain, source_action_index: actionIndex,
                 push_generation: generation, consensus_proof: proofJson, batch_block_time: blockTime });
@@ -114,6 +114,17 @@ describe('PriceAggregator batch re-land over a round of mixed origin', function 
         expect(own.reference_chain).to.equal('BTC');
         expect(own.consensus_proof).to.equal(PRODUCER_PROOF);
         expect(table.find(r => r.coin_pair === 'LTC/USD').push_generation).to.equal(5);
+    });
+
+    it('leaves disputed producer provenance out of a re-landed batch upsert', async function () {
+        table[0].status = 'disputed';
+        const result = await agg.receiveValidatedBatch(CHAIN, makeBatch({ push_generation: 5 }));
+        expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 1, rejected: 0 });
+        expect(upserts).to.deep.equal([['LTC/USD']]);
+        const own = table.find(r => r.coin_pair === 'BTC/USD');
+        expect(own.status).to.equal('disputed');
+        expect(own.reference_block).to.equal(PRODUCER_BLOCK);
+        expect(own.consensus_proof).to.equal(PRODUCER_PROOF);
     });
 
     it('leaves the self-finalized pair alone when a repair targets the round', async function () {

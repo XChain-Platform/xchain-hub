@@ -30,7 +30,7 @@ const batchLandingReset     = require('./batch_landing_reset.js');
 const zeroStampRounds       = require('./zero_stamp_rounds.js');
 const chainRestore          = require('./chain_restore.js');
 const newestPage            = require('./newest_page.js');
-const { upsertAssignments } = require('./producer_guard.js');
+const { upsertAssignments, skippedOnlyUpsertAssignments } = require('./producer_guard.js');
 
 // batch_block_time only moves earlier (or fills a 0), for producer rows as well.
 const BATCH_LANDING_CLOCK = `batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
@@ -116,10 +116,12 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  ORDER BY s.round_number DESC, s.coin_pair ASC LIMIT 50`);
     },
 
-    // Reads one row from price_snapshots.
+    // Reads every held pair for one round so ingest can distinguish a complete duplicate
+    // from a partial round. Skipped placeholders are deliberately absent from the held set.
     // Moved here from src/oracle/price_aggregator.js:526, src/oracle/price_aggregator.js:1131.
     async getPriceSnapshotByRoundNumber(round) {
-        return this.doQuery(`SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1`, [round]);
+        return this.doQuery(`SELECT coin_pair, status FROM price_snapshots
+            WHERE round_number = ? AND status != 'skipped' ORDER BY coin_pair`, [round]);
     },
 
     // Reads one row from price_snapshots.
@@ -158,10 +160,10 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
         return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE '{"batch":%' LIMIT 1`);
     },
 
-    // Updates price_snapshots.
-    // Moved here from src/anchor/reorg_handler.js:637.
-    async updatePriceSnapshotByBlockTimestamp(bound) {
-        return this.doQuery(`UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'`, [bound]);
+    // Disputes finalized price_snapshots rows inside a reorg bound. Connection-first: it
+    // runs inside the reorg rollback transaction, beside the attestation DELETE.
+    async updatePriceSnapshotByBlockTimestamp(conn, bound) {
+        return conn.query(`UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'`, [bound]);
     },
 
     // Reads every disputed price_snapshots row inside a reorg bound, whole, for the mirror
@@ -277,14 +279,15 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/price_aggregator.js:722.
     //
     // Upsert, not a plain INSERT: a 'skipped' placeholder may already occupy this key and is
-    // overwritten with the real data. A producer row keeps its first signed anchor and proof.
-    // A disputed row keeps that status while canonical landing metadata moves. created_at is
-    // NOT overwritten.
+    // overwritten with the real data. A producer row keeps its first signed anchor and proof,
+    // including after a local dispute. Other disputed rows keep that status while canonical
+    // landing metadata moves. created_at is NOT overwritten.
     // One statement lands the round atomically (no transaction API). The admission columns are
     // bound AFTER created_at so positional readers keep their index. `referenceChain` fills
-    // both reference_chain and source_chain.
+    // both reference_chain and source_chain. replaceOnlySkipped is reserved for a repair that
+    // selected absent rows earlier and must not overwrite a concurrent catch-up fill.
     async setPushedPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
-                                      sourceActionIndex, pushGeneration, createdAt, admitCols) {
+                                      sourceActionIndex, pushGeneration, createdAt, admitCols, replaceOnlySkipped = false) {
         let placeholders = pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?, ?, ?, ?)").join(', ');
         let params = [];
         for (let p of pairs) {
@@ -298,7 +301,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  push_generation, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
-                    ${upsertAssignments()}`;
+                    ${replaceOnlySkipped === true ? skippedOnlyUpsertAssignments() : upsertAssignments()}`;
         return this.doQuery(query, params);
     },
 
@@ -307,8 +310,8 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     //
     // One statement PER ROUND: the unit that must never be observed torn is the round.
     // A skipped placeholder upgrades to the batch-backed row, whose reference_block is its
-    // landing height. A producer row keeps its first signed anchor and proof. A disputed row
-    // keeps its status while canonical landing metadata moves.
+    // landing height. A producer row keeps its first signed anchor and proof, including after a
+    // local dispute. Other disputed rows keep their status while canonical landing metadata moves.
     // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push the
     // fee-pricing bound later. A skipped placeholder always holds 0, so its upgrade takes the
     // fill branch. The admission columns are bound AFTER created_at so positional

@@ -120,8 +120,9 @@ function createCluster(nodeCount, overrides) {
     // cluster.stubIndexer (hashes: { [height]: hash }). CrossChainEngine
     // followers likewise verify a proposed source action via
     // getactionconfirmations before PREPARing; `actions` overrides the
-    // default confirmed response per action_index.
-    const stubIndexer = { tip: 800100, network: 'regtest', hashes: {}, actions: {} };
+    // default confirmed response per action_index. `orphaned` ({ [height]: oldHash })
+    // feeds getreorghistory, which the hub also requires before it confirms a reorg.
+    const stubIndexer = { tip: 800100, network: 'regtest', hashes: {}, actions: {}, orphaned: {} };
     let stubIndexerServer = null;
     let stubIndexerUrl = '';
     function stubHashFor(height) {
@@ -165,6 +166,12 @@ function createCluster(nodeCount, overrides) {
                     const idx = params && params.action_index != null ? Number(params.action_index) : 0;
                     return res.json({ jsonrpc: '2.0', id,
                         result: stubIndexer.actions[idx] || { exists: true, confirmations: 100 } });
+                }
+                if (method === 'getreorghistory') {
+                    const height = params && params.block_index != null ? Number(params.block_index) : null;
+                    const oldHash = height != null ? stubIndexer.orphaned[height] : undefined;
+                    const events = oldHash ? [{ blocks: [{ block_index: height, block_hash: oldHash }] }] : [];
+                    return res.json({ jsonrpc: '2.0', id, result: { events } });
                 }
                 res.json({ jsonrpc: '2.0', id, error: { message: 'unknown method ' + method } });
             });

@@ -6,6 +6,7 @@
 const { expect } = require('chai');
 const {
     isProducerRoundRow,
+    hasProducerProvenance,
     groupKey,
     indexGroups,
     groupAgrees,
@@ -128,6 +129,17 @@ describe('price round producer gate in grouping', function () {
         for (const [name, extra] of Object.entries(NON_PRODUCER)) {
             expect(groupKey(row(1, proofOf('a'), 'x', extra)), name).to.equal(null);
         }
+    });
+
+    it('keeps disputed producer provenance outside finalized-only grouping', function () {
+        const disputed = row(1, proofOf('a'), 'x', { status: 'disputed' });
+        expect(hasProducerProvenance(row(1, proofOf('a'), 'x'))).to.equal(true);
+        expect(hasProducerProvenance(disputed)).to.equal(true);
+        expect(isProducerRoundRow(disputed)).to.equal(false);
+        expect(hasProducerProvenance(row(1, '[]', 'x', { status: 'skipped' }))).to.equal(false);
+        expect(hasProducerProvenance(row(1, proofOf('a'), 'x', {
+            status: 'disputed', source_chain: 'BTC', source_action_index: 7
+        }))).to.equal(false);
     });
 
     it('leaves a non-producer row out of every group', function () {

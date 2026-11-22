@@ -92,7 +92,7 @@ function makeValidator() {
         let inserts = [];
         answerRoundRereadFromInserts(hub.db);
         hub.db.doQuery.callsFake(async (sql, params) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^SELECT coin_pair, status FROM price_snapshots/.test(sql)) return [];
             if (/^INSERT INTO price_snapshots/.test(sql)) { inserts.push(params); return {}; }
             return [];
         });
@@ -182,7 +182,7 @@ function registerPriceaggregatorReceivevalidatedround1Tests6() {
     });
 
     it('rejects a duplicate round (a snapshot row already exists) before verification', async function () {
-        hub.db.doQuery.onFirstCall().resolves([{ id: 1 }]);
+        hub.db.doQuery.onFirstCall().resolves(PAIRS.map(pair => ({ coin_pair: pair.pair, status: 'finalized' })));
         let result = await agg.receiveValidatedRound('BTC', makeRound());
         expect(result).to.deep.equal({ accepted: false, reason: 'duplicate' });
         expect(hub.db.doQuery.callCount).to.equal(1); // dedup SELECT only
@@ -227,7 +227,7 @@ function registerPriceaggregatorReceivevalidatedround1Tests9() {
         // skipped rows; only a genuine finalized row counts as a duplicate.
         let dedupSql = null;
         hub.db.doQuery.callsFake(async (sql) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) { dedupSql = sql; return []; }
+            if (/^SELECT coin_pair, status FROM price_snapshots/.test(sql)) { dedupSql = sql; return []; }
             return {};
         });
         let result = await agg.receiveValidatedRound('BTC', makeRound());
@@ -242,7 +242,7 @@ function registerPriceaggregatorReceivevalidatedround1Tests9() {
         // data (and stay idempotent for an already-finalized row).
         let insertSqls = [];
         hub.db.doQuery.callsFake(async (sql) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^SELECT coin_pair, status FROM price_snapshots/.test(sql)) return [];
             if (/^INSERT INTO price_snapshots/.test(sql)) { insertSqls.push(sql); return {}; }
             return {};
         });
@@ -252,7 +252,8 @@ function registerPriceaggregatorReceivevalidatedround1Tests9() {
         expect(insertSqls).to.have.length(1);
         insertSqls.forEach(sql => {
             expect(sql).to.match(/ON DUPLICATE KEY UPDATE/);
-            expect(sql).to.match(/status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)/);
+            expect(sql).to.match(
+                /status\s*=\s*IF\(status\s*=\s*'skipped',\s*'finalized',\s*status\)/);
         });
     });
 
@@ -378,7 +379,7 @@ function registerPriceaggregatorReceivevalidatedround1Tests17() {
         let events = [];
         agg.on('row:inserted', e => events.push(e));
         hub.db.doQuery.callsFake(async (sql) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^SELECT coin_pair, status FROM price_snapshots/.test(sql)) return [];
             if (/^INSERT INTO price_snapshots/.test(sql)) throw new Error('boom');
             return [];
         });

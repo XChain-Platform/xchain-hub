@@ -34,15 +34,17 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
-// Dedupe: if a NON-SKIPPED row exists for this round_number, this is a
-// duplicate of an already-finalized round. 'skipped' placeholder rows
-// (written by OracleConsensus.storeSkippedRound when this hub had no
-// local submissions) must NOT count as a duplicate. A real validated
-// round for the same round_number can still arrive from a peer chain that
-// did reach quorum, and it must be allowed to overwrite the placeholders
-// (see the ON DUPLICATE KEY UPDATE on the insert below).
+// Read the non-skipped pairs held for this round. A full held set is a duplicate;
+// a partial set is verified in full and only its missing pairs are written.
 function duplicateRoundRead(round) {
     return this.db.getPriceSnapshotByRoundNumber(round);
+}
+
+function missingRoundPairs(roundData, existing) {
+    const held = new Set((Array.isArray(existing) ? existing : [])
+        .filter(row => row && typeof row.coin_pair === 'string')
+        .map(row => row.coin_pair));
+    return roundData.pairs.filter(pair => !held.has(pair.pair));
 }
 
 // STAKE_WEIGHTED_QUORUM: at/above activation the chain finalizes a PRICE v0 on the
@@ -179,19 +181,19 @@ function pushGenerationOf(roundData) {
 
 // Upsert (not a plain INSERT): a 'skipped' placeholder row may already occupy
 // this (round_number, coin_pair) unique key from storeSkippedRound. Overwrite
-// it with the real finalized data rather than colliding on the key. For an
-// already-finalized row this is an idempotent no-op of identical data (failover
-// double-publish safe). created_at is intentionally NOT overwritten so it
-// preserves when the hub first recorded the round.
+// it with the real finalized data rather than colliding on the key, but update
+// a duplicate key only while its held status is still 'skipped'. The status check
+// is inside the upsert, so a concurrent catch-up fill after the presence read is
+// preserved. created_at is intentionally NOT overwritten.
 //
 // ONE multi-row INSERT lands the whole round atomically; a getfeequote /
 // getpricesnapshots reader (or the id-ordered mirror bootstrap) can never observe
 // a torn round (some pairs from this round, others from the prior round). A single
 // statement is the atomicity tool, needing no db.withTransaction.
-function pushedRoundInsert(round, roundData, sourceChain, stamps, admitCols) {
-    return this.db.setPushedPriceSnapshotRound(round, roundData.pairs, stamps.referenceBlock, sourceChain || null,
+function pushedRoundInsert(round, pairs, sourceChain, stamps, admitCols) {
+    return this.db.setPushedPriceSnapshotRound(round, pairs, stamps.referenceBlock, sourceChain || null,
         stamps.timestamp, stamps.validatorCount, stamps.proofJson, stamps.sourceActionIndex, stamps.pushGeneration,
-        stamps.createdAt, admitCols);
+        stamps.createdAt, admitCols, true);
 }
 
 // Announce a stored round: the mirror rows, the accepted line, and the coverage check.
@@ -217,7 +219,7 @@ function announceStoredRound(round, sourceChain, roundData, insertedRows, valida
 // The store half, after the round has cleared verification and quorum: the stale-replay
 // fence, the atomic insert and the announcements. Async because those are its own awaits;
 // the caller returns its result directly, so nothing of the caller's runs after it.
-async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
+async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs, pairsToStore) {
     let { round, timestamp, referenceBlock } = head;
     // Only the verified signatures are stored as the consensus proof
     let proofJson = JSON.stringify(verifiedSigs);
@@ -244,18 +246,19 @@ async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
     let createdAt = new Date();
     let stamps = { referenceBlock, timestamp, validatorCount, proofJson, sourceActionIndex, pushGeneration, createdAt };
     let insertedRows = [];
-    if (roundData.pairs.length) {
+    const pairs = Array.isArray(pairsToStore) ? pairsToStore : roundData.pairs;
+    if (pairs.length) {
         // The round's admission map, the one the verified signatures cover, stored in its
         // per-chain columns (NULL for a legacy round, never 0), appended AFTER created_at
         // so every positional reader of this INSERT keeps its index.
         let admitCols = this.admission.admitBlocksToColumns(roundData.admit_blocks == null ? null : roundData.admit_blocks);
         try {
-            await pushedRoundInsert.call(this, round, roundData, sourceChain, stamps, admitCols);
+            await pushedRoundInsert.call(this, round, pairs, sourceChain, stamps, admitCols);
         } catch (err) {
             logger.error(nodeUtil.format('PriceAggregator: error inserting round ' + round + ':', err));
             return { accepted: false, reason: 'db error' };
         }
-        insertedRows = await storedRoundRows.call(this, round, roundData.pairs);
+        insertedRows = await storedRoundRows.call(this, round, pairs);
     }
 
     announceStoredRound.call(this, round, sourceChain, roundData, insertedRows, validatorCount);
@@ -271,9 +274,11 @@ async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
     if (pairsReason) return { accepted: false, reason: pairsReason };
     let structural = validateRoundSigs(roundData);
     if (structural.reason) return { accepted: false, reason: structural.reason };
+    let pairsToStore;
     if (checkDuplicate) {
         let existing = await duplicateRoundRead.call(this, head.round);
-        if (existing && existing.length > 0) return { accepted: false, reason: 'duplicate' };
+        pairsToStore = missingRoundPairs(roundData, existing);
+        if (pairsToStore.length === 0) return { accepted: false, reason: 'duplicate' };
     }
 
     let weighted = weightedModeFor.call(this, head.btcBlockHeight);
@@ -293,7 +298,9 @@ async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
         this, structural.sigs, snapshot, built.payload, head.btcBlockHeight);
     let quorumReason = roundQuorumReason(weighted, snapshot, verifiedSigs);
     if (quorumReason) return { accepted: false, reason: quorumReason };
-    return { accepted: true, head, verifiedSigs, payload: built.payload, snapshot };
+    const accepted = { accepted: true, head, verifiedSigs, payload: built.payload, snapshot };
+    if (checkDuplicate) accepted.pairsToStore = pairsToStore;
+    return accepted;
 }
 
 module.exports = {
@@ -306,7 +313,8 @@ module.exports = {
     async receiveValidatedRound(sourceChain, roundData) {
         let verified = await verifyValidatedRound.call(this, sourceChain, roundData, true);
         if (!verified.accepted) return verified;
-        return storeVerifiedRound.call(this, sourceChain, roundData, verified.head, verified.verifiedSigs);
+        return storeVerifiedRound.call(this, sourceChain, roundData, verified.head,
+            verified.verifiedSigs, verified.pairsToStore);
     }
 
 };

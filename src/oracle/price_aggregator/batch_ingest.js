@@ -25,7 +25,7 @@ const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
 const { verifyBatchQuorum } = require('./batch_verification.js');
 const { parsePushGeneration } = require('./single_validation.js');
 const { storedRoundRows } = require('./stored_round_rows.js');
-const { isProducerRoundRow } = require('../../peers/hub_db/price_round_groups.js');
+const { hasProducerProvenance } = require('../../peers/hub_db/price_round_groups.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -111,13 +111,12 @@ async function orphanedBatchLandingOf(sourceChain, rows, fence) {
 // what the hub now HOLDS (the upsert keeps the earlier landing clock), re-read rather
 // than built, so a mirror never receives a value this hub does not store.
 //
-// A pair this hub finalized itself (a producer row, BTC-anchored and carrying a signature
-// array) keeps its row: the retraction never deletes it, so there is nothing to move, and the
-// upsert would replace its BTC anchor and proof with the batch's landing height and proof. The
-// round is decided per round but its pairs can differ in origin.
+// A pair this hub finalized itself keeps its row even after a local dispute: the retraction never
+// deletes it, so there is nothing to move, and the upsert would replace its signed BTC anchor and
+// proof with the batch landing. The round is decided per round but its pairs can differ in origin.
 async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt, existing) {
     let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
-    let selfFinalized = new Set((existing || []).filter(isProducerRoundRow).map(row => row.coin_pair));
+    let selfFinalized = new Set((existing || []).filter(hasProducerProvenance).map(row => row.coin_pair));
     let pairs = r.pairs.filter(p => !selfFinalized.has(p.pair));
     if (pairs.length > 0)
         await batchRoundInsert.call(this, Object.assign({}, r, { pairs }), sourceChain, head, verified, fence, createdAt, admitCols);
