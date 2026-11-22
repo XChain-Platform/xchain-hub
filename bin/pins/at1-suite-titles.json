@@ -1930,6 +1930,17 @@
       "6d3da50a34ca5856b9e48339a440d4e15cfcf7b7e1cb964a75f0d5794d2f448e",
       "f50492b127300bc4b0d22f20e97222a22ed297eda551f82b89f7a99b725085ce"
     ],
+    "261ce4c6a6c48f1c": [
+      "452cb7c3ca2949ed8dc2bad5e1ae51e25c84f974af074c2a2641a5bdfd8c9e5a",
+      "060142365e29e8b506881d6e52838a5e9e36b20b05afe3b3d279a1ff00a6a73a",
+      "682e7489388bf89d5aaf2cffa3da70215022a97b60ab553aa8d14648af0b2d52",
+      "7591bcd6ebe0a1bae56e7a6fa07dc482f23d8b3d823147f588329d6254bd7a44",
+      "438c96ccffdad438dd68329536a523629f3f1af23f488358c00cafc03df1c8cf",
+      "1b76e584d2eab8db2ff15de21c6e39b22e86c3fe41dc12980cad0c787506d6d7",
+      "15191555ba3de8a5092b23bb6040a2968bdee942ccb13b15ea163b9dedfe1d08",
+      "67a45c38ea19cc88cd053ea0b56b2ac0095c91ea94aa36a9749d81b2cc60b58a",
+      "25135402102ddfc63e86c065447ee19e6c590575f23a151fef20283d01aac37e"
+    ],
     "2621f803d9ae656e": [
       "65d092f00c68d1d70ec0d742f44e4f545c37403bbe583723a7bb90b2fdb69424",
       "f1288cc558713e3780e4c128937527a6bf1216f981003df625f257d1c9d85629",
@@ -2877,6 +2888,24 @@
       "0ec074aec5d0ed7f68c2e777d667243440d9f76250f736e0370fc96a48f84f22",
       "e2ef1e544b76bc170ae6217f3c52ccadc09b63443b26093c42cafe1dd63a951b",
       "e9cd4bbe378484d6ac56ff9e4d699dce5aaa750405cb5f94c02c5b0554d408bd"
+    ],
+    "332ad31d332a6591": [
+      "bb91eb0af684d5aa2d761359bb40fd964f150aa9f6c41a4f72cde4ac7ad7112a",
+      "15d2b97fc8cf9ef1a3b831819e8fa69d429fdc875019b1f92e15406390ae59ff",
+      "6adeab043d69abd011b4d283433ea1e5e5fa1b6b9dd60c76ae971b6af8feea58",
+      "ca2b17f0a67a2871db50923cee6fcddc611575a11ffc2d1d72771394b4f8c074",
+      "5a6bed5d31ef90e68c5012ddee55ccc5f9decbc2a8de510296a42db54600016c",
+      "a2f9cd4c43dd45a57af349f82e65610e6370672dc274d0efa2a75f30ef26cec7",
+      "b2834ded4d0f07622d9c3d75599705257d83115155e355a4adbe65e69e0cd478",
+      "20633ae3b4d5dc8a2e0f2cb3f831ea00cb9d04fd26583a5850afe1ae6602e7b5",
+      "15a5136a6d26415b8f51c026851c6ef2ac7a04f9ebff5efaf8445a2fbefc7944",
+      "d682dd6ebb2ea04732f9e7f6c5e4ffe74668c6ca2d2e6ecc4cc680863ac462e5",
+      "5eaece3395842c858c62c3de124a449d92af30c486d61be130cd73b0bf31e11c",
+      "7405b22ce6bcadfa9a556a6552249a548f33e28a9fe226dbc3a935bb95f60ea3",
+      "dc0ac3db57b726155ad61a9fdddfbeb03153bb52d55144eaee4dac8a02a9104c",
+      "0ee2a19b69e3b87259009aad0d99000163c4050aef2df622e368e7da02473524",
+      "08b0e1f5e9450ed72ba7ab37bf58159a6eb94a63f40c372a9152ff1c01b932b7",
+      "fa659ec8537a57484cb48546dff2e0c566e81572ba7699a1d42c09280c4f0b03"
     ],
     "333161467e82fb43": [
       "5dfbcba2446d9506263a7b3006d35fd97fe3760c4f5bf918b6da97a048ddb7da",
@@ -6730,6 +6759,24 @@
       "eb14e6230356b721967569ab5d0a9bb797146a1b3a5ed8ba9c887edd623427fb",
       "c1d23084a394ffc2259384e7bf83e6864b038f27b40658bfb3bed20abeb7d6e4"
     ],
+    "6fc683d25823316b": [
+      "fca9e7efa9f39587b0478033645a0177032ed12f77057d77aeaaf9b645e7c9c3",
+      "fc2db1ef223752e7609e61a075faaf6b968a0de6284634573e54d677e91a1335",
+      "b39c9c781c907a403d317a23fd4aa101865928c9be8793e7d1eb26ac5c4ed79d",
+      "e2bc53e7fb906ba3fecae3f1463c57b41be5eaa02532d402d564b8f3027fa297",
+      "bf077ef56f22684a6ae001bb775b18598d3241f9ed60afb36caed0622a5c3b42",
+      "8719b24ccf12a752e76342466e2815182e7b95b54549a31df18c5ad9076c5cac",
+      "f021d63665f47cc134320fd78a00a2b59d8930d32b4dbc07d60d4c1bf2e1ffc3",
+      "5d4a5468385855aa247eadc9570bc1c68fcbd4aafcc363724529463b305d12ab",
+      "86d4b246bdffec81b550a3e42a787fea1719f4fe427f3eb988ed94340f12f239",
+      "106832fd1288af4b5c0ab9ff6d86262854dd7140a2607e0575a5d5d0f41969d2",
+      "ba2e4a3c3a21c2d5991acf182025607b4896efb6f5eb26be9b230042fa6e3248",
+      "a1314a93865dfd0e8425c1ddd3be854423a03a64e5fc946f23c3118302139233",
+      "61adae4dd70a14e3ee6a016870616701f899b412a1ac1caf0bb36e3d4e82529d",
+      "0065f59bf346c9f46ac550bb76f216ec02ca6ac359b2df0b3e5238940b29c048",
+      "1885accab179ba5b9f578a7e0d94a5ad741fc6038d7435b04c2053ce657dc1ef",
+      "6643a6d2ef799ec537b75587c04b36fd49e73d7885b41d316958ac405a146a81"
+    ],
     "6fe39bda1b656f6b": [
       "090adfa074bf2d992f2fa1e553d09a160eb5cc19a77b0943eede94bd8c2f259c",
       "02240a6f380252d70c0d6df6b3e66729a7982c5128f2900e0bac0fbc4c693cbb",
@@ -7679,6 +7726,14 @@
       "a8d43dc59e9fcf720017660bd0ba0c18c910a15fe4d1ba079114d7430606e8c8",
       "be7c088d2f1a39d42682a3ad376b74f41b146daf4660cef6f22f60a557e646da",
       "1dc000d5508c5ce6e9d18d7c65fd75aa8ffa3550ce0d633d9ed3e82551a39778"
+    ],
+    "80a2c0793c3962cd": [
+      "0296795ead110c8f5267e36a7d00376a66d74070d6e266b12ebf5732eb4db62c",
+      "afc3079edf1d271957a289fd7e6c27bf66216d19189bbea9cc937416c0887590",
+      "9753cee91279b83aab283b7836bcd27f84849b016f55d824ca4e793688abcfad",
+      "08246313422da292b6095991fa41111f5f30729af9f28d41157aed0f62e94d56",
+      "84986e2a905e20d1ea3ef427433c18d4f7bc5c235c69550fbcb6f3d0f3da7d54",
+      "38ba180a5176fe9d1369bdbe1d1708f5993c07ea99b0a0e41e3e8db4289c9cb9"
     ],
     "814d21828c5a7872": [
       "27de4cdf6ee01930f9127e5f33917ef1078eb6e131c0b2f14e29d6aa414a70e9",
@@ -8704,6 +8759,11 @@
       "204aa654aaabef6294c93137b00bff88d2212c7b10f32a30d59b475f226e0003",
       "e299a7d1a2b5282adb55b19d7245adfe830afc7b7dcfff313e1a13badee13866"
     ],
+    "961b9c6d44154791": [
+      "cb63b953c62ed82aa5451f174cc8e44a80cd18d2212fb11bb57d8daa7e3c68d1",
+      "b17bc2ff893745bedb65310e4c690c4103c4377621fc19019c39fb8b7c15d7b3",
+      "c808d4622aa04be4c924fa5bb2906928bac14d5fac0578de88c3c80762482b37"
+    ],
     "966426c2438799ad": [
       "4dfb383a8aec2edf41c579fbece68a67b50eaf2f5490d1f222e97a6ccd46f80d",
       "07ff5a8ad6e9f606c9abe47c778ec3d7b98b8da6bf95733488d80b47da13d35b"
@@ -9546,16 +9606,6 @@
       "457c6f1fd220135b955eb065768835a2c9dd3bf436e8025cdb1a25137b6fbba1",
       "52f4e5e2ff0c6bd96698cb41359de4693d528977229c8085cda596e33149d772"
     ],
-    "a37233bb66c91470": [
-      "452cb7c3ca2949ed8dc2bad5e1ae51e25c84f974af074c2a2641a5bdfd8c9e5a",
-      "060142365e29e8b506881d6e52838a5e9e36b20b05afe3b3d279a1ff00a6a73a",
-      "682e7489388bf89d5aaf2cffa3da70215022a97b60ab553aa8d14648af0b2d52",
-      "7591bcd6ebe0a1bae56e7a6fa07dc482f23d8b3d823147f588329d6254bd7a44",
-      "1b76e584d2eab8db2ff15de21c6e39b22e86c3fe41dc12980cad0c787506d6d7",
-      "15191555ba3de8a5092b23bb6040a2968bdee942ccb13b15ea163b9dedfe1d08",
-      "67a45c38ea19cc88cd053ea0b56b2ac0095c91ea94aa36a9749d81b2cc60b58a",
-      "25135402102ddfc63e86c065447ee19e6c590575f23a151fef20283d01aac37e"
-    ],
     "a39453bf444684fc": [
       "6ddd47ee84dc24412dac0cbd706b8052b4a21b12b1eade08f757e99c38d277c4",
       "329a6abebc3e8f732316f68b9e04c6269becb47a2d916c39a70b8e9a6ffaeb22",
@@ -9740,21 +9790,6 @@
       "4c8dc7c11cbb980c049e37ad5a9fe78ea9fe58af175cf69bbed1f141a0ffe984",
       "0ddc38d982ff46a1ce4826cb34ef1af66547990a3effebfecae307c3a4c178d1",
       "8941d3f7914a9562ec9c1a21cd758d532f5e3d3049c03846adfba1fca95e2482"
-    ],
-    "a7f6921e5d90175b": [
-      "2369dad26c646af55fe71c6473b9f47b8e4535286711ebfb051531875e97dd59",
-      "2b0a61b25d8f75511fd9867d0fa9c025873e02925182dc9e6b3337c0be0a967c",
-      "a17772be680383211614b46001c35c32938fb9d022cf454680dab4b239108662",
-      "5485d29ab77463d12420a1761c2d07d60db2202ccc6ce62df204df1a511f085a",
-      "0f0c911747e550bcd5b745874aeeaa60fc766c9bfeaca0032106ccfe006e3ca0",
-      "8f67395cdaa6b1ac8a30f1323c17a4687e89b0b2710e586bd368a493edccd5d5",
-      "451bad9206c5d63b1d4e99eac05daeb6efff2596f796241ef1494440725420d2",
-      "57c12d684a9ad560a9d59cc6140416587c4d8f3a97e57e16802aecca3c3d8fd3",
-      "91b146981ddb6b6d3c6f05d85bc56fdc0897962f7cce9e56bb6775f291a88780",
-      "bd756572a789fa11162cbbca3ab80fa04b045257fa9dc67fd93a92f2c412f024",
-      "b5f1d0d4aef57d428e308da166ba713f1a78b00c1fff2cef787ca7a74e02dd73",
-      "96a462c5a2829c16fbbb65b83c2c4b84f91eb2db63755d2835047f01216f2a9c",
-      "8bd0e3e7487c5b951d9b60ec84476c5bd7262bb5d19a56a8095989f704c92f61"
     ],
     "a82471c19d189232": [
       "2108e546ef6baac45fde436a13854099d2cec670d2fba514538743f764dc1f05",
@@ -11054,23 +11089,6 @@
       "4b97d6597916d19f3e7258e9e07442fdfd942d74908c0d8c3d909b3358fd07cb",
       "cd72821051891a8d19d5a9c93bcbc9fec78b9395e293d9feeb08e571ad22e1df"
     ],
-    "c0765cc178bd0bad": [
-      "fca9e7efa9f39587b0478033645a0177032ed12f77057d77aeaaf9b645e7c9c3",
-      "fc2db1ef223752e7609e61a075faaf6b968a0de6284634573e54d677e91a1335",
-      "b39c9c781c907a403d317a23fd4aa101865928c9be8793e7d1eb26ac5c4ed79d",
-      "e2bc53e7fb906ba3fecae3f1463c57b41be5eaa02532d402d564b8f3027fa297",
-      "bf077ef56f22684a6ae001bb775b18598d3241f9ed60afb36caed0622a5c3b42",
-      "8719b24ccf12a752e76342466e2815182e7b95b54549a31df18c5ad9076c5cac",
-      "f021d63665f47cc134320fd78a00a2b59d8930d32b4dbc07d60d4c1bf2e1ffc3",
-      "5d4a5468385855aa247eadc9570bc1c68fcbd4aafcc363724529463b305d12ab",
-      "86d4b246bdffec81b550a3e42a787fea1719f4fe427f3eb988ed94340f12f239",
-      "106832fd1288af4b5c0ab9ff6d86262854dd7140a2607e0575a5d5d0f41969d2",
-      "ba2e4a3c3a21c2d5991acf182025607b4896efb6f5eb26be9b230042fa6e3248",
-      "a1314a93865dfd0e8425c1ddd3be854423a03a64e5fc946f23c3118302139233",
-      "0065f59bf346c9f46ac550bb76f216ec02ca6ac359b2df0b3e5238940b29c048",
-      "1885accab179ba5b9f578a7e0d94a5ad741fc6038d7435b04c2053ce657dc1ef",
-      "6643a6d2ef799ec537b75587c04b36fd49e73d7885b41d316958ac405a146a81"
-    ],
     "c07a6e25fae9b719": [
       "c07a6e25fae9b7192dc0352c770b0dc9b232cd5266749d164b47ba0a4c7db05d"
     ],
@@ -11133,6 +11151,14 @@
       "b0da4d25f4155119c584b5cfdc026bc87a9e67c65b6e62240fe533b1ed3ac5a8",
       "ac5ff9805c1aaf2df07b63e1d8ca28d4c7d9ebf82a30c295dd9016bf8050385b",
       "468e1636af6bd81de82661d16e3b65c22a439996a1cd7cc836135bf08b3c3599"
+    ],
+    "c231bf8f074a1003": [
+      "1f83a300bb0e06accc0d3a03157be648b32d3bbf1e8e4f167af4ea09fb70c3f0",
+      "08ef9bcef6dae3077bc077e7b97384c1be6ffd0092b4743506560ace41e31d3c",
+      "4814068eae12bc3883170b7025d46bd454dbb83a2261a5b44d0f4907987fdc93",
+      "22d1452ce8a4fd7a113f0b5b20dea41700e1bf8e4dfd684cbb8a0b3450726119",
+      "dd64e723588a8e27427ebf7cc66b6e6753fddf13db9f4556c4a07953f326d059",
+      "963b7c6ed67a58bf9449b3400fa3961115312befc8610daf675b05aea9240caa"
     ],
     "c27ee6b4710e93a1": [
       "fd52261d740ea1ce88be7a7dba146ef75732d0e46e9bfe5f9e0f7735f40bfef9",
@@ -11223,6 +11249,24 @@
       "5fa084ff3e63c30f64d096d10651986958e51de176b7b53de68b22141e3b8bbb",
       "affb232f50d98fa4754697f9b33dc5bc5b49f496022bd36281453c748ee2da94",
       "2d0effbbc27804761b60d4ad5fe8c7b9f81e4723a0f4e872f15a8500c692812f"
+    ],
+    "c2ec85b3b0654b6c": [
+      "2369dad26c646af55fe71c6473b9f47b8e4535286711ebfb051531875e97dd59",
+      "2b0a61b25d8f75511fd9867d0fa9c025873e02925182dc9e6b3337c0be0a967c",
+      "a17772be680383211614b46001c35c32938fb9d022cf454680dab4b239108662",
+      "02d28323dcfb521698befa70a634f6b91a89ec0578f37916b40449cdaf65caf1",
+      "fd85d17cf080570c6cbda7c8523dfff5b9cd0f4999d124d4f0343b98a92d6c39",
+      "876c22fbcc0ae5d4ab07024dfd457d8f0ec9e6d87d6205cd8a6b657c9adc5423",
+      "5485d29ab77463d12420a1761c2d07d60db2202ccc6ce62df204df1a511f085a",
+      "0f0c911747e550bcd5b745874aeeaa60fc766c9bfeaca0032106ccfe006e3ca0",
+      "8f67395cdaa6b1ac8a30f1323c17a4687e89b0b2710e586bd368a493edccd5d5",
+      "451bad9206c5d63b1d4e99eac05daeb6efff2596f796241ef1494440725420d2",
+      "57c12d684a9ad560a9d59cc6140416587c4d8f3a97e57e16802aecca3c3d8fd3",
+      "91b146981ddb6b6d3c6f05d85bc56fdc0897962f7cce9e56bb6775f291a88780",
+      "bd756572a789fa11162cbbca3ab80fa04b045257fa9dc67fd93a92f2c412f024",
+      "b5f1d0d4aef57d428e308da166ba713f1a78b00c1fff2cef787ca7a74e02dd73",
+      "96a462c5a2829c16fbbb65b83c2c4b84f91eb2db63755d2835047f01216f2a9c",
+      "8bd0e3e7487c5b951d9b60ec84476c5bd7262bb5d19a56a8095989f704c92f61"
     ],
     "c32df9a3b4c47fe5": [
       "c606f83f56984b51e9019484e4b160fef5019d6edd7c1b6a40574adb3f6a8cfe",
@@ -11674,12 +11718,16 @@
       "e89f4493f055c1c50f994285fd14fb40428febfb072eb6875fca62e44ce330c7",
       "116fe358108800a3e9ff1c5f4555533bea10db4999c722c60b6fb7861a0a98ad"
     ],
-    "cc7112e3d7a9ca7b": [
-      "0296795ead110c8f5267e36a7d00376a66d74070d6e266b12ebf5732eb4db62c",
-      "9753cee91279b83aab283b7836bcd27f84849b016f55d824ca4e793688abcfad",
-      "08246313422da292b6095991fa41111f5f30729af9f28d41157aed0f62e94d56",
-      "84986e2a905e20d1ea3ef427433c18d4f7bc5c235c69550fbcb6f3d0f3da7d54",
-      "38ba180a5176fe9d1369bdbe1d1708f5993c07ea99b0a0e41e3e8db4289c9cb9"
+    "cc872513b68d4779": [
+      "70d45ab7c2761c921031a85db839b36d2b4ece929cc44b29f56c579f9fe50d2a",
+      "70cdd768c54edb664da6a668caca0370ea99790c634be90a632ef28ecf920bd5",
+      "9288f7ee3922427ce50e1a39e1c2d84ccab3da99f20a0f6080ec61afb75befd0",
+      "097daf2373a3ad5b00753bcccb23b191de047cbb10ca7f6663e4202cd1747f87",
+      "aaeddbf2a7e7e2a4bba22c90f258c66175c1a93ac9898794a7d6330c65059c09",
+      "5562f06e871eb6ad35d99433162bbe47c92a048674af0369ad14db532bc6a5d0",
+      "83199fba6c6c625faa8e5099fee382a2bf1fc3817067fe7c0f8a7b373159b04a",
+      "6fad6d86ae7089174025ce963f06b9c7e0fa5e10c0726148054c9ebe4c5b418c",
+      "a57da077689306b53a9f72530a97f09ebed577f953bbcbc744a4f7e89594db43"
     ],
     "cc90b09452f902a5": [
       "eb872e643173bfecbaba5b956f7d16ff2b58ddf11000089d22264853ebc777bf",
@@ -13657,21 +13705,6 @@
       "276b3be84c5740265b80fe6860ef45218f49a6c5630f17f7c1acf717231d784f",
       "72ecee9ca6e387d231782c8efe16c016b9dcce7dfeba32540f27c8f9d4cb05c8"
     ],
-    "f425ccb44f40e512": [
-      "bb91eb0af684d5aa2d761359bb40fd964f150aa9f6c41a4f72cde4ac7ad7112a",
-      "15d2b97fc8cf9ef1a3b831819e8fa69d429fdc875019b1f92e15406390ae59ff",
-      "ca2b17f0a67a2871db50923cee6fcddc611575a11ffc2d1d72771394b4f8c074",
-      "5a6bed5d31ef90e68c5012ddee55ccc5f9decbc2a8de510296a42db54600016c",
-      "a2f9cd4c43dd45a57af349f82e65610e6370672dc274d0efa2a75f30ef26cec7",
-      "b2834ded4d0f07622d9c3d75599705257d83115155e355a4adbe65e69e0cd478",
-      "20633ae3b4d5dc8a2e0f2cb3f831ea00cb9d04fd26583a5850afe1ae6602e7b5",
-      "d682dd6ebb2ea04732f9e7f6c5e4ffe74668c6ca2d2e6ecc4cc680863ac462e5",
-      "5eaece3395842c858c62c3de124a449d92af30c486d61be130cd73b0bf31e11c",
-      "7405b22ce6bcadfa9a556a6552249a548f33e28a9fe226dbc3a935bb95f60ea3",
-      "dc0ac3db57b726155ad61a9fdddfbeb03153bb52d55144eaee4dac8a02a9104c",
-      "0ee2a19b69e3b87259009aad0d99000163c4050aef2df622e368e7da02473524",
-      "fa659ec8537a57484cb48546dff2e0c566e81572ba7699a1d42c09280c4f0b03"
-    ],
     "f43402ffa01c2899": [
       "fae6718ec990ba9055c758701be551e07b5f582c268a585204267176a3fc5e1f",
       "903f003d2775b2ad447312133c118ab0e52c13aa899fc577e6075fc666c1601e",
@@ -14429,8 +14462,8 @@
         "ci:security",
         "ci:regression"
       ],
-      "fileCount": 1198,
-      "titleCount": 10567,
+      "fileCount": 1200,
+      "titleCount": 10588,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -14642,6 +14675,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_pbft_flow.test.js": "036d5dfabe37b936",
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "9f46b2b815475382",
+        "test/unit/anchor/reorg_handler/reorg_handler_rollback_atomic_retry.test.js": "cc872513b68d4779",
         "test/unit/anchor/reorg_handler/reorg_handler_round_counters.test.js": "3e60e7e34daba193",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
         "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
@@ -15149,7 +15183,7 @@
         "test/unit/db/prices/presence_read_keeps_producer_columns.test.js": "36267613ef6f900e",
         "test/unit/db/prices/retraction_tails_and_landing_clock_pins.test.js": "cade1d06fa3a2339",
         "test/unit/db/prices/skipped_marker_rewrite_keeps_first_reference.test.js": "498a3500c118f052",
-        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "cc7112e3d7a9ca7b",
+        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "80a2c0793c3962cd",
         "test/unit/db/prices/window_coverage_query.test.js": "5b3d6a5889c25d52",
         "test/unit/db/prices/window_landing_reset_statements.test.js": "8c75346b8b0d0e3f",
         "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
@@ -15292,7 +15326,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_follower_landing.test.js": "5b55d2a7428b0572",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "6fe39bda1b656f6b",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "a37233bb66c91470",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "261ce4c6a6c48f1c",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "10d8b9fc78f879d9",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_reland.test.js": "20e0731f8156479b",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
@@ -15312,6 +15346,7 @@
         "test/unit/oracle/price/aggregator/price_aggregator_v1_canonical_arm.test.js": "bae38c920d8b9648",
         "test/unit/oracle/price/aggregator/price_aggregator_weighted_quorum.test.js": "bf51a782d269ce02",
         "test/unit/oracle/price/aggregator/price_v1_canonical_ingest.test.js": "c856a769e6b83108",
+        "test/unit/oracle/price/aggregator/round/price_aggregator_partial_round_fill.test.js": "c231bf8f074a1003",
         "test/unit/oracle/price/canonical_price.test.js": "83f075a9f2f498ef",
         "test/unit/oracle/price/derived_pairs.test.js": "ebcf07d0fd46e332",
         "test/unit/oracle/price/fetcher/price_fetcher_01_median.test.js": "5b15fa3242f6a05f",
@@ -15463,9 +15498,9 @@
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
         "test/unit/peers/hub_db/peer_catchup_state_stability.test.js": "0bb333b17333c929",
-        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "a7f6921e5d90175b",
+        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "c2ec85b3b0654b6c",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
-        "test/unit/peers/hub_db/price_round_groups.test.js": "c0765cc178bd0bad",
+        "test/unit/peers/hub_db/price_round_groups.test.js": "6fc683d25823316b",
         "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
@@ -15686,8 +15721,8 @@
       }
     },
     "test": {
-      "fileCount": 1198,
-      "titleCount": 10567,
+      "fileCount": 1200,
+      "titleCount": 10588,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15899,6 +15934,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_pbft_flow.test.js": "036d5dfabe37b936",
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "9f46b2b815475382",
+        "test/unit/anchor/reorg_handler/reorg_handler_rollback_atomic_retry.test.js": "cc872513b68d4779",
         "test/unit/anchor/reorg_handler/reorg_handler_round_counters.test.js": "3e60e7e34daba193",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
         "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
@@ -16406,7 +16442,7 @@
         "test/unit/db/prices/presence_read_keeps_producer_columns.test.js": "36267613ef6f900e",
         "test/unit/db/prices/retraction_tails_and_landing_clock_pins.test.js": "cade1d06fa3a2339",
         "test/unit/db/prices/skipped_marker_rewrite_keeps_first_reference.test.js": "498a3500c118f052",
-        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "cc7112e3d7a9ca7b",
+        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "80a2c0793c3962cd",
         "test/unit/db/prices/window_coverage_query.test.js": "5b3d6a5889c25d52",
         "test/unit/db/prices/window_landing_reset_statements.test.js": "8c75346b8b0d0e3f",
         "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
@@ -16549,7 +16585,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_follower_landing.test.js": "5b55d2a7428b0572",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "6fe39bda1b656f6b",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "a37233bb66c91470",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "261ce4c6a6c48f1c",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "10d8b9fc78f879d9",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_reland.test.js": "20e0731f8156479b",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
@@ -16569,6 +16605,7 @@
         "test/unit/oracle/price/aggregator/price_aggregator_v1_canonical_arm.test.js": "bae38c920d8b9648",
         "test/unit/oracle/price/aggregator/price_aggregator_weighted_quorum.test.js": "bf51a782d269ce02",
         "test/unit/oracle/price/aggregator/price_v1_canonical_ingest.test.js": "c856a769e6b83108",
+        "test/unit/oracle/price/aggregator/round/price_aggregator_partial_round_fill.test.js": "c231bf8f074a1003",
         "test/unit/oracle/price/canonical_price.test.js": "83f075a9f2f498ef",
         "test/unit/oracle/price/derived_pairs.test.js": "ebcf07d0fd46e332",
         "test/unit/oracle/price/fetcher/price_fetcher_01_median.test.js": "5b15fa3242f6a05f",
@@ -16720,9 +16757,9 @@
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
         "test/unit/peers/hub_db/peer_catchup_state_stability.test.js": "0bb333b17333c929",
-        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "a7f6921e5d90175b",
+        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "c2ec85b3b0654b6c",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
-        "test/unit/peers/hub_db/price_round_groups.test.js": "c0765cc178bd0bad",
+        "test/unit/peers/hub_db/price_round_groups.test.js": "6fc683d25823316b",
         "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
@@ -16890,8 +16927,8 @@
       }
     },
     "test:all": {
-      "fileCount": 1287,
-      "titleCount": 11475,
+      "fileCount": 1290,
+      "titleCount": 11502,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -16932,12 +16969,13 @@
         "test/integration/consensus/config_consensus.test.js": "037dd45be032426d",
         "test/integration/crosschain/attestation.test.js": "349b6cff72d04841",
         "test/integration/crosschain/reorg.test.js": "e6242d9f6959b91a",
+        "test/integration/crosschain/reorg_rollback_atomic.test.js": "961b9c6d44154791",
         "test/integration/db/config_cursor.test.js": "cd6fc21361cc1abb",
         "test/integration/db/db_datetime_retype_real.test.js": "c0fdb0edb04f3f4f",
         "test/integration/db/db_price_status_pair_round_explain.test.js": "efcb0aa87f3945aa",
         "test/integration/db/db_widen_unique_key.test.js": "6fc676911498b586",
         "test/integration/db/oracle_prices_latest.test.js": "8fdc774d4dd17c7e",
-        "test/integration/db/price_batch_push_upsert_real.test.js": "f425ccb44f40e512",
+        "test/integration/db/price_batch_push_upsert_real.test.js": "332ad31d332a6591",
         "test/integration/db/price_finalize_upsert_real.test.js": "cc37380dde10f884",
         "test/integration/governance/governance.test.js": "b1b9d82b90e50b13",
         "test/integration/governance/vote_seq_monotonic.test.js": "6cbbc1fc0801f2b4",
@@ -17192,6 +17230,7 @@
         "test/unit/anchor/reorg_handler/reorg_handler_pbft_flow.test.js": "036d5dfabe37b936",
         "test/unit/anchor/reorg_handler/reorg_handler_probe_own_node.test.js": "31812db5899ce42d",
         "test/unit/anchor/reorg_handler/reorg_handler_report_reorg.test.js": "9f46b2b815475382",
+        "test/unit/anchor/reorg_handler/reorg_handler_rollback_atomic_retry.test.js": "cc872513b68d4779",
         "test/unit/anchor/reorg_handler/reorg_handler_round_counters.test.js": "3e60e7e34daba193",
         "test/unit/anchor/reorg_handler/reorg_handler_self_verification.test.js": "a1a67154d9da3652",
         "test/unit/anchor/reorg_handler/reorg_handler_snapshot_lock.test.js": "e2ed5c7ed2c095ac",
@@ -17699,7 +17738,7 @@
         "test/unit/db/prices/presence_read_keeps_producer_columns.test.js": "36267613ef6f900e",
         "test/unit/db/prices/retraction_tails_and_landing_clock_pins.test.js": "cade1d06fa3a2339",
         "test/unit/db/prices/skipped_marker_rewrite_keeps_first_reference.test.js": "498a3500c118f052",
-        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "cc7112e3d7a9ca7b",
+        "test/unit/db/prices/upserts_preserve_disputed_status.test.js": "80a2c0793c3962cd",
         "test/unit/db/prices/window_coverage_query.test.js": "5b3d6a5889c25d52",
         "test/unit/db/prices/window_landing_reset_statements.test.js": "8c75346b8b0d0e3f",
         "test/unit/db/prices/zero_stamp_rounds_absent_index.test.js": "f591c5047ee0b2da",
@@ -17842,7 +17881,7 @@
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_follower_landing.test.js": "5b55d2a7428b0572",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_landing_time.test.js": "49ff97219882c8a0",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_publisher.test.js": "6fe39bda1b656f6b",
-        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "a37233bb66c91470",
+        "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_reland_mixed_round.test.js": "261ce4c6a6c48f1c",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction.test.js": "10d8b9fc78f879d9",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_reland.test.js": "20e0731f8156479b",
         "test/unit/oracle/price/aggregator/batch/price_aggregator_batch_retraction_window.test.js": "f3531e1bdbbe78dd",
@@ -17862,6 +17901,7 @@
         "test/unit/oracle/price/aggregator/price_aggregator_v1_canonical_arm.test.js": "bae38c920d8b9648",
         "test/unit/oracle/price/aggregator/price_aggregator_weighted_quorum.test.js": "bf51a782d269ce02",
         "test/unit/oracle/price/aggregator/price_v1_canonical_ingest.test.js": "c856a769e6b83108",
+        "test/unit/oracle/price/aggregator/round/price_aggregator_partial_round_fill.test.js": "c231bf8f074a1003",
         "test/unit/oracle/price/canonical_price.test.js": "83f075a9f2f498ef",
         "test/unit/oracle/price/derived_pairs.test.js": "ebcf07d0fd46e332",
         "test/unit/oracle/price/fetcher/price_fetcher_01_median.test.js": "5b15fa3242f6a05f",
@@ -18013,9 +18053,9 @@
         "test/unit/peers/hub_db/peer_catchup_signer_set_only.test.js": "4914266dd27d9bea",
         "test/unit/peers/hub_db/peer_catchup_single_flight.test.js": "8448e4c4109e6894",
         "test/unit/peers/hub_db/peer_catchup_state_stability.test.js": "0bb333b17333c929",
-        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "a7f6921e5d90175b",
+        "test/unit/peers/hub_db/price_catchup_round_group.test.js": "c2ec85b3b0654b6c",
         "test/unit/peers/hub_db/price_catchup_verifiers.test.js": "a0498a9cbc255585",
-        "test/unit/peers/hub_db/price_round_groups.test.js": "c0765cc178bd0bad",
+        "test/unit/peers/hub_db/price_round_groups.test.js": "6fc683d25823316b",
         "test/unit/peers/hub_db/signed_rows_verifiers.test.js": "33e4713966751c39",
         "test/unit/peers/hub_db_broadcaster/hub_db_attestation_responses_mirror.test.js": "d7eab67243cfc407",
         "test/unit/peers/hub_db_broadcaster/hub_db_broadcaster.test.js": "18feae309726dbeb",
@@ -18253,8 +18293,8 @@
       }
     },
     "test:integration": {
-      "fileCount": 25,
-      "titleCount": 141,
+      "fileCount": 26,
+      "titleCount": 147,
       "files": {
         "test/integration/anchor/anchor_reward_supersede_atomic.test.js": "d30bd8a54d132bc6",
         "test/integration/anchor/anchor_selector_supersede.test.js": "933ea559dc18c43e",
@@ -18266,12 +18306,13 @@
         "test/integration/consensus/config_consensus.test.js": "037dd45be032426d",
         "test/integration/crosschain/attestation.test.js": "349b6cff72d04841",
         "test/integration/crosschain/reorg.test.js": "e6242d9f6959b91a",
+        "test/integration/crosschain/reorg_rollback_atomic.test.js": "961b9c6d44154791",
         "test/integration/db/config_cursor.test.js": "cd6fc21361cc1abb",
         "test/integration/db/db_datetime_retype_real.test.js": "c0fdb0edb04f3f4f",
         "test/integration/db/db_price_status_pair_round_explain.test.js": "efcb0aa87f3945aa",
         "test/integration/db/db_widen_unique_key.test.js": "6fc676911498b586",
         "test/integration/db/oracle_prices_latest.test.js": "8fdc774d4dd17c7e",
-        "test/integration/db/price_batch_push_upsert_real.test.js": "f425ccb44f40e512",
+        "test/integration/db/price_batch_push_upsert_real.test.js": "332ad31d332a6591",
         "test/integration/db/price_finalize_upsert_real.test.js": "cc37380dde10f884",
         "test/integration/governance/governance.test.js": "b1b9d82b90e50b13",
         "test/integration/governance/vote_seq_monotonic.test.js": "6cbbc1fc0801f2b4",
