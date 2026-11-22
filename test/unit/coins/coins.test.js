@@ -77,6 +77,9 @@ const GOLDEN_HASH = {
     DOGE: { mainnet: 'cc2a4db628dd3759bcf64dd35dc6b9ee2726be1a9d38eb5e5596bc3a9d0bf99e',
             testnet: '82c6bc814e3de4a1e023d008457b7186c5a6ac142c85be9bf0a18f2d5989fd72',
             regtest: 'd7bd53f527d961f1cf0cfc7de725d61e625975f7086532976c777a04c08988f6' },
+      KAS:  { mainnet: '9b5a38dd4511ff0d298a29fda8be429e2e00f6954629bd75db10379ebd09041e',
+              testnet: 'a5eceb4f9c0ef85090312510daddea3b6f171de59f7867f37aef2a2d8a5a7b7c',
+              regtest: 'b81fe5581c8108575b06910de1749981a0518bf918a6277b05905ebff70c3d1c' },
 };
 
 function registerRegistryBasics() {
@@ -89,10 +92,10 @@ function registerRegistryBasics() {
     // signal, not a downstream wireFormat or firstBlock failure that would
     // otherwise be harder to trace back to its actual cause.
     it('exposes the three launch coins with full-name mappings', () => {
-        expect(coins.ALLOWED_COINS).to.deep.equal(['BTC', 'LTC', 'DOGE']);
-        expect(coins.COIN_FULL_NAME).to.deep.equal({ BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' });
+        expect(coins.ALLOWED_COINS).to.deep.equal(['BTC', 'LTC', 'DOGE', 'KAS']);
+        expect(coins.COIN_FULL_NAME).to.deep.equal({ BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin', KAS: 'kaspa' });
         expect(coins.FULL_NAME_TO_TICK.bitcoin).to.equal('BTC');
-        expect(coins.DEFAULT_CONFIRMATIONS).to.deep.equal({ BTC: 6, LTC: 12, DOGE: 60 });
+        expect(coins.DEFAULT_CONFIRMATIONS).to.deep.equal({ BTC: 6, LTC: 12, DOGE: 60, KAS: 100 });
     });
 
     it('resolves every coin/network with the expected core fields', () => {
