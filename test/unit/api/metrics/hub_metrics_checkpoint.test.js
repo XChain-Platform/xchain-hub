@@ -29,7 +29,15 @@ const COUNTERS = [
     ['_cadenceStalls', 'xchain_checkpoint_cadence_stalls_total', 9],
     ['_roundFailures', 'xchain_checkpoint_round_failures_total', 5],
     ['_leaderDeclinesTotal', 'xchain_checkpoint_leader_declines_total', 8],
+    ['_cosignDeclinesTotal', 'xchain_checkpoint_cosign_declines_total', 10],
     ['_selfAcceptFailures', 'xchain_checkpoint_self_accept_failures_total', 6]
+];
+
+const SNAPSHOT_COUNTERS = [
+    ['_roundTimeouts', 'xchain_snapshot_checkpoint_round_timeouts_total', 4],
+    ['_roundAbortsTotal', 'xchain_snapshot_checkpoint_round_aborts_total', 2],
+    ['_cosignDeclinesTotal', 'xchain_snapshot_checkpoint_cosign_declines_total', 3],
+    ['_tickFailures', 'xchain_snapshot_checkpoint_tick_failures_total', 1]
 ];
 
 // A fake StateCheckpointEngine carrying only the fields the collector reads.
@@ -41,6 +49,17 @@ function fakeEngine(overrides = {}){
         _frozenTipTicks: 60
     };
     for(const [field, , value] of COUNTERS) engine[field] = value;
+    return Object.assign(engine, overrides);
+}
+
+function fakeSnapshotEngine(overrides = {}) {
+    const engine = {
+        _dueOverdueBlocks: 14,
+        _lastTickOkAt: Date.now() - 2000,
+        _startedAt: Date.now() - 3000,
+        getStats: () => ({ gate_armed: true })
+    };
+    for (const [field, , value] of SNAPSHOT_COUNTERS) engine[field] = value;
     return Object.assign(engine, overrides);
 }
 
@@ -89,6 +108,15 @@ describe('hub state checkpoint scrape series', function () {
         const out = registry.render();
         expect(sample(out, 'xchain_checkpoint_round_timeouts_total')).to.equal(7);
         expect(sample(out, 'xchain_checkpoint_cadence_stalls_total')).to.equal(9);
+    });
+
+    it('renders snapshot checkpoint counters and gauges when that engine is present', function () {
+        const out = install({ snapshotCheckpoints: fakeSnapshotEngine() }).render();
+        for (const [, name, value] of SNAPSHOT_COUNTERS)
+            expect(sample(out, name), name).to.equal(value);
+        expect(sample(out, 'xchain_snapshot_checkpoint_overdue_blocks')).to.equal(14);
+        expect(sample(out, 'xchain_snapshot_checkpoint_last_tick_age_seconds')).to.be.at.least(2);
+        expect(sample(out, 'xchain_snapshot_checkpoint_gate_armed')).to.equal(1);
     });
 });
 

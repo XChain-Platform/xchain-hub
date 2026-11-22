@@ -45,16 +45,33 @@ describe('finalized price snapshot upserts', () => {
             const { insert, update } = parts(await capture(method));
             assert.match(insert, /'finalized'/);
             assert.match(update, /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)/);
-            assert.doesNotMatch(update, /status\s*=\s*'finalized'/);
+            assert.doesNotMatch(update, /(?:^|,)\s*status\s*=\s*'finalized'/);
         });
     }
 
     it('keeps canonical landing metadata mutable while the disputed status stays fixed', async () => {
         for (const method of ['setPushedPriceSnapshotRound', 'setBatchPriceSnapshotRound']) {
             const { update } = parts(await capture(method));
-            assert.match(update, /reference_block\s*=\s*VALUES\(reference_block\)/);
-            assert.match(update, /source_action_index\s*=\s*VALUES\(source_action_index\)/);
-            assert.match(update, /push_generation\s*=\s*VALUES\(push_generation\)/);
+            assert.match(update, /consensus_round\s*=\s*IF\(status\s*=\s*'finalized'/);
+            for (const column of ['reference_block', 'source_action_index', 'push_generation']) {
+                const guarded = new RegExp(column + '\\s*=\\s*IF\\(consensus_round\\s*=\\s*2,\\s*' +
+                    column + ',\\s*VALUES\\(' + column + '\\)\\)');
+                assert.match(update, guarded);
+            }
+            assert.match(update, /consensus_round\s*=\s*1,\s*status\s*=/);
         }
+    });
+
+    it('only upgrades skipped rows when finalizing a round', async () => {
+        const { update } = parts(await capture('setFinalizedPriceSnapshotRound'));
+        const guarded = ['price', 'reference_block', 'block_timestamp', 'validator_count',
+            'consensus_proof', 'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
+        for (const column of guarded) {
+            const pattern = new RegExp(column + "\\s*=\\s*IF\\(status\\s*=\\s*'skipped',\\s*VALUES\\(" +
+                column + '\\),\\s*' + column + '\\)');
+            assert.match(update, pattern, column);
+        }
+        assert.doesNotMatch(update, /\b(reference_chain|source_chain|source_action_index|push_generation|batch_block_time)\s*=/);
+        assert.match(update, /status\s*=\s*IF\(status\s*=\s*'disputed',\s*status,\s*'finalized'\)\s*$/);
     });
 });

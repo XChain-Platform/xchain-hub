@@ -354,10 +354,25 @@ function registerFeature5persistenceRetractionFragment4Part2() {
     });
   });
 }
+function registerFeature5persistenceRetractionFragment4Part3() {
+  it('retractCallsForReorg releases a stored upper-case call_id under the lowercase round id', async function () {
+    const { engine, db } = makeEngine();
+    db.rows.push({
+      call_id: CALL_ID.toUpperCase(), phase: 'dispatch', status: 'finalized',
+      source_chain: 'BTC', source_action_index: 41
+    });
+    const rid = sha256('XCALLROUND|dispatch|' + CALL_ID);
+    engine['_inflight'].add(rid);
+    await engine.retractCallsForReorg('BTC', 40);
+    expect(engine.consensus.forgetFinalized.calledWith(rid)).to.equal(true);
+    expect(engine['_inflight'].has(rid)).to.equal(false);
+  });
+}
 function registerFeature5persistenceRetractionFragment4() {
   describe('persistence + retraction', function () {
     registerFeature5persistenceRetractionFragment4Part1();
     registerFeature5persistenceRetractionFragment4Part2();
+    registerFeature5persistenceRetractionFragment4Part3();
   });
 }
 describe('CrossChainCallEngine', function () {

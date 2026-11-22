@@ -185,6 +185,22 @@ function memberSubmissionSkip(round, submissions) {
     return null;
 }
 
+function snapshotMemberSubmissions(round, submissions, snapshot) {
+    const memberPubkeys = this.memberPubkeySet(snapshot);
+    submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
+    return {
+        memberPubkeys,
+        submissions,
+        skip: memberSubmissionSkip.call(this, round, submissions)
+    };
+}
+
+async function refreshClampReference(round, btcBlockHeight) {
+    if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+        await this.refreshLastFinalizedForRound(round);
+    }
+}
+
 // The single-node bypass (quorum 0): aggregate, sign and store the round here, then announce it.
 async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submissions) {
     let aggregated = this.aggregateAll(submissions);
@@ -236,6 +252,24 @@ async function finalizeSoloRound(round, btcBlockHeight, btcBlockTime, submission
     });
 }
 
+async function handleWeightedSoleSelf(round, btcBlockHeight, btcBlockTime, submissions, weighted, snapshot, quorum) {
+    if (!weighted || quorum === 0 || !snapshot ||
+        !federation.isSoleSelfFederation(snapshot.validators, this.selfPubkey())) return false;
+    if (swq.meetsStakeThreshold(snapshot.validators, [this.selfPubkey()])) {
+        await finalizeSoloRound.call(this, round, btcBlockHeight, btcBlockTime, submissions);
+        return true;
+    }
+    const now = Date.now();
+    if (!this._soleSelfThresholdWarnAt || now - this._soleSelfThresholdWarnAt >= 60000) {
+        this._soleSelfThresholdWarnAt = now;
+        logger.error('Oracle: the sole validator key spans multiple stake sources, but one signature ' +
+            'is credited with only one source and cannot clear the weighted threshold enforced on-chain; ' +
+            'consolidate stake under one source or add validators');
+    }
+    await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+        'sole validator key spans multiple stake sources; one signature cannot clear the weighted threshold');
+    return true;
+}
 // Everything after the round's snapshot is locked: the snapshot guards, the member filter,
 // the clamp-reference refresh, then the solo bypass or the seat split.
 async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissions, weighted, snapshot) {
@@ -256,36 +290,29 @@ async function finalizeOnSnapshot(round, btcBlockHeight, btcBlockTime, submissio
         return;
     }
 
-    // Oracle M1: everything below (aggregation, minSubmissions floor, leader/
-    // fallback election) must only see submissions from snapshot MEMBERS, one
-    // per verified pubkey. Quorum is sized from the snapshot; letting any
-    // merely-registered validator's submission through hands a no-stake key a
-    // vote in the trimmed median every hub then co-signs. Null snapshot keeps
-    // the unfiltered legacy map (graceful degradation, same as the quorum
-    // fallback below).
-    let memberPubkeys = this.memberPubkeySet(snapshot);
-    submissions = this.filterSubmissionsToSnapshot(submissions, memberPubkeys);
-    skip = memberSubmissionSkip.call(this, round, submissions);
+    const members = snapshotMemberSubmissions.call(this, round, submissions, snapshot);
+    const memberPubkeys = members.memberPubkeys;
+    submissions = members.submissions;
+    skip = members.skip;
     if (skip) {
         await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime, skip);
         return;
     }
 
-    // Before ANY path aggregates, bootstrap included: a hub clamping against an
-    // older round emits a median its peers will not co-sign. After every skip
-    // guard, so a skipped round costs no read.
-    //
-    // GATED on oracle_clamp_reference_activation.js, keyed on the round's own BTC
-    // block height (the value that locked this round's snapshot above). Below it
-    // the reference keeps its pre-alignment writers only, so a mixed-version fleet
-    // never judges one round against two different references.
-    if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
-        await this.refreshLastFinalizedForRound(round);
-    }
+    await refreshClampReference.call(this, round, btcBlockHeight);
 
     let quorum = snapshot
         ? this.hub.capabilitySnapshot.getQuorum(snapshot)
         : this.getQuorum();
+    if (quorum === 0 && this.isNonMemberSnapshot(snapshot)) {
+        logger.warn('Oracle: refusing solo finalization for round ' + round +
+            ' at price snapshot ' + snapshot.blockIndex + '; this hub is not a member');
+        await this.storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+            'this hub is not a member of the price snapshot');
+        return;
+    }
+    if (await handleWeightedSoleSelf.call(this, round, btcBlockHeight, btcBlockTime,
+        submissions, weighted, snapshot, quorum)) return;
     if (quorum === 0) return finalizeSoloRound.call(this, round, btcBlockHeight, btcBlockTime, submissions);
 
     // Past every early-skip branch: this hub has a usable submission set and a

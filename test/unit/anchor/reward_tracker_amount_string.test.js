@@ -40,6 +40,25 @@ async function recordedAmount(rewardType, knob, network) {
     return insert ? insert.args[1][3] : null;
 }
 
+function assertWriterVerifierParity() {
+    const types = ['anchor_BTC', 'anchor_LTC', 'anchor_DOGE', 'anchor_bundle',
+        'anchor_archive', 'anchor_other'];
+    for (const network of ['testnet', 'mainnet', '']) {
+        for (const block of [0, 1, 970000, 99999999]) {
+            for (const type of types) {
+                for (const knob of ['7.5', '10abc']) {
+                    const writer = RewardTracker.prototype.resolveAnchorRewardAmount.call(
+                        { anchorReward: knob, hub: { network } }, type, block, network);
+                    const verifier = StateAnchorPublisher.prototype.expectedArchivedRewardAmount.call(
+                        { hub: { rewardTracker: { anchorReward: knob } } },
+                        { reward_type: type, block_index: block }, network);
+                    expect(verifier, `${type}/${network}/${block}/${knob}`).to.equal(writer);
+                }
+            }
+        }
+    }
+}
+
 describe('RewardTracker anchor reward amount (decimal string)', function () {
     let savedAnchor, savedArchive;
     beforeEach(function () {
@@ -63,10 +82,17 @@ describe('RewardTracker anchor reward amount (decimal string)', function () {
     it('renders the legacy knob on the 8-decimal grid, identically on both sides', async function () {
         expect(await recordedAmount('anchor_BTC', '2.5', '')).to.equal('2.50000000');
         expect(RewardTracker.legacyAnchorRewardAmount('2.5')).to.equal('2.50000000');
+        assertWriterVerifierParity();
     });
 
     it('records nothing for a prefix-numeric knob, and co-signs no legacy amount for it', async function () {
         expect(await recordedAmount('anchor_BTC', '10abc', '')).to.equal(null);
         expect(RewardTracker.legacyAnchorRewardAmount('10abc')).to.equal('0.00000000');
+        const expected = StateAnchorPublisher.prototype.expectedArchivedRewardAmount;
+        const self = { hub: {} };
+        expect(expected.call(self, { reward_type: 'anchor_bundle', block_index: 1 }, 'testnet'))
+            .to.equal('12.5');
+        expect(expected.call(self, { reward_type: 'anchor_other', block_index: 1 }, 'testnet'))
+            .to.equal(null);
     });
 });

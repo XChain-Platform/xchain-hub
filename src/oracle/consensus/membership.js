@@ -35,8 +35,11 @@ module.exports = {
     // the SNAPSHOT, so the .map below drops it while meetsStakeThreshold reads it off the
     // array it is handed. Without the carry a round locked over a capped snapshot loses
     // its fail-closed guard and an under-counted S lets a minority of stake clear the 2/3
-    // bar. Same one-liner as the sibling rebuilds in this file (:2083) and in
-    // CrossChainDexEngine.js / StakeShareWatcher.js.
+    // bar. The direct twin is src/consensus/pbft/leader.js; sibling snapshot
+    // rebuilds live in src/oracle/consensus/snapshot_store.js. Find every carry
+    // with `git grep "truncated === true" src`. The twin carry is pinned by
+    // test/unit/consensus/snapshot_truncation_carry.test.js and per-site parity
+    // by test/unit/capabilities/capability_snapshot_truncation_parity.test.js.
     normalizeValidators(snapshot, weighted) {
         if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
         let out = snapshot.validators.map(v => ({
@@ -59,6 +62,15 @@ module.exports = {
             if (v && v.pubkey) set.add(String(v.pubkey).toLowerCase());
         }
         return set.size > 0 ? set : null;
+    },
+
+    // A quorum-zero snapshot is a solo round only for its sole member. This is
+    // the oracle equivalent of the config-PBFT and DEX sole-self guards.
+    isNonMemberSnapshot(snapshot) {
+        let members = this.memberPubkeySet(snapshot);
+        if(!members) return false;
+        let self = this.selfPubkey();
+        return !self || !members.has(String(self).toLowerCase());
     },
 
     // Oracle M1: restrict a sender-keyed submission map to validators that are

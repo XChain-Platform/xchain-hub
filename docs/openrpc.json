@@ -382,7 +382,7 @@
     },
     {
       "name": "getoracleroundpresence",
-      "summary": "Per-round oracle PRESENCE over a range: for every round in [from_round, to_round], whether this hub recorded it at all and how it ended (finalized / skipped / disputed / missing), plus the explicit `missing` list and a `digest` over the (round, status) sequence. Poll several hubs over the same range and compare digests to detect federation divergence about which rounds happened. Omitted bounds anchor on this hub's highest recorded round and the last `limit` rounds (default 50, max 1000).",
+      "summary": "Per-round oracle PRESENCE over a range: for every round in [from_round, to_round], whether this hub recorded it at all and how it ended (finalized / skipped / disputed / missing), plus the explicit `missing` list and a `digest` over the (round, status) sequence. Poll several hubs over the same range and compare digests to detect federation divergence about which rounds happened. Omitted bounds anchor on this hub's highest recorded round and the last `limit` rounds (default 50, max 1000). An explicit from_round/to_round span is also capped at 1000: from_round is honored, to_round is lowered, and callers must check the returned bounds.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -779,7 +779,7 @@
     },
     {
       "name": "getcheckpointstats",
-      "summary": "State-checkpoint health: last finalized block per chain and quorum-timeout counters.",
+      "summary": "State and snapshot-checkpoint health: finalization, quorum and cadence signals.",
       "paramStructure": "by-name",
       "params": [],
       "result": {

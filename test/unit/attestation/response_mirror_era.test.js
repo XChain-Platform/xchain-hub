@@ -90,4 +90,19 @@ describe('ATTEST response mirror era: one predicate for publisher, mirror and co
             expect(text, rel).to.match(/require\('\.{1,2}\/(\.\.\/)?response_mirror_era\.js'\)/);
         }
     });
+
+    it('takes the batch publisher key from the shared module and not from a second literal', () => {
+        let text = fs.readFileSync(path.join(SRC, 'batch_publisher.js'), 'utf8');
+        expect(text).to.not.include(ATTEST_RESPONSE_MIRROR_KEY);
+        expect(text).to.match(/\{ ATTEST_RESPONSE_MIRROR_KEY \} = require\('\.\/response_mirror_era\.js'\)/);
+    });
+
+    // The zero-conf gate is a pinned carrier, so it keeps its own spelling of the key; this
+    // holds that spelling equal to the shared constant.
+    it('keeps the zero-conf gate literal equal to the shared key', () => {
+        let text = fs.readFileSync(path.join(SRC, 'attest_zero_conf_gate.js'), 'utf8');
+        let m = text.match(/^const ATTEST_RESPONSE_MIRROR_KEY = '([^']+)';$/m);
+        expect(m, 'literal declaration').to.not.equal(null);
+        expect(m[1]).to.equal(ATTEST_RESPONSE_MIRROR_KEY);
+    });
 });

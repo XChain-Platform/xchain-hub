@@ -28,6 +28,10 @@ function makeHub({ resolveBlock, resolveValidators } = {}){
         deletions: [],
         broadcastDeletion(evt){ this.deletions.push(evt); }
     };
+    const snapshot = async () => {
+        const answer = await resolveValidators();
+        return Array.isArray(answer) ? { validators: answer } : answer;
+    };
     return {
         identity: {
             getPubkeyHex: () => VALIDATORS[0].pubkey,
@@ -38,8 +42,8 @@ function makeHub({ resolveBlock, resolveValidators } = {}){
         network: 'regtest',
         p2pConfig: {},
         capabilitySnapshot: {
-            getWeightSnapshot: async () => ({ validators: await resolveValidators() }),
-            getSnapshot: async () => ({ validators: await resolveValidators() })
+            getWeightSnapshot: snapshot,
+            getSnapshot: snapshot
         },
         resolveBtcLatestBlock: resolveBlock
     };
@@ -84,6 +88,24 @@ async function emptyValidatorSetRetry(){
         await submitAndAwaitSignedRetry(consensus, hub,
             'a signing round after the validator set resolves',
             'an unresolved quorum set must never fall through to unsigned broadcast');
+    } finally {
+        consensus.stop();
+    }
+}
+
+async function truncatedValidatorSetRetry(){
+    let reads = 0;
+    let hub = makeHub({
+        resolveBlock: async () => 5000,
+        resolveValidators: async () => (++reads === 1
+            ? { validators: VALIDATORS, truncated: true }
+            : { validators: VALIDATORS })
+    });
+    let consensus = retryConsensus(hub);
+    try {
+        await submitAndAwaitSignedRetry(consensus, hub,
+            'a signing round after the validator set is no longer truncated',
+            'a truncated quorum set must be deferred before signatures are requested');
     } finally {
         consensus.stop();
     }
@@ -136,6 +158,7 @@ async function assertUnsignedFallback(hub, evt){
 
 describe('RetractionConsensus submit retry', function () {
     it('defers an empty validator set and opens a signing round on retry', emptyValidatorSetRetry);
+    it('defers a truncated validator set before signing and retries it', truncatedValidatorSetRetry);
     it('defers a null snapshot block and opens a signing round on retry', nullSnapshotBlockRetry);
     it('still broadcasts a quorum-class table unsigned when the hub has no identity', noIdentityFallback);
     it('still broadcasts a table outside the quorum class unsigned', nonQuorumTableFallback);

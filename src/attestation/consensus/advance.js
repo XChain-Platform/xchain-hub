@@ -30,8 +30,9 @@ const { ATTEST_PREPARE } = require('./constants.js');
 module.exports = {
 
     // Once enough proposals are in, run provider.agree() to pick a winner and
-    // transition to PREPARE phase. Idempotent by early return, NOT by re-sweeping:
-    // once a winner exists this returns at the first statement below, so a PROPOSE
+    // transition to PREPARE phase. Idempotent by early return, NOT by re-sweeping.
+    // After a no-winner verdict, agreement repeats only when the ok-proposal set grows.
+    // Once a winner exists this returns at the first statement below, so a PROPOSE
     // arriving afterwards is stored by handlePropose but never re-verified against
     // the winner canonical and never counted into pending.signatures. The
     // winner-canonical sweep further down runs exactly once, at the moment the winner
@@ -64,6 +65,7 @@ module.exports = {
         if(this.awaitsLeaderAdmitMap(pending)) return;
         let proposalsArr = this.okProposalsForRound(rid, pending);
         if(!proposalsArr) return;
+        if(pending._noWinnerOkCount != null && proposalsArr.length <= pending._noWinnerOkCount) return;
         let providerModule = this.roundProviderModule(rid, pending);
         if(!providerModule) return;
         if(this.awaitsJudgeLeader(pending)) return;
@@ -85,6 +87,7 @@ module.exports = {
         if(this.roundMovedDuringAgree(rid, pending)) return;
 
         if(!winner){
+            pending._noWinnerOkCount = proposalsArr.length;
             this.concludeWithoutWinner(rid, judgeOutcome, proposalsArr);
             return;
         }
@@ -213,8 +216,9 @@ module.exports = {
         // fetches shrink `proposals.length` and a lone unreplicated body clears
         // ceil((N+1)/2) with N=1, becoming the round winner and suppressing the
         // deterministic no_quorum audit row (byte_equality's independent-fetch
-        // premise goes unexercised). byte_equality honours it; judge_model
-        // ignores it. `need` is the responsible-set bound maybeAdvanceFromProposals computed.
+        // premise goes unexercised). byte_equality honours it as the majority
+        // denominator; judge_model refuses a lone ok proposal under it. `need` is
+        // the responsible-set bound maybeAdvanceFromProposals computed.
         return { pinnedJudgeModel: pending.pinnedJudgeModel || null, pinnedVendors: pending.pinnedVendors || null,
                  pinnedApprovedModels: pending.pinnedApprovedModels || null,
                  timeoutMs: judgeTimeoutMs, expectedN: need, outcome: judgeOutcome };

@@ -43,7 +43,7 @@ module.exports = {
     // leader check is identical, deliberately: a takeover must put the same
     // canonical content on chain the leader would have, never a variant.
     async assembleWindow(windowIndex, opts) {
-        if (!this.enabled) return;
+        if (!this.enabled || this._stopped) return;
         let takeover = !!(opts && opts.takeover);
         if (!takeover && this._assembledWindows.has(windowIndex)) return;
 
@@ -55,6 +55,7 @@ module.exports = {
         // window that drifted before the buffer learned to track a re-finalization.
         await this.reconcileBufferedWindow(first, last);
         await this.shedRetractedWindowCarriedByChain(windowIndex, first, last);
+        if (this._stopped) return;   // an assembly already past its first await when stop() ran
         let rounds = this.bufferedRange(first, last);
         if (rounds.length === 0) { this.noteAssembled(windowIndex); this.forgetRetractedWindow(windowIndex); return; }
 
@@ -65,11 +66,7 @@ module.exports = {
 
         // Who publishes this window, and whether this hub is it.
         let election = await this.electWindowPublisher(windowIndex, first, last, anchor, takeover);
-        if (!election) return;
-
-        // The self-check. A window published with a hole in it puts a signed, permanent
-        // claim on chain that the missing round did not finalize.
-        if (!(await this.windowCoverageComplete(first, last, rounds))) return;
+        if (!election || this._stopped) return;
 
         let signer = this.getBatchSigner();
         if (!signer) {
@@ -78,15 +75,29 @@ module.exports = {
             return;
         }
 
-        let wires = await this.signWindowWires(signer, rounds, anchor, election.publisherCount);
-        // Quorum was not reached. Nothing publishes for this window and it is
-        // deliberately NOT memoized, so a later leader (or a later catch-up on
-        // this hub) can re-propose the identical canonical content.
-        if (wires === null) return;
+        // The proposal covers the WINDOW, not the span this hub happens to hold. A hub
+        // that restarted inside its own window holds only part of it, and everything
+        // downstream (packing, the anchor, the signing round's own gap fill, every
+        // co-signer's re-derivation) keys on the held span, so without this the rounds
+        // its peers finalized meanwhile are left off chain for good. Not memoized on
+        // failure, so a later pass re-proposes the whole window.
+        let exempt = new Set();
+        if (!(await this.fillWindowToBounds(signer, first, last, rounds, anchor, exempt))) return;
+        anchor = parseInt(rounds[rounds.length - 1].btcBlockHeight);
 
-        this.noteAssembled(windowIndex);
-        this.forgetRetractedWindow(windowIndex);
-        if (wires.length === 0) return;
+        // The self-check. A window published with a hole in it puts a signed, permanent
+        // claim on chain that the missing round did not finalize.
+        if (!(await this.windowCoverageComplete(first, last, rounds))) return;
+
+        let wires = await this.signWindowWires(signer, rounds, anchor, election.publisherCount, exempt);
+        // A short quorum publishes nothing and stays unmemoized for a later pass.
+        if (wires === null) { if (!takeover) this.noteSigningShortfall(windowIndex); return; }
+
+        if (wires.length === 0) {
+            this.noteAssembled(windowIndex);
+            this.forgetRetractedWindow(windowIndex);
+            return;
+        }
         await this.enqueueWindowWires(windowIndex, first, last, wires, election, takeover);
     },
 
@@ -126,10 +137,10 @@ module.exports = {
             // later window has to re-propose this one.
             this._followerRounds++;
             this.noteAssembled(windowIndex);
-            let pruned = await this.pruneObservedWindow(first, last);
-            // Pruned means the leader's batch is already on chain, so there is
-            // nothing to take over. Only an unobserved window gets a timer.
-            if (pruned === 0) this.scheduleTakeover(windowIndex, myRank, leaderRank, pubkeys.length);
+            await this.pruneObservedWindow(first, last);
+            // A partial landing still needs a takeover for its buffered remainder.
+            if (this.bufferedRange(first, last).length > 0)
+                this.scheduleTakeover(windowIndex, myRank, leaderRank, pubkeys.length);
             return null;
         }
         if (takeover) {
@@ -145,17 +156,19 @@ module.exports = {
     // Pack the window into wires and run a signing round for each, splitting at every
     // armed flag day first. Null when a range failed to reach quorum, which withholds
     // the whole window rather than publishing the part that signed.
-    async signWindowWires(signer, rounds, anchor, publisherCount) {
+    async signWindowWires(signer, rounds, anchor, publisherCount, exempt) {
         let sigCountHint = await this.priceSetSizeHint(anchor, publisherCount);
         let wires = [];
-        for (let segment of this.splitByFlagDay(rounds)) {
+        let segments = this.splitByFlagDay(rounds)
+            .flatMap(segment => this.splitAtExemptRounds(segment, exempt));
+        for (let segment of segments) {
             let idx = 0;
             while (idx < segment.length) {
                 let take  = Math.max(1, this.packSegment(segment.slice(idx), sigCountHint));
                 let range = segment.slice(idx, idx + take);
-                let wire  = await this.signAndSizeRange(signer, range);
+                let wire  = await this.signAndSizeRange(signer, range, exempt);
                 if (wire === null) return null;
-                idx += wire.rounds.length;
+                idx += this.segmentRoundsConsumed(segment, idx, wire.rounds);
                 if (wire.unpublishable) continue;   // the ceiling case, already dead-lettered
                 wires.push(wire);
             }
@@ -166,6 +179,26 @@ module.exports = {
     // Put every signed wire on the durable queue and drain it. The enqueue is what
     // makes the window survive a crash between signing and broadcast.
     async enqueueWindowWires(windowIndex, first, last, wires, election, takeover) {
+        let entries = wires.map((wire, i) => ({
+            // Identity stays the first round for queue retention and dedup sets.
+            round: wire.firstRound,
+            batch: {
+                windowIndex: windowIndex,
+                firstRound: wire.firstRound,
+                lastRound: wire.lastRound,
+                anchor: wire.anchor,
+                rounds: wire.rounds.map(r => parseInt(r.round)),
+                sigCount: wire.sigCount,
+                compressed: wire.compressed,
+                wireIndex: i,
+                wireCount: wires.length
+            },
+            wire: wire.wire
+        }));
+        this.enqueueWindowBatch(windowIndex, entries);
+        this.noteAssembled(windowIndex);
+        this.forgetRetractedWindow(windowIndex);
+
         if (takeover) {
             this._takeoverUnlanded.delete(windowIndex);
             this.takeoverPublished++;
@@ -179,26 +212,6 @@ module.exports = {
             this.batchSplitCount += wires.length - 1;
             logger.info('OraclePublisher: window [' + first + ',' + last + '] split into ' +
                 wires.length + ' PRICE v0 wires to fit ' + this.constructor.PRICE_WIRE_MAX_BYTES + ' bytes');
-        }
-
-        for (let i = 0; i < wires.length; i++) {
-            await this.enqueue({
-                // Identity field stays the FIRST round, so processQueue's Sets and the
-                // retention sweep's queue-floor clamp keep working on a scalar (D10).
-                round: wires[i].firstRound,
-                batch: {
-                    windowIndex: windowIndex,
-                    firstRound:  wires[i].firstRound,
-                    lastRound:   wires[i].lastRound,
-                    anchor:      wires[i].anchor,
-                    rounds:      wires[i].rounds.map(r => parseInt(r.round)),
-                    sigCount:    wires[i].sigCount,
-                    compressed:  wires[i].compressed,
-                    wireIndex:   i,
-                    wireCount:   wires.length
-                },
-                wire: wires[i].wire
-            });
         }
 
         await this.processQueue();
@@ -311,8 +324,7 @@ module.exports = {
     // 'disputed' marks a reorg-retracted row, and the signing round refuses to sign
     // disputed content, so treating a disputed round as "present but unbuffered" would
     // stall the window forever waiting for something no peer will ever co-sign.
-    // No exemption for early rounds: batching is unconditional, so every round that
-    // finalized locally was buffered and an unbuffered one is a real coverage hole.
+    // Retraction deletes landed-batch copies, so an all-batch-sourced round is safe to exempt.
     async windowCoverageComplete(first, last, rounds) {
         if (!this.db) return true;
         let rows;
@@ -323,13 +335,14 @@ module.exports = {
                 '] against price_snapshots; withholding the batch (fail closed): ', e && e.message));
             return false;
         }
-        let have    = new Set(rounds.map(r => parseInt(r.round)));
-        let missing = [];
+        let have = new Set(rounds.map(r => parseInt(r.round))), coverageByRound = new Map();
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
             if (!Number.isFinite(r) || have.has(r)) continue;
-            missing.push(r);
+            let batchSourced = String(row.proof_head || '').indexOf('{"batch"') === 0;
+            coverageByRound.set(r, (coverageByRound.get(r) !== false) && batchSourced);
         }
+        let missing = Array.from(coverageByRound).filter(([, allBatch]) => !allBatch).map(([r]) => r);
         // A round shed after its batch landed has no buffered copy by design, and the
         // chain carries it: it is not a hole. Without this a window-size change leaves
         // the window's tail (rounds the old windows already landed) unpublishable.

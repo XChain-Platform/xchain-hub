@@ -166,7 +166,7 @@ module.exports = {
     // empty meta) so the round can quorum-sign an explicit non-ok ATTEST v1
     // (Phase 4) instead of stalling every peer until deadline expiry.
     async fetchOwnProposal(rid, request, providerId, providerModule, providerDef, pins){
-        let { pinnedFetchModel, pinnedVendors, modelIdx } = pins;
+        const { pinnedFetchModel, pinnedVendors, pinnedRequestBounds, pinnedMaxResponseBytes, modelIdx } = pins;
         // Durable, request_id-keyed twin of the in-memory `seen`
         // window. Both guards above die with the process (`seen` is cleared on
         // stop(), isRoundActive reads live consensus state), so a restart inside
@@ -192,11 +192,13 @@ module.exports = {
             this.fetchCount++;
             try {
                 fetched = await providerModule.fetch(request.payload, {
-                    maxResponseBytes: providerDef.max_response_bytes,
+                    maxResponseBytes: pinnedMaxResponseBytes === null ? undefined : pinnedMaxResponseBytes,
                     timeoutMs:        this.fetchTimeoutMs,
                     pinnedModel:      pinnedFetchModel,
                     // Block-anchored model->vendor map for the pinned id.
                     pinnedVendors:    pinnedVendors,
+                    // Block-anchored request shape for the pinned provider config.
+                    pinnedRequestBounds: pinnedRequestBounds,
                     // Rank of the pinned model on the fallback ladder; providers
                     // enforce request-level fallback policy on it (llm 'strict').
                     modelRank:        modelIdx,
@@ -231,7 +233,7 @@ module.exports = {
     buildRoundState(ctx){
         let { request, amLeader, snapshot, snapshotBlk, responsible, leaderPubkey, redundancy, providerId,
               providerDef, fetched, myStatus, pinnedJudgeModel, pinnedVendors, pinnedConsensusStrategy,
-              approvedModels } = ctx;
+              approvedModels, pinnedMaxResponseBytes } = ctx;
         let roundState = {
             request:        request,
             role:           amLeader ? 'leader' : 'follower',
@@ -251,11 +253,8 @@ module.exports = {
             pinnedVendors:    pinnedVendors,
             // The response cap this round's own fetch was bounded by, carried so
             // AttestationConsensus can size its inbound PROPOSE/PREPARE body gate
-            // from the same number instead of re-reading the hot-reloadable
-            // registry per message. A governance change landing mid-round would
-            // otherwise leave this hub gating its peers' bodies at a cap its own
-            // proposal never had to meet.
-            pinnedMaxResponseBytes: (providerDef && Number(providerDef.max_response_bytes)) || null,
+            // from the same request-block value used by the provider fetch.
+            pinnedMaxResponseBytes: pinnedMaxResponseBytes,
             // Block-anchored PBFT strategy for this round (see the resolution above).
             // AttestationConsensus reads ONLY this, never the live registry.
             pinnedConsensusStrategy: pinnedConsensusStrategy,

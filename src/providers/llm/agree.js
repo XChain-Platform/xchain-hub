@@ -65,6 +65,15 @@ class JudgeAgreement {
             return null;
         }
         if (proposals.length === 1) {
+            // The caller hands in only the ok proposals, so a lone survivor of a
+            // responsible set that expected more is an unreplicated body: seating it
+            // would skip the judge and the meta corroboration for an answer no second
+            // validator produced. Inconclusive, so the round resolves to the retryable
+            // no_quorum and a later ok proposal re-enters the judge.
+            if ((Number(options && options.expectedN) || 0) > 1) {
+                markInconclusive(options, 'unreplicated_proposal');
+                return null;
+            }
             // Allowlist still applies with a single proposal. There is nothing to
             // corroborate against, but an unapproved identifier is unrecognized either way
             // and must not reach the canonical signature.
@@ -112,11 +121,11 @@ class JudgeAgreement {
     // True when a failed judge attempt ends the chain, with the round already
     // marked inconclusive; false when the chain may advance to the next model.
     judgeFailureStopsChain(e, jm, options) {
-        // Transport-only invariant: a REACHED judge's outcome (a model
+        // Verdict-only invariant: a REACHED judge's outcome (a model
         // refusal, a truncation, or a hard non-transient API error) is a
         // judgment outcome, not a transport failure, and must NOT be re-asked
-        // of a different fallback model. Only transport failures (transient
-        // errors, credential/endpoint resolution) may advance the chain.
+        // of a different fallback model. Transport failures and vendor config,
+        // auth or billing failures with no verdict may advance the chain.
         // A spent budget is neither: the guard is hub-global, so every later
         // model in the chain is refused too. Stop here (see the pre-loop gate).
         if (e && e.budgetExhausted) {
@@ -124,14 +133,18 @@ class JudgeAgreement {
             markInconclusive(options, 'budget_exhausted');
             return true;
         }
+        if (e && e.kind === 'vendor_config') {
+            this.logger.warn('llm: judge ' + jm + ' failed on vendor config, auth, or billing; advancing fallback chain');
+            return false;
+        }
         if (e && (e.kind === 'refusal' || e.transient === false)) {
             this.logger.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                 (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
             // Three buckets, not two. The chain-advance
             // decision is the same for all of them, but the recorded reason is
             // the only place an operator sees WHY the round went inconclusive:
-            // a 4xx from a deprecated model id, an auth misconfiguration, and a
-            // non-zero claude CLI exit all arrive here with kind undefined, and
+            // a request-invalid 4xx and an unclassified CLI exit arrive here with
+            // kind undefined, and
             // labelling those 'judge_refusal' makes vendor-contract drift
             // indistinguishable from real content moderation.
             let reason = 'judge_hard_error';
@@ -144,8 +157,8 @@ class JudgeAgreement {
     }
 
     // Judge fallback chain: pinned judge first, then the configured
-    // alternates (deduped). Only TRANSPORT failures (vendor down, no creds,
-    // timeout) advance the chain; a reachable judge's verdict, however
+    // alternates (deduped). Failures before a verdict (vendor down, no creds,
+    // timeout, auth, config or billing) advance the chain; a reached verdict, however
     // unparseable, is a judgment outcome and must not be re-asked of a
     // different model. Leader-local: followers adopt the leader's winner and
     // never re-judge, so this needs no cross-hub determinism.
@@ -226,7 +239,8 @@ class JudgeAgreement {
 
     // Consensus strategy: judge_model (spec §6).
     //
-    // Single-proposal case (redundancy=1): trivial. Return the only proposal.
+    // Single-proposal case (redundancy=1, or no expectedN above 1): trivial. Return the
+    // only proposal. A lone ok proposal under expectedN > 1 is no_quorum, never a winner.
     // Multi-proposal case (redundancy>=3): build a judge prompt enumerating
     // candidate responses, run JUDGE_MODEL at temperature=0, parse JSON
     // verdict { equivalent, canonical_index } and return the canonical

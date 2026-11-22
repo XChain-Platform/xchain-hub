@@ -177,6 +177,27 @@ describe('checkpoint disagreement holds @regression', function () {
 });
 
 describe('checkpoint disagreement holds @regression', function () {
+    it('declines an unavailable own hash triple inside a witnessed replay', async function () {
+        const cp = checkpoint({ ledger_hash: '', actions_hash: '', contract_hash: '' });
+        const own = block({
+            ledger_hash: null, actions_hash: null, contract_hash: null, rules: replay(),
+        });
+        const followerEngine = buildEngine(cp, own);
+
+        await followerEngine.engine.handleSignReq(signRequest(cp));
+        await followerEngine.engine.handleSignReq(signRequest(cp));
+
+        expect(followerEngine.broadcasts).to.deep.equal([]);
+        expect(followerEngine.engine._cosignDeclines.indexer_no_block).to.equal(2);
+        expect(followerEngine.engine._cosignDeclines.checkpoint_disagreement).to.equal(0);
+
+        const leaderEngine = buildEngine(cp, own);
+        await leaderEngine.engine.runRound('BTC', SNAP, []);
+        expect(leaderEngine.engine.pending.size).to.equal(0);
+        expect(leaderEngine.broadcasts).to.deep.equal([]);
+        expect(leaderEngine.engine._leaderDeclines.indexer_no_block).to.equal(1);
+    });
+
     it('meters witnessed replay disagreements as indexer divergence', async function () {
         const cp = checkpoint();
         const own = block({ ledger_hash: '99'.repeat(32), rules: replay() });

@@ -191,6 +191,7 @@ function initRoundState(self){
     // the spend log at start(). The in-memory `rounds` map is empty after a
     // restart, so it cannot answer that question.
     self._committedEpochs = new Set();
+    self._spendLogUnread = false;   // set while the spend log failed a read other than ENOENT
     self._timer   = null;
     self._ticking = false;      // in-flight guard, see tick()
     self._truncWarnAt = 0;      // throttle for the truncated-set alarm, see eligibleVerifiers()

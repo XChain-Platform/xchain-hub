@@ -39,7 +39,7 @@ const SUBMISSIONS_INFO_KEYS = [
     'roundBand', 'implausibleRounds', 'implausibleRoundCount', 'implausibleRoundRejections',
     'failedSubmissionPersists', 'lastSubmissionPersistFailureRound', 'lastSubmissionPersistFailureCount',
     'submissionsPruneFailures', 'lastSubmissionsPruneFailureRound', 'consecutiveSkippedRounds', 'freshnessHydrateError',
-    'round_timeouts', 'abandoned_rounds', 'lastAbandonedRound',
+    'processEpoch', 'round_timeouts', 'abandoned_rounds', 'lastAbandonedRound',
     'single_source_rounds', 'lastSingleSourceRound', 'oracle_fetch_failures',
     'lastSuccessfulRoundTime', 'lastSuccessAgeMs', 'usingFallback', 'chainTipFetchFailures',
     'chainTipStalenessMs', 'chainTipBlockAgeMs', 'chainTipBlockStale'
@@ -104,6 +104,26 @@ describe('oracle diagnostics: fields xchain-dashboard reads', function () {
     it('getSubmissionsInfo emits every key the dashboard reads', async function () {
         let info = await liveInfo();
         expect(missingKeys(info, SUBMISSIONS_INFO_KEYS)).to.deep.equal([]);
+    });
+
+    it('processEpoch is stable within one round object and differs between two', async function () {
+        let first = await liveInfo();
+        let second = await liveInfo();
+        expect(first.processEpoch).to.match(/^[0-9a-f]{16}$/);
+        expect(second.processEpoch).to.match(/^[0-9a-f]{16}$/);
+        expect(second.processEpoch).to.not.equal(first.processEpoch);
+        let hub = createMockHub({
+            p2pConfig: {
+                ORACLE_EPOCH_START: Date.now() - CURRENT * INTERVAL_MS,
+                ORACLE_ROUND_INTERVAL: String(INTERVAL_MS),
+                ORACLE_SUBMISSION_WINDOW: '30000'
+            }
+        });
+        hub.db.doQuery = sinon.stub().resolves([]);
+        let round = new OracleRound(hub);
+        let a = await round.getSubmissionsInfo();
+        let b = await round.getSubmissionsInfo();
+        expect(b.processEpoch).to.equal(a.processEpoch);
     });
 
     it('droppedPairs elements and roundBand carry the sub-keys the dashboard reads', async function () {

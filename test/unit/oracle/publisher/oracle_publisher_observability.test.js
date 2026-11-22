@@ -168,6 +168,29 @@ oraclePublisherTests('capability-snapshot dark logging (item 2391)', function ()
         expect(warn.callCount).to.equal(2);
     });
 
+    it('counts each dark spell once and logs one info line when a spell ends', async function () {
+        sinon.stub(console, 'warn');
+        let log = sinon.stub(console, 'log');
+        let recovered = () => log.getCalls().filter(c => /resolved again at block/.test(String(c.args[0]))).length;
+        let capSS = { getSnapshot: sinon.stub().resolves(null) };
+        let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
+        expect(pub.snapshotDarkSpells).to.equal(0);
+        await pub.getActiveOraclePublishPubkeys(100);
+        await pub.getActiveOraclePublishPubkeys(101);
+        expect(pub.snapshotDarkSpells).to.equal(1);
+        expect(recovered()).to.equal(0);
+        capSS.getSnapshot.resolves({ validators: [{ pubkey: 'aa'.repeat(32) }] });
+        expect(await pub.getActiveOraclePublishPubkeys(102)).to.deep.equal(['aa'.repeat(32)]);
+        await pub.getActiveOraclePublishPubkeys(103);
+        expect(recovered()).to.equal(1);
+        expect(log.calledWithMatch(/resolved again at block 102 after \d+s dark/)).to.equal(true);
+        expect(pub._snapshotDarkSince).to.equal(null);
+        capSS.getSnapshot.resolves(null);
+        await pub.getActiveOraclePublishPubkeys(104);
+        expect(pub.snapshotDarkSpells).to.equal(2);
+        expect(pub._snapshotDarkSince).to.be.a('number');
+    });
+
 });
 
 
@@ -198,5 +221,22 @@ oraclePublisherTests('oversized PRICE v0 wire drop (item 2402)', function () {
         expect(pub.getStats().oversizedDrops).to.equal(2);
     });
 
+});
+
+oraclePublisherTests('durable buffer read failures', function () {
+    it('latches an unread buffer and refuses a destructive rewrite', function () {
+        let error = sinon.stub(console, 'error');
+        let ioError = Object.assign(new Error('injected read fault'), { code: 'EIO' });
+        fsMock.readFileSync.throws(ioError);
+        let pub = new OraclePublisher(makeHub());
+
+        pub.hydrateBuffer();
+
+        expect(pub._buffer.size).to.equal(0);
+        expect(pub.getStats().bufferUnread).to.equal(true);
+        expect(pub.rewriteBufferFile([])).to.equal(false);
+        expect(fsMock.renameSync.called).to.equal(false);
+        expect(error.calledWithMatch(/rewrites are suspended/)).to.equal(true);
+    });
 });
 

@@ -23,6 +23,8 @@
 
 const crypto = require('crypto');
 const configRedaction = require('./config_redaction.js');
+const { requestId } = require('./jsonrpc_envelope.js');
+const { isSnapshotRequest } = require('./rate_limit_policy.js');
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub:
@@ -156,7 +158,7 @@ function bulkTierRefuses(calls, provided, ctx) {
 // per-IP rate limit.
 function authGate(ctx) {
     const { HUB_API_KEY, HUB_FEED_API_KEY, HUB_REORG_API_KEY, HUB_CONFIG_SECRETS_API_KEY } = ctx;
-    return (req, res, next) => {
+    return function authGateMiddleware(req, res, next) {
         if (!HUB_API_KEY && !HUB_FEED_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
@@ -164,10 +166,13 @@ function authGate(ctx) {
         // element invokes a write or sensitive-read method. Reading req.body.method
         // off an array leaves it undefined, which would let a batch smuggle gated
         // methods past the check unauthenticated.
+        // The batch cap runs after this gate so authentication wins over a 400.
+        // middleware.js keeps this pre-cap walk bounded with its 100 KB method-size
+        // gate, including arrays presented by callers who can use the attest parser.
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let provided = req.headers['x-api-key'] || '';
         let unauthorized = () => res.status(401).json({
-            jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+            jsonrpc: '2.0', id: requestId(req.body),
             error: { code: -32001, message: 'Unauthorized' }
         });
         if (reorgTierRefuses(calls, provided, ctx)) return unauthorized();
@@ -188,7 +193,7 @@ function authGate(ctx) {
         if (bulkTierRefuses(calls, provided, ctx)) return unauthorized();
         if (calls.some(hasInvalidMethod)) {
             return res.status(400).json({
-                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                jsonrpc: '2.0', id: requestId(req.body),
                 error: { code: -32600, message: 'Invalid Request' }
             });
         }
@@ -214,9 +219,15 @@ function authGate(ctx) {
 // caller already holding the key, and does not become an oracle for which
 // methods a hub implements.
 function feedPortAllowlist() {
-    return (req, res, next) => {
+    return function feedPortAllowlistMiddleware(req, res, next) {
         if (!req.xchainFeedOrigin) return next();
-        if (req.method === 'GET') return next();     // snapshot reads, already path-scoped
+        // Only a bodyless snapshot page read bypasses the RPC method check. The root
+        // JSON-RPC router dispatches parsed bodies on GET too, including on snapshot
+        // paths that no page route handles.
+        const emptyObject = req.body && !Array.isArray(req.body) &&
+            Object.getPrototypeOf(req.body) === Object.prototype && Object.keys(req.body).length === 0;
+        if (req.method === 'GET' && isSnapshotRequest(req) &&
+            (req.body === undefined || emptyObject)) return next();
         let calls = Array.isArray(req.body) ? req.body : [req.body];
         let allowed = calls.length > 0 && calls.every((call) => {
             let method = call && call.method;
@@ -224,7 +235,7 @@ function feedPortAllowlist() {
         });
         if (!allowed) {
             return res.status(404).json({
-                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                jsonrpc: '2.0', id: requestId(req.body),
                 error: { code: -32601, message: 'Method not available on this port' }
             });
         }
@@ -232,4 +243,4 @@ function feedPortAllowlist() {
     };
 }
 
-module.exports = { authGate, feedPortAllowlist };
+module.exports = { authGate, bulkKeyMatches, feedPortAllowlist };

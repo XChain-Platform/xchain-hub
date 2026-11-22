@@ -28,6 +28,8 @@ const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATI
 const swq               = require('../../consensus/stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('../../lib/bft_quorum.js');
 const { validateRoundFields, validateRoundPairs, validateRoundSigs } = require('./round_validation.js');
+const { parsePushGeneration } = require('./single_validation.js');
+const { storedRoundRows } = require('./stored_round_rows.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -172,37 +174,7 @@ function roundQuorumReason(weighted, snapshot, verifiedSigs) {
 // (which carries the rollback's generation) deletes only stale rows and a
 // re-published row at a recycled action_index (higher generation) survives.
 function pushGenerationOf(roundData) {
-    let pushGeneration = parseInt(roundData.push_generation);
-    if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
-    return pushGeneration;
-}
-
-// The rows this round contributes to price_snapshots, in the column order the
-// mirror stream and every positional reader of the insert already expect.
-function priceSnapshotRows(round, roundData, sourceChain, stamps, admitCols) {
-    let insertedRows = [];
-    for (let p of roundData.pairs) {
-        insertedRows.push({
-            round_number:        round,
-            coin_pair:           p.pair,
-            price:               p.price,
-            reference_block:     stamps.referenceBlock,
-            reference_chain:     sourceChain || null,
-            block_timestamp:     stamps.timestamp,
-            validator_count:     stamps.validatorCount,
-            consensus_round:     1,
-            consensus_proof:     stamps.proofJson,
-            status:              'finalized',
-            source_chain:        sourceChain || null,
-            source_action_index: stamps.sourceActionIndex,
-            push_generation:     stamps.pushGeneration,
-            created_at:          stamps.createdAt,
-            admit_block_btc:     admitCols.admit_block_btc,
-            admit_block_ltc:     admitCols.admit_block_ltc,
-            admit_block_doge:    admitCols.admit_block_doge
-        });
-    }
-    return insertedRows;
+    return parsePushGeneration(roundData.push_generation).value;
 }
 
 // Upsert (not a plain INSERT): a 'skipped' placeholder row may already occupy
@@ -277,13 +249,13 @@ async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
         // per-chain columns (NULL for a legacy round, never 0), appended AFTER created_at
         // so every positional reader of this INSERT keeps its index.
         let admitCols = this.admission.admitBlocksToColumns(roundData.admit_blocks == null ? null : roundData.admit_blocks);
-        insertedRows = priceSnapshotRows(round, roundData, sourceChain, stamps, admitCols);
         try {
             await pushedRoundInsert.call(this, round, roundData, sourceChain, stamps, admitCols);
         } catch (err) {
             logger.error(nodeUtil.format('PriceAggregator: error inserting round ' + round + ':', err));
             return { accepted: false, reason: 'db error' };
         }
+        insertedRows = await storedRoundRows.call(this, round, roundData.pairs);
     }
 
     announceStoredRound.call(this, round, sourceChain, roundData, insertedRows, validatorCount);
@@ -293,6 +265,8 @@ async function storeVerifiedRound(sourceChain, roundData, head, verifiedSigs) {
 async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
     let head = validateRoundFields.call(this, sourceChain, roundData);
     if (head.reason) return { accepted: false, reason: head.reason };
+    const generation = parsePushGeneration(roundData.push_generation);
+    if (generation.reason) return { accepted: false, reason: generation.reason };
     let pairsReason = validateRoundPairs.call(this, roundData, head.timestamp);
     if (pairsReason) return { accepted: false, reason: pairsReason };
     let structural = validateRoundSigs(roundData);
@@ -319,7 +293,7 @@ async function verifyValidatedRound(sourceChain, roundData, checkDuplicate) {
         this, structural.sigs, snapshot, built.payload, head.btcBlockHeight);
     let quorumReason = roundQuorumReason(weighted, snapshot, verifiedSigs);
     if (quorumReason) return { accepted: false, reason: quorumReason };
-    return { accepted: true, head, verifiedSigs };
+    return { accepted: true, head, verifiedSigs, payload: built.payload, snapshot };
 }
 
 module.exports = {

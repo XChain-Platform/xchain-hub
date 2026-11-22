@@ -23,11 +23,13 @@
 const crypto = require('crypto');
 const { relayMarginFloorS } = require('../../lib/relay_margin.js');
 const { normalizeRetractionBounds } = require('../../lib/retraction_bounds.js');
+const roundRetraction = require('../retraction/rounds.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
-
 module.exports = {
     async finalizeMatch(desc){
+        const proposal = roundRetraction.begin(this);
+        try {
         let snapshotBlock = await this.resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
 
@@ -41,16 +43,16 @@ module.exports = {
         // receiving it, and the two then carried different settlement action indexes
         // for the same match. Size the margin to the SLOWER of the two legs, since
         // both chains must hold the row before either reaches its eligible block.
-        let effectiveTime = this.nowSeconds() +
-            Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
+        let effectiveTime = Number.isFinite(Number(desc.effectiveTime)) ? Number(desc.effectiveTime) :
+            this.nowSeconds() + Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
 
         let row = this.buildMatchRow(desc, matchId, snapshotBlock, effectiveTime);
         if(!(await this.stampMatchAdmission(row, matchId))) return;
 
-        // Resolve the cross_chain validator set at snapshot_block (deterministic,
-        // BTC-anchored) so every node computes the same quorum. The leader of the
+        // Resolve the cross_chain validator set at snapshot_block. The leader of the
         // round persists + mirrors these rows to indexers (in consensus PROPOSE).
         let validators = await this.resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
+        if(roundRetraction.covered(this, proposal, row)) return;
 
         // Reserve this fill in-flight so a later poll doesn't re-propose it before the
         // committed ledger is updated by writeFinalizedMatch.
@@ -64,6 +66,7 @@ module.exports = {
             this._inflight.delete(matchId);            // round failed to start; allow a retry
             throw e;
         }
+        } finally { roundRetraction.end(this, proposal); }
     },
 
     buildMatchRow(desc, matchId, snapshotBlock, effectiveTime){
@@ -208,8 +211,7 @@ module.exports = {
 
     pruneRetractionFence(){
         this.ensureRetractionFence();
-        let floor = this._retractionSeq;
-        for(const token of this._pendingWrites) if(token.seq < floor) floor = token.seq;
+        let floor = roundRetraction.floor(this, this._retractionSeq);
         this._retractionFence = this._retractionFence.filter(entry => entry.seq > floor);
     },
 
@@ -338,6 +340,7 @@ module.exports = {
         if(bounds.error) throw new Error(bounds.error);
         let { from, to, gen, bounded, fenced } = bounds;
         const entry = this.recordRetraction(chain, bounds);
+        roundRetraction.cancelCoveredPending(this, this.consensus, entry, id => this._inflight.delete(id));
         const pending = await this.waitForCoveredWrites(entry);
         const uncommitted = new Set(pending.filter(token => token.inserted && !token.capacityApplied)
             .map(token => token.row.match_id));

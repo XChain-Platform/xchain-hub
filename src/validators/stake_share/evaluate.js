@@ -24,7 +24,7 @@
 'use strict';
 
 const mathjs = require('mathjs');
-const { totalStake } = require('../../consensus/stake_weighted_quorum.js');
+const { totalStake, meetsStakeThreshold } = require('../../consensus/stake_weighted_quorum.js');
 const { LEVELS, fmt, pct, normalizeSources, emptyResult, marginBands } = require('./levels.js');
 const { classifyMargin } = require('./margin.js');
 
@@ -60,27 +60,65 @@ function readTotalStake(validators, configured) {
 // totalStake() would have thrown otherwise.
 function matchOperatorSources(validators, configured) {
     let weightBySource = new Map();
+    let pubkeyToSource = new Map();
+    let sourcesByPubkey = new Map();
+    let operatorPubkeys = new Set();
+    let configuredSet = new Set(configured);
     for (let v of validators) {
         let src = String(v.source);
+        let pk = String(v.pubkey).toLowerCase();
         if (!weightBySource.has(src)) weightBySource.set(src, mathjs.bignumber(String(v.weight).trim()));
+        pubkeyToSource.set(pk, src);
+        if (!sourcesByPubkey.has(pk)) sourcesByPubkey.set(pk, new Set());
+        sourcesByPubkey.get(pk).add(src);
+        if (configuredSet.has(src)) operatorPubkeys.add(pk);
     }
 
-    let ours = mathjs.bignumber(0);
+    let nominal = mathjs.bignumber(0);
     let matched = [];
     for (let src of configured) {
         if (!weightBySource.has(src)) continue;
         matched.push(src);
-        ours = mathjs.add(ours, weightBySource.get(src));
+        nominal = mathjs.add(nominal, weightBySource.get(src));
+    }
+    let reachableSources = new Set(Array.from(operatorPubkeys, pk => pubkeyToSource.get(pk)));
+    let ours = mathjs.bignumber(0);
+    for (let src of reachableSources) ours = mathjs.add(ours, weightBySource.get(src));
+    let sharedOperatorKeys = [];
+    for (let pk of operatorPubkeys) {
+        let sources = Array.from(sourcesByPubkey.get(pk));
+        if (sources.length > 1) sharedOperatorKeys.push({
+            pubkey: pk, sources: sources, creditedSource: pubkeyToSource.get(pk)
+        });
     }
     let unmatched = configured.filter(s => !weightBySource.has(s));
-    return { weightBySource: weightBySource, ours: ours, matched: matched, unmatched: unmatched };
+    return { weightBySource, ours, nominal, matched, unmatched, operatorPubkeys, sharedOperatorKeys };
+}
+
+function sharedKeyReason(sources) {
+    if (sources.sharedOperatorKeys.length === 0) return '';
+    let keys = sources.sharedOperatorKeys.map(k => k.pubkey + ' across ' + k.sources.join('/') +
+        ' (credited to ' + k.creditedSource + ')').join(', ');
+    return ' Shared signing keys resolve as ' + keys + '; nominal operator-source stake is ' +
+        fmt(sources.nominal) + ', while those keys reach ' + fmt(sources.ours) + ' under the gate.';
+}
+
+function crossCheckMargin(validators, sources, margin) {
+    let gateMeets = meetsStakeThreshold(validators, sources.operatorPubkeys);
+    if (gateMeets === margin.meetsGate) return margin;
+    return Object.assign({}, margin, {
+        level: LEVELS.HALTED,
+        meetsGate: false,
+        stakesToHalt: 0,
+        reason: 'the stake-share arithmetic and commit gate disagree for the operator signing keys; ' +
+            'reporting HALTED until the snapshot or monitor logic is corrected.'
+    });
 }
 
 // The evaluation when none of the configured sources is in the snapshot.
 function unmatchedResult(configured, sources, S) {
-    // Not "halted": a share of zero here is far more likely a wrong or
-    // stale address list than the operator's stake actually being gone, and
-    // paging on a config typo teaches an operator to ignore this monitor.
+    // Treat zero matches as likely stale address lists, not halted operators.
+    // Promote only sources with measurements recorded by the monitor.
     let res = emptyResult(LEVELS.UNCONFIGURED,
         'none of the ' + configured.length + ' configured operator staking sources appear in this ' +
         'snapshot of ' + sources.weightBySource.size + ' staking sources, so the share cannot be measured. ' +
@@ -91,6 +129,7 @@ function unmatchedResult(configured, sources, S) {
     res.totalStake               = fmt(S);
     res.sourceCount              = sources.weightBySource.size;
     res.operatorStake            = '0';
+    res.operatorStakeNominal     = '0';
     res.otherStake               = fmt(S);
     res.shareRatio               = 0;
     return res;
@@ -187,18 +226,23 @@ function evaluateStakeShare(opts) {
         ours: ours, total: S, unit: unit, unitFrom: unitFrom, held: held,
         warnAtStakes: warnAt, criticalAtStakes: criticalAt
     });
+    margin = crossCheckMargin(opts.validators, sources, margin);
+    margin.reason += sharedKeyReason(sources);
 
     return {
         level:                    margin.level,
         reason:                   margin.reason,
         totalStake:               fmt(S),
         operatorStake:            fmt(ours),
+        operatorStakeNominal:     fmt(sources.nominal),
         otherStake:               fmt(other),
         shareRatio:               shareRatio,
         sourceCount:              weightBySource.size,
         operatorSourceCount:      matched.length,
         configuredSourceCount:    configured.length,
+        matchedOperatorSources:   matched,
         unmatchedOperatorSources: unmatched,
+        sharedOperatorKeys:       sources.sharedOperatorKeys,
         meetsGate:                margin.meetsGate,
         headroom:                 margin.headroom,
         unitStake:                unit === null ? null : fmt(unit),

@@ -102,6 +102,12 @@ addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT', 'heigh
     regtest: UNARMED,
 });
 
+addGate('cross_chain/dex/offer_lists.CROSS_CHAIN_LIST_SOURCE_ACTIVATION', 'time', {
+    mainnet: UNARMED,
+    testnet: 1794873600,
+    regtest: 0,
+});
+
 // consensus/federation
 // Extends federation detection beyond live quorum at the anchor height.
 // Armed on regtest and testnet; mainnet waits on coordinated activation.

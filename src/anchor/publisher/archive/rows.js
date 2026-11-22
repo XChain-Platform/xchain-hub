@@ -32,7 +32,7 @@ const eq = require('../../../consensus/equivocation_header.js');
 const gateRegistry = require('../../../consensus/gate_registry');
 const CROSS_CHAIN_ROYALTY_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
 const nodeUtil = require('node:util');
-const { readArchiveSeqFloor } = require('./seq_floor_seed.js');
+const { readArchiveSeqFloorOutcome } = require('./seq_floor_seed.js');
 const { resolveArchiveNextSeqOverride } = require('./seq_override.js');
 const hubConfig = require('../../../config');
 const { getLogger } = require('../../../observability');
@@ -238,18 +238,28 @@ module.exports = {
         if(s > this.ownArchiveSeqFloor()) this._ownArchiveBatchSeq = s;
     },
 
-    // Re-read our address's highest archive seq from the DOGE indexer before a leader draw
-    // (retries a failed boot seed, counts a head mined since boot); a failed read keeps the
-    // floor rather than blocking the round. True when the floor rose.
+    // Re-read our address's highest archive seq from the DOGE indexer before a leader draw.
+    // A failed read keeps a known floor, but leaves a fresh process unknown and unable to draw.
+    // True when the floor rose.
     async refreshOwnArchiveSeqFloor(){
         let ix = this.indexers && this.indexers.DOGE;
-        let seq = await readArchiveSeqFloor({
+        let outcome = await readArchiveSeqFloorOutcome({
             indexerCall: (coin, method, params) => this.indexerCall(coin, method, params),
             dogeAddress: this.dogeAddress, dogeIndexerUrl: ix && ix.url, logger
         });
         let before = this.ownArchiveSeqFloor();
-        if(seq !== null) this.noteOwnArchiveSeq(seq);
+        if(outcome.kind === 'ok' || outcome.kind === 'none')
+            this._ownArchiveSeqFloorKnown = true;
+        if(outcome.kind === 'ok') this.noteOwnArchiveSeq(outcome.seq);
         return this.ownArchiveSeqFloor() > before;
+    },
+
+    // A configured publisher must learn a definitive own-address floor before it
+    // draws. An explicit regtest seq override keeps its drill-only bypass.
+    ownArchiveSeqFloorUnknown(){
+        if(this.archiveNextSeqOverride() !== null) return false;
+        let ix = this.indexers && this.indexers.DOGE;
+        return Boolean(this.dogeAddress && ix && ix.url && !this._ownArchiveSeqFloorKnown);
     },
 
     // Return the v1 leader's seq: `drawn`, or a redraw above every seq our own address spent

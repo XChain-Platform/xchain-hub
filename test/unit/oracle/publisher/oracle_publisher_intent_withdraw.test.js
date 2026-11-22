@@ -102,6 +102,13 @@ function throwing(fields) {
     return async () => { throw Object.assign(new Error('refused'), fields); };
 }
 
+function sdkThrowing(code, rpcError) {
+    const known = !!(rpcError && rpcError.data && rpcError.data.reason === 'TX_ALREADY_IN_CHAIN');
+    return throwing({ code,
+        message: 'Encoder RPC error: ' + (known ? 'transaction already in block chain' : 'Transaction broadcast failed'),
+        details: { method: 'broadcast_tx', rpcError } });
+}
+
 // One case's scratch directory and marker table, shared by the registered groups below.
 const ctx = { dir: null, db: null };
 
@@ -113,6 +120,7 @@ describe('OraclePublisher publish intent across a failure and a restart', functi
     afterEach(function () { fs.rmSync(ctx.dir, { recursive: true, force: true }); });
     registerNeverSentTests();
     registerQuarantineTests();
+    registerHydrationFailureTest();
 });
 
 function registerNeverSentTests() {
@@ -135,6 +143,21 @@ function registerNeverSentTests() {
         await enqueueBatch(p);
         await p.processQueue();
         expect(ctx.db.rows.map(r => r.round)).to.deep.equal(ROUNDS);
+    });
+
+    it('withdraws SDK refusal intents so the next pass can publish', async function () {
+        for (const code of ['RATE_LIMITED', 'ENCODER_HTTP_401']) {
+            ctx.db = makeDb();
+            const first = await boot(ctx.dir, ctx.db, sdkThrowing(code));
+            await enqueueBatch(first);
+            await first.processQueue();
+            expect(ctx.db.rows, code).to.deep.equal([]);
+            expect(deadLetters(ctx.dir), code).to.deep.equal([]);
+
+            const second = await boot(ctx.dir, ctx.db, async () => ({ txid: 'ab'.repeat(32) }));
+            await second.processQueue();
+            expect(ctx.db.rows.map(r => r.sent_at !== null), code).to.deep.equal([true, true, true]);
+        }
     });
 }
 
@@ -164,6 +187,21 @@ function registerQuarantineTests() {
         expect(ctx.db.rows).to.deep.equal(ROUNDS.map(r => ({ round: r, txid: 'dd'.repeat(32), sent_at: null })));
     });
 
+    it('holds an SDK already-known answer as a possibly landed send', async function () {
+        const rpc = { code: -32010, data: { reason: 'TX_ALREADY_IN_CHAIN' } };
+        let calls = 0;
+        const p = await boot(ctx.dir, ctx.db, async () => { calls++; return sdkThrowing('ENCODER_RPC_ERROR', rpc)(); });
+        await enqueueBatch(p);
+        await p.processQueue();
+        await p.processQueue();
+        expect(calls).to.equal(1);
+        expect(deadLetters(ctx.dir)[0].reason).to.match(/ambiguous send failure/);
+        expect(ctx.db.rows.map(r => r.round)).to.deep.equal(ROUNDS);
+        expect(p._ambiguousWindows.has(7)).to.equal(true);
+    });
+}
+
+function registerHydrationFailureTest() {
     it('a failed startup hydration cannot hide a crash-mid-send intent from the publish pass', async function () {
         let sent = [];
         ctx.db.rows.push({ round: ROUNDS[0], txid: null, sent_at: null });

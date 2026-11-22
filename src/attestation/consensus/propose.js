@@ -163,7 +163,7 @@ module.exports = {
 
         // A fresh round for this rid is opening; allow its envelopes to buffer
         // again after any prior torn-down attempt (item 2640).
-        this.tornDown.delete(rid);
+        this.clearTornDown(rid);
         this.pending.set(rid, pending);
 
         if(this.peerManager && !myBodyOverCap){
@@ -273,6 +273,7 @@ module.exports = {
             // governance delisting of the pinned model froze the round at
             // no_quorum forever, since every retry re-pinned the same model.
             pinnedApprovedModels: roundState.pinnedApprovedModels || null,
+            approvedModelsPinned: Object.prototype.hasOwnProperty.call(roundState, 'pinnedApprovedModels'),
             // Block-anchored PBFT strategy for this round. Every consensus_strategy
             // decision below reads THIS and never providerRegistry.getDef(): the registry
             // is re-parsed from the local configs table on every proposal:finalized

@@ -206,4 +206,88 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         expect(pending.winner, 'an empty-body ok winner vouched only by an error proposal must not latch').to.equal(null);
         expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
     }); });
+
+async function seedPinnedMetaRound(ownMeta, leaderMeta, peerMeta, redundancy) {
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', redundancy || 3, ownMeta);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        rs.pinnedApprovedModels = ['approved-model', 'alternate-model'];
+        await c.propose(RID, rs);
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body'), leaderMeta));
+        if(peerMeta !== undefined)
+            c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body'), peerMeta));
+        await flush();
+        return c.pending.get(RID);
+}
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('refuses an unapproved leader model before adoption', async function () {
+        let pending = await seedPinnedMetaRound('approved-model', 'fabricated-model', 'approved-model');
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'fabricated-model'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    }); });
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('refuses an approved model reported only by the leader', async function () {
+        let pending = await seedPinnedMetaRound('alternate-model', 'approved-model', 'alternate-model');
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    }); });
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('adopts only after the approved model is corroborated', async function () {
+        let pending = await seedPinnedMetaRound('alternate-model', 'approved-model', undefined, 2);
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        expect(pending.winner).to.equal(null);
+        expect(c.earlyMessages.get(RID)).to.have.lengthOf(1);
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body'), 'approved-model'));
+        await flush();
+        expect(pending.winner.body.toString()).to.equal('p1-body');
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+    }); });
+
+async function seedLoneOkRound(pinned, registry) {
+        if(registry) c.providerRegistry = registry;
+        let rs = roundState(me, [me, p1, p2], Buffer.alloc(0), 'llm', 3, '');
+        rs.myProposal.status = 'provider_error';
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        rs.pinnedApprovedModels = pinned;
+        await c.propose(RID, rs);
+        await flush();
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        c.handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+        await flush();
+        return c.pending.get(RID);
+}
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('refuses a lone ok proposal when the other responsible proposals are errors', async function () {
+        let pending = await seedLoneOkRound(['approved-model']);
+        expect(pending.proposals.size).to.equal(3);
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    }); });
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('judges a round that pinned no allowlist against the provider live set', async function () {
+        let live = makeRealProviderRegistry(p => p[0], 'judge_model');
+        live.getModule.returns({ agree: p => p[0], approvedMetaSet: () => new Set(['approved-model']) });
+        let pending = await seedPinnedMetaRound('approved-model', 'approved-model', 'approved-model');
+        c.providerRegistry = live;
+        pending.pinnedApprovedModels = null;
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        await flush();
+        expect(pending.winner.body.toString()).to.equal('p1-body');
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+    }); });
+
+describe('AttestationConsensus follower metadata gates', function () { beforeEach(hookAt96861); afterEach(hookAt97120); it('refuses a no-allowlist round whose provider module cannot supply the live set', async function () {
+        let pending = await seedPinnedMetaRound('approved-model', 'approved-model', 'approved-model');
+        pending.pinnedApprovedModels = null;
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'approved-model'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    }); });
 }

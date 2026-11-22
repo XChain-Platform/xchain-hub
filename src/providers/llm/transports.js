@@ -52,12 +52,12 @@ function openAiRequestBody(model, maxTokens, temperature, prompt, sys, jsonMode)
     reqBody.messages.push({ role: 'user', content: userContent });
     // OpenAI o-series reasoning models reject any explicit temperature != 1 with
     // HTTP 400 ("Unsupported value: 'temperature'"). The gpt-5 reasoning family
-    // (gpt-5, gpt-5-mini, gpt-5-nano) carries the same restriction. fetch()/
+    // (gpt-5, gpt-5-mini, gpt-5-nano) and gpt-6 carry the same restriction. fetch()/
     // agree() always pass a numeric temperature (DEFAULT_TEMPERATURE=0), so a
     // `typeof temperature` guard is always true and would hard-fail every
     // reasoning-model round. Gate on the model id instead: omit temperature for
-    // o-series/gpt-5 and let the API default, send it for other chat models
-    // (gpt-*, including the non-reasoning gpt-5-chat*) that honor it.
+    // o-series/gpt-5/gpt-6 and let the API default, send it for other chat models
+    // (including the non-reasoning gpt-5-chat* and gpt-6-chat*) that honor it.
     const reasoningModel = isReasoningModel(model);
     if (!reasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
     return reqBody;

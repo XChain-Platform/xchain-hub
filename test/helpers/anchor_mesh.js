@@ -135,6 +135,9 @@ function makeNodeHub(self, db, opts, identity, validators, n, peerManager, bus) 
         },
         resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
     };
+    // The fold gate is keyed on the DOGE tip and defers when a hub cannot resolve one,
+    // so suites that publish folded v3 opt in to a DOGE tip; the rest keep the absent resolver.
+    if (opts.dogeBlock != null) hub.resolveDogeLatestBlock = async () => opts.dogeBlock;
     return hub;
 }
 
@@ -232,10 +235,14 @@ function applyStakeWeights(bus, recordNetwork) {
 }
 
 // Arm CHECKPOINT_COMMITMENT for the bundle selector's floor on THIS mesh's publishers
-// only, as an own-property override of sectionCommitmentActive that stopMeshes deletes.
-// The shared gate registry is never touched, so no other case or canonical sees it.
+// only, as own-property overrides of sectionCommitmentActive and the ladder age's
+// commitmentFloorBlock that stopMeshes deletes. The shared gate registry is never
+// touched, so no other case or canonical sees it.
 function armCommitmentFloor(bus) {
-    for (let nd of bus.nodes) nd.pub.sectionCommitmentActive = () => true;
+    for (const nd of bus.nodes) {
+        nd.pub.sectionCommitmentActive = () => true;
+        nd.pub.commitmentFloorBlock = () => 0;
+    }
 }
 
 // n publishers over a shared gossip bus. Every node shares identical DB
@@ -349,6 +356,7 @@ async function stopMeshes() {
         for (let nd of bus.nodes) {
             await nd.pub.stop();
             delete nd.pub.sectionCommitmentActive;
+            delete nd.pub.commitmentFloorBlock;
         }
     }
     buses = [];

@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const assert = require('assert');
 
 const { archivedListRowRefusal } = require('../../../../../src/cross_chain/list/archive_checks.js');
@@ -86,6 +96,15 @@ describe('archived list row array and hash refusals', function () {
             archivedListRowRefusal(withChanges(full, { members_hash: '0'.repeat(64) })),
             'full row members hash mismatch'
         );
+    });
+
+    it('refuses a full row with removed members', function () {
+        for (const removed of [JSON.stringify(['a']), ['a']]) {
+            assert.strictEqual(
+                archivedListRowRefusal(withChanges(full, { removed })),
+                'full row has removed members'
+            );
+        }
     });
 
     it('returns the first failing reason', function () {

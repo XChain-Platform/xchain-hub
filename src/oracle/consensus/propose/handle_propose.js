@@ -370,11 +370,11 @@ module.exports = {
         // refuse can make a hub query its database or flip which side of the gate it
         // takes for the round.
         //
-        // GATED on oracle_clamp_reference_activation.js, keyed on the envelope's own
-        // btcBlockHeight: the same field bounded above and the same one that anchors
-        // the weighted-quorum gate below, so the follower and the leader evaluate one
+        // GATED on oracle_clamp_reference_activation.js, keyed on the bounded height
+        // taken above: the same value that anchors the round-time gate and the
+        // weighted-quorum gate below, so the follower and the leader evaluate one
         // round against one height.
-        if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+        if (ocr.isClampReferenceAlignActive(blockHeight, this.hub ? this.hub.network : undefined)) {
             await this.refreshLastFinalizedForRound(round);
         }
         return lockProposeSnapshot.call(this, envelope, proposal, blockHeight, roundTimeActive);

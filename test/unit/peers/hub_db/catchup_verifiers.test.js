@@ -260,7 +260,7 @@ describe('state checkpoint catch-up verifier', function () {
         const row = signCheckpoint(checkpointRow(100), keys.slice(0, 3));
         const verify = registry.getCatchupVerifier('state_checkpoints');
 
-        expect(await verify(row, hub)).to.equal(true);
+        expect(await verify(row, hub)).to.deep.include({ ok: true });
         expect(hub.calls).to.deep.equal([{ capability: 'oracle_publish', block: 100 }]);
         row.validator_signatures = JSON.stringify(JSON.parse(row.validator_signatures).slice(0, 2));
         expect(await verify(row, hub)).to.deep.include({ ok: false });
@@ -289,7 +289,7 @@ describe('state checkpoint catch-up verifier', function () {
         const verify = registry.getCatchupVerifier('state_checkpoints');
         const row = signCheckpoint(Object.assign(checkpointRow(12), { network: 'testnet' }), [keys[0]]);
 
-        expect(await verify(row, hub)).to.equal(true);
+        expect(await verify(row, hub)).to.deep.include({ ok: true });
         validators.truncated = true;
         expect(await verify(row, hub)).to.deep.include({ ok: false });
     });
@@ -363,14 +363,14 @@ describe('signed-row verifiers in the catch-up framework', function () {
         const verify = registry.getCatchupVerifier('state_checkpoints');
         const row = signCheckpoint(checkpointRow(100), keys.slice(0, 3));
 
-        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer', db })).to.equal(true);
+        expect(await verify(row, { table: 'state_checkpoints', peer: 'peer', db })).to.deep.include({ ok: true });
         expect(db.calls).to.deep.equal([{ block: 100, capability: 'oracle_publish' }]);
         expect(await verify(row, { table: 'state_checkpoints', peer: 'peer' })).to.deep.include({ ok: false });
 
         const weightedDb = capabilityDb(keys.slice(0, 3), ['70', '20', '10']);
         const weighted = signCheckpoint(
             Object.assign(checkpointRow(12), { network: 'testnet' }), [keys[0]]);
-        expect(await verify(weighted, { db: weightedDb })).to.equal(true);
+        expect(await verify(weighted, { db: weightedDb })).to.deep.include({ ok: true });
 
         await assertRemoteTokenContentVerification(registry);
     });

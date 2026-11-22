@@ -14,18 +14,21 @@
  *
  * XChain Hub - the express middleware stack ahead of every route.
  *
- * Order is the auth boundary and is kept exactly: trust proxy, helmet, the JSON
- * body parser, CORS, the three per-IP rate limits, the observability surface and
- * hub gauges, then the x-api-key tier gate and the public-port allowlist.
+ * Order is the auth boundary and is kept exactly: trust proxy, helmet, CORS, the
+ * three per-IP rate limits, the bounded JSON body parser and method-size gate,
+ * the batch surcharges, the observability surface and hub gauges, then the
+ * x-api-key tier gate and the public-port allowlist. The limits count a request
+ * before its body is parsed, so a malformed or oversize POST is still metered.
  *
  ********************************************************************/
 
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults. The mirror
-// bootstrap and key-holding callers are metered separately; see installRateLimits below.
-const { buildRateLimitOptions, isSnapshotRequest, parseSnapshotRpm,
+// bootstrap and key-holding callers are metered separately; see installRateCounters below.
+const { buildRateLimitOptions, isSnapshotPageRead, parseSnapshotRpm,
         SNAPSHOT_PATH_PREFIX } = require('./rate_limit_policy.js');
 const { authenticatedCaller, batchSurcharge, parseAuthRpm, rateLimitKey } = require('./rate_limit_tiers.js');
+const { ATTEST_BATCH_MAX_INFLATED_BYTES } = require('../lib/attest_batch_wire.js');
 const FixedWindowStore = require('./rate_limit_store.js');
 const { installObservability } = require('../observability');   // default-off /metrics + structured log shim
 const {
@@ -34,9 +37,54 @@ const {
     installHubGovernanceOverdueMetrics,
     installHubAttestationMetrics,
     installHubCheckpointMetrics,
+    installHubReorgRetractionMetrics,
     installHubOraclePublisherMetrics
 } = require('./hub_metrics');
-const { authGate, feedPortAllowlist } = require('./auth_gate');
+const { authGate, bulkKeyMatches, feedPortAllowlist } = require('./auth_gate');
+
+const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';
+// The eight CIDRs isLocalCaller treats as local, as Express names them, and one
+// address inside each.
+const LOCAL_RANGES = 'loopback, linklocal, uniquelocal';
+const LOCAL_RANGE_SAMPLES = [
+    '127.0.0.1', '::1', '10.0.0.1', '172.16.0.1', '192.168.0.1',
+    '169.254.0.1', 'fc00::1', 'fe80::1'
+];
+const DEFAULT_BODY_LIMIT_BYTES = 100 * 1024;
+const ATTEST_BATCH_BODY_LIMIT_BYTES = ATTEST_BATCH_MAX_INFLATED_BYTES + 64 * 1024;
+
+function resolveTrustProxy(raw) {
+    const value = raw || DEFAULT_TRUST_PROXY;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (/^\d+$/.test(value)) return parseInt(value);
+    return value;
+}
+
+// Does the trust-proxy setting let any loopback or private-range peer set req.ip? Two
+// CIDR blocks either nest or are disjoint, so a trusted block overlaps a local range
+// exactly when it contains that range's sample (the trust function accepts it) or the
+// block's own address is local (it sits inside the range). Express parses that address
+// too, so mapped and hex IPv6 spellings resolve as they do for live peers. A hop count
+// trusts every peer, so its function accepts the samples, as it does for named ranges.
+function trustsLocalPeer(app, express) {
+    const setting = app.get('trust proxy');
+    if (setting === true) return true;
+    const trust = app.get('trust proxy fn');
+    if (typeof trust !== 'function') return false;
+    if (LOCAL_RANGE_SAMPLES.some((address) => trust(address, 0))) return true;
+    if (typeof setting !== 'string') return false;
+    const local = express().set('trust proxy', LOCAL_RANGES).get('trust proxy fn');
+    return setting.split(',').some((entry) => local(entry.trim().split('/')[0], 0));
+}
+
+function trustsAnyPeer(setting) {
+    return setting !== false && setting !== 0;
+}
+
+function usesHopCount(setting) {
+    return Number.isInteger(setting) && setting > 0;
+}
 
 // Returns the observability handle, whose shutdown() the signal handler flushes.
 function installMiddleware(app, ctx) {
@@ -57,10 +105,56 @@ function bodyParserErrorHandler(err, req, res, next) {
     const status = err && err.status;
     const clientError = Number.isInteger(status) && status > 399 && status < 500;
     if(res.headersSent || !clientError) return next(err);
+    // Every refusal on this endpoint is a JSON-RPC error envelope, so a client reading
+    // error.code never gets undefined: -32700 for undecodable JSON, -32600 for the rest.
+    const parseFailed = status !== 413 && err.type === 'entity.parse.failed';
     const message = status === 413 ? 'request entity too large'
-                  : err.type === 'entity.parse.failed' ? 'invalid JSON body'
+                  : parseFailed ? 'invalid JSON body'
                   : 'invalid request body';
-    res.status(status).json({ error: message });
+    res.status(status).json({ jsonrpc: '2.0', id: null,
+        error: { code: parseFailed ? -32700 : -32600, message } });
+}
+
+function recordJsonBodyBytes(req, res, buf) {
+    req.jsonBodyBytes = buf.length;
+}
+
+function attestParserAllowed(req, ctx) {
+    if (!ctx.HUB_API_KEY) return true;
+    return bulkKeyMatches(req.headers['x-api-key'] || '', ctx);
+}
+
+function largeBodyMethodGate(req, res, ...rest) {
+    const next = rest[0];
+    if (!req.jsonBodyBytes || req.jsonBodyBytes <= DEFAULT_BODY_LIMIT_BYTES) return next();
+    const singleAttestPush = req.body && !Array.isArray(req.body) &&
+        typeof req.body.method === 'string' && req.body.method.toLowerCase() === 'pushattestbatch';
+    if (singleAttestPush) return next();
+    return res.status(413).json({ jsonrpc: '2.0', id: null,
+        error: { code: -32600, message: 'request entity too large' } });
+}
+
+// Keep unhandled middleware and route errors out of Express's HTML finalhandler.
+function terminalErrorHandler(logger) {
+    return function handleTerminalError(err, req, res, next) {
+        if (res.headersSent) return next(err);
+        const rawStatus = err && (err.status || err.statusCode);
+        const clientError = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus < 500;
+        const status = clientError ? rawStatus : 500;
+        if (!clientError && logger && typeof logger.error === 'function') {
+            const requestPath = String(req && (req.path || req.url) || '/').split('?')[0];
+            const location = (req && req.method ? req.method : 'REQUEST') + ' ' +
+                requestPath;
+            logger.error('Hub API request failed at ' + location + ': ' +
+                (err && (err.stack || err.message) ? (err.stack || err.message) : 'unknown error'));
+        }
+        return res.status(status).json({
+            jsonrpc: '2.0', id: null,
+            error: clientError
+                ? { code: -32600, message: 'invalid request' }
+                : { code: -32603, message: 'internal error' }
+        });
+    };
 }
 
 function installTransportMiddleware(app, ctx) {
@@ -71,9 +165,9 @@ function installTransportMiddleware(app, ctx) {
     // connection, or the real visitor where the proxy resolves it, and the
     // setting below recovers whichever it is. So honour X-Forwarded-For to
     // recover the real client IP, but only from a trusted proxy.
-    // `true` would trust ANY client-supplied XFF, letting
-    // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
-    // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
+    // `true` logs a boot warning because it trusts any client-supplied XFF,
+    // letting callers spoof their IP past the per-IP rate limiter and its
+    // local-caller exemption. The default trusts loopback plus
     // private-range peers: a containerized hub sees the host reverse proxy as
     // the docker bridge IP (uniquelocal), a native hub sees it as loopback;
     // both recover the real client IP. Exposed directly to the internet, a
@@ -82,17 +176,29 @@ function installTransportMiddleware(app, ctx) {
     // count (e.g. `1`), or an address/CIDR list per the express docs. For
     // telemetry the IP is only used transiently to derive a coarse
     // country/region + keyed hash and is never stored.
-    let trustProxy = hubConfig.HUB_TRUST_PROXY || 'loopback, uniquelocal';
-    if (trustProxy === 'true')       trustProxy = true;
-    else if (trustProxy === 'false') trustProxy = false;
-    else if (/^\d+$/.test(trustProxy)) trustProxy = parseInt(trustProxy);
+    const trustProxy = resolveTrustProxy(hubConfig.HUB_TRUST_PROXY);
+    if (trustProxy === true) {
+        ctx.logger.warn('HUB_TRUST_PROXY=true trusts client-supplied X-Forwarded-For; callers can spoof their IP to bypass per-IP limits and the local-caller exemption');
+    }
     app.set('trust proxy', trustProxy);
 
     app.use(helmet());
-    app.use(express.json());
-    app.use(bodyParserErrorHandler);
     app.use(cors({ origin: CORS_ORIGIN }));
-    installRateLimits(app, ctx);
+    // Counting runs ahead of the parser; only the batch surcharge needs the parsed body.
+    const surcharges = installRateCounters(app, ctx);
+    // The larger parser is available only to the bulk-key tier. A hub without
+    // HUB_API_KEY has explicitly declared an unauthenticated write posture at
+    // boot, so its indexers have no key to present and must use the same parser.
+    // The gate after parsing still keeps every non-attest call and every batch
+    // array at 100 KB, bounding the pre-cap walks in authGate and feedPortAllowlist.
+    const defaultJson = express.json({ limit: DEFAULT_BODY_LIMIT_BYTES, verify: recordJsonBodyBytes });
+    const attestJson = express.json({ limit: ATTEST_BATCH_BODY_LIMIT_BYTES, verify: recordJsonBodyBytes });
+    app.use(function jsonParser(req, res, next) {
+        return (attestParserAllowed(req, ctx) ? attestJson : defaultJson)(req, res, next);
+    });
+    app.use(bodyParserErrorHandler);
+    app.use(largeBodyMethodGate);
+    surcharges.forEach((surcharge) => app.use(surcharge));
 }
 
 // One line per minute at most, per bucket: a throttled client retries hard by definition,
@@ -119,37 +225,55 @@ function throttleReporter(logger, envName) {
 // mirror bootstrap alone at HUB_SNAPSHOT_RATE_LIMIT_RPM (600), sized to the drain that
 // wedged the 2026-09-16 fleet roll; src/api/rate_limit_policy.js has the numbers.
 //
-// The two JSON-RPC tiers skip the snapshot family and each other, so a request charges
-// exactly one bucket. Each is followed by its batch surcharge, so a batch costs one token
-// per call rather than one per HTTP request. The options (the 429 body, the
+// The two JSON-RPC tiers skip snapshot page reads and each other, and the snapshot bucket
+// skips everything that is not a page read, so a request charges exactly one bucket. A
+// page read is a bodyless GET or HEAD under the prefix (isSnapshotPageRead): anything
+// else sent there, such as a JSON-RPC body the root router would dispatch, is metered
+// by the JSON-RPC tiers with their batch surcharge, never by the larger snapshot budget.
+// installTransportMiddleware mounts each returned surcharge after parsing, so a batch
+// costs one token per call rather than one per HTTP request. The options (the 429 body, the
 // loopback/private exemption) live in the policy module so they are unit-testable; api.js
 // self-starts on require, so nothing declared inline here could ever be asserted against.
-function installRateLimits(app, ctx) {
+
+// Mounts the limiters, which read only the address and headers, and returns the batch
+// surcharges for the caller to mount once the body is parsed.
+function installRateCounters(app, ctx) {
+    const surcharges = [];
     const { hubConfig, logger, rateLimit, HUB_RATE_LIMIT_RPM, HUB_RATE_LIMIT_EXEMPT_LOCAL } = ctx;
     const snapshotRpm = parseSnapshotRpm(hubConfig.HUB_SNAPSHOT_RATE_LIMIT_RPM);
     const authRpm = parseAuthRpm(hubConfig.HUB_AUTH_RATE_LIMIT_RPM, HUB_RATE_LIMIT_RPM);
     const isAuthenticated = authenticatedCaller(ctx);
-    installRpcTier(app, rateLimit, {
+    const trustSetting = app.get('trust proxy');
+    const trustedLocal = trustsLocalPeer(app, ctx.express);
+    if (!HUB_RATE_LIMIT_EXEMPT_LOCAL && trustSetting !== true && trustedLocal) {
+        if (usesHopCount(trustSetting)) {
+            logger.warn('HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies limits per resolved client IP, but a numeric HUB_TRUST_PROXY hop count lets any direct peer, including a public peer, choose that IP and a new rate-limit bucket via X-Forwarded-For. Use a hop count only when every direct peer is a trusted proxy; otherwise set HUB_TRUST_PROXY=false or list only the real proxy addresses.');
+        } else {
+            logger.warn('HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies limits per resolved client IP, but loopback or private-range peers trusted by HUB_TRUST_PROXY can still choose that IP and a new rate-limit bucket via X-Forwarded-For. This is expected behind a same-host reverse proxy; if public traffic arrives with a private source address, set HUB_TRUST_PROXY=false or list only the real proxy addresses.');
+        }
+    }
+    installRpcTier(app, rateLimit, surcharges, {
         rpm:         HUB_RATE_LIMIT_RPM,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
-        skipPath:    (req) => isSnapshotRequest(req) || isAuthenticated(req),
+        skipPath:    (req) => isSnapshotPageRead(req) || isAuthenticated(req),
         onLimited:   throttleReporter(logger, 'HUB_RATE_LIMIT_RPM')
     });
-    installRpcTier(app, rateLimit, {
+    installRpcTier(app, rateLimit, surcharges, {
         rpm:         authRpm,
         exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
-        skipPath:    (req) => isSnapshotRequest(req) || !isAuthenticated(req),
+        skipPath:    (req) => isSnapshotPageRead(req) || !isAuthenticated(req),
         envName:     'HUB_AUTH_RATE_LIMIT_RPM',
         onLimited:   throttleReporter(logger, 'HUB_AUTH_RATE_LIMIT_RPM')
     });
     // Answers in the REST `{ error }` shape its routes already use for 401 and 500, not in
-    // a JSON-RPC envelope: nothing on this path speaks JSON-RPC.
+    // a JSON-RPC envelope: it meters only page reads, and none of those speaks JSON-RPC.
     app.use(SNAPSHOT_PATH_PREFIX, rateLimit(buildRateLimitOptions({
         rpm:             snapshotRpm,
         windowMs:        60 * 1000,
         exemptLocal:     HUB_RATE_LIMIT_EXEMPT_LOCAL,
         envName:         'HUB_SNAPSHOT_RATE_LIMIT_RPM',
         jsonRpcEnvelope: false,
+        skipPath:        (req) => !isSnapshotPageRead(req),
         onLimited:       throttleReporter(logger, 'HUB_SNAPSHOT_RATE_LIMIT_RPM')
     })));
     logger.info('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP, ' +
@@ -157,18 +281,25 @@ function installRateLimits(app, ctx) {
         snapshotRpm + ' req/min per IP on ' + SNAPSHOT_PATH_PREFIX + ', batches charged per call' +
         (HUB_RATE_LIMIT_EXEMPT_LOCAL
             ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
-            : ' (enforced for every caller, including loopback and private-range)'));
+            : usesHopCount(trustSetting)
+                ? ' (enforced per resolved client IP; a numeric HUB_TRUST_PROXY hop count lets any direct peer, including a public peer, set that IP via X-Forwarded-For)'
+                : trustedLocal
+                ? ' (enforced per resolved client IP; trusted loopback or private proxy peers still set that IP via X-Forwarded-For)'
+                : trustsAnyPeer(trustSetting)
+                    ? ' (enforced per resolved client IP, including loopback and private-range; only the HUB_TRUST_PROXY peers set that IP via X-Forwarded-For)'
+                    : ' (enforced for every caller, including loopback and private-range)'));
+    return surcharges;
 }
 
-// One JSON-RPC tier: its limiter over a store the surcharge can charge in bulk, then the
-// surcharge built from the very same options.
-function installRpcTier(app, rateLimit, tier) {
+// One JSON-RPC tier: its limiter over a store the surcharge can charge in bulk. The
+// surcharge is built from the very same options and handed back for later mounting.
+function installRpcTier(app, rateLimit, surcharges, tier) {
     const opts = Object.assign(buildRateLimitOptions(Object.assign({ windowMs: 60 * 1000 }, tier)), {
         store:        new FixedWindowStore(),
         keyGenerator: rateLimitKey
     });
     app.use(rateLimit(opts));
-    app.use(batchSurcharge(opts));
+    surcharges.push(batchSurcharge(opts));
 }
 
 function installMetrics(app, ctx) {
@@ -205,8 +336,16 @@ function installMetrics(app, ctx) {
     // engine has a detector that does not depend on its stats RPC.
     installHubAttestationMetrics(observability, hub);
     installHubCheckpointMetrics(observability, hub);
+    installHubReorgRetractionMetrics(observability, hub);
     installHubOraclePublisherMetrics(observability, hub);
     return observability;
 }
 
-module.exports = { installMiddleware, installRateLimits, installTransportMiddleware, bodyParserErrorHandler };
+module.exports = {
+    installMiddleware,
+    installTransportMiddleware,
+    bodyParserErrorHandler,
+    terminalErrorHandler,
+    DEFAULT_BODY_LIMIT_BYTES,
+    ATTEST_BATCH_BODY_LIMIT_BYTES
+};

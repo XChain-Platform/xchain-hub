@@ -23,6 +23,7 @@
 'use strict';
 
 const nodeUtil = require('node:util');
+const { splitJsonLines } = require('../../lib/fs/durable_file.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -103,13 +104,15 @@ module.exports = {
 
     // Do two buffer entries carry the same signable content? Compares exactly the
     // fields buildPriceBatchPayload reads, pair order included only through a sorted
-    // key, since the builder normalizes ordering itself. bufferedAt is metadata and is
-    // deliberately excluded: re-stamping it would rewrite the file on every replay.
+    // key, since the builder normalizes ordering itself, and the admission map with
+    // its presence, since an absent map is a legacy round. bufferedAt is metadata and
+    // is deliberately excluded: re-stamping it would rewrite the file on every replay.
     sameBufferedRound(a, b) {
         if (parseInt(a.round) !== parseInt(b.round)) return false;
         if (parseInt(a.timestamp) !== parseInt(b.timestamp)) return false;
         if (parseInt(a.btcBlockHeight) !== parseInt(b.btcBlockHeight)) return false;
-        return this.pairKey(a.pairs) === this.pairKey(b.pairs);
+        if (this.pairKey(a.pairs) !== this.pairKey(b.pairs)) return false;
+        return this.admitKey(a.admitBlocks) === this.admitKey(b.admitBlocks);
     },
 
     pairKey(pairs) {
@@ -119,19 +122,60 @@ module.exports = {
             .join('|');
     },
 
-    readBufferFile() {
-        let raw = this.readDurableFile(this.bufferPath);
-        if (raw === null) return [];
-        return raw.split('\n').filter(l => l.trim().length > 0).map(l => {
-            try { return JSON.parse(l); } catch (e) { return null; }
-        }).filter(e => e !== null && Number.isFinite(Number(e.round)));
+    // '' for a legacy round, else the canonical encoding the signed bytes carry. A map
+    // that cannot be encoded gets a raw key no canonical encoding can equal, so it
+    // never matches a signable map and an identical copy still matches itself.
+    admitKey(map) {
+        if (map === null || map === undefined) return '';
+        try {
+            return this.admission.encodeAdmitBlocks(map);
+        } catch (e) {
+            return '!' + JSON.stringify(Object.keys(map).sort().map(k => [k, String(map[k])]));
+        }
     },
 
-    // Atomic rewrite (rewriteDurableFile), used by the pruning paths. Returns false on a write
-    // failure; the in-memory Map is the authority for this process either way, so a
-    // failed prune costs disk, never correctness.
+    // The buffer file split into usable round entries and the raw lines that are not
+    // (a torn append, a hand edit), plus whether the last line lacks its newline, which
+    // would let the next append glue onto it. Null when the file could not be read.
+    readBufferFile() {
+        let raw;
+        try {
+            raw = this.readDurableFileStrict(this.bufferPath);
+        } catch (e) {
+            logger.error(nodeUtil.format('OraclePublisher: failed to read the v2 round buffer at ' +
+                this.bufferPath + ':', e));
+            return null;
+        }
+        if (raw === null) return { entries: [], rejected: [], unterminated: false };
+        let split = splitJsonLines(raw, e => Number.isFinite(Number(e.round)));
+        split.unterminated = raw.length > 0 && !raw.endsWith('\n');
+        return split;
+    },
+
+    // Copy the buffer lines that are not usable rounds into the dead-letter file before
+    // a rewrite drops them. Returns the lines that could not be copied, which every
+    // rewrite keeps verbatim, so none leaves the disk unrecorded.
+    quarantineBufferLines(lines) {
+        if (!lines || lines.length === 0) return [];
+        let kept = lines.filter(raw => !this.quarantineQueueLine(raw, 'unparseable round buffer line'));
+        this.corruptBufferLines = (this.corruptBufferLines || 0) + lines.length;
+        logger.error('OraclePublisher: ' + lines.length + ' unparseable line(s) in the v2 round buffer at ' +
+            this.bufferPath + '; moved ' + (lines.length - kept.length) + ' to ' + this.deadLetterPath +
+            ' and kept ' + kept.length + ' in the buffer. Operator: inspect them for a round to restore.');
+        return kept;
+    },
+
+    // Atomic rewrite (rewriteDurableFile), used by the pruning paths. An unread
+    // startup buffer is latched so no later compaction can replace data that was
+    // never loaded into memory.
     rewriteBufferFile(entries) {
-        let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
+        if (this._bufferUnread) {
+            logger.error('OraclePublisher: skipped rewrite of unread v2 round buffer at ' +
+                this.bufferPath + '; restart after the read fault is fixed');
+            return false;
+        }
+        let all   = entries.map(e => JSON.stringify(e)).concat(this._bufferKeptRaw || []);
+        let lines = all.join('\n') + (all.length > 0 ? '\n' : '');
         try {
             this.rewriteDurableFile(this.bufferPath, lines);
             return true;
@@ -148,10 +192,23 @@ module.exports = {
     // the stale copy the batch rail can no longer get co-signed.
     hydrateBuffer() {
         this._buffer = new Map();
-        for (let e of this.readBufferFile()) {
+        let state = this.readBufferFile();
+        this._bufferUnread = state === null;
+        if (this._bufferUnread) {
+            logger.error('OraclePublisher: rewrites are suspended because the v2 round buffer at ' +
+                this.bufferPath + ' could not be read; fix the fault and restart to recover its rounds');
+            return;
+        }
+        for (let e of state.entries) {
             let r = parseInt(e.round);
             if (!Number.isFinite(r)) continue;
             this._buffer.set(r, e);
+        }
+        // The quarantine copy is fsync'd before any rewrite can drop the lines. A torn
+        // tail is rewritten away at once, so the next append cannot glue a good round onto it.
+        this._bufferKeptRaw = this.quarantineBufferLines(state.rejected);
+        if (state.rejected.length > 0 || state.unterminated) {
+            this.rewriteBufferFile(this.bufferedRange(-Infinity, Infinity));
         }
         if (this._buffer.size > 0) {
             logger.info('OraclePublisher: reloaded ' + this._buffer.size +
@@ -207,7 +264,8 @@ module.exports = {
     // a bare signature array, so the prefix discriminates exactly (the same test
     // PriceAggregator's retraction path uses). Best-effort: a DB error just leaves the
     // rounds buffered until the bound above collects them.
-    async pruneObservedWindow(first, last) {
+    async pruneObservedWindow(first, last, readState) {
+        if (readState) readState.readable = false;
         if (!this.db) return 0;
         let rows;
         try {
@@ -217,22 +275,37 @@ module.exports = {
                 first + '..' + last + '; leaving them buffered: ', e && e.message));
             return 0;
         }
-        // Prune the whole range each observed batch CLAIMS, not just the rows that
-        // carry its proof. receiveBatch dedupes per round: a round already
-        // finalized from the v0 rail is counted a duplicate and keeps its v0 proof, so
-        // a landed six-round batch typically stamps only the one round this hub was
-        // missing. Keying the prune on the stamped rows alone therefore left five of
-        // six rounds buffered after a window had demonstrably published, and every
-        // later leader re-proposed that published window forever. The proof's own
-        // header names the range it covers, so use it.
+        if (readState) readState.readable = true;
+        // A stamped row proves its own round landed. Proof bounds identify other
+        // candidates, but sparse batches require exact chain membership before prune.
         let pruned = 0;
+        const candidates = new Set();
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
-            if (Number.isFinite(r) && this._buffer.delete(r)) pruned++;
+            if (Number.isFinite(r) && this._buffer.delete(r)) {
+                this.markRoundLanded(r);
+                pruned++;
+            }
             let covered = this.batchProofRange(row.consensus_proof);
             if (!covered) continue;
             for (let n of Array.from(this._buffer.keys())) {
-                if (n >= covered.first && n <= covered.last && this._buffer.delete(n)) pruned++;
+                if (n >= covered.first && n <= covered.last) candidates.add(n);
+            }
+        }
+        if (candidates.size > 0) {
+            try {
+                const carried = await this.roundsCarriedByChain(Array.from(candidates));
+                if (carried instanceof Set) {
+                    for (const n of candidates) {
+                        if (carried.has(n) && this._buffer.delete(n)) {
+                            this.markRoundLanded(n);
+                            pruned++;
+                        }
+                    }
+                }
+            } catch (e) {
+                logger.warn(nodeUtil.format('OraclePublisher: cannot confirm exact batch membership in ' +
+                    first + '..' + last + '; leaving candidate rounds buffered: ', e && e.message));
             }
         }
         if (pruned > 0) {

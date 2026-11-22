@@ -37,14 +37,20 @@ module.exports = {
         // FINALIZED sender pre-filter, which wants "is this sender a current
         // oracle_publish member" and NOT a block-pinned set. Every such caller
         // re-checks the sender against the block-PINNED election / observed-leader
-        // set before acting, so the live registry is the correct source here and
-        // this path must NOT fail closed (that would reject every legitimate peer
-        // back-fill and force systematic re-anchoring).
+        // set before acting, so the live registry is the correct source here. A
+        // registry read fault still returns an empty set so the callers fail
+        // closed, but that rejects legitimate back-fills and can force another
+        // anchor. Keep that failure loud.
         if(!this.hub.capabilityRegistry) return [];
         try {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
             return pubkeys.map(p => String(p).toLowerCase()).sort();
-        } catch(e){ return []; }
+        } catch(e){
+            logger.warn('StateAnchorPublisher: oracle_publish current-membership read failed; ' +
+                'peer BUNDLE_DONE/FINALIZED messages will be rejected until the registry recovers: ' +
+                (e && e.message ? e.message : String(e)));
+            return [];
+        }
     },
 
     async getArchivePublishPubkeys(blockIndex, network){

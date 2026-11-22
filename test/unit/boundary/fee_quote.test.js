@@ -131,6 +131,8 @@ function registerOraclePriceBoundaries() {
     it('XCHAIN/USD = 1.00, coin price = 100000 → nativeCoinAmount = 0.00001000', testXCHAINUSD100CoinPrice100000NativeCoinAmount000001000);
     it('very small coin price → large nativeCoinAmount', testVerySmallCoinPriceLargeNativeCoinAmount);
     it('very large coin price → very small nativeCoinAmount', testVeryLargeCoinPriceVerySmallNativeCoinAmount);
+    it('carries sub-8-decimal fee USD into the native quote', testCarriesSub8DecimalFeeUsdIntoNativeQuote);
+    it('does not zero a native quote by rounding the USD intermediate', testDoesNotZeroNativeQuoteAtUsdIntermediate);
 }
 async function testXCHAINUSDUnavailableThrowsWithDescriptiveError() {
     mockDb.doQuery.resetBehavior();
@@ -214,6 +216,24 @@ async function testVeryLargeCoinPriceVerySmallNativeCoinAmount() {
     let result = await hub.getFeeQuote('ISSUE', 'BTC');
     // nativeCoinAmount = 1.0 / 1000000 = 0.000001
     expect(result.nativeCoinAmount).to.equal('0.00000100');
+}
+async function testCarriesSub8DecimalFeeUsdIntoNativeQuote() {
+    mockDb.doQuery.resetBehavior();
+    mockDb.doQuery
+        .onFirstCall().resolves([{ price: '0.123456789', status: 'finalized' }])
+        .onSecondCall().resolves([{ price: '0.000001', status: 'finalized' }]);
+    let result = await hub.getFeeQuote('ISSUE', 'BTC');
+    expect(result.feeUsd).to.equal('0.12345679');
+    expect(result.nativeCoinAmount).to.equal('123456.78900000');
+}
+async function testDoesNotZeroNativeQuoteAtUsdIntermediate() {
+    mockDb.doQuery.resetBehavior();
+    mockDb.doQuery
+        .onFirstCall().resolves([{ price: '0.000000004', status: 'finalized' }])
+        .onSecondCall().resolves([{ price: '0.0001', status: 'finalized' }]);
+    let result = await hub.getFeeQuote('ISSUE', 'BTC');
+    expect(result.feeUsd).to.equal('0.00000000');
+    expect(result.nativeCoinAmount).to.equal('0.00004000');
 }
 
 function registerConfigRowOverridesDoNotMoveTheQuoteOffThePinnedBundle() {

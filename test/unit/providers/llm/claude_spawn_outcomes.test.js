@@ -45,8 +45,12 @@ function makeFakeChild(opts) {
         }
 
         if (opts && opts.noClose) return;
-        if (opts && opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
-        if (opts && opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
+        if (opts && opts.stdoutChunks) {
+            for (const chunk of opts.stdoutChunks) child.stdout.emit('data', chunk);
+        } else if (opts && opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
+        if (opts && opts.stderrChunks) {
+            for (const chunk of opts.stderrChunks) child.stderr.emit('data', chunk);
+        } else if (opts && opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
         child.emit('close', opts && opts.exitCode !== undefined ? opts.exitCode : 0);
     });
     return child;
@@ -282,5 +286,18 @@ describe('claude-spawn runClaudePrint()', function () {
         catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.transient).to.equal(true);
+    });
+
+    it('preserves a UTF-8 character split across stdout chunks', async function () {
+        const result = 'café 日本語 ✓';
+        const body = Buffer.from(JSON.stringify({ result }), 'utf8');
+        const split = body.indexOf(Buffer.from('é', 'utf8')) + 1;
+        const stdoutChunks = [body.subarray(0, split), body.subarray(split)];
+        const { runClaudePrint } = loadClaudeSpawn({ stdoutChunks });
+
+        const out = await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+
+        expect(out.result).to.equal(result);
+        expect(out.result).to.not.include('\uFFFD');
     });
 });

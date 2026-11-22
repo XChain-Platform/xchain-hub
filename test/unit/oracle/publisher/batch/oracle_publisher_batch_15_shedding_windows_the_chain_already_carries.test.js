@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const {
     fs,
     os,
@@ -90,6 +100,18 @@ const testCase3 = async function () {
                 expect(h.p.noteBatchLanded('x', 5)).to.equal(0);
             };
 
+const exactRoundCase = async function () {
+                let h = makePublisher();
+                await h.p.start();
+                for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+                expect(h.p.noteBatchLanded(0, 5, { rounds: [0, 1, 3, 4, 5] })).to.equal(5);
+
+                expect(Array.from(h.p._buffer.keys())).to.deep.equal([2]);
+                expect(h.p.isRoundLanded(2)).to.equal(false);
+                expect(h.p._assembledWindows.has(0)).to.equal(false);
+            };
+
 const testCase4 = async function () {
                 let h = makePublisher();
                 await h.p.start();
@@ -122,6 +144,7 @@ const testCase5 = async function () {
 
 function registerSuite2() {
     it('sheds the covered rounds from memory AND the buffer file and memoizes the window', testCase3);
+    it('sheds only the exact rounds carried by a batch with a hole', exactRoundCase);
     it('keeps a PARTLY covered window re-proposable over its remaining rounds only', testCase4);
     it('disarms a takeover and a grace timer for a window that has fully landed', testCase5);
 }
@@ -132,8 +155,8 @@ const testCase6 = async function () {
                 // Windows 0..3 closed, window 4 open (round 24 only).
                 for (let r = 0; r < 25; r++) h.p._buffer.set(r, bufferedFixture(r));
                 expect(h.p.pendingCatchupWindows()).to.deep.equal([0, 1, 2, 3]);
-                let rpc = hubWithIndexer(h, [{ first_round: 0, last_round: 5, action_index: 10 },
-                                             { first_round: 12, last_round: 17, action_index: 11 }]);
+                let rpc = hubWithIndexer(h, [{ first_round: 0, last_round: 5, round_count: 6, action_index: 10 },
+                                             { first_round: 12, last_round: 17, round_count: 6, action_index: 11 }]);
 
                 expect(await h.p.reconcileBacklogAgainstChain()).to.equal(12);
 
@@ -154,7 +177,8 @@ const testCase7 = async function () {
                 let h = makePublisher({ signerOpts: { met: false } });
                 await h.p.start();
                 for (let r = 0; r < 25; r++) h.p._buffer.set(r, bufferedFixture(r));
-                hubWithIndexer(h, [{ first_round: 0, last_round: 5 }, { first_round: 12, last_round: 17 }]);
+                hubWithIndexer(h, [{ first_round: 0, last_round: 5, round_count: 6 },
+                    { first_round: 12, last_round: 17, round_count: 6 }]);
 
                 expect(await h.p.reconcileThenSweep()).to.equal(2);
                 await h.p._windowChain;
@@ -169,7 +193,8 @@ const testCase8 = async function () {
                 let h = makePublisher();
                 await h.p.start();
                 for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));
-                hubWithIndexer(h, [{ first_round: 2, last_round: 3 }, { first_round: 4, last_round: 9 }]);
+                hubWithIndexer(h, [{ first_round: 2, last_round: 3, round_count: 2 },
+                    { first_round: 4, last_round: 9, round_count: 6 }]);
 
                 await h.p.reconcileBacklogAgainstChain();
 
@@ -223,6 +248,39 @@ const testCase11 = async function () {
                 expect(rpc.called).to.equal(false);
             };
 
+const holedBatchCase = async function () {
+                let h = makePublisher();
+                await h.p.start();
+                for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+                let rpc = sinon.stub(h.p, 'indexerRpc').callsFake(async (url, key, method) => {
+                    if (method === 'getpricebatches') return { batches: [{ first_round: 0, last_round: 5,
+                        round_count: 5, action_index: 70 }], truncated: false };
+                    return { rounds: [0, 1, 3, 4, 5].map(round => ({ round })), sigs: [] };
+                });
+                h.hub.resolveIndexerUrl = sinon.stub().resolves('indexer-url');
+
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(5);
+                expect(Array.from(h.p._buffer.keys())).to.deep.equal([2]);
+                expect(await h.p.roundsCarriedByChain([0, 1, 2, 3, 4, 5]))
+                    .to.deep.equal(new Set([0, 1, 3, 4, 5]));
+                expect(rpc.getCalls().filter(call => call.args[2] === 'getpricebatchpayload')).to.have.length(2);
+            };
+
+const unknownBatchCase = async function () {
+                let h = makePublisher();
+                await h.p.start();
+                for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+                h.hub.resolveIndexerUrl = sinon.stub().resolves('indexer-url');
+                sinon.stub(h.p, 'indexerRpc').callsFake(async (url, key, method) => {
+                    if (method === 'getpricebatches') return { batches: [{ first_round: 0, last_round: 5,
+                        round_count: null, action_index: 70 }], truncated: false };
+                    throw new Error('payload unavailable');
+                });
+
+                expect(await h.p.reconcileBacklogAgainstChain()).to.equal(0);
+                expect(Array.from(h.p._buffer.keys())).to.deep.equal([0, 1, 2, 3, 4, 5]);
+            };
+
 function registerSuite3() {
     it('asks the DOGE indexer for the whole pending span, with the federation key, and sheds what it names', testCase6);
     it('the sweep then re-proposes ONLY the unlanded windows, so nothing already on chain is paid for twice', testCase7);
@@ -230,6 +288,8 @@ function registerSuite3() {
     it('fails OPEN when no indexer URL is configured: the sweep runs as before and the miss is counted', testCase9);
     it('fails OPEN when the indexer is unreachable or too old to answer, and logs the reason once', testCase10);
     it('does not ask at all when nothing is pending', testCase11);
+    it('reads exact payload membership for a holed batch', holedBatchCase);
+    it('keeps every round when an unknown-count batch payload cannot be read', unknownBatchCase);
 }
 
 // Finalized v0 rows for the rounds, one per pair, the shape the restore reads.

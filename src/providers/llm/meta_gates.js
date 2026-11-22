@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const { markInconclusive } = require('./judge');
+const metaVerdict = require('./meta_verdict');
 
 // canonicalizable `meta`
 //
@@ -47,8 +48,6 @@ const { markInconclusive } = require('./judge');
 //      another model and whose body the judge then picked) also lands here, and
 //      failing closed is the right answer for that too: the round is
 //      inconclusive rather than recording a claim the federation cannot support.
-const META_MIN_CORROBORATION = 2;
-
 class MetaGates {
     // `settings` is the provider instance's LlmSettings, read live on every call.
     constructor({ logger, settings }) {
@@ -83,27 +82,24 @@ class MetaGates {
     // null with `options.outcome` marked inconclusive.
     canonicalMeta(proposals, idx, options){
         const raw = proposals[idx] ? proposals[idx].meta : undefined;
-        // Deliberately strict about type: a non-string meta (object, Buffer, number)
-        // is not something this allowlist can reason about, so it is unrecognized.
-        if (typeof raw !== 'string' || raw === ''){
+        const verdict = metaVerdict(proposals, raw, this.approvedMetaSet(options));
+        if (verdict === 'reject_unapproved' && (typeof raw !== 'string' || raw === '')){
             this.logger.warn('llm: winning proposal carries a non-string/empty meta; failing closed');
             markInconclusive(options, 'meta_unrecognized');
             return null;
         }
-        if (!this.approvedMetaSet(options).has(raw)){
+        if (verdict === 'reject_unapproved'){
             this.logger.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
                 'failing closed rather than canonicalizing an unvouched value on-chain');
             markInconclusive(options, 'meta_unrecognized');
             return null;
         }
-        if (proposals.length > 1){
+        if (verdict === 'uncorroborated'){
             let agreeing = proposals.filter(p => typeof p.meta === 'string' && p.meta === raw).length;
-            if (agreeing < META_MIN_CORROBORATION){
-                this.logger.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
-                    ' of ' + proposals.length + ' proposals; failing closed');
-                markInconclusive(options, 'meta_uncorroborated');
-                return null;
-            }
+            this.logger.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
+                ' of ' + proposals.length + ' proposals; failing closed');
+            markInconclusive(options, 'meta_uncorroborated');
+            return null;
         }
         return raw;
     }

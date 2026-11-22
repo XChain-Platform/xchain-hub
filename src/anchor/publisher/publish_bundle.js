@@ -27,13 +27,12 @@ const ar = require('../../consensus/gates/anchor_reward_gate.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { ANCHOR_BUNDLE_MAX_BYTES, XANC_BUNDLE_DONE } = require('./constants.js');
 const { anchorSendMayHaveLanded } = require('./send_failure.js');
+const { prepareBundleFoldArchive, reconcileFoldArchiveAdoption } = require('./fold/adoption.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 const BUNDLE_DONE_PUBLISHER_BIND_GATE = 'anchor/publisher/bundle_done.BUNDLE_DONE_PUBLISHER_BIND_ACTIVATION';
-
 module.exports = {
-
     ...canonicalForms.foldPublisherMethods,
 
     // Elect the publisher order for one bundle, or null when the oracle_publish set
@@ -100,9 +99,12 @@ module.exports = {
         }
         if(held){
             let mined = null;
-            try { mined = foldActive
-                ? await this.findExistingFoldedBundle(group, null)
-                : await this.findExistingBundle(group); }
+            try {
+                mined = foldActive ? await this.findExistingFoldedBundle(group, null)
+                    : await this.findExistingBundle(group);
+                if(foldActive && !(mined && mined.exists))
+                    mined = await this.findExistingBundle(group);
+            }
             catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
             if(!(mined && mined.exists)){
                 logger.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
@@ -198,12 +200,12 @@ module.exports = {
         // the already-mined bundle instead of paying for a second one.
         let result;
         try {
-            result = await this.broadcastWithRetry(broadcaster, payload, undefined,
-                () => archiveSection
-                    ? this.findExistingFoldedBundle(group, archiveSection)
-                    : (String(payload).split('|')[1] === '3'
-                        ? this.findExistingFoldedBundle(group, null)
-                        : this.findExistingBundle(group)));
+            result = await this.broadcastWithRetry(broadcaster, payload, undefined, async () => {
+                if(archiveSection) return this.findExistingFoldedBundle(group, archiveSection);
+                if(String(payload).split('|')[1] !== '3') return this.findExistingBundle(group);
+                const folded = await this.findExistingFoldedBundle(group, null);
+                return folded || this.findExistingBundle(group);
+            });
         } catch(e){
             // A definitive failure means nothing reached the DOGE node (pre-send
             // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
@@ -351,14 +353,8 @@ module.exports = {
             if(await this.bundleHeldByIntent(group, chains, network, snapshotBlock, foldActive)) return;
 
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-            let archiveSection = foldActive
-                ? await this.collectFoldArchive(group, network).catch(e => {
-                    logger.warn('StateAnchorPublisher: folded archive preparation failed for ' + network +
-                                '; publishing checkpoints without it: ' + (e && e.message));
-                    return null;
-                })
-                : null;
-            if(archiveSection) this.armFoldArchiveRound(archiveSection);
+            let archiveSection = await prepareBundleFoldArchive(
+                this, group, network, snapshotBlock, foldActive);
             let attestation = await this.collectBundleAttestation(group, me, chains, network, snapshotBlock);
             if(!attestation){
                 if(archiveSection) this.finishFoldArchiveRound(archiveSection, null);
@@ -380,11 +376,15 @@ module.exports = {
             let result = await this.sendBundle(signer, group, payload, archiveSection);
             let txid = this.bundleResultTxid(result, network, snapshotBlock, chains, foldActive);
             if(!txid) return;
+            archiveSection = await reconcileFoldArchiveAdoption(
+                this, archiveSection, result, network);
             await this.stampBundleSections(group, txid, anchored);
             await this.completeFoldArchive(archiveSection, signer, txid);
             this.noteBundlePublished(group, order, result, network, snapshotBlock, chains, txid);
+            const anchorVersion = result && result.exists && Number.isFinite(result.version)
+                ? result.version : (foldActive ? 3 : 0);
             let adoptedOwner = await this.recordBundleReward(group, me, attestation.attested, attestation.attestSigs, result,
-                network, snapshotBlock, txid, foldActive ? 3 : 0);
+                network, snapshotBlock, txid, anchorVersion);
             let suppressPeerAnnouncement = result && result.exists && adoptedOwner === 'peer' &&
                 activeAt(BUNDLE_DONE_PUBLISHER_BIND_GATE, network, null, snapshotBlock, null);
             if(!suppressPeerAnnouncement) this.announceBundleDone(group, network, snapshotBlock, txid);

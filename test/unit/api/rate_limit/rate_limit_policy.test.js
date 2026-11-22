@@ -214,8 +214,8 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             return new Promise((resolve) => {
                 const app = express();
                 app.set('trust proxy', trustProxy);
-                app.use(express.json());
                 app.use(rateLimit(buildRateLimitOptions(opts)));
+                app.use(express.json());
                 app.post('/', (req, res) => res.json({ jsonrpc: '2.0', id: req.body.id, result: { accepted: true } }));
                 server = app.listen(0, '127.0.0.1', () => { port = server.address().port; resolve(); });
             });
@@ -256,7 +256,7 @@ const { buildRateLimitOptions, isLocalCaller, normalizeIp, parseExemptLocal,
             expect(parsedBody.error.code).to.equal(RATE_LIMIT_RPC_ERROR_CODE);
             expect(parsedBody.error.message).to.contain('2 requests per 60s');
             expect(parsedBody.error.data.limit).to.equal(2);
-            expect(parsedBody.id).to.equal(3);
+            expect(parsedBody.id).to.equal(null);
         }
         async function aLoopbackCallerReplayingFarPastTest31() {
             // The verify condition is a chain-only node replaying a batch-bearing chain. It pushes far

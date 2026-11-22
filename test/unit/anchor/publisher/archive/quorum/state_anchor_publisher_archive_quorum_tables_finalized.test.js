@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const crypto = require('crypto');
 const { expect } = require('chai');
 const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
@@ -137,6 +147,55 @@ describe('archive quorum-table FINALIZED observation binding', function () {
             .to.match(/^tombstone /);
     });
 
+});
+
+describe('archive reward FINALIZED qualifier binding', function () {
+    function check(pub, sender, reward){
+        return pub.finalizedOutsideObservedArchive(7, sender, [], [], [reward], [], [], [], [], []);
+    }
+
+    it('rejects a reissued archive reward with a different qualifier', function () {
+        const { pub } = publisher();
+        const sender = 'AA';
+        pub.recordObservedArchiveContent(7, sender, { rewards: [{
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'BB', block_index: 100
+        }] });
+
+        expect(check(pub, 'aa', {
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'bb', round_qualifier: 200
+        })).to.match(/^reward /);
+        expect(check(pub, 'aa', {
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'bb', round_qualifier: 100
+        })).to.equal(null);
+    });
+
+    it('fails closed on an absent or malformed archive qualifier', function () {
+        const { pub } = publisher();
+        pub.recordObservedArchiveContent(7, 'pk', { rewards: [{
+            reward_type: 'anchor_archive', round_number: 5,
+            validator_pubkey: 'pk', block_index: 100
+        }] });
+        const base = { reward_type: 'anchor_archive', round_number: 5, validator_pubkey: 'PK' };
+
+        expect(check(pub, 'PK', base)).to.match(/^reward /);
+        expect(check(pub, 'PK', { ...base, round_qualifier: 1.5 })).to.match(/^reward /);
+    });
+
+    it('normalizes ordinary rewards to qualifier zero', function () {
+        const { pub } = publisher();
+        pub.recordObservedArchiveContent(7, 'pk', { rewards: [{
+            reward_type: 'anchor_publish', round_number: 9,
+            validator_pubkey: 'pk', block_index: 100
+        }] });
+        const base = { reward_type: 'anchor_publish', round_number: 9, validator_pubkey: 'PK' };
+
+        expect(check(pub, 'PK', { ...base, round_qualifier: 0 })).to.equal(null);
+        expect(check(pub, 'PK', base)).to.equal(null);
+        expect(check(pub, 'PK', { ...base, round_qualifier: 7 })).to.match(/^reward /);
+    });
 });
 
 describe('archive quorum-table deferred FINALIZED staging', function () {

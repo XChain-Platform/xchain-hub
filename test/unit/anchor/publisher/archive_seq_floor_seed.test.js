@@ -97,6 +97,7 @@ describe('StateAnchorPublisher: archive sequence floor seed tolerance', function
             const rig = makePublisher({ indexerCall: async () => ({ error: detail }) });
             const warnings = await captureWarnings(() => rig.pub.seedArchiveSeqFloor());
             expect(rig.consumed).to.deep.equal([]);
+            expect(warnings).to.have.lengthOf(1);
             expect(warnings.some(line => line.includes('seed failed') && line.includes(detail))).to.equal(true);
             expect(warnings.some(line => /found no archive/.test(line))).to.equal(false);
         }

@@ -285,10 +285,10 @@ it('accepts an unset buffer on mainnet', function () {
             });
 it('warns and accepts on regtest so venues can run deliberate depths', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                let warnStub = logStub.warn;
-                let snap = new CapabilitySnapshot(networkedHub('regtest'));
-                expect(snap.reorgBufferBlocks).to.equal(0);
-                expect(warnStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
+                let thrown = null;
+                try { new CapabilitySnapshot(networkedHub('regtest')); } catch (e) { thrown = e; }
+                expect(thrown).to.be.an('error');
+                expect(thrown.code).to.equal('REORG_BUFFER_MISMATCH');
             });
 it('warns and accepts in standalone mode (no network declared)', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
@@ -297,12 +297,16 @@ it('warns and accepts in standalone mode (no network declared)', function () {
                 expect(snap.reorgBufferBlocks).to.equal(12);
             });
 it('honors the loud one-off bypass on mainnet', function () {
-                process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
-                process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
-                let warnStub = logStub.warn;
-                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
-                expect(snap.reorgBufferBlocks).to.equal(0);
-                expect(warnStub.calledWithMatch(/XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT/)).to.equal(true);
+                for (const network of ['mainnet', 'testnet', 'regtest']) {
+                    process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
+                    process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
+                    let thrown = null;
+                    try { new CapabilitySnapshot(networkedHub(network)); } catch (e) { thrown = e; }
+                    expect(thrown).to.be.an('error');
+                    expect(thrown.code).to.equal('REORG_BUFFER_MISMATCH');
+                    expect(logStub.error.calledWithMatch(/XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT/)).to.equal(true);
+                    expect(thrown.message).to.not.match(/SKIP_REORG_BUFFER_ASSERT=1 to bypass/);
+                }
             });
 it('still falls back to the canonical default on a typo, without throwing', function () {
                 process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';

@@ -19,22 +19,21 @@
  *                                     [--limit N] [--json]
  *   HUB_RPC_URLS=http://h1:4000,http://h2:4000 node bin/oracle-round-presence.js
  *
- * The range is resolved ONCE, from the first hub that reports a USABLE range, and
- * every hub is then asked about exactly that range: letting each hub pick its own
- * bounds is how the comparison silently stops comparing (a hub missing the newest
- * rounds would answer about an older window and agree with everyone by never
- * overlapping). "Usable" is not "reachable": an empty hub answers successfully with
- * a null range, and stopping there would abort the check the fleet needs.
+ * The range is resolved ONCE from the highest usable upper bound reported by the
+ * named hubs, and every hub is then asked about exactly that range. Pinning to a
+ * lagging hub would omit the absent tail this check needs to expose. "Usable" is not
+ * "reachable": an empty hub answers successfully with a null range.
  *
  * Read-only: it broadcasts nothing and writes nothing.
  *
+ * Explicit from/to spans are limited to 1000 rounds; split wider checks into windows.
  * Exit codes: 0 agreed, 1 divergent, 2 could not compare (an invalid invocation,
  * or fewer than two distinct hubs with a usable answer).
  */
 'use strict';
 
 const axios = require('axios');
-const { comparePresence } = require('../src/lib/oracle_round_presence.js');
+const { comparePresence, comparePairCounts, MAX_RANGE } = require('../src/lib/oracle_round_presence.js');
 
 // The URL string is the only hub identity there is: presence answers carry no hub id,
 // so two DNS aliases of one host stay indistinguishable and this does not pretend
@@ -116,17 +115,24 @@ function parseBounds(opts) {
         console.error('--from must not be greater than --to; got ' + bounds.from + ' and ' + bounds.to);
         return null;
     }
+    if (bounds.from !== null && bounds.to !== null && bounds.to - bounds.from + 1 > MAX_RANGE) {
+        console.error('Requested span ' + (bounds.to - bounds.from + 1) + ' exceeds MAX_RANGE ' + MAX_RANGE +
+            '; split the request into windows of at most ' + MAX_RANGE + ' rounds.');
+        return null;
+    }
     return bounds;
 }
 
-// Resolve the range from the first hub that reports a usable one, then pin it for
-// everyone. Advancing past an empty answer is the point: a freshly resynced or
-// wiped hub listed first would otherwise abort every run of the check. Returns null
-// once it has printed that no hub could anchor the range.
+// Probe every hub and pin the range from the highest usable upper bound. Otherwise
+// a lagging hub listed first hides the tail it is missing. Returns null once it has
+// printed that no hub could anchor the range.
 async function resolveRange(hubs, bounds) {
-    if (bounds.from !== null && bounds.to !== null) return { from_round: bounds.from, to_round: bounds.to };
+    if (bounds.from !== null && bounds.to !== null) {
+        return { range: { from_round: bounds.from, to_round: bounds.to }, anchors: [] };
+    }
     let empty = 0;
     let unreached = 0;
+    const anchors = [];
     for (const hub of hubs) {
         let presence = null;
         try { presence = await ask(hub, { from_round: bounds.from, to_round: bounds.to, limit: bounds.limit }); }
@@ -135,13 +141,27 @@ async function resolveRange(hubs, bounds) {
             console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err));
             continue;
         }
-        if (usableRange(presence)) return { from_round: presence.from_round, to_round: presence.to_round };
+        if (usableRange(presence)) {
+            anchors.push({ hub, from_round: presence.from_round, to_round: presence.to_round });
+            continue;
+        }
         empty++;
-        console.error('warn: ' + hub + ' answered with no recorded rounds; trying the next hub.');
+        console.error('warn: ' + hub + ' answered with no recorded rounds.');
     }
-    console.error('No hub returned a usable round range (' + empty +
-        ' answered empty, ' + unreached + ' unreachable).');
-    return null;
+    if (anchors.length === 0) {
+        console.error('No hub returned a usable round range (' + empty +
+            ' answered empty, ' + unreached + ' unreachable).');
+        return null;
+    }
+    let selected = anchors[0];
+    for (const anchor of anchors) if (anchor.to_round > selected.to_round) selected = anchor;
+    const range = { from_round: selected.from_round, to_round: selected.to_round };
+    if (new Set(anchors.map(anchor => anchor.to_round)).size > 1) {
+        console.error('warn: hubs report different newest rounds: ' +
+            anchors.map(anchor => anchor.hub + '=' + anchor.to_round).join('  ') + '; pinning ' +
+            range.from_round + '-' + range.to_round + ' so lagging hubs report missing rounds.');
+    }
+    return { range, anchors };
 }
 
 // Every hub asked about the one pinned range, split into usable answers and the hubs
@@ -161,6 +181,13 @@ async function collectAnswers(hubs, range) {
             unreachable.push({ hub, error: 'answered without a rounds array' });
             continue;
         }
+        // The answering hub owns its range cap, so version skew must fail closed even
+        // when this CLI's local MAX_RANGE accepted the request.
+        if (presence.from_round !== range.from_round || presence.to_round !== range.to_round) {
+            unreachable.push({ hub, error: 'answered rounds ' + presence.from_round + '-' + presence.to_round +
+                ', not the pinned ' + range.from_round + '-' + range.to_round });
+            continue;
+        }
         answers.push({ hub, presence });
     }
     return { answers, unreachable };
@@ -178,8 +205,9 @@ async function main(opts) {
 
     const bounds = parseBounds(opts);
     if (!bounds) return 2;
-    const range = await resolveRange(HUBS, bounds);
-    if (!range) return 2;
+    const resolved = await resolveRange(HUBS, bounds);
+    if (!resolved) return 2;
+    const { range, anchors } = resolved;
 
     const { answers, unreachable } = await collectAnswers(HUBS, range);
     if (answers.length < 2) {
@@ -190,12 +218,22 @@ async function main(opts) {
 
     const comparison = comparePresence(answers);
     if (JSON_OUT) {
-        console.log(JSON.stringify({ range, unreachable, comparison,
+        console.log(JSON.stringify({ range, anchors, unreachable, comparison, pairAdvisory: comparePairCounts(answers),
             digests: answers.map(a => ({ hub: a.hub, digest: a.presence.digest,
                                          missing: a.presence.missing })) }, null, 2));
         return comparison.agreed ? 0 : 1;
     }
     return printVerdict(range, answers, unreachable, comparison);
+}
+
+// Pair counts never gate the verdict: they are listed so a hub holding a short round is seen.
+function printPairAdvisory(differing) {
+    if (differing.length === 0) return;
+    console.log('\nPair counts differ on ' + differing.length + ' round(s) (advisory, does not change the verdict):');
+    for (const d of differing) {
+        const parts = Object.keys(d.finalized_pairs).map(h => h + '=' + d.finalized_pairs[h]);
+        console.log('  round ' + d.round + ': ' + parts.join('  '));
+    }
 }
 
 // The human report. Returns the exit code the verdict carries.
@@ -210,6 +248,7 @@ function printVerdict(range, answers, unreachable, comparison) {
 
     if (comparison.agreed) {
         console.log('\nAgreed: every hub reports the same outcome for every round in range.');
+        printPairAdvisory(comparePairCounts(answers));
         return 0;
     }
     console.log('\nDIVERGENT on ' + comparison.divergent.length + ' round(s):');
@@ -217,6 +256,7 @@ function printVerdict(range, answers, unreachable, comparison) {
         const parts = Object.keys(d.statuses).map(h => h + '=' + d.statuses[h]);
         console.log('  round ' + d.round + ': ' + parts.join('  '));
     }
+    printPairAdvisory(comparePairCounts(answers));
     return 1;
 }
 

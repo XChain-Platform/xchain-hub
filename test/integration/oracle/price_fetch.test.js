@@ -252,7 +252,7 @@ function registerMultiFiatTests() {
 
 // Helper: nock interceptor that validates the CoinGecko API key header
 function nockCoinGeckoWithHeaderCheck(apiKey) {
-    let nock = require('nock');
+    let nock = require('nock').default;
     return nock('https://api.coingecko.com')
         .get('/api/v3/simple/price')
         .query(true)
@@ -262,7 +262,7 @@ function nockCoinGeckoWithHeaderCheck(apiKey) {
 
 // Helper: nock interceptor that validates the CoinMarketCap API key header
 function nockCmcWithHeaderCheck(apiKey) {
-    let nock = require('nock');
+    let nock = require('nock').default;
     return nock('https://pro-api.coinmarketcap.com')
         .get('/v1/cryptocurrency/quotes/latest')
         .query(true)

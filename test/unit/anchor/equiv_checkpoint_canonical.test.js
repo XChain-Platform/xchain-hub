@@ -21,9 +21,10 @@ const eq   = require('../../../src/consensus/equivocation_header.js');
 const gateRegistry = require('../../../src/consensus/gate_registry');   // the checkpoint flag day is a row (W5)
 const SCE  = require('../../../src/anchor/checkpoint_engine.js');
 const SAP  = require('../../../src/anchor/publisher.js');
+const { assertCheckpointVectors, keyOf } = require('./equiv_checkpoint_canonical.test/helpers/checkpoint_assertions.js');
 // The frozen ANCHOR v0 wire vector, vendored byte-identically from
 // xchain-documentation/protocol/test-vectors/anchor_canonical.json and guarded by
-// anchor_golden_vectors.test.js. Driving the section parity off these bytes means the
+// test/unit/anchor/anchor_canonical_vectors_vendor.test.js. Driving the section parity off these bytes means the
 // three canonical builders meet a real bundle, not three transcriptions of one literal.
 const GOLDEN = require('../../fixtures/anchor_canonical_vectors.json');
 
@@ -39,7 +40,7 @@ const GOLDEN = require('../../fixtures/anchor_canonical_vectors.json');
 // ANCHOR wire bytes, not this gate. A mis-resolved sibling path in the
 // required-siblings CI lane (bin/ci-all.sh sets XCHAIN_REQUIRE_SIBLINGS=1) would
 // otherwise turn both blocks into permanent pendings on a green run. So there the
-// missing sibling is a hard failure, matching ConsensusPrimitiveConformance.test.js
+// missing sibling is a hard failure, matching consensus_primitive_conformance.test.js
 // and the indexer's coins-conformance / anchorRewardActivationParity guards.
 // A sibling symlinked into a peer's live main checkout is refused before it loads (sibling_checkout.js).
 const { siblingCheckout, skipOrFail } = require('../../helpers/sibling_checkout.js');
@@ -83,11 +84,6 @@ const dBase = { CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
 const dV1 = Object.assign({}, dBase, { FORMAT:1, MATCH_BATCH_SEQ:3, MATCH_COUNT:10,
               BATCH_CRC32:'cc', TOTAL_CHUNKS:2 });
 const RAW_V1 = RAW_ON + '|3|10|cc|2';
-// key = the slice between the literal "EQUIV|" and the "||" boundary.
-function keyOf(canon){
-    expect(canon.startsWith('EQUIV|')).to.equal(true);
-    return canon.slice('EQUIV|'.length, canon.indexOf('||'));
-}
 function registerGateBehaviorTests() {
     describe('gate behavior (per-block checkpoint)', function () {
         it('below the flag-day → bare raw bytes (regression-safe)', function () {
@@ -99,6 +95,9 @@ function registerGateBehaviorTests() {
         });
         it('rawCanonicalCheckpoint is always the bare bytes (used nested by the v1 archive)', function () {
             expect(SCE.rawCanonicalCheckpoint(cpOn)).to.equal(RAW_ON);
+        });
+        it('hub canonicalCheckpoint meets every shared checkpoint vector (no sibling needed)', function () {
+            assertCheckpointVectors(SCE.canonicalCheckpoint);
         });
     });
 }

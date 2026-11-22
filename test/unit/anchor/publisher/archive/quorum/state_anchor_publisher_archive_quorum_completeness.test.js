@@ -96,7 +96,7 @@ describe('StateAnchorPublisher #4183 empty signing set is not a quorum of one', 
     // that does (or does not) contain it.
     function archiveRound(signingSetFor) {
         let { pub, identity } = buildPub({
-            'FROM cross_chain_matches WHERE batch_seq IS NULL': [MATCH_ROW],
+            'FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL': [MATCH_ROW],
             'FROM state_checkpoints':                           [CP_ROW]
         });
         let me = identity.getPubkeyHex().toLowerCase();
@@ -137,6 +137,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     const GROUP = SET.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
                                   signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
 
+    // Testnet keeps the wrapper group at oracle_publish at BLOCK, the group these cases strip.
     function verifier(resolved) {
         let { pub } = buildPub({});                         // no local reward rows: late-joiner path
         pub.resolveCapabilitySet = async () => (resolved === undefined ? SET : resolved);
@@ -146,13 +147,13 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     it('accepts a COMPLETE archive (control)', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK)).to.equal(true);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK, 'testnet')).to.equal(true);
     });
 
     it('REFUSES an archive whose reward group was stripped, though every present group is honest', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: [] }, BLOCK)).to.equal(false);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: [] }, BLOCK, 'testnet')).to.equal(false);
     });
 
     it('REFUSES an archive whose WRAPPER oracle_publish group was stripped', async () => {
@@ -161,7 +162,7 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // ever visits it without the completeness derivation.
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK + 6)).to.equal(false);
+            { network: 'testnet', matches: [], calls: [], rewards: [REWARD], capability_snapshots: GROUP }, BLOCK + 6, 'testnet')).to.equal(false);
     });
 
     it('does NOT false-reject a group our own resolution also finds empty', async () => {
@@ -170,15 +171,15 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
         // on honest rounds; the completeness check compares sizes instead.
         let pub = verifier([]);
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [], capability_snapshots: [] }, BLOCK)).to.equal(true);
+            { network: 'testnet', matches: [], calls: [], rewards: [], capability_snapshots: [] }, BLOCK, 'testnet')).to.equal(true);
     });
 
     it('REFUSES an archive demanding a group at a non-numeric block', async () => {
         let pub = verifier();
         expect(await pub.verifyArchiveAgainstLocal(
-            { matches: [], calls: [],
+            { network: 'testnet', matches: [], calls: [],
               rewards: [Object.assign({}, REWARD, { block_index: 'not-a-block' })],
-              capability_snapshots: GROUP }, BLOCK)).to.equal(false);
+              capability_snapshots: GROUP }, BLOCK, 'testnet')).to.equal(false);
     });
 });
 
@@ -240,12 +241,9 @@ function registerFinalizedStampTests() {
         expect(stamped.length).to.equal(1);
         expect(stamped[0][1][0].status, 'the announced terminal status lands').to.equal('settled');
         expect(stamped[0][2], 'the confirmed txid is stamped').to.equal(TXID);
-        // The back-fill gate runs at ALL heights, so it keeps the reject-SET form rather
-        // than the reward gate's exact-v1 expectation. v0 (the checkpoint BUNDLE) must be
-        // in that set and must NOT be the archive head's own version, or the gate would
-        // reject every head the publisher now emits.
-        expect(asked[0].expect.rejectVersions, 'the head is checked against the reject SET, not exact v1')
-            .to.deep.equal([0, 2]);
+        // The helper probes exact v1 first. It only probes v3 and its bound archive row
+        // when the announced transaction has no v1 head.
+        expect(asked[0].expect).to.deep.equal({ version: 1 });
     });
 
     it('stamps ONLY the sentinel seq while the head is unconfirmed, and queues the rest', async () => {

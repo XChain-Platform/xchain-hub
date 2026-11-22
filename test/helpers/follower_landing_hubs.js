@@ -22,6 +22,7 @@ const StateAnchorPublisher = require('../../src/anchor/publisher');
 const ValidatorIdentity    = require('../../src/validators/identity');
 const { createMockHub, DB_METHODS } = require('./mockHub');
 const { CP_ROW }           = require('./anchor_mesh_db.js');
+const { projectPresenceRows } = require('./prices/presence_projection');
 const vectors              = require('../fixtures/anchor_archive_vectors.json');
 
 const HELD_ROUND   = 200;          // finalized on both hubs over P2P before the batch lands
@@ -100,7 +101,7 @@ function ingestQueries(rows) {
     return {
         async findPriceSnapshotRowsForRounds(rounds) {
             let wanted = new Set(rounds);
-            return copy(rows.filter(r => wanted.has(r.round_number)));
+            return projectPresenceRows(rows.filter(r => wanted.has(r.round_number)));
         },
         async getPriceSnapshotByRoundNumber(round) {
             return rows.filter(r => r.round_number === round && r.status !== 'skipped').slice(0, 1).map(r => ({ id: r.id }));
@@ -136,6 +137,13 @@ function ingestQueries(rows) {
     };
 }
 
+// The window statements' predicate: a stamped, unskipped round inside the window, narrowed to
+// the retracted landing's clock when the window carries a usable one.
+function landedInWindow(r, first, last, clock) {
+    if (r.round_number < first || r.round_number > last || r.status === 'skipped' || !(r.batch_block_time > 0)) return false;
+    return !(Number.isSafeInteger(clock) && clock > 0) || r.batch_block_time === clock;
+}
+
 // The retraction statements: the fence, the deletes and both landing-clock resets.
 function retractionQueries(rows) {
     return {
@@ -153,15 +161,13 @@ function retractionQueries(rows) {
             for (let r of orphanedLandings(rows, args)) r.batch_block_time = 0;
             return {};
         },
-        async findPriceSnapshotRoundsLandedBetween(first, last) {
-            let rounds = rows.filter(r => r.round_number >= first && r.round_number <= last &&
-                r.status !== 'skipped' && r.batch_block_time > 0).map(r => r.round_number);
+        async findPriceSnapshotRoundsLandedBetween(first, last, clock) {
+            let rounds = rows.filter(r => landedInWindow(r, first, last, clock)).map(r => r.round_number);
             return [...new Set(rounds)].map(round_number => ({ round_number }));
         },
-        async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last) {
+        async updatePriceSnapshotsClearBatchBlockTimeBetween(first, last, clock) {
             for (let r of rows) {
-                if (r.round_number >= first && r.round_number <= last && r.status !== 'skipped' && r.batch_block_time > 0)
-                    r.batch_block_time = 0;
+                if (landedInWindow(r, first, last, clock)) r.batch_block_time = 0;
             }
             return {};
         },

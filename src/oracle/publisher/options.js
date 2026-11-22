@@ -51,6 +51,14 @@ module.exports = {
         // Lifetime count of unparseable queue lines moved to the dead-letter file
         // before a rewrite, kept apart from abandonedCount (those are whole rounds).
         this.corruptQueueLines  = 0;
+        // Set when the durable round buffer could not be read at startup. While set,
+        // compaction is blocked so unread finalized rounds remain recoverable.
+        this._bufferUnread      = false;
+        // Lifetime count of unparseable round buffer lines found on reload, each copied
+        // to the dead-letter file before a rewrite can drop it. Lines that could not be
+        // copied ride every buffer rewrite verbatim in _bufferKeptRaw.
+        this.corruptBufferLines = 0;
+        this._bufferKeptRaw     = [];
         // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
         // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
         // so operators can tell an oversized drop apart from an attempts-exhausted abandon.
@@ -58,6 +66,10 @@ module.exports = {
         // Transition-only guard so a persistent capability-snapshot resolution failure
         // (which darks the publisher) is logged once per dark spell, not every round.
         this._snapshotDark      = false;
+        // Lifetime count of dark spells and the start of the current one, so a scrape
+        // can tell a dark hub from one that is simply not the rotation leader.
+        this.snapshotDarkSpells = 0;
+        this._snapshotDarkSince = null;
         // Lifetime published count + last-published markers + last-observed balance,
         // surfaced via getStats() so an operator RPC can see the publish rail's
         // health (a stalled rail is otherwise invisible: every price_snapshots row
@@ -189,6 +201,9 @@ module.exports = {
         this.takeoverDeclinedUnproven = 0;
         // Takeovers declined because the hub DB could not answer whether the window is on chain.
         this.takeoverDeclinedReadError = 0;
+        // windowIndex -> read-error retries spent; and takeovers given up after the last one.
+        this._takeoverReadRetries = new Map();
+        this.takeoverReadRetryExhausted = 0;
         // How long an armed follower waits, once something says a batch for
         // the window may ALREADY be on the wire, before it treats that tx as gone and
         // publishes its own. Mirrors AttestationPublisher's

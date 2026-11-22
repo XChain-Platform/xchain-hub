@@ -33,7 +33,8 @@ const logger = getLogger();
 // The built-in provider definitions and their canonicalisers live in
 // provider_registry/defaults.js; the block-anchored config history methods live in
 // provider_registry/config_history.js and are installed on the prototype below.
-const { DEFAULTS, parseAttestationProviderParam, normalizeMinStakeXchain } = require('./provider_registry/defaults.js');
+const { DEFAULTS, parseAttestationProviderParam, normalizeMinStakeXchain,
+    normalizeMaxResponseBytes } = require('./provider_registry/defaults.js');
 const configHistoryMethods = require('./provider_registry/config_history.js');
 
 // Group configs rows by provider_id, skipping any row that carries no id or no value.
@@ -93,6 +94,8 @@ class ProviderRegistry {
         // governance-side validation could reach it. Anchored here, two hubs resolve the
         // same strategy for the same request block however their local reloads raced.
         // Same null-is-transparent walk-back as min_stake_xchain (getConsensusStrategy).
+        // max_response_bytes also rides the history because it bounds both a hub's
+        // provider fetch and the peer bodies its consensus engine admits.
         this.providerConfigHistory = new Map();
 
         // Pre-seed with defaults so even a fresh deploy is operational
@@ -275,5 +278,6 @@ installParts(ProviderRegistry.prototype, [configHistoryMethods]);
 module.exports = Object.assign(ProviderRegistry, {
     DEFAULTS,
     parseAttestationProviderParam,
-    normalizeMinStakeXchain
+    normalizeMinStakeXchain,
+    normalizeMaxResponseBytes
 });

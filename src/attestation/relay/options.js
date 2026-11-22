@@ -125,6 +125,7 @@ function initRelayAtMostOnce(self, cfg){
     // why a crash between intent and outcome is treated as sent.
     self.walPath   = hubConfig.ATTEST_RELAY_QUEUE_PATH || cfg.ATTEST_RELAY_QUEUE_PATH || './data/attest-relay-queue.jsonl';
     self._published = new AtMostOnce();
+    self._walUnread = false;   // set while the WAL failed a read other than ENOENT
 
     // The response leg's own at-most-once set. Idempotency keys on
     // (request_id, phase), so the two legs never share a slot: one request_id

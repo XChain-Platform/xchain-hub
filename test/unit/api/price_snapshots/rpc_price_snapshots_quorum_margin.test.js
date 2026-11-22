@@ -12,7 +12,7 @@
 
 const sinon = require('sinon');
 const { expect } = require('chai');
-const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
+const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
 
 const sigs = (...pubkeys) => JSON.stringify(pubkeys.map(pubkey => ({ pubkey, sig: 'sig' })));
 const validators = (...pubkeys) => pubkeys.map(pubkey => ({ pubkey }));
@@ -67,6 +67,12 @@ describe('getpricesnapshots quorum margin', function () {
         const { rpc } = fixture([row({ consensus_proof: sigs('a', 'b', 'c', 'd') })]);
         const out = await rpc.getpricesnapshots({ with_quorum_margin: true });
         expect(out[0].quorum_margin).to.include({ met: true, oneFaultTolerant: true, signers: 4 });
+    });
+
+    it('does not let proof entries outside the snapshot inflate count mode', async function () {
+        const { rpc } = fixture([row({ consensus_proof: sigs('a', 'b', 'outside-a', 'outside-b') })]);
+        const out = await rpc.getpricesnapshots({ with_quorum_margin: true });
+        expect(out[0].quorum_margin).to.include({ met: false, oneFaultTolerant: false, signers: 2 });
     });
 });
 

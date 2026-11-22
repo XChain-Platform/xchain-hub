@@ -352,3 +352,42 @@ oraclePublisherTests('ORACLE_PUBLISH_ENABLED kill switch (item 2677)', function 
 
 });
 
+
+// ── first recurring catch-up sweep ───────────────────────────────────────
+
+oraclePublisherTests('startBufferCatchupSweep()', function () {
+    let clock;
+    beforeEach(function () { clock = sinon.useFakeTimers(); });
+    afterEach(function () { clock.restore(); });
+
+    function pubWithBacklog(n) {
+        let pub = new OraclePublisher(makeHub());
+        pub.batchCatchupIntervalMs = 3600000;
+        pub.batchCatchupBacklogIntervalMs = 60000;
+        sinon.stub(pub, 'pendingCatchupWindows').returns(new Array(n).fill(0).map((_, i) => i));
+        sinon.stub(pub, 'reconcileThenSweep').resolves(0);
+        return pub;
+    }
+
+    it('first tick comes at the backlog cadence when more windows wait than one sweep takes', async function () {
+        let pub = pubWithBacklog(5);
+        pub.startBufferCatchupSweep();
+        await clock.tickAsync(59999);
+        expect(pub.reconcileThenSweep.called).to.be.false;
+        await clock.tickAsync(1);
+        expect(pub.reconcileThenSweep.calledOnce).to.be.true;
+        pub._stopped = true;
+        clearTimeout(pub._catchupSweepTimer);
+    });
+
+    it('first tick waits the idle interval when the backlog fits in one sweep', async function () {
+        let pub = pubWithBacklog(4);
+        pub.startBufferCatchupSweep();
+        await clock.tickAsync(3599999);
+        expect(pub.reconcileThenSweep.called).to.be.false;
+        await clock.tickAsync(1);
+        expect(pub.reconcileThenSweep.calledOnce).to.be.true;
+        pub._stopped = true;
+        clearTimeout(pub._catchupSweepTimer);
+    });
+});

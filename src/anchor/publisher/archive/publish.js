@@ -24,6 +24,7 @@
 const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const { XANC_FINALIZED } = require('../constants.js');
 const { anchorSendMayHaveLanded } = require('../send_failure.js');
+const { requireBroadcastTxid } = require('../../../lib/guards/idempotent_broadcast.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 
@@ -207,8 +208,13 @@ module.exports = {
     },
 
     // Broadcast every v2 continuation chunk under `chunkSeq`; the number lost after retries.
+    // A send without a txid is incomplete unless the existence check proves the
+    // slot already landed. Treat that unknown outcome as ambiguous so it is never
+    // re-sent, then count it as lost when the slot remains absent.
     async broadcastArchiveChunks(round, chunkSeq, chunkBroadcaster, cp){
         let lostChunks = 0;
+        const guardedChunkBroadcaster = async (payload) =>
+            requireBroadcastTxid(await chunkBroadcaster(payload), 'StateAnchorPublisher archive chunk');
         for(let i = 1; i < round.chunks.length; i++){
             let v2Payload = ['ANCHOR', '2', String(chunkSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
             // A lost chunk is a durability failure (recovery needs every chunk),
@@ -217,10 +223,16 @@ module.exports = {
             // the head and only some of its chunks, and without per-slot resolution the
             // resume would either re-pay for the chunks that landed or strand the batch.
             try {
-                let chunkResult = await this.broadcastWithRetry(chunkBroadcaster, v2Payload, undefined,
+                let chunkResult = await this.broadcastWithRetry(guardedChunkBroadcaster, v2Payload, undefined,
                       () => this.findExistingArchiveChunk(cp, round, i, chunkSeq));
                 if(chunkResult && chunkResult.txid && !chunkResult.exists)
                     this.notePendingConfirmation('archive_chunk', chunkResult.txid, round.batchSeq + '/' + i);
+                else if(!(chunkResult && chunkResult.exists === true)){
+                    lostChunks++;
+                    this._archiveChunkLosses++;
+                    logger.error('StateAnchorPublisher: v2 chunk ' + i +
+                                 ' broadcast returned no txid and its slot was not proven on-chain');
+                }
             }
             catch(e){
                 lostChunks++;

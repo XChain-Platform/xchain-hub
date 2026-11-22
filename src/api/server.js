@@ -26,9 +26,11 @@ const nodeUtil = require('node:util');
 const defaultJsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
-const { installMiddleware } = require('./middleware');
+const { installMiddleware, terminalErrorHandler } = require('./middleware');
+const { withEnvelopeRepair } = require('./jsonrpc_envelope');
 const { buildRpcController } = require('./rpc');
 const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
+const { snapshotCapWarnings } = require('./snapshot_read_caps');
 const { mountTelemetryRoutes } = require('./rest/telemetry');
 const { mountRegistryRoutes } = require('./rest/registry');
 
@@ -36,8 +38,9 @@ function createApp(ctx) {
     const { express, hubConfig } = ctx;
     const jsonRouter = ctx.jsonRouter || defaultJsonRouter;
     const app = express();
+    for (const warning of snapshotCapWarnings(hubConfig)) ctx.logger.warn(warning);
     const observability = installMiddleware(app, ctx);
-    const jsonRpcController = buildRpcController(ctx);
+    const jsonRpcController = ctx.rpcController || buildRpcController(ctx);
     mountSnapshotRoutes(app, ctx);
     mountTelemetryRoutes(app, ctx);
     mountRegistryRoutes(app, ctx);
@@ -46,8 +49,25 @@ function createApp(ctx) {
     app.use(makeRpcBatchGuard(resolveMaxBatch(hubConfig.HUB_MAX_RPC_BATCH, 20)));
     // Body-parser 2.x leaves body undefined for requests without JSON. The router
     // expects an object, so restore the earlier body-parser default before dispatch.
-    app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
-    app.use(jsonRouter({ methods: jsonRpcController }));
+    app.use(function reqBodyShim(req, res, next) {
+        if (req.body === undefined) req.body = {};
+        next();
+    });
+    // The router defaults missing params but passes null through to handlers,
+    // where signature destructuring would turn caller input into an internal error.
+    app.use(function rpcNullParamsShim(req, res, next) {
+        const calls = Array.isArray(req.body) ? req.body : [req.body];
+        for (const call of calls) {
+            if (call && typeof call === 'object' && !Array.isArray(call) && call.params === null) {
+                call.params = {};
+            }
+        }
+        next();
+    });
+    // The router's error envelopes drop a falsy id (0 becomes null) and echo the
+    // caller's jsonrpc member; the wrapper repairs both on the way out.
+    app.use(withEnvelopeRepair(jsonRouter({ methods: jsonRpcController })));
+    app.use(terminalErrorHandler(ctx.logger));
     return { app, observability };
 }
 
@@ -110,15 +130,45 @@ function upgradeHandler(wss, { hub, logger, HUB_API_KEY, HUB_API_KEY_PREVIOUS, H
 }
 
 // Returns the daily retention interval, or null when telemetry is off.
+// The health body is keyless and public, so only a short upper-case driver code
+// (for example ECONNREFUSED) is published; the raw message can carry connection
+// details and goes to the private log alone.
+function boundedErrorCode(e) {
+    const code = e && typeof e.code === 'string' ? e.code : '';
+    return /^[A-Z][A-Z0-9_]{0,47}$/.test(code) ? code : 'UNKNOWN';
+}
+
 function startTelemetryRetention({ hub, logger, TELEMETRY_ENABLED, TELEMETRY_RETENTION_DAYS }) {
     let telemetryCleanupInterval = null;
     if (TELEMETRY_ENABLED) {
+        const stats = {
+            enabled: true,
+            retention_days: TELEMETRY_RETENTION_DAYS,
+            last_run_at: null,
+            last_success_at: null,
+            last_deleted: 0,
+            last_error_code: null,
+            last_error_at: null,
+            consecutive_failures: 0
+        };
+        hub.telemetryRetention = { getStats: () => ({ ...stats }) };
         const pruneTelemetry = async () => {
+            stats.last_run_at = new Date().toISOString();
             try {
                 let result = await hub.db.deleteTelemetryPing(TELEMETRY_RETENTION_DAYS);
                 let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+                stats.last_success_at = new Date().toISOString();
+                stats.last_deleted = deleted;
+                stats.consecutive_failures = 0;
                 if (deleted > 0) logger.info('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
-            } catch (e) { /* best-effort; never crash the hub over retention */ }
+            } catch (e) {
+                let message = e && e.message ? e.message : String(e);
+                stats.last_error_code = boundedErrorCode(e);
+                stats.last_error_at = new Date().toISOString();
+                stats.consecutive_failures++;
+                logger.warn('Telemetry retention: prune failed (retention ' + TELEMETRY_RETENTION_DAYS +
+                    ' days, consecutive failures ' + stats.consecutive_failures + '): ' + message);
+            }
         };
         // unref so these best-effort retention timers never keep the event loop
         // alive on their own (the listening socket does that in production); this
@@ -251,4 +301,4 @@ async function releaseResources({ hub, server, wss, observability }) {
     await observability.shutdown();
 }
 
-module.exports = { createApp, startServer, upgradeHandler, serveFeedOnP2pPort };
+module.exports = { createApp, startServer, startTelemetryRetention, upgradeHandler, serveFeedOnP2pPort };

@@ -30,6 +30,11 @@ const batchLandingReset     = require('./batch_landing_reset.js');
 const zeroStampRounds       = require('./zero_stamp_rounds.js');
 const chainRestore          = require('./chain_restore.js');
 const newestPage            = require('./newest_page.js');
+const { upsertAssignments } = require('./producer_guard.js');
+
+// batch_block_time only moves earlier (or fills a 0), for producer rows as well.
+const BATCH_LANDING_CLOCK = `batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
+                                          VALUES(batch_block_time), batch_block_time)`;
 
 // The fence queries (price_ingest_watermarks) are spread in from the file above, so this
 // module still exports ONE price-family mixin that src/db/index.js installs unchanged.
@@ -92,7 +97,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Reads rows from price_snapshots.
     // Moved here from src/oracle/publisher.js:2419.
     async findPriceSnapshotsByRoundNumberAndStatus(first, last, status) {
-        return this.doQuery('SELECT DISTINCT round_number, block_timestamp FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ?', [first, last, status]);
+        return this.doQuery('SELECT DISTINCT round_number, block_timestamp, LEFT(consensus_proof, 8) AS proof_head FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ?', [first, last, status]);
     },
 
     // Reads rows from price_snapshots.
@@ -151,12 +156,6 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/publisher.js:1688.
     async hasPriceSnapshotsByConsensusProof() {
         return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE '{"batch":%' LIMIT 1`);
-    },
-
-    // Probes for a matching row in price_snapshots.
-    // Moved here from src/oracle/publisher.js:1669.
-    async hasPriceSnapshotsByRoundNumber(first, last) {
-        return this.doQuery(`SELECT 1 AS seen FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND consensus_proof LIKE '{"batch":%' LIMIT 1`, [first, last]);
     },
 
     // Updates price_snapshots.
@@ -225,8 +224,9 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // N-1), and the id-ordered mirror bootstrap could persist that torn read to a replica.
     // A single statement is the atomicity primitive here, needing no withTransaction.
     // `prices` is [{ coinPair, price }]; `admitCols` is the round's admission map
-    // already resolved to its per-chain columns. The upsert upgrades a 'skipped' placeholder
-    // row to 'finalized', but cannot revive a row concurrently marked 'disputed'.
+    // already resolved to its per-chain columns. A new key inserts, a 'skipped'
+    // placeholder upgrades, and an existing finalized or disputed row stays unchanged.
+    // Status is assigned last because the preceding guards must read the held status.
     async setFinalizedPriceSnapshotRound(round, prices, referenceBlock, blockTimestamp, validatorCount, proof, admitCols) {
         let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
         let params = [];
@@ -237,12 +237,16 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  validator_count, consensus_round, consensus_proof, status,
                  admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
-                 block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
-                 consensus_proof = VALUES(consensus_proof),
-                 status = IF(status = 'disputed', status, 'finalized'),
-                 admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                 admit_block_doge = VALUES(admit_block_doge)`;
+                ON DUPLICATE KEY UPDATE
+                 price = IF(status = 'skipped', VALUES(price), price),
+                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
+                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
+                 validator_count = IF(status = 'skipped', VALUES(validator_count), validator_count),
+                 consensus_proof = IF(status = 'skipped', VALUES(consensus_proof), consensus_proof),
+                 admit_block_btc = IF(status = 'skipped', VALUES(admit_block_btc), admit_block_btc),
+                 admit_block_ltc = IF(status = 'skipped', VALUES(admit_block_ltc), admit_block_ltc),
+                 admit_block_doge = IF(status = 'skipped', VALUES(admit_block_doge), admit_block_doge),
+                 status = IF(status = 'disputed', status, 'finalized')`;
         return this.doQuery(query, params);
     },
 
@@ -273,8 +277,9 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     // Moved here from src/oracle/price_aggregator.js:722.
     //
     // Upsert, not a plain INSERT: a 'skipped' placeholder may already occupy this key and is
-    // overwritten with the real data; a finalized row is an idempotent no-op. A disputed row
-    // keeps that status while canonical landing metadata moves. created_at is NOT overwritten.
+    // overwritten with the real data. A producer row keeps its first signed anchor and proof.
+    // A disputed row keeps that status while canonical landing metadata moves. created_at is
+    // NOT overwritten.
     // One statement lands the round atomically (no transaction API). The admission columns are
     // bound AFTER created_at so positional readers keep their index. `referenceChain` fills
     // both reference_chain and source_chain.
@@ -293,15 +298,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  push_generation, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
-                    price = VALUES(price), reference_block = VALUES(reference_block),
-                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
-                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = IF(status = 'disputed', status, 'finalized'),
-                    source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation),
-                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                    admit_block_doge = VALUES(admit_block_doge)`;
+                    ${upsertAssignments()}`;
         return this.doQuery(query, params);
     },
 
@@ -310,9 +307,11 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
     //
     // One statement PER ROUND: the unit that must never be observed torn is the round.
     // A skipped placeholder upgrades to the batch-backed row, whose reference_block is its
-    // landing height. A disputed row keeps its status while canonical landing metadata moves.
+    // landing height. A producer row keeps its first signed anchor and proof. A disputed row
+    // keeps its status while canonical landing metadata moves.
     // batch_block_time only ever moves EARLIER (or fills a 0), so a re-landing cannot push the
-    // fee-pricing bound later. The admission columns are bound AFTER created_at so positional
+    // fee-pricing bound later. A skipped placeholder always holds 0, so its upgrade takes the
+    // fill branch. The admission columns are bound AFTER created_at so positional
     // readers keep their index. `referenceChain` fills reference_chain and source_chain.
     async setBatchPriceSnapshotRound(round, pairs, referenceBlock, referenceChain, timestamp, validatorCount, proofJson,
                                      sourceActionIndex, pushGeneration, blockTime, createdAt, admitCols) {
@@ -330,17 +329,7 @@ module.exports = Object.assign({}, priceIngestWatermarks, batchLandingReset, zer
                  push_generation, batch_block_time, created_at, admit_block_btc, admit_block_ltc, admit_block_doge)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
-                    price = VALUES(price), reference_block = VALUES(reference_block),
-                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
-                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = IF(status = 'disputed', status, 'finalized'),
-                    source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index),
-                    push_generation = VALUES(push_generation),
-                    batch_block_time = IF(batch_block_time = 0 OR VALUES(batch_block_time) < batch_block_time,
-                                          VALUES(batch_block_time), batch_block_time),
-                    admit_block_btc = VALUES(admit_block_btc), admit_block_ltc = VALUES(admit_block_ltc),
-                    admit_block_doge = VALUES(admit_block_doge)`;
+                    ${upsertAssignments(BATCH_LANDING_CLOCK)}`;
         return this.doQuery(query, params);
     },
 

@@ -138,6 +138,7 @@ function registerObservabilityInstallObservabilitySuite1Part2() {
       expect(res.headers.get('content-type')).to.include('version=0.0.4');
       expect(res.headers.get('cache-control')).to.equal('no-store');
       const body = await res.text();
+      expect(body).to.include('# HELP http_requests_total HTTP requests handled, by method, route and status code');
       expect(body).to.include('http_requests_total{method="GET",route="/health",status="200"} 2');
       expect(body).to.include('http_request_duration_seconds_count{method="GET",route="/health"} 2');
       expect(body).to.include('http_requests_in_flight 0');
@@ -150,6 +151,46 @@ function registerObservabilityInstallObservabilitySuite1Part2() {
     }
   });
 }
+function registerObservabilityInstallAbortedDisconnect() {
+  it('labels a client disconnect as aborted and releases the in-flight gauge', async function () {
+    let enterRoute;
+    let releaseRoute;
+    let responseClosed;
+    const entered = new Promise(resolve => { enterRoute = resolve; });
+    const gate = new Promise(resolve => { releaseRoute = resolve; });
+    const closed = new Promise(resolve => { responseClosed = resolve; });
+    const app = express();
+    app.get('/slow', async (req, res) => {
+      res.once('close', responseClosed);
+      enterRoute();
+      await gate;
+      if (!res.destroyed) res.status(503).json({ ok: false });
+    });
+    const obs = installObservability(app, {
+      service: 'svc', env: { METRICS_ENABLED: '1' }, console: fakeConsole()
+    });
+    const srv = await listen(app);
+    try {
+      const request = http.get(srv.url('/slow'));
+      request.on('error', () => {});
+      await entered;
+      request.destroy();
+      await closed;
+      releaseRoute();
+      await new Promise(resolve => setImmediate(resolve));
+      const body = await (await fetch(srv.url('/metrics'))).text();
+      expect(body).to.include('http_requests_total{method="GET",route="/slow",status="aborted"} 1');
+      expect(body).to.not.include('route="/slow",status="200"');
+      expect(body).to.not.include('route="/slow",status="503"');
+      expect(body).to.include('http_requests_in_flight 0');
+    } finally {
+      releaseRoute();
+      await obs.shutdown();
+      await srv.close();
+    }
+  });
+}
+
 function registerObservabilityInstallObservabilitySuite1Part3() {
   it('buckets an unmatched path by first segment so URLs cannot explode cardinality', async function () {
     const app = express();
@@ -286,6 +327,7 @@ function registerObservabilityInstallObservabilitySuite1Part6() {
 describe('observability/installObservability', function () {
   registerObservabilityInstallObservabilitySuite1Part1.call(this);
   registerObservabilityInstallObservabilitySuite1Part2.call(this);
+  registerObservabilityInstallAbortedDisconnect.call(this);
   registerObservabilityInstallObservabilitySuite1Part3.call(this);
   registerObservabilityInstallObservabilitySuite1Part4.call(this);
   registerObservabilityInstallObservabilitySuite1Part5.call(this);

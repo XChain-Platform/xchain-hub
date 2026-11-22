@@ -24,7 +24,7 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 const LANDING_COIN = 'DOGE';
-const LANDED_BATCH_PAGE = 500;
+const LANDED_BATCH_WINDOW_LIMIT = 8;
 
 function finiteInteger(value){
     if(typeof value !== 'number' && typeof value !== 'string') return null;
@@ -37,33 +37,38 @@ module.exports = {
 
     async reconcilePendingAgainstChain(pending){
         if(pending.length === 0) return pending;
-        let starts = pending.map(window => Number(window.windowStart));
-        let from = Math.min(...starts), to = Math.max(...starts);
-        let answer = await this.fetchLandedAttestBatches(from, to);
-        // A reopened window is published only on a chain answer that says its batch is
-        // absent; without one it waits, because the reorged original may be re-mined.
-        if(!answer) return pending.some(window => window.reopened)
-            ? pending.filter(window => !window.reopened) : pending;
-
-        this.stats.chainReconcileRuns++;
-        let wanted = new Set(starts);
-        let landed = new Set();
-        for(let batch of answer.batches){
-            let start = batch.window_start;
-            if(!wanted.has(start) || batch.window_end !== start + this.windowS) continue;
-            await this.recordLandedWindow(start, batch.window_end,
-                batch.tx_hash || null, batch.row_count);
-            landed.add(start);
+        let remaining = [];
+        let hadUsableAnswer = false;
+        // Query each pending window alone. Page occupancy must not depend on landed
+        // windows between pending ones, and duplicate heads for one window must never
+        // defer another window.
+        for(let index = 0; index < pending.length; index++){
+            let window = pending[index];
+            let start = Number(window.windowStart);
+            let answer = await this.fetchLandedAttestBatches(start, start);
+            if(!answer){
+                if(index === 0 && !pending.some(candidate => candidate.reopened)) return pending;
+                // Stop after the first failure rather than stacking RPC timeouts. A
+                // reopened window still requires a chain answer proving absence.
+                for(let later of pending.slice(index))
+                    if(!later.reopened) remaining.push(later);
+                break;
+            }
+            hadUsableAnswer = true;
+            let landed = answer.batches.find(batch =>
+                batch.window_start === start && batch.window_end === start + this.windowS);
+            if(landed){
+                await this.recordLandedWindow(start, landed.window_end,
+                    landed.tx_hash || null, landed.row_count);
+                this.stats.chainReconcileLandedWindows++;
+            } else if(answer.truncated){
+                this.stats.windowsDeferred++;
+            } else {
+                remaining.push(window);
+            }
         }
-        this.stats.chainReconcileLandedWindows += landed.size;
-        if(answer.truncated){
-            // A full page proves only that its listed windows landed. Any omitted
-            // window may have been pushed off the page, so absence is not evidence
-            // until a later non-truncated answer covers the range.
-            this.stats.windowsDeferred += pending.length - landed.size;
-            return [];
-        }
-        return pending.filter(window => !landed.has(Number(window.windowStart)));
+        if(hadUsableAnswer) this.stats.chainReconcileRuns++;
+        return remaining;
     },
 
     // The landing chain's indexer as { url, key }, or { failure } naming why not.
@@ -91,7 +96,7 @@ module.exports = {
         let result;
         try {
             result = await this.indexerRpc(url, key, 'getattestbatches',
-                { window_start_from: from, window_start_to: to, limit: LANDED_BATCH_PAGE });
+                { window_start_from: from, window_start_to: to, limit: LANDED_BATCH_WINDOW_LIMIT });
         } catch(e){
             return this.chainReconcileFailed('getattestbatches on ' + url +
                 ' failed: ' + (e && e.message));

@@ -95,9 +95,10 @@ module.exports = {
     // Rows the ANCHOR archive still owes a batch to. Append-only, so there is no
     // archived_status to re-check: a snapshot the archive already covered never
     // changes, and a superseding policy arrives as a NEW row at a higher policy_seq.
-    async findPolicySnapshotsByBatchSeq(limit) {
+    async findPolicySnapshotsByBatchSeq(network, limit) {
         return this.doQuery(
-            'SELECT * FROM policy_snapshots WHERE batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?', [limit]);
+            'SELECT * FROM policy_snapshots WHERE network = ? AND batch_seq IS NULL ORDER BY snapshot_id ASC LIMIT ?',
+            [String(network || ''), limit]);
     },
 
     // Stamps the ANCHOR archive batch a snapshot was published in. Guarded on

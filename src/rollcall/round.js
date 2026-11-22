@@ -346,6 +346,7 @@ function initRoundState(self){
     // separate self-publish commitments. The rounds map is empty after a
     // restart, so it cannot answer either question.
     self._committed     = new Set();  // key: <epoch> | <epoch>:self
+    self._spendLogUnread = false;     // set while the spend log failed a read other than ENOENT
     self.initDeliveryMemory();      // round/delivery.js, rebuilt from the spend log
     self._timer         = null;
     self._ticking       = false;

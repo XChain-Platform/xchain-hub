@@ -179,4 +179,15 @@ function registerOracleSetEdgeTests() {
         expect(queried.count).to.equal(0);
         expect(warn.called).to.equal(false);
     });
+
+    it('the unpinned membership pre-filter logs a registry read failure', async () => {
+        let { pub } = buildPub({ network: 'regtest' });
+        pub.hub.capabilityRegistry = {
+            async getActiveValidators() { throw new Error('registry down'); }
+        };
+        expect(await pub.getActiveOraclePublishPubkeys(null)).to.deep.equal([]);
+        expect(warn.calledOnce).to.equal(true);
+        expect(warn.firstCall.args[0]).to.match(/oracle_publish current-membership read failed/);
+        expect(warn.firstCall.args[0]).to.match(/registry down/);
+    });
 }

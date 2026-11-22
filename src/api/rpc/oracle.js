@@ -21,9 +21,40 @@ const roundPresence = require('../../lib/oracle_round_presence.js');   // oracle
 const { validateLimit, strictInt } = require('../validate');
 const swq = require('../../consensus/stake_weighted_quorum.js');
 const { computeQuorumMargin } = require('../../oracle/quorum_margin.js');
+const { RATE_LIMIT_RPC_ERROR_CODE } = require('../rate_limit_policy');
+const { resolveRpcSnapshotCap } = require('../snapshot_read_caps');
 
 // Preserve consensus-input capacity by enriching at most 16 historical anchors per public request.
 const MAX_QUORUM_MARGIN_ANCHORS = 16;
+
+// Bound on getpricesnapshots and getoracleroundpresence calls in flight together, whoever
+// sends them. The pool holds ten connections; the REST /hub-db/snapshot gate takes up to
+// 4 of them by default and this gate up to 3, so at least 3 stay free for the hub's own
+// writers and for the SELECT 1 liveness probe behind ping and health.
+// HUB_RPC_SNAPSHOT_MAX_INFLIGHT overrides it, and the REST and RPC gates count separately,
+// so an operator raising either should keep their sum within the budget that
+// snapshot_read_caps.js checks and warns about at boot.
+const RPC_SNAPSHOT_BUSY_RETRY_AFTER_S = 1;
+
+// Unbounded, a flood of limit=10000 reads (single calls or 20-member batches) filled the
+// shared pool, and the liveness probe's SELECT 1 queued behind them until ping and health
+// timed out and answered 503 db:false while the database was serving every read. The
+// excess is shed in-band with the rate limiter's code rather than an HTTP status: the
+// router shares one response across every member of a batch, so a 429 for one shed member
+// would fail the members that were served.
+function snapshotReadGate(hubConfig) {
+    const cap = resolveRpcSnapshotCap(hubConfig);
+    let inFlight = 0;
+    return async function admit(work) {
+        if (inFlight >= cap) {
+            return { error: 'price snapshot reads at capacity', code: RATE_LIMIT_RPC_ERROR_CODE,
+                data: { limit: cap, policy: 'global-inflight', retryAfterSeconds: RPC_SNAPSHOT_BUSY_RETRY_AFTER_S } };
+        }
+        inFlight++;
+        try { return await work(); }
+        finally { inFlight--; }
+    };
+}
 
 function quorumInputs(row) {
     if (!row || row.status !== 'finalized' || typeof row.consensus_proof !== 'string') return null;
@@ -85,7 +116,8 @@ async function addQuorumMargins(hub, rows) {
 }
 
 function buildOracleRpc(ctx) {
-    return Object.assign({}, oracleStatusRpc(ctx), priceReadsRpc(ctx), roundPresenceRpc(ctx));
+    const gatedCtx = Object.assign({}, ctx, { admitSnapshotRead: snapshotReadGate(ctx.hubConfig) });
+    return Object.assign({}, oracleStatusRpc(ctx), priceReadsRpc(gatedCtx), roundPresenceRpc(gatedCtx));
 }
 
 function oracleStatusRpc(ctx) {
@@ -134,8 +166,41 @@ function oracleStatusRpc(ctx) {
     };
 }
 
+// One price_snapshots page read with its optional quorum margins and watermark.
+async function readPriceSnapshots(hub, {limit, status, with_watermark, with_quorum_margin}) {
+    try {
+        // validateLimit admits digit strings; hand the DB layer the parsed
+        // number, since a string binds as a quoted `LIMIT ?` and MariaDB
+        // rejects it with a syntax error.
+        let snapshots = await hub.getPriceSnapshots(limit ? Number(limit) : 50, status);
+        if (with_quorum_margin) snapshots = await addQuorumMargins(hub, snapshots);
+        // with_watermark is optional and additive: health consumers (the
+        // dashboard's pairHealth) need a server-clock watermark so row age
+        // is computed entirely in the hub's clock domain instead of diffing
+        // hub block_timestamp against the caller's clock, which folds
+        // host/hub skew into the freshness thresholds (same fix the
+        // submissions rail already carries via lastSuccessAgeMs, and the
+        // REST /hub-db/snapshot sibling via its `watermark`). Omitted =
+        // historical bare-array contract, so existing callers are untouched.
+        // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
+        // bound the consumer clamps freshness to travelled only on
+        // getoraclesubmissions, so it was lost exactly when that rail was
+        // down; same oracleMaxAgeSecondsInForce source as there, never a literal.
+        if (with_watermark) {
+            return {
+                watermark: Math.floor(Date.now() / 1000),
+                oracleMaxPriceAgeSeconds: await hub.oracleMaxAgeSecondsInForce(),
+                snapshots,
+            };
+        }
+        return snapshots;
+    } catch (err) {
+        return {error: "error fetching price snapshots"};
+    }
+}
+
 function priceReadsRpc(ctx) {
-    const { hub } = ctx;
+    const { hub, admitSnapshotRead } = ctx;
     return {
         // status is optional and additive: omitted/'finalized' preserves the
         // historical finalized-only contract; 'all' includes skipped/disputed
@@ -145,32 +210,9 @@ function priceReadsRpc(ctx) {
             if (limErr) return limErr;
             if (status !== undefined && status !== 'finalized' && status !== 'all')
                 return {error: "status must be 'finalized' or 'all'"};
-            try {
-                let snapshots = await hub.getPriceSnapshots(limit || 50, status);
-                if (with_quorum_margin) snapshots = await addQuorumMargins(hub, snapshots);
-                // with_watermark is optional and additive: health consumers (the
-                // dashboard's pairHealth) need a server-clock watermark so row age
-                // is computed entirely in the hub's clock domain instead of diffing
-                // hub block_timestamp against the caller's clock, which folds
-                // host/hub skew into the freshness thresholds (same fix the
-                // submissions rail already carries via lastSuccessAgeMs, and the
-                // REST /hub-db/snapshot sibling via its `watermark`). Omitted =
-                // historical bare-array contract, so existing callers are untouched.
-                // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
-                // bound the consumer clamps freshness to travelled only on
-                // getoraclesubmissions, so it was lost exactly when that rail was
-                // down; same oracleMaxAgeSecondsInForce source as there, never a literal.
-                if (with_watermark) {
-                    return {
-                        watermark: Math.floor(Date.now() / 1000),
-                        oracleMaxPriceAgeSeconds: await hub.oracleMaxAgeSecondsInForce(),
-                        snapshots,
-                    };
-                }
-                return snapshots;
-            } catch (err) {
-                return {error: "error fetching price snapshots"};
-            }
+            // The slot is held across the page read, the quorum-margin snapshot reads and
+            // the age-bound read, since each of them takes a pool connection.
+            return admitSnapshotRead(() => readPriceSnapshots(hub, {limit, status, with_watermark, with_quorum_margin}));
         },
 
         async getprice({coin_pair}){
@@ -192,7 +234,7 @@ function priceReadsRpc(ctx) {
 }
 
 function roundPresenceRpc(ctx) {
-    const { hub } = ctx;
+    const { hub, admitSnapshotRead } = ctx;
     return {
         // Per-round PRESENCE over an explicit range, so "this hub has no
         // record of round 26" is a REPORTED value rather than an empty result set.
@@ -216,11 +258,15 @@ function roundPresenceRpc(ctx) {
                 if (n === null || n < 1 || n > roundPresence.MAX_RANGE)
                     return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
             }
-            try {
-                return await hub.getOracleRoundPresence(from_round, to_round, limit);
-            } catch (err) {
-                return {error: "error fetching oracle round presence"};
-            }
+            // Hold one shared price-snapshot slot across the optional max-round query
+            // and the range read. Validation stays outside the gate so bad calls take no slot.
+            return admitSnapshotRead(async () => {
+                try {
+                    return await hub.getOracleRoundPresence(from_round, to_round, limit);
+                } catch (err) {
+                    return {error: "error fetching oracle round presence"};
+                }
+            });
         },
 
         // Operator stake share vs the weighted commit gate (read, no auth). Per chain

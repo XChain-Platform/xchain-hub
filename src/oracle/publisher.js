@@ -107,6 +107,7 @@ const landingPart      = require('./publisher/landing.js');
 const lifecyclePart    = require('./publisher/lifecycle.js');
 const rotationPart     = require('./publisher/rotation.js');
 const queuePart        = require('./publisher/queue.js');
+const queueBatchPart   = require('./publisher/queue_batch.js');
 const bufferPart       = require('./publisher/buffer.js');
 const takeoverPart     = require('./publisher/takeover.js');
 const schedulerPart    = require('./publisher/scheduler.js');
@@ -117,7 +118,7 @@ const publishPassPart  = require('./publisher/publish_pass.js');
 const publishEntryPart = require('./publisher/publish_entry.js');
 const statsPart        = require('./publisher/stats.js');
 const PARTS = [optionsPart, batchOptionsPart, broadcastPart, landingPart, lifecyclePart,
-               rotationPart, queuePart, bufferPart, takeoverPart, schedulerPart, landedPart,
+               rotationPart, queuePart, queueBatchPart, bufferPart, takeoverPart, schedulerPart, landedPart,
                assemblyPart, wirePart, publishPassPart, publishEntryPart, statsPart];
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/common/validator.js
@@ -213,16 +214,8 @@ class OraclePublisher {
         rewriteFileAtomically(fs, filePath, text);
     }
 
-    // Read a durable file whole, or null when it cannot be read. The callers all
-    // treat an unreadable file as empty, which is why the failure is returned
-    // rather than thrown.
-    readDurableFile(filePath) {
-        try { return fs.readFileSync(filePath, 'utf8'); }
-        catch (e) { return null; }
-    }
-
     // Read a durable file whole, or null when it does not exist; any other failure
-    // throws, for the queue rebuild that must tell an empty file from an unread one.
+    // throws, because durable stores must tell an empty file from an unread one.
     readDurableFileStrict(filePath) {
         try { return fs.readFileSync(filePath, 'utf8'); }
         catch (e) {

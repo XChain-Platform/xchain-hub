@@ -71,6 +71,21 @@ describe('landing watermark ingest ordering', function () {
         await broadcaster.sampleAdmission();
         expect(frame(broadcaster).landed).to.deep.equal({});
     });
+
+    it('forwards repair options through the ingest wrapper', async function () {
+        let received;
+        const aggregator = {
+            receiveValidatedBatch: async (chain, batch, options) => {
+                received = options;
+                return { accepted: true };
+            }
+        };
+        const { broadcaster } = build({}, aggregator);
+        this.broadcaster = broadcaster;
+        const options = { fillRounds: new Set([7]) };
+        await aggregator.receiveValidatedBatch('DOGE', {}, options);
+        expect(received).to.equal(options);
+    });
 });
 
 describe('landing watermark publication', function () {

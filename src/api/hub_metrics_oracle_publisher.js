@@ -60,6 +60,11 @@ const ORACLE_PUBLISHER_SERIES = {
             read: (publisher) => publisher.takeoverDeferred
         },
         {
+            name: 'xchain_oracle_publisher_set_unresolved_spells_total',
+            help: 'Transitions into the fail-closed state where the oracle_publish capability snapshot is unresolved',
+            read: (publisher) => publisher.snapshotDarkSpells
+        },
+        {
             name: 'xchain_oracle_publisher_batch_sign_timeouts_total',
             help: 'PRICE batch signing rounds that timed out waiting for co-signatures',
             read: (publisher) => callIf(publisher, 'batchSignTimeouts')
@@ -76,6 +81,12 @@ const ORACLE_PUBLISHER_SERIES = {
             help: 'Publishes this hub broadcast that have not yet reached a block',
             read: (publisher) => (publisher._pendingConfirmations instanceof Map
                 ? publisher._pendingConfirmations.size : null)
+        },
+        // A dark hub takes no leader turn, so a flat published_total alone looks like a healthy non-leader.
+        {
+            name: 'xchain_oracle_publisher_set_unresolved',
+            help: '1 while the oracle_publish capability snapshot is unresolved and this hub fails closed (will not publish)',
+            read: (publisher) => publisher._snapshotDark === true
         },
         // Mirror takeoverStats(): armed needs a failover window AND a proven observation feed.
         {

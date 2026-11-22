@@ -77,9 +77,25 @@ function missingRowPreload() {
     return file;
 }
 
-describe('bin/consensus-identity.js: top-level error handling', function () {
-    this.timeout(20000);
+function registerHelpFlagTest() {
+    it('documents every long flag parseArgs accepts', function () {
+        const res = run(['--help']);
+        expect(res.status, res.stderr).to.equal(0);
+        expect(res.stderr).to.equal('');
+        const source = fs.readFileSync(BIN, 'utf8');
+        const start = source.indexOf('function parseArgs');
+        const end = source.indexOf('function main', start);
+        expect(start).to.be.at.least(0);
+        expect(end).to.be.greaterThan(start);
+        const flags = new Set(Array.from(source.slice(start, end).matchAll(/arg === '(--[^']+)'/g), m => m[1]));
+        expect(flags.size).to.be.at.least(6);
+        for (const flag of flags)
+            expect(res.stdout, '--help omits ' + flag).to.include(flag);
+        expect(res.stdout).to.include('print this usage banner');
+    });
+}
 
+function registerHealthyPathTests() {
     it('exits 0 and still prints the identity on the healthy path', function () {
         const res = run(['--json']);
         expect(res.status, res.stderr).to.equal(0);
@@ -88,6 +104,8 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(identity.consensus_rules_gates).to.not.have.property(ATTEST_RELAY_RESPONSE_DEADLINE_KEY);
         expect(identity.consensus_rules_gates).to.not.have.property(BRIDGE_ROW_FIELDS_TERMINAL_KEY);
     });
+
+    registerHelpFlagTest();
 
     it('keeps the committed identity pinned when a registry-only row is added', function () {
         const res = run(['--compare', PIN]);
@@ -99,20 +117,28 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         const res = run(['--compare', PIN]);
         expect(res.status, res.stdout + res.stderr).to.equal(0);
     });
+}
 
+function registerErrorPathTests() {
     it('exits 2 with one clean stderr line, not a raw stack, on a thrown error', function () {
-        const res = run(['--compare', path.join(REPO, 'no-such-consensus-pin.json')]);
-        expect(res.status).to.equal(2);
-        expect(res.stderr).to.match(/^consensus-identity: /);
-        // A raw Node stack carries the module's own frames; the clean handler's
-        // one-liner carries none, so this is the line that tells the two apart.
-        expect(res.stderr).to.not.match(/^\s+at /m);
+        const missingRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'identity-root-')), 'missing');
+        const cases = [
+            run(['--compare', path.join(REPO, 'no-such-consensus-pin.json')]),
+            run(['--root', missingRoot])
+        ];
+        for (const res of cases) {
+            expect(res.status).to.equal(2);
+            expect(res.stderr).to.match(/^consensus-identity: /);
+            expect(res.stderr.trim().split('\n')).to.have.lengthOf(1);
+            expect(res.stderr).to.not.include('Require stack:');
+            expect(res.stderr).to.not.match(/^\s+at /m);
+        }
     });
 
     it('exits 2 naming an unknown flag instead of ignoring it', function () {
         const res = run(['--assert-no-absnet']);
         expect(res.status).to.equal(2);
-        expect(res.stderr).to.match(/^consensus-identity: unknown flag --assert-no-absnet/);
+        expect(res.stderr).to.match(/^consensus-identity: unknown flag: --assert-no-absnet/);
         expect(res.stdout).to.equal('');
     });
 
@@ -131,6 +157,12 @@ describe('bin/consensus-identity.js: top-level error handling', function () {
         expect(res.stdout).to.equal('');
         expect(fs.existsSync(path.join(REPO, '--assert-no-absent'))).to.equal(false);
     });
+}
+
+describe('bin/consensus-identity.js: top-level error handling', function () {
+    this.timeout(20000);
+    registerHealthyPathTests();
+    registerErrorPathTests();
 });
 
 describe('bin/consensus-identity.js: child environment and registry-row refusal', function () {

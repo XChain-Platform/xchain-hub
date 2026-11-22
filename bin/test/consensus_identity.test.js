@@ -149,6 +149,44 @@ describe('bin/consensus-identity.js', function () {
             const differences = identity.compare(value, after);
             assert.ok(differences.some((d) => d.kind === 'coin_pin' && d.field === 'BTC:regtest'));
         });
+
+        it('catches moved coin-pin network lists and absent gates', () => {
+            const after = JSON.parse(JSON.stringify(value));
+            after.coin_pin_armed_networks.push('mainnet');
+            after.coin_pin_skipped_networks = [];
+            after.absent_gates = ['moved.gate'];
+
+            const differences = identity.compare(value, after);
+            for (const field of ['coin_pin_armed_networks', 'coin_pin_skipped_networks', 'absent_gates']) {
+                assert.ok(differences.some((d) => d.kind === 'value' && d.field === field), field);
+            }
+        });
+
+        it('catches a top-level field present on only one side', () => {
+            const after = JSON.parse(JSON.stringify(value));
+            after.future_identity_field = 'new';
+            delete after.gates_field;
+
+            const differences = identity.compare(value, after);
+            assert.ok(differences.some((d) => d.kind === 'field_added'
+                && d.field === 'future_identity_field'));
+            assert.ok(differences.some((d) => d.kind === 'field_dropped' && d.field === 'gates_field'));
+        });
+
+        it('catches an empty expanded map present on only one side', () => {
+            const pin = JSON.parse(JSON.stringify(value));
+            const after = JSON.parse(JSON.stringify(value));
+            pin.coin_consensus_pins = {};
+            delete after.coin_consensus_pins;
+            assert.ok(identity.compare(pin, after).some((d) => d.kind === 'field_dropped'
+                && d.field === 'coin_consensus_pins'));
+        });
+
+        it('leaves environment comparison to checkPin', () => {
+            const after = JSON.parse(JSON.stringify(value));
+            after.env.XC_ROLLCALL_REGTEST_ACTIVATION = 'armed';
+            assert.deepStrictEqual(identity.compare(value, after), []);
+        });
     });
 });
 

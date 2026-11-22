@@ -38,6 +38,7 @@ const logger = getLogger();
 
 const DEFAULT_CHECKPOINT_INTERVAL_BLOCKS = 6;
 const CANONICAL_ANCHOR_CHECKPOINT_EVERY_N = 1;
+const CANONICAL_ANCHOR_ELECTION_TOLERANCE_BLOCKS = 36;
 const SKIP_ENV = 'XCHAIN_HUB_SKIP_ANCHOR_CADENCE_ASSERT';
 
 const warned = new Set();
@@ -83,7 +84,7 @@ function warnIgnored(name, raw, honoured, canonical, network) {
     if (warned.has(key)) return;
     warned.add(key);
     logger.warn('WARNING: ' + name + '=' + raw + ' is set but IGNORED on ' + (network || '<unset>') +
-        '; using ' + canonical + '. The checkpoint/anchor cadence is fleet-uniform and moves only by a ' +
+        '; using ' + canonical + '. This anchor predicate is fleet-uniform and moves only by a ' +
         'coordinated code change, never by a local override.');
 }
 
@@ -121,6 +122,11 @@ function resolveAnchorCheckpointEveryN(cfg, network) {
         cadenceNetwork(network));
 }
 
+function resolveAnchorElectionToleranceBlocks(cfg, network) {
+    return resolveKnob('ANCHOR_ELECTION_TOLERANCE_BLOCKS', cfg || {},
+        CANONICAL_ANCHOR_ELECTION_TOLERANCE_BLOCKS, cadenceNetwork(network));
+}
+
 /**
  * Resolve both fleet-uniform cadence knobs and report any canonical drift
  * (reachable on regtest only, the one network that honours an override).
@@ -143,6 +149,8 @@ function resolveCheckpointIntervalBlocks(cfg, network) {
 }
 
 module.exports = {
-    resolveCheckpointCadence, resolveCheckpointIntervalBlocks, resolveAnchorCheckpointEveryN, assertCanonicalCadence,
-    DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, CANONICAL_ANCHOR_CHECKPOINT_EVERY_N
+    resolveCheckpointCadence, resolveCheckpointIntervalBlocks, resolveAnchorCheckpointEveryN,
+    resolveAnchorElectionToleranceBlocks, assertCanonicalCadence,
+    DEFAULT_CHECKPOINT_INTERVAL_BLOCKS, CANONICAL_ANCHOR_CHECKPOINT_EVERY_N,
+    CANONICAL_ANCHOR_ELECTION_TOLERANCE_BLOCKS
 };

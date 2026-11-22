@@ -143,11 +143,17 @@ function registerParseExpectedColumnsTests() {
                         '  id INT NOT NULL PRIMARY KEY,\n' +
                         '  name VARCHAR(20),\n' +
                         '  created INT NOT NULL DEFAULT 0,\n' +
-                        '  PRIMARY KEY (id)\n' +
+                        '  fulltext_score INT NULL,\n' +
+                        '  shape GEOMETRY NOT NULL,\n' +
+                        '  PRIMARY KEY (id),\n' +
+                        '  FULLTEXT KEY ft_name (name),\n' +
+                        '  FULLTEXT INDEX ft_name_2 (name),\n' +
+                        '  FULLTEXT ft_name_3 (name),\n' +
+                        '  SPATIAL INDEX sp_shape (shape)\n' +
                         ');';
             const cols = db.parseExpectedColumns(sql);
             const byName = Object.fromEntries(cols.map(c => [c.name, c]));
-            expect(byName).to.have.all.keys('id', 'name', 'created'); // constraint line skipped
+            expect(byName).to.have.all.keys('id', 'name', 'created', 'fulltext_score', 'shape');
             expect(byName.id.notNull).to.be.true;            // inline PRIMARY KEY -> notNull
             expect(byName.name.nullable).to.be.true;
             expect(byName.created.notNull).to.be.true;

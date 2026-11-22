@@ -79,13 +79,20 @@ function matchEngine(indexerCall){
         committedFor: () => ({ give: '0', get: '0' }),
         effectiveRemaining: o => ({ give: o.give_amount, get: o.get_amount }),
         offerKey: (coin, actionIndex) => coin + ':' + actionIndex,
+        tryOrderMatch(a, b){
+            return this.buildDesc(a, b, 'order', 'order', a.give_amount, b.give_amount);
+        },
         indexerCall
     }, matchPart);
 }
 
-function armGate(active){
-    registry.activeAt = key =>
-        key === offerLists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT ? active : false;
+function armGate(active, sourceActive){
+    registry.activeAt = (key, _network, _coin, _height, time) => {
+        if(key === offerLists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT) return active;
+        if(key === offerLists.CROSS_CHAIN_LIST_SOURCE_ACTIVATION)
+            return sourceActive === true && Number(time) >= 1794873600;
+        return false;
+    };
 }
 
 function registerPolicyEnforcementTests(){
@@ -138,6 +145,61 @@ function registerPolicyEnforcementTests(){
 
         assert.strictEqual(engine.tryMatch(...emptyPair), null);
         assert.strictEqual(engine.tryMatch(...blockedPair), null);
+    });
+
+    it('checks mapped ORDER and SWAP sources in the list owner chain only after activation', async function(){
+        armGate(true, true);
+        for(let kind of ['order', 'swap']){
+            let [a, b] = pair({
+                kind,
+                home_network: 'mainnet',
+                block_list: 12
+            }, {
+                kind,
+                home_network: 'mainnet',
+                source: 'LRGJEcmpdUJbqEd7P76fSM1LrdzuA6TvD4'
+            });
+            let rpc = resolves({
+                type: 0,
+                members: ['173LyQTzYp4YaRvxCy7NAKwaeRdcyjnHTG']
+            });
+            let engine = matchEngine(rpc);
+
+            await offerLists.prepareOfferLists(engine, [a, b], 100);
+
+            assert.ok(engine.tryMatch(a, b, 100, 1794873599));
+            assert.strictEqual(engine.tryMatch(a, b, 100, 1794873600), null);
+        }
+    });
+
+    it('requires a mapped source on an active allow list but preserves payout-only handling when no mapping exists', async function(){
+        armGate(true, true);
+        let mapped = pair({
+            home_network: 'mainnet',
+            allow_list: 11
+        }, {
+            home_network: 'mainnet',
+            source: 'LRGJEcmpdUJbqEd7P76fSM1LrdzuA6TvD4'
+        });
+        let unmapped = pair({
+            home_network: 'mainnet',
+            home_coin: 'DOGE',
+            give_coin: 'DOGE',
+            allow_list: 11
+        }, {
+            home_network: 'mainnet',
+            home_coin: 'LTC',
+            get_coin: 'DOGE',
+            source: 'ltc1qerp5jqmc2nja6lrxw0w4e02uvk83aj89qwltym'
+        });
+        let rpc = resolves({ type: 0, members: ['ltc-payout'] });
+        let engine = matchEngine(rpc);
+
+        await offerLists.prepareOfferLists(engine, mapped, 100);
+        await offerLists.prepareOfferLists(engine, unmapped, 100);
+
+        assert.strictEqual(engine.tryMatch(...mapped, 100, 1794873600), null);
+        assert.ok(engine.tryMatch(...unmapped, 100, 1794873600));
     });
 }
 

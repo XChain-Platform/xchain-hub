@@ -364,10 +364,9 @@ function registerFeature5persistenceRetractionFragment6Part2() {
       row,
       signatures: []
     });
-    await engine.retractCallsForReorg('BTC', 40);
-    expect(db.rows.length).to.equal(0); // the retraction really had no row to flip
+    const retracting = engine.retractCallsForReorg('BTC', 40);
     release();
-    await writing;
+    await Promise.all([writing, retracting]);
     expect(db.rows.length).to.equal(0);
     expect(broadcaster.broadcastRow.called).to.equal(false);
     expect(engine._inflight.has(row.round_id)).to.equal(false);

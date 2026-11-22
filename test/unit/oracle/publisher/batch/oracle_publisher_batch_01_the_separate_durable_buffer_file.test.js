@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const { fs, sinon, expect, OraclePublisher, ME, PEER1, PEER2, roundFixture,
     bufferedFixture, makeDb, makePublisher, readJsonl, instances,
     cleanupPublisherBatch } = require('./oracle_publisher_batch.test.js');
@@ -211,6 +221,10 @@ const testCase13 = async function () {
             let h = makePublisher({ db: db, publishers: [ME, PEER1, PEER2] });
             await h.p.start();
             for (let r = 0; r < 8; r++) await h.p.onRoundFinalized(roundFixture(r));
+            h.hub.resolveIndexerUrl = sinon.stub().resolves('indexer-url');
+            sinon.stub(h.p, 'indexerRpc').resolves({ batches: [
+                { first_round: 0, last_round: 5, round_count: 6, action_index: 70 }
+            ] });
 
             let pruned = await h.p.pruneObservedWindow(0, 5);
             expect(pruned).to.equal(6);

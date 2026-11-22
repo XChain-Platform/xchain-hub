@@ -21,7 +21,7 @@
  *
  ********************************************************************/
 
-// Judge-call token budgets. A reasoning-family judge (gpt-5 / o-series) bills
+// Judge-call token budgets. A reasoning-family judge (gpt-5 / gpt-6 / o-series) bills
 // reasoning tokens against max_completion_tokens, so the ~20-token verdict JSON
 // is routinely starved by internal reasoning at the 256 budget and returns
 // finish_reason 'length' with empty content, which agree() maps to no_quorum:
@@ -35,8 +35,8 @@ const JUDGE_MAX_TOKENS_REASONING = 2048;
 // attestation content. Fetch-path counterpart to the judge reasoning budget.
 const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 
-// True for OpenAI reasoning-family models: the o-series, and the gpt-5 reasoning
-// ids (gpt-5 / gpt-5-mini / gpt-5-nano), which reject an explicit temperature and
+// True for OpenAI reasoning-family models: the o-series, and the gpt-5 / gpt-6
+// reasoning ids, which reject an explicit temperature and
 // bill reasoning tokens against max_completion_tokens. gpt-5-chat* is EXCLUDED on
 // purpose: it is the non-reasoning ChatGPT model, it honors an explicit
 // temperature, and classifying it as reasoning would silently drop the
@@ -50,7 +50,8 @@ const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 // classified as reasoning - the exact inversion the exclusion above exists to prevent.
 // Versioned REASONING ids (gpt-5.1, gpt-5.1-mini) still classify as reasoning.
 function isReasoningModel(model) {
-    return /^o[0-9]/.test(String(model)) || /^gpt-5(?!(?:\.\d+)?-chat)/.test(String(model));
+    return /^o[0-9]/.test(String(model)) ||
+        /^gpt-(?:5|6)(?=$|[.-])(?!(?:\.\d+)?-chat)/.test(String(model));
 }
 
 // True for Claude models whose Messages API contract REMOVED the sampling
@@ -73,7 +74,8 @@ function isReasoningModel(model) {
 // pack, "Thinking & Effort" and shared/error-codes.md model-specific 400s.
 const ANTHROPIC_NO_SAMPLING_MODELS = [
     'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
-    'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5', 'claude-mythos-preview'
+    'claude-sonnet-5', 'claude-haiku-5-5', 'claude-fable-5',
+    'claude-mythos-5', 'claude-mythos-preview'
 ];
 function anthropicRejectsSampling(model) {
     let m = String(model || '');

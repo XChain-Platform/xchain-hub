@@ -97,13 +97,13 @@ module.exports = {
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
         if(!archive) return this.noteArchiveSignReqRefusal('archive_invalid', d, sender);
-        // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
-        // decides which archive signing group the completeness check requires, and `mine`
-        // is byte-matched to the wire cp above (snapshot_block rides rawCanonicalCheckpoint).
-        if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
+        // Wrapper block and network come from OUR OWN row (`mine`), never the archive body.
+        // They select the capability groups and quorum rules recovery will apply, and
+        // `mine` is byte-matched to the wire checkpoint above.
+        if(!(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block), mine.network))){
             return this.noteArchiveSignReqRefusal('archive_diverges_from_local', d, sender);
         }
-        this.coSignArchive(d, sender, archive, canonical, myPubkey);
+        await this.coSignArchive(d, sender, archive, canonical, myPubkey);
     },
 
     // Every follower refusal is readable without letting a repeated bad request flood
@@ -248,8 +248,9 @@ module.exports = {
     // rows this batch may later mark archived. Record it BEFORE co-signing: the
     // signature about to go out is part of what carries this exact archive to DOGE,
     // and the FINALIZED that closes the round is checked against it.
-    coSignArchive(d, sender, archive, canonical, myPubkey){
+    async coSignArchive(d, sender, archive, canonical, myPubkey){
         this.recordObservedArchiveContent(Number(d.batch_seq), sender, archive);
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return;
 
         this.peerManager.broadcast(XANC_SIGN, {
             batch_seq: Number(d.batch_seq), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)

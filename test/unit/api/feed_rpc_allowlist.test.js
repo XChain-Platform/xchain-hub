@@ -17,10 +17,8 @@
 // sensitiveReadAuth.test.js; this file is only about which methods that port
 // considers at all.
 
-const sinon      = require('sinon');
 const { expect } = require('chai');
-const proxyquire = require('proxyquire').noPreserveCache();
-const { waitUntil } = require('../../helpers/waitUntil');
+const { feedPortAllowlist } = require('../../../src/api/auth_gate.js');
 
 // The complete indexer->hub vocabulary (xchain-indexer src/hub/hub_client.js).
 const FEED_METHODS = [
@@ -39,82 +37,22 @@ const REFUSED_METHODS = [
     'resumeeffectorspend', 'getallconfigs', 'getvalidators', 'ping'
 ];
 
-function makeBootDoubles() {
-    const useCalls = [];
-    const mockApp = {
-        use:  sinon.stub().callsFake((fn) => { useCalls.push(fn); }),
-        get:  sinon.stub(),
-        post: sinon.stub(),
-        set:  sinon.stub(),
-        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
-    };
-    const mockServer = {
-        listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); }),
-        on: sinon.stub(),
-        emit: sinon.stub()
-    };
-    const mockExpress = sinon.stub().returns(mockApp);
-    mockExpress.json = sinon.stub().returns(function expressJson() {});
-
-    const mockHub = new Proxy({}, {
-        get: (target, prop) => {
-            if (!(prop in target)) target[prop] = sinon.stub().callsFake(async () => ({}));
-            return target[prop];
-        }
-    });
-    return { useCalls, mockExpress, mockServer, mockHub };
-}
-
-function saveFeedEnvironment() {
-    const saved = {};
-    for (const k of ['HUB_API_KEY', 'HUB_FEED_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
-                     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
-                     'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
-        saved[k] = process.env[k];
-        delete process.env[k];
-    }
-    Object.assign(process.env, {
-        HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999', HUB_API_KEY: 'test-hub-key'
-    });
-    return saved;
-}
-
-function restoreEnvironment(saved) {
-    for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-    }
-}
-
-function loadApi(mockExpress, mockServer, mockHub) {
-    proxyquire('../../../src/api', {
-        'dotenv': { config: sinon.stub() },
-        'express': mockExpress,
-        'helmet': sinon.stub().returns(function helmetMw() {}),
-        'cors': sinon.stub().returns(function corsMw() {}),
-        'express-rate-limit': sinon.stub().returns(function rateLimitMw() {}),
-        'express-json-rpc-router': () => function routerMw() {},
-        'http': { createServer: sinon.stub().returns(mockServer) },
-        'ws': { Server: sinon.stub().returns({ on: sinon.stub() }) },
-        'geoip-lite': { lookup: sinon.stub().returns(null) },
-        './XChainHub': function () { return mockHub; }
-    });
-}
-
 function driveMiddleware(mw, opts) {
     const res = {
         statusCode: 200,
         status(code) { this.statusCode = code; return this; },
         json(body) { this.body = body; return this; }
     };
-    const body = Array.isArray(opts.method)
+    const hasRawBody = Object.prototype.hasOwnProperty.call(opts, 'body');
+    const body = hasRawBody ? opts.body : (Array.isArray(opts.method)
         ? opts.method.map((m, i) => ({ method: m, id: i + 1 }))
-        : (opts.method === undefined ? {} : { method: opts.method, id: 1 });
+        : (opts.method === undefined ? {} : { method: opts.method, id: 1 }));
     const req = {
         body: body,
         headers: { 'x-api-key': 'test-hub-key' },
-        method: opts.httpMethod || 'POST'
+        method: opts.httpMethod || 'POST',
+        url: opts.url,
+        originalUrl: opts.url
     };
     if (opts.feed) req.xchainFeedOrigin = true;
     let nexted = false;
@@ -122,41 +60,10 @@ function driveMiddleware(mw, opts) {
     return { nexted, res };
 }
 
-function findAllowlistMiddleware(useCalls) {
-    // Identify the allowlist middleware behaviourally: it refuses a stamped
-    // administrative method with -32601 and passes the same call unstamped.
-    const candidates = useCalls.filter((fn) => typeof fn === 'function' && fn.length >= 3);
-    let mw = null;
-    for (const fn of candidates) {
-        try {
-            const stamped   = driveMiddleware(fn, { method: 'updateconfig', feed: true });
-            const unstamped = driveMiddleware(fn, { method: 'updateconfig' });
-            if (!stamped.nexted && stamped.res.statusCode === 404 && unstamped.nexted) { mw = fn; break; }
-        } catch (_) { /* not this middleware */ }
-    }
-    expect(mw, 'feed allowlist middleware not found among app.use() calls').to.not.equal(null);
-    return mw;
-}
-
-async function bootApi() {
-    const { useCalls, mockExpress, mockServer, mockHub } = makeBootDoubles();
-    const saved = saveFeedEnvironment();
-    try {
-        loadApi(mockExpress, mockServer, mockHub);
-    } finally {
-        restoreEnvironment(saved);
-    }
-    await waitUntil(() => mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
-    const mw = findAllowlistMiddleware(useCalls);
-    return { drive: (opts) => driveMiddleware(mw, opts) };
-}
+const middleware = feedPortAllowlist();
+const api = { drive: (opts) => driveMiddleware(middleware, opts) };
 
 describe('hub public-port rpc allowlist (P2P feed)', function () {
-    let api;
-
-    before(async function () { api = await bootApi(); });
-    afterEach(function () { sinon.restore(); });
-
     it('admits every indexer feed method on the public port', function () {
         for (const m of FEED_METHODS) {
             expect(api.drive({ method: m, feed: true }).nexted, m).to.equal(true);
@@ -195,7 +102,9 @@ describe('hub public-port rpc allowlist (P2P feed)', function () {
             expect(res.statusCode).to.equal(404);
         }
     });
+});
 
+describe('hub public-port rpc allowlist (P2P feed)', function () {
     it('refuses an empty batch on the public port', function () {
         const { nexted, res } = api.drive({ method: [], feed: true });
         expect(nexted).to.equal(false);
@@ -208,6 +117,26 @@ describe('hub public-port rpc allowlist (P2P feed)', function () {
     });
 
     it('passes a stamped GET through (snapshot reads are scoped by path, not method)', function () {
-        expect(api.drive({ method: undefined, feed: true, httpMethod: 'GET' }).nexted).to.equal(true);
+        let out = api.drive({ body: undefined, feed: true, httpMethod: 'GET',
+            url: '/hub-db/snapshot/price_snapshots' });
+        expect(out.nexted).to.equal(true);
+
+        out = api.drive({ body: {}, feed: true, httpMethod: 'GET',
+            url: '/hub-db/snapshot/price_snapshots' });
+        expect(out.nexted).to.equal(true);
+
+        const { nexted, res } = api.drive({ method: 'updateconfig', feed: true,
+            httpMethod: 'GET', url: '/hub-db/snapshot/x' });
+        expect(nexted).to.equal(false);
+        expect(res.statusCode).to.equal(404);
+        expect(res.body.error.code).to.equal(-32601);
+
+        out = api.drive({ method: 'gethubs', feed: true, httpMethod: 'GET',
+            url: '/hub-db/snapshot/x' });
+        expect(out.nexted).to.equal(true);
+
+        out = api.drive({ method: 'updateconfig', httpMethod: 'GET',
+            url: '/hub-db/snapshot/x' });
+        expect(out.nexted).to.equal(true);
     });
 });

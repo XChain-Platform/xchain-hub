@@ -113,14 +113,14 @@ describe('archive list snapshot rows', () => {
 
     it('refuses a row with only a sub-quorum signature set', async () => {
         const pub = buildPub();
-        const row = sign(pub, listRow(), 2);
+        const row = sign(pub, pub.serializeListSnapshot(listRow()), 2);
 
         expect(await pub.verifyArchivedListSnapshot(row)).to.equal(false);
     });
 
     it('accepts a quorum-signed row', async () => {
         const pub = buildPub();
-        const row = sign(pub, listRow(), 3);
+        const row = sign(pub, pub.serializeListSnapshot(listRow()), 3);
 
         expect(await pub.verifyArchivedListSnapshot(row)).to.equal(true);
     });

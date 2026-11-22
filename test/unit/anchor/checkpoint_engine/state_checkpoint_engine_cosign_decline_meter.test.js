@@ -51,7 +51,7 @@ function buildFollower(opts) {
     engine.resolveSnapshotBlock = async () => (opts.tip !== undefined ? opts.tip : SNAP);
     engine.resolveCapabilityValidators = async () => [leader, follower].map(id => ({ pubkey: pk(id), amount: '1' }));
     engine.followsCadenceLeader = () => true;
-    engine.getMaxCheckpointSeq = async () => null;
+    engine.getMaxCheckpointSeq = async () => (opts.maxSeq !== undefined ? opts.maxSeq : null);
     if (opts.latch !== undefined) engine._lastCheckpointBtcBlock = opts.latch;
     engine.indexerCall = opts.indexerCall || (async () => Object.assign({}, TIP));
     engine.cosigned = [];
@@ -59,9 +59,10 @@ function buildFollower(opts) {
     return engine;
 }
 
-function signReq() {
-    let cp = Object.assign({ chain: 'BTC', snapshot_block: SNAP, checkpoint_seq: canonicalForms.deriveCheckpointSeq(SNAP) }, TIP);
-    let sig = leader.sign(StateCheckpointEngine.canonicalCheckpoint(cp));
+function signReq(overrides) {
+    const cp = Object.assign({ chain: 'BTC', snapshot_block: SNAP,
+        checkpoint_seq: canonicalForms.deriveCheckpointSeq(SNAP) }, TIP, overrides);
+    const sig = leader.sign(StateCheckpointEngine.canonicalCheckpoint(cp));
     return { type: 'XCHK_SIGN_REQ', sender: pk(leader), data: { checkpoint: cp, sig_pubkey: pk(leader), sig: sig } };
 }
 
@@ -81,6 +82,94 @@ const DECLINE_CASES = [
     ['off_cadence',         { latch: SNAP - 2 }, /proposed 500, last checkpoint 498, interval 6/],
 ];
 
+async function expectSequenceDeclinesAreMetered() {
+    const cases = [
+        ['seq_not_derived', {}, { checkpoint_seq: SNAP + 1 }, /seq 501, derived 500/],
+        ['seq_at_or_below_max', { maxSeq: SNAP }, {}, /max recorded seq 500/],
+    ];
+    for(const [reason, opts, overrides, detail] of cases){
+        const engine = buildFollower(opts);
+        const lines = await warnsDuring(async () => {
+            await engine.handleSignReq(signReq(overrides));
+            await engine.handleSignReq(signReq(overrides));
+        });
+        expect(engine.cosigned, reason + ' stays fail-closed').to.have.lengthOf(0);
+        const stats = await engine.getStats();
+        expect(stats.cosign_declines[reason], reason).to.equal(2);
+        expect(stats.last_cosign_decline_reason, reason).to.equal(reason);
+        expect(lines.filter(line => line.includes(reason)), reason).to.have.lengthOf(1);
+        expect(lines.join('\n'), reason).to.match(detail);
+    }
+}
+
+async function expectRequestDecline(reason, configure, request = signReq()){
+    const engine = buildFollower({});
+    configure(engine);
+    const lines = await warnsDuring(async () => {
+        await engine.handleSignReq(request);
+        await engine.handleSignReq(request);
+    });
+    expect(engine.cosigned, reason + ' stays fail-closed').to.have.lengthOf(0);
+    expect(engine._cosignDeclines[reason], reason).to.equal(2);
+    expect(engine._cosignDeclinesTotal, reason).to.equal(2);
+    expect(engine._lastCosignDeclineReason, reason).to.equal(reason);
+    expect(lines.filter(line => line.includes(reason)), reason).to.have.lengthOf(1);
+}
+
+function requestWithSupersedeFields(fields){
+    const request = signReq();
+    request.data.checkpoint = Object.assign({}, request.data.checkpoint, fields);
+    return request;
+}
+
+async function expectSupersedeFieldDecline(reason, fields, gateActive){
+    const originalGate = canonicalForms.isCheckpointSupersedeActive;
+    canonicalForms.isCheckpointSupersedeActive = () => gateActive;
+    try {
+        await expectRequestDecline(reason, () => {}, requestWithSupersedeFields(fields));
+    } finally {
+        canonicalForms.isCheckpointSupersedeActive = originalGate;
+    }
+}
+
+describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
+    it('counts validator resolution, membership, leader, signature, and sequence read refusals', async function () {
+        await expectRequestDecline('validator_resolve_failed', engine => {
+            engine.resolveCapabilityValidators = async () => { throw new Error('resolver down'); };
+        });
+        await expectRequestDecline('not_member', engine => {
+            engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+            engine.resolveCapabilityValidators = async () => [leader, absent]
+                .map(id => ({ pubkey: pk(id), amount: '1' }));
+        });
+        await expectRequestDecline('not_cadence_leader', engine => {
+            engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+            engine.resolveCapabilityValidators = async () => [follower, absent]
+                .map(id => ({ pubkey: pk(id), amount: '1' }));
+        });
+        const badSig = signReq();
+        badSig.data.sig = leader.sign('different checkpoint');
+        await expectRequestDecline('sender_sig_invalid', () => {}, badSig);
+        await expectRequestDecline('seq_read_failed', engine => {
+            engine.getMaxCheckpointSeq = async () => { throw new Error('db down'); };
+        });
+    });
+
+    it('does not meter a non-member observer that cannot publish a reply', async function () {
+        const engine = buildFollower({});
+        engine.peerManager = { authoringHeld: () => true };
+        engine.followsCadenceLeader = StateCheckpointEngine.prototype.followsCadenceLeader;
+        engine.resolveCapabilityValidators = async () => [leader, absent]
+            .map(id => ({ pubkey: pk(id), amount: '1' }));
+
+        await engine.handleSignReq(signReq());
+
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.not_member).to.equal(0);
+        expect(engine._cosignDeclinesTotal).to.equal(0);
+    });
+});
+
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     for (let [reason, opts, detail] of DECLINE_CASES) {
         it(reason + ': declines, counts it, and warns once per window', async function () {
@@ -91,6 +180,7 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
             });
             expect(engine.cosigned, 'still fail-closed').to.have.lengthOf(0);
             expect(engine._cosignDeclines[reason]).to.equal(2);
+            expect(engine._cosignDeclinesTotal).to.equal(2);
             let mine = lines.filter(l => /declining to co-sign/.test(l));
             expect(mine, 'throttled to one line for two declines').to.have.lengthOf(1);
             expect(mine[0]).to.include(reason).and.to.match(detail);
@@ -102,10 +192,54 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         await engine.handleSignReq(signReq());
         expect(engine.cosigned).to.have.lengthOf(1);
         expect(Object.values(engine._cosignDeclines).every(n => n === 0)).to.equal(true);
+        expect(engine._cosignDeclinesTotal).to.equal(0);
     });
 });
 
 describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
+    it('counts and throttles a pre-auth network mismatch without throwing', async function () {
+        const engine = buildFollower({});
+        const lines = await warnsDuring(async () => {
+            await engine.handleSignReq(signReq({ network: 'mainnet' }));
+            await engine.handleSignReq(signReq({ network: 'mainnet' }));
+        });
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.network_mismatch).to.equal(2);
+        expect(engine._lastCosignDeclineReason).to.equal('network_mismatch');
+        const mismatch = lines.filter(line => line.includes('network_mismatch'));
+        expect(mismatch).to.have.lengthOf(1);
+        expect(mismatch[0]).to.include('mainnet').and.to.include('regtest');
+    });
+
+    it('counts a failed supersede replay-window read instead of rejecting the handler', async function () {
+        const digest = 'ef'.repeat(32);
+        const rules = { digest, replay: {
+            state: 'replayed', target: 30, replay_to: 44, witness: 'passed', changed: true
+        } };
+        const engine = buildFollower({ indexerCall: async () => Object.assign({}, TIP, { rules }) });
+        engine.supersedeFieldsForRound = async () => { throw new Error('db down'); };
+        const lines = await warnsDuring(() => engine.handleSignReq(signReq({
+            supersedes_from: 30, rules_digest: digest
+        })));
+        expect(engine.cosigned).to.have.lengthOf(0);
+        expect(engine._cosignDeclines.supersede_read_failed).to.equal(1);
+        expect(engine._lastCosignDeclineReason).to.equal('supersede_read_failed');
+        expect(lines.join('\n')).to.include('supersede_read_failed').and.to.include('db down');
+    });
+
+    it('counts malformed supersession fields before canonical construction', async function () {
+        const digest = 'ef'.repeat(32);
+        await expectSupersedeFieldDecline('supersede_below_gate', {
+            supersedes_from: 30, rules_digest: digest,
+        }, false);
+        for(const fields of [
+            { supersedes_from: 30 },
+            { rules_digest: digest },
+            { supersedes_from: 'abc', rules_digest: digest },
+            { supersedes_from: 30, rules_digest: 'xyz' },
+        ]) await expectSupersedeFieldDecline('supersede_malformed', fields, true);
+    });
+
     it('classifies getblockhashes result errors before checkpoint hold checks', async function () {
         const cases = [
             ['block not indexed: 500', 'indexer_no_block'],
@@ -121,6 +255,9 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
         }
     });
 
+});
+
+describe('StateCheckpointEngine: follower co-sign declines are counted and named', function () {
     it('counts canonical divergence and rootless fallback refusals', async function () {
         const rooted = signReq().data.checkpoint;
         const rootless = Object.assign({}, rooted, {
@@ -150,16 +287,22 @@ describe('StateCheckpointEngine: follower co-sign declines are counted and named
     it('getcheckpointstats reports every reason and the last one seen', async function () {
         let engine = buildFollower({ indexerCall: async () => null });
         let fresh = await engine.getStats();
-        expect(fresh.cosign_declines).to.have.all.keys('own_tip_unresolved', 'snapshot_out_of_tolerance', 'off_cadence',
-            'indexer_read_failed', 'indexer_no_block', 'indexer_replaying', 'supersede_no_replay',
+        expect(fresh.cosign_declines).to.have.all.keys('network_mismatch', 'own_tip_unresolved',
+            'snapshot_out_of_tolerance', 'off_cadence',
+            'seq_not_derived', 'validator_resolve_failed', 'not_member', 'not_cadence_leader',
+            'sender_sig_invalid', 'seq_read_failed', 'seq_at_or_below_max',
+            'indexer_read_failed', 'indexer_no_block',
+            'indexer_replaying', 'supersede_read_failed', 'supersede_no_replay',
             'supersede_unwitnessed', 'supersede_no_disagreement', 'supersede_target_mismatch',
             'supersede_digest_mismatch', 'checkpoint_disagreement', 'checkpoint_reorged',
-            'indexer_divergence', 'rootless');
+            'indexer_divergence', 'rootless', 'seq_second_payload',
+            'supersede_below_gate', 'supersede_malformed');
         expect(fresh.last_cosign_decline_reason).to.equal(null);
         await warnsDuring(() => engine.handleSignReq(signReq()));
         let stats = await engine.getStats();
         expect(stats.cosign_declines.indexer_no_block).to.equal(1);
         expect(stats.last_cosign_decline_reason).to.equal('indexer_no_block');
+        await expectSequenceDeclinesAreMetered();
     });
 });
 

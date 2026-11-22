@@ -211,6 +211,7 @@ module.exports = {
         // "structurally cannot drain".
         this._catchupCursor          = 0;
         this.batchCatchupRetiredWindows = 0;
+        this.initRetirementState();
         // Set by stop(), so a sweep tick that is mid-await when the publisher stops does
         // not re-arm the timer stop() just cleared.
         this._stopped                = false;
@@ -224,6 +225,14 @@ module.exports = {
         this.chainReconcilePrunedRounds = 0;
         this.chainReconcileFailures    = 0;
         this._chainReconcileWarned     = null;   // last failure reason logged, to log each once
+    },
+
+    // windowIndex -> { backoffMs, nextRetryAt } for retired windows still waiting on the
+    // slow retry lane, and how many have since left it through an assembly outcome
+    // (published, followed, found empty, or seen landed).
+    initRetirementState() {
+        this._retiredWindows = new Map();
+        this.batchCatchupRetiredRecovered = 0;
     },
 
     // ---------------- Landing, not just sending (confirmed-UTXO reserve + watchdog) ----------------
@@ -266,6 +275,7 @@ module.exports = {
         this.confirmationCheckFailures = 0;
         this.lastConfirmationCheckAt  = null;
         this._confirmTimer            = null;
+        this._confirmChecking         = false;
         // Watchdog cadence. 0 disables the timer entirely (the counters stay live for
         // a caller that drives checkPublishedConfirmations itself).
         this.confirmCheckIntervalMs   = nonNegativeIntConfig(

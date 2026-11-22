@@ -25,6 +25,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator');
 const { createMockHub } = require('../../../../../helpers/mockHub');
+const { answerRoundRereadFromInserts } = require('../../../../../helpers/prices/inserted_round_rows.js');
 const { CANONICAL_REORG_BUFFER } = require('../../../../../../src/consensus/snapshot_reorg_buffer.js');
 // The pair-name flag day's own map. Every shipped network is genesis-on since the
 // 2026-09-09 ruling, so the D14 case below straddles a threshold it installs itself.
@@ -126,9 +127,11 @@ function makeValidator() {
 
 
     // doQuery stub. `finalizedRounds` names round_numbers that already have a
-    // non-'skipped' row, i.e. the dedupe SELECT hits for them.
+    // non-'skipped' row, i.e. the dedupe SELECT hits for them. The post-insert round
+    // re-read returns the rows the recorded INSERTs stored.
     function stubDb(finalizedRounds = []) {
         let inserts = [];
+        answerRoundRereadFromInserts(hub.db);
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^SELECT id FROM price_snapshots/.test(sql))
                 return finalizedRounds.includes(params[0]) ? [{ id: 7 }] : [];
@@ -312,7 +315,9 @@ function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
 
         expect(inserts.length).to.equal(0);
     });
+}
 
+function registerPriceaggregatorReceivevalidatedbatch1Tests4() {
     it('rejects a batch with an empty round list, a bad window or a missing block_time', async function () {
         stubDb([]);
         let empty = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds: [] }));
@@ -329,6 +334,30 @@ function registerPriceaggregatorReceivevalidatedbatch1Tests3() {
         // A coerced-to-zero block_time would read as "before every flag day"; refused.
         let zeroTime = await agg.receiveValidatedBatch('BTC', makeBatch({ block_time: 0 }));
         expect(zeroTime.reason).to.equal('invalid block_time');
+
+        const malformed = [
+            [makeBatch({ first_round: '12junk' }), 'invalid round window'],
+            [makeBatch({ last_round: '105.5' }), 'invalid round window'],
+            [makeBatch({ btc_block_height: [BATCH_ANCHOR] }), 'invalid btc_block_height'],
+            [makeBatch({ block_index: '500junk' }), 'invalid block_index'],
+            [makeBatch({ block_time: [BLOCK_TIME] }), 'invalid block_time'],
+            [makeBatch({ block_time: '123.5' }), 'invalid block_time']
+        ];
+        for (const [field, value, reason] of [
+            ['round', '12junk', 'invalid rounds'],
+            ['timestamp', '123.5', 'invalid round timestamp'],
+            ['timestamp', 123.5, 'invalid round timestamp'],
+            ['btc_block_height', [799000], 'invalid round btc_block_height']
+        ]) {
+            const batch = makeBatch();
+            batch.rounds[0][field] = value;
+            malformed.push([batch, reason]);
+        }
+        for (const [batch, reason] of malformed) {
+            const result = await agg.receiveValidatedBatch('BTC', batch);
+            expect(result.accepted).to.equal(false);
+            expect(result.reason).to.equal(reason);
+        }
     });
 }
 
@@ -336,4 +365,5 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
     registerPriceaggregatorReceivevalidatedbatch1Hooks();
     registerPriceaggregatorReceivevalidatedbatch1Tests1();
     registerPriceaggregatorReceivevalidatedbatch1Tests3();
+    registerPriceaggregatorReceivevalidatedbatch1Tests4();
 });

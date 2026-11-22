@@ -284,6 +284,10 @@ class Lifecycle {
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();
         if(this.crossChain)       await this.crossChain.stop();
+        // Stopped before the signer, consensus and pool it drives: its grace, catch-up
+        // and confirmation timers end in a signing round, a spend and a DB write, and
+        // its round:finalized listener would otherwise re-arm them after the close.
+        if(this.oraclePublisher)   this.oraclePublisher.stop();
         if(this.oracleBatchSigner) await this.oracleBatchSigner.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();

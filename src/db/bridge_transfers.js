@@ -177,10 +177,10 @@ module.exports = {
     // Rows the ANCHOR archive still owes a batch to: never archived, or archived at a
     // status a later retraction has since moved past. The same pending predicate
     // cross_chain_matches uses.
-    async findBridgeTransfersByBatchSeq(limit) {
+    async findBridgeTransfersByBatchSeq(network, limit) {
         return this.doQuery(
-            'SELECT * FROM bridge_transfers WHERE batch_seq IS NULL OR archived_status <> status ' +
-            'ORDER BY transfer_id ASC LIMIT ?', [limit]);
+            'SELECT * FROM bridge_transfers WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status) ' +
+            'ORDER BY transfer_id ASC LIMIT ?', [String(network || ''), limit]);
     },
 
     // Stamps the ANCHOR archive batch a transfer was published in. Guarded on the same

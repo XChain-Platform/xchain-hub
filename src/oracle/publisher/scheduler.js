@@ -39,6 +39,13 @@ const ASSEMBLED_WINDOW_MEMO_MAX = 4096;
 // queued behind it would wait out every one of them.
 const CATCHUP_WINDOWS_PER_SWEEP = 4;
 
+// Retired windows re-proposed per sweep, on top of the regular slots, and the ceiling
+// on the doubling wait between those retries. A refusal cannot tell content
+// divergence from peers that were down, so retirement slows a window down instead of
+// ending it; the cap keeps the slowest retry well inside the buffer's horizon.
+const CATCHUP_RETIRED_WINDOWS_PER_SWEEP = 1;
+const RETIRED_RETRY_MAX_BACKOFF_MS = 48 * 3600000;
+
 module.exports = {
 
     // ----- The window scheduler -----
@@ -67,6 +74,8 @@ module.exports = {
     // late arrival would let a steady trickle of stragglers postpone an hour of price
     // data indefinitely.
     armWindowTimer(windowIndex) {
+        // An onRoundFinalized already past its await when stop() ran reaches here.
+        if (this._stopped) return;
         let state = this._windows.get(windowIndex);
         if (!state) { state = { timer: null }; this._windows.set(windowIndex, state); }
         if (state.timer) return;
@@ -104,6 +113,7 @@ module.exports = {
     // carries, THEN re-propose what is left. Never throws: the sweep must run even
     // when the reconcile cannot, or a hub with no indexer would never catch up.
     async reconcileThenSweep() {
+        if (this._stopped) return 0;
         try { await this.reconcileBacklogAgainstChain(); }
         catch (e) { logger.error(nodeUtil.format('OraclePublisher: backlog reconcile against the chain failed:', e)); }
         try { return this.sweepBufferCatchup(); }
@@ -135,13 +145,14 @@ module.exports = {
     // _assembledWindows is what keeps this cheap on the second and later sweeps: a
     // window this hub followed, published, or found empty is memoized there, so what
     // survives the filter is exactly the windows that ATTEMPTED and produced no wire.
+    // A retired window is left out too; it has its own slower lane (dueRetiredWindows).
     pendingCatchupWindows() {
         if (this._buffer.size === 0) return [];
         let windows = Array.from(new Set(
             Array.from(this._buffer.keys()).map(r => this.windowIndexOf(r)))).sort((a, b) => a - b);
         let highest = windows[windows.length - 1];
         return windows.filter(w => {
-            if (this._assembledWindows.has(w)) return false;
+            if (this._assembledWindows.has(w) || this._retiredWindows.has(w)) return false;
             let state = this._windows.get(w);
             if (state && state.timer) return false;
             return w < highest || this.windowLastSlotBuffered(w);
@@ -182,8 +193,10 @@ module.exports = {
     // always the oldest four, a hub holding 697 closed windows re-proposed windows 10-13
     // for ever and proposed window 14 never once.
     sweepBufferCatchup() {
+        if (this._stopped) return 0;
         let pending = this.pendingCatchupWindows();
-        if (pending.length === 0) return 0;
+        // An empty regular pool is exactly when a due retired window matters most.
+        if (pending.length === 0) return this.retryRetiredWindows();
         this.batchCatchupSweeps++;
 
         // Resume where the last sweep stopped, wrapping when the cursor has passed
@@ -199,12 +212,8 @@ module.exports = {
             // Retiring costs no slot: a hopeless window must not displace a window that
             // could still publish, which is the whole point of retiring it.
             if (this.retireExhaustedWindow(w)) { retired.push(w); continue; }
-            let seen = this._catchupAttempts.get(w);
-            if (seen) seen.count++;
-            else      this._catchupAttempts.set(w, { count: 1, firstAt: Date.now() });
             take.push(w);
         }
-        if (take.length === 0 && retired.length === 0) return 0;
         if (take.length > 0) this._catchupCursor = take[take.length - 1] + 1;
 
         if (pending.length > take.length) {
@@ -212,21 +221,63 @@ module.exports = {
                 'buffered and unpublished; re-proposing ' + take.length + ' of them this sweep ' +
                 '(from window ' + (take.length ? take[0] : '-') + ', resuming at ' +
                 this._catchupCursor + ' next sweep)' +
-                (retired.length ? '; retired ' + retired.length + ' window(s) that will never be co-signed' : ''));
+                (retired.length ? '; moved ' + retired.length + ' window(s) to the slow retry lane' : ''));
         }
         for (let w of take) this.queueWindowAssembly(w);
-        return take.length;
+        return take.length + this.retryRetiredWindows();
     },
 
-    // Retire one window from the catch-up sweep when it has failed enough attempts, for
-    // long enough, that the federation is not going to co-sign it. True when it was
-    // retired this call.
+    // Retired windows whose wait has run out, oldest due first. Entries whose rounds
+    // have all left the buffer are dropped here, since nothing is left to propose.
+    dueRetiredWindows() {
+        let now = Date.now(), due = [];
+        for (let [w, state] of Array.from(this._retiredWindows)) {
+            let { first, last } = this.windowPlan.rangeOf(w);
+            if (this._assembledWindows.has(w) || this.bufferedRange(first, last).length === 0) {
+                this._retiredWindows.delete(w);
+                continue;
+            }
+            let timer = this._windows.get(w);
+            if (state.nextRetryAt <= now && !(timer && timer.timer)) due.push([w, state.nextRetryAt]);
+        }
+        return due.sort((a, b) => a[1] - b[1]).map(d => d[0]);
+    },
+
+    // Queue the due retired windows this sweep may spend, pushing each one's next retry
+    // out first so a retry that fails again simply waits longer.
+    retryRetiredWindows() {
+        let due = this.dueRetiredWindows().slice(0, CATCHUP_RETIRED_WINDOWS_PER_SWEEP);
+        for (let w of due) {
+            let state = this._retiredWindows.get(w);
+            state.backoffMs = Math.max(state.backoffMs, Math.min(state.backoffMs * 2, RETIRED_RETRY_MAX_BACKOFF_MS));
+            state.nextRetryAt = Date.now() + state.backoffMs;
+            let { first, last } = this.windowPlan.rangeOf(w);
+            logger.warn('OraclePublisher: re-proposing retired window [' + first + ',' + last + ']; ' +
+                'if it fails again the next retry is in ' + Math.round(state.backoffMs / 60000) + ' minute(s)');
+            this.queueWindowAssembly(w);
+        }
+        return due.length;
+    },
+
+    // Only a completed signing round that came back short counts toward
+    // retirement. Withholds before signing remain eligible for later sweeps.
+    // A retired window's failure is already priced into its backoff.
+    noteSigningShortfall(windowIndex) {
+        if (this._retiredWindows.has(windowIndex)) return;
+        const seen = this._catchupAttempts.get(windowIndex);
+        if (seen) seen.count++;
+        else      this._catchupAttempts.set(windowIndex, { count: 1, firstAt: Date.now() });
+    },
+
+    // Retire one window from the regular catch-up slots when it has failed enough
+    // attempts, for long enough, that it is starving the windows behind it. True when it
+    // was retired this call.
     //
-    // Retirement is a memo entry, NOT a deletion: the buffered rounds stay exactly where
-    // they are, so the observation prune, a takeover and the ORACLE_BATCH_BUFFER_MAX_ROUNDS
-    // bound all behave as before, and nothing this hub holds is thrown away. All it
-    // changes is that the window stops consuming a re-proposal slot the windows behind
-    // it need.
+    // Retirement is a slow lane, NOT the assembled memo and NOT a deletion: the buffered
+    // rounds stay where they are, and the window is re-proposed on a doubling wait from
+    // its own extra slot, because a short quorum looks the same whether peers refused
+    // the content or were simply down. All it changes is that the window stops
+    // consuming a regular re-proposal slot.
     retireExhaustedWindow(windowIndex) {
         if (this.catchupMaxAttempts <= 0) return false;
         let seen = this._catchupAttempts.get(windowIndex);
@@ -234,13 +285,18 @@ module.exports = {
         if ((Date.now() - seen.firstAt) < this.catchupRetireAfterMs) return false;
 
         let { first, last } = this.windowPlan.rangeOf(windowIndex);
+        let backoffMs = Math.max(1, this.catchupRetireAfterMs, this.batchCatchupIntervalMs);
         this.batchCatchupRetiredWindows++;
-        this.noteAssembled(windowIndex);   // also clears the attempt record
+        this._catchupAttempts.delete(windowIndex);
+        this._retiredWindows.set(windowIndex, { backoffMs: backoffMs, nextRetryAt: Date.now() + backoffMs });
+        while (this._retiredWindows.size > ASSEMBLED_WINDOW_MEMO_MAX) {
+            this._retiredWindows.delete(this._retiredWindows.keys().next().value);
+        }
         logger.warn('OraclePublisher: window [' + first + ',' + last + '] has failed ' + seen.count +
             ' batch-signing round(s) over ' + Math.round((Date.now() - seen.firstAt) / 60000) +
-            ' minute(s) and is retired from the catch-up sweep: no quorum of the price-capable set ' +
-            'will reproduce its content, so re-proposing it only starves the windows behind it. Its ' +
-            'rounds stay buffered; batchCatchupRetiredWindows in getoraclepublisherstatus counts this.');
+            ' minute(s) and is retired from the catch-up sweep to a slow retry lane, so it stops ' +
+            'starving the windows behind it; next retry in ' + Math.round(backoffMs / 60000) + ' minute(s). ' +
+            'Its rounds stay buffered; batchCatchupRetiredPending in getoraclepublisherstatus counts this.');
         return true;
     },
 
@@ -271,7 +327,10 @@ module.exports = {
     // protected nothing and cost the fleet a backlog it could not walk.
     startBufferCatchupSweep() {
         if (this._catchupSweepTimer) return;
-        this.armCatchupSweep(this.batchCatchupIntervalMs);
+        // The first arm picks its cadence the same way every later one does: a hub
+        // restarting into a backlog deeper than one sweep must not idle a full idle
+        // interval before the second sweep.
+        this.armCatchupSweep(this.nextCatchupSweepDelayMs());
     },
 
     armCatchupSweep(delayMs) {
@@ -318,6 +377,7 @@ module.exports = {
         // it published, was followed, or was found empty. Keeping its attempt record
         // would retire the NEXT window to reuse the index after the memo evicts.
         this._catchupAttempts.delete(windowIndex);
+        if (this._retiredWindows.delete(windowIndex)) this.batchCatchupRetiredRecovered++;
         this._assembledWindows.set(windowIndex, true);
         while (this._assembledWindows.size > ASSEMBLED_WINDOW_MEMO_MAX) {
             this._assembledWindows.delete(this._assembledWindows.keys().next().value);

@@ -159,31 +159,48 @@ function buildCliArgs(model, systemPrompt, systemPromptOverride, maxBudgetUsd) {
 }
 
 // Reject on the child failures that arrive as events rather than as an exit code.
-function rejectOnChildErrors(child, timer, rejectTransient) {
+function rejectOnChildErrors(child, timer, terminate, rejectTransient) {
     child.on('error', (e) => {
         clearTimeout(timer);
         rejectTransient('claude-spawn: spawn error: ' + e.message);
     });
 
-    // stdin write failures on a child that exits early (bad flag, late
-    // binary-resolution failure, CLI startup crash) arrive asynchronously
-    // as an 'error' event (EPIPE), not as a synchronous throw from the
-    // write() in runCli. Without a handler the unhandled stream error would
-    // propagate to the process and can take down the whole hub; reject the
-    // promise instead. The child.on('error') handler above covers spawn
-    // failures only, not pipe errors.
+    // A broken stdin pipe does not prove the child exited. Terminate it through
+    // the same bounded sequence as a timeout before allowing fallback to advance.
     child.stdin.on('error', (e) => {
         clearTimeout(timer);
+        terminate();
         rejectTransient('claude-spawn: stdin error: ' + e.message);
     });
+}
+
+// One idempotent SIGTERM, then SIGKILL after a grace period, for a child that must
+// stop. The escalation is dropped as soon as the child's exit is confirmed.
+function makeTerminator(child) {
+    let terminating = false;
+    let escalationTimer = null;
+    const clearEscalation = () => {
+        if (escalationTimer) clearTimeout(escalationTimer);
+        escalationTimer = null;
+    };
+    const terminate = () => {
+        if (terminating) return;
+        terminating = true;
+        try { child.kill('SIGTERM'); } catch {}
+        escalationTimer = setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch {}
+        }, 2000);
+        if (escalationTimer.unref) escalationTimer.unref();
+    };
+    return { terminate, clearEscalation };
 }
 
 // Spawn the CLI once, stream `prompt` on stdin, and settle on its exit.
 function runCli(args, prompt, cwd, auth, timeoutMs) {
     return new Promise((resolve, reject) => {
         let settled = false;
-        let stdout = '';
-        let stderr = '';
+        const stdoutChunks = [];
+        const stderrChunks = [];
         const safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
         const safeReject  = (e) => { if (!settled) { settled = true; reject(e); } };
 
@@ -195,28 +212,32 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
 
         // Classification contract shared with the HTTP transports (providers/llm.js):
         // err.transient=true marks a TRANSPORT-or-VENDOR-availability failure the judge
-        // fallback chain may retry on a different model; err.transient=false marks a
-        // REACHED-MODEL outcome (a verdict, a refusal, a hard vendor error) that must NOT trigger
-        // re-judging, and err.kind='refusal' marks a model refusal, mirroring the
+        // fallback chain may retry on a different model; err.transient=false normally marks a
+        // reached-model outcome that must not trigger re-judging. A vendor_config kind
+        // marks the no-verdict exception, and kind='refusal' mirrors the
         // anthropic_api/openai_api paths so refusal reporting is symmetric across
         // vendors. Without this every bare-Error rejection fell through agree()'s
         // gate and wrongly advanced the chain past a reached-judge outcome.
         const rejectTransient = (msg) => { let err = new Error(msg); err.transient = true; safeReject(err); };
         const rejectHard = (msg, kind) => { let err = new Error(msg); err.transient = false; if (kind) err.kind = kind; safeReject(err); };
 
+        const { terminate, clearEscalation } = makeTerminator(child);
         const timer = setTimeout(() => {
-            try { child.kill('SIGTERM'); } catch {}
-            setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000);
+            terminate();
             rejectTransient('claude-spawn: timeout after ' + timeoutMs + 'ms');
         }, timeoutMs);
 
-        child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
-        child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+        child.stdout.on('data', (chunk) => { stdoutChunks.push(chunk); });
+        child.stderr.on('data', (chunk) => { stderrChunks.push(chunk); });
 
-        rejectOnChildErrors(child, timer, rejectTransient);
+        rejectOnChildErrors(child, timer, terminate, rejectTransient);
 
+        child.once('exit', clearEscalation);
         child.on('close', (code) => {
             clearTimeout(timer);
+            clearEscalation();
+            const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+            const stderr = Buffer.concat(stderrChunks).toString('utf8');
             const outcome = closeOutcome(code, stdout, stderr);
             if (outcome.transient === true)       rejectTransient(outcome.message);
             else if (outcome.transient === false) rejectHard(outcome.message, outcome.kind);
@@ -228,6 +249,7 @@ function runCli(args, prompt, cwd, auth, timeoutMs) {
             child.stdin.end();
         } catch (e) {
             clearTimeout(timer);
+            terminate();
             rejectTransient('claude-spawn: stdin write failed: ' + e.message);
         }
     });

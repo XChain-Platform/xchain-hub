@@ -43,11 +43,16 @@ module.exports = {
     // or, earlier, the first eligible checkpoint of one of its chains since that chain's
     // last anchor. A section is replaced by a newer checkpoint every cadence step, so its
     // own height never ages past one step and the backup ranks would never unlock.
-    // Leader and followers both read it here, from their own rows.
-    async bundleContentBlock(network, sections){
+    // Leader and followers both read it here, from their own rows. The leader passes
+    // `bundleEligible` and counts only rows a bundle could carry; followers keep the
+    // wider age, whose rows are a superset, so any rank a leader unlocks is unlocked at
+    // every follower whichever of the two ages that follower reads.
+    async bundleContentBlock(network, sections, bundleEligible){
         let block = Math.min(...sections.map(section => Number(section.snapshot_block)));
         const chains = new Set(sections.map(section => String(section.chain)));
-        for(const row of await this.oldestUnanchoredCheckpointBlocks(network)){
+        const rows = bundleEligible ? await this.oldestBundleEligibleCheckpointBlocks(network)
+                                    : await this.oldestUnanchoredCheckpointBlocks(network);
+        for(const row of rows){
             const oldest = Number(row.oldest_block);
             if(chains.has(String(row.chain)) && Number.isSafeInteger(oldest) && oldest >= 0 && oldest < block)
                 block = oldest;
@@ -68,9 +73,28 @@ module.exports = {
         }
     },
 
+    // The age above restricted to rows groupSectionsByNetwork and the pending selector
+    // would let ride a bundle. Any failure reads the wider age instead, so failover is
+    // never weaker than with the wider age alone.
+    async oldestBundleEligibleCheckpointBlocks(network){
+        const floor = typeof this.commitmentFloorBlock === 'function' ? this.commitmentFloorBlock(network) : null;
+        if(!Number.isSafeInteger(floor) || !this.db ||
+           typeof this.db.findOldestBundleEligibleCheckpointBlocksByNetwork !== 'function')
+            return this.oldestUnanchoredCheckpointBlocks(network);
+        try {
+            return (await this.db.findOldestBundleEligibleCheckpointBlocksByNetwork(
+                this.checkpointIntervalBlocks, this.anchorEveryNCheckpoints, String(network), floor)) || [];
+        } catch(e){
+            logger.warn('StateAnchorPublisher: bundle-eligible checkpoint age read failed for ' + network +
+                        '; measuring the bundle ladder from the unanchored age: ' + (e && e.message));
+            return this.oldestUnanchoredCheckpointBlocks(network);
+        }
+    },
+
     // Follower half of the ladder: is `sender` rank-unlocked for the bundle over `rows`
-    // (our own copies of its sections) at our BTC tip? Same order and content age as
-    // the leader's publishBundle, so a backup the leader side unlocks is accepted here.
+    // (our own copies of its sections) at our BTC tip? Same order as the leader's
+    // publishBundle, measured from the wider unanchored age, which is never younger than
+    // the leader's, so a backup the leader side unlocks is accepted here.
     async bundleSenderUnlocked(network, snapshotBlock, electionSet, sender, rows){
         const order = canonicalForms.hashOrder(
             this.bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);

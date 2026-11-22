@@ -17,6 +17,7 @@ const { buildSnapshotCosignView } = require('./cosign_view.js');
 const { snapshotCosignRefusal } = require('./cosign_policy.js');
 const { acceptSnapshotFinalized } = require('./finalized_message.js');
 const { ROUND_STATE, createSnapshotRound } = require('./round_state.js');
+const snapshotStats = require('./stats.js');
 
 const logger = getLogger();
 
@@ -111,7 +112,7 @@ async function lead(engine, cp, validators, snapshotBlock, signature) {
         if (engine.snapshotRounds.get(id) !== pending) return;
         // A quorum-met round still open here never finalized, so it is logged too.
         const reason = pending.round.status().quorumMet ? 'quorum_met_unfinalized' : 'below_quorum';
-        logRoundTerminal(pending, ROUND_STATE.EXPIRED, reason);
+        logRoundTerminal(engine, pending, ROUND_STATE.EXPIRED, reason);
         closeRound(engine, pending);
     }, engine.roundTimeoutMs);
     if (pending.timer.unref) pending.timer.unref();
@@ -181,7 +182,7 @@ async function advanceLeader(engine, pending) {
         });
         if (decision.state === ROUND_STATE.PENDING) return;
         if (decision.state !== ROUND_STATE.FINALIZE) {
-            logRoundTerminal(pending, decision.state, decision.reason);
+            logRoundTerminal(engine, pending, decision.state, decision.reason);
             closeRound(engine, pending);
             return;
         }
@@ -190,7 +191,7 @@ async function advanceLeader(engine, pending) {
             validator_signatures: decision.msg.signatures,
         });
         if (!snapshotCheckpointQuorum(signed, pending.validators, ValidatorIdentity.verify)) {
-            logRoundTerminal(pending, ROUND_STATE.ABORT, 'quorum_recheck_failed');
+            logRoundTerminal(engine, pending, ROUND_STATE.ABORT, 'quorum_recheck_failed');
             closeRound(engine, pending);
             return;
         }
@@ -204,9 +205,10 @@ async function advanceLeader(engine, pending) {
     }
 }
 
-function logRoundTerminal(pending, state, reason) {
+function logRoundTerminal(engine, pending, state, reason) {
     if (pending.terminalLogged) return;
     pending.terminalLogged = true;
+    snapshotStats.recordRoundTerminal(engine, state, reason);
     const tally = pending.round.status();
     const stake = tally.stakeTally === null || tally.totalStake === null
         ? 'unavailable'

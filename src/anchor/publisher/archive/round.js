@@ -26,6 +26,7 @@ const { listIdsOf } = require('./list/list_rows_select.js');
 const archivePublishGate = require('../../archive_publish_gate.js');
 const { bftQuorumOrSingle } = require('../../../lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
+const { selectArchiveRoundInput } = require('./round_selection.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
 const { XANC_SIGN_REQ } = require('../constants.js');
 const { getLogger } = require('../../../observability');
@@ -57,16 +58,10 @@ module.exports = {
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!this.archiveElectionAdmits(electionPubkeys, me, electionBlock)) return this.archiveFlushStatus('none', 'election_not_admitted');
 
-        let rows = await this.gatherUnpublishedArchiveRows();
-        if(!rows) return this.archiveFlushStatus('none', 'no_pending_rows');
-
-        let cps = await this.latestArchiveWrapperRows();
-        if(!cps || cps.length === 0){
-            logger.info('StateAnchorPublisher: no state checkpoint yet; archive deferred');
-            return this.archiveFlushStatus('none', 'no_wrapper_checkpoint');
-        }
+        const selected = await selectArchiveRoundInput(this);
+        if(selected.status) return selected.status;
+        let { cps, network, rows } = selected;
         let cp = this.cpFromRow(cps[0]);
-        let network  = String(cps[0].network);
 
         let liveIntent = await this.getLiveArchiveIntent(network);
         if(this.archiveRoundIntentHeld(liveIntent, network)) return this.archiveFlushStatus('intent_held', 'live_intent_held');
@@ -74,6 +69,7 @@ module.exports = {
         let batchSeq = await this.getNextBatchSeq();
         // Lead only above the seqs our own DOGE address already spent
         batchSeq = await this.leaderBatchSeqAboveOwn(batchSeq);
+        if(this.ownArchiveSeqFloorUnknown()) return this.archiveFlushStatus('none', 'seq_floor_unknown');
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return this.archiveFlushStatus('none', 'empty_after_reward_resolution');
 
@@ -86,10 +82,10 @@ module.exports = {
         let canonical = this.archiveCanonical(cp, batchSeq, archive.count, wire.crc, wire.chunks.length);
         if(!this.identity) throw new Error('no validator identity: cannot sign archives');
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
-
         let signingSet = await this.archiveSigningSet(cp);
         if(this.archiveSigningSetUnresolved(signingSet, cp, batchSeq)) return this.archiveFlushStatus('none', 'signing_set_unresolved');
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return this.archiveFlushStatus('none', 'wrapper_slot_already_signed');
+        let mySig = this.identity.sign(canonical);
         let round = this.openArchiveRound({ cp, batchSeq, wire, canonical, signer, electionBlock, archive, rows, rewardRows, signingSet, myPubkey, mySig });
         if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
 
@@ -182,8 +178,8 @@ module.exports = {
 
     // The pending rows, or null when there are none or they repeat the last complete
     // publish. Fingerprinted here, before buildSizedArchive trims the set in place.
-    async gatherUnpublishedArchiveRows(){
-        const rows = await this.gatherArchiveRows();
+    async gatherUnpublishedArchiveRows(network){
+        const rows = await this.gatherArchiveRows(network);
         if(!rows) return null;
         rows.rowsFingerprint = this.archiveRowsFingerprint(rows);
         return this.archiveRepeatsLastPublish(rows.rowsFingerprint) ? null : rows;

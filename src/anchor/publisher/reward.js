@@ -48,14 +48,18 @@ function installFoldAttestHooks(){
         finally { peerManager.broadcast = broadcast; }
     };
     attestRoundMethods.handleAttestSignReq = async function(envelope){
-        let archiveReply = this.coSignFoldArchiveRequest(envelope).catch(() => null);
-        let peerManager = this.peerManager;
         // Gate the archive co-sign on THIS request's own verdict, never on a flag set by
         // patching the shared broadcast, which overlapping requests would trip for each other.
-        let accepted = (await handleReq.call(this, envelope)) === true;
+        // Verification runs alongside the bundle handler, but the durable wrapper slot is
+        // claimed only once that verdict is true, so a declined sender cannot burn it.
+        let verdict = handleReq.call(this, envelope).then(v => v === true);
+        let archiveReply = this.coSignFoldArchiveRequest(envelope, verdict).catch(() => null);
+        let peerManager = this.peerManager;
+        let accepted = await verdict;
         let signed = await archiveReply;
         if(accepted && signed && peerManager){
             this.recordObservedArchiveLeader(signed.batchSeq, signed.sender, signed.cp);
+            this.recordObservedFoldArchiveKey(signed.batchSeq, signed.sender, signed);
             this.recordObservedArchiveContent(signed.batchSeq, signed.sender, signed.archive);
             peerManager.broadcast(XANCPUB_SIGN, signed.reply);
         }

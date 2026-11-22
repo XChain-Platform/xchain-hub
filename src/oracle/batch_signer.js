@@ -42,6 +42,7 @@ const swq               = require('../consensus/stake_weighted_quorum.js');
 // batch's BTC anchor height.
 const gateRegistry      = require('../consensus/gate_registry');
 const PRICE_SIG_TALLY_KEY = 'price_sig_tally_activation.PRICE_SIG_TALLY_ACTIVATION';
+const hubConfig         = require('../config');
 const { positiveIntConfig } = require('../lib/config_int.js');
 const { resolveRoundCadence } = require('./round_cadence.js');
 const { resolveBatchWindow } = require('./batch_window_config.js');
@@ -102,7 +103,10 @@ class OracleBatchSigner {
         // waited out ORACLE_BATCH_GRACE_MS before it proposes, so a peer that is
         // briefly behind on its own mirror still has a full minute to catch up and
         // co-sign. Spending it costs an hour of publishing latency, never safety.
-        this.signTimeoutMs = positiveIntConfig(cfg.ORACLE_BATCH_SIGN_TIMEOUT_MS, 60000,
+        // The env wins over p2pConfig, as for the other env-backed ORACLE_BATCH_* knobs:
+        // api.js does not forward this key, so a p2pConfig-only read would ignore the override.
+        this.signTimeoutMs = positiveIntConfig(
+            hubConfig.ORACLE_BATCH_SIGN_TIMEOUT_MS || cfg.ORACLE_BATCH_SIGN_TIMEOUT_MS, 60000,
             'ORACLE_BATCH_SIGN_TIMEOUT_MS');
 
         this.fillTimeoutMs = positiveIntConfig(cfg.ORACLE_BATCH_FILL_TIMEOUT_MS, 15000,

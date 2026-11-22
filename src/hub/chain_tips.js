@@ -30,7 +30,9 @@ const nodeUtil = require('node:util');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
 const { lagRefusal, resolveBtcCheckpointHeights } = require('./btc_checkpoint_heights.js');
-const logger = getLogger();
+const logger = getLogger(); const { REASONS, classifyFetchError } = require('../validators/consensus_input_monitor.js');
+// A null tip ends rounds before any snapshot fetch, so only this feeds the gate monitor; failures only (the stake-share watcher reads this path too).
+const tipFailed = (hub, reason, why) => { const m = hub.capabilitySnapshot && hub.capabilitySnapshot.monitor; if(m && m.recordFailure) try { m.recordFailure('getlatestblock', reason, why); } catch (_) { /* observability only */ } };
 
 // One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
 // isolated even when tests or embedded callers deliberately use more than one in a scope.
@@ -70,7 +72,7 @@ class ChainTips {
         let url = await this.resolveBtcIndexerUrl();
         if(!url){
             logger.warn('XChainHub: no BTC indexer URL resolves; no BTC latest block');
-            return null;
+            tipFailed(this, REASONS.NO_INDEXER, 'no BTC indexer URL resolves'); return null;
         }
         try {
             let res = await axiosFor(this).post(url, {
@@ -81,13 +83,13 @@ class ChainTips {
             if(!result || result.error){
                 logger.warn('XChainHub: BTC indexer getlatestblock returned ' +
                     (result ? 'an error (' + JSON.stringify(result.error) + ')' : 'no result') + '; no BTC latest block');
-                return null;
+                tipFailed(this, REASONS.RPC_ERROR, 'getlatestblock returned no usable result'); return null;
             }
             let directHeight = Number(result.block_index) || null;
             if(!directHeight){
                 logger.warn('XChainHub: BTC indexer getlatestblock returned no usable block_index (' +
                     JSON.stringify(result.block_index) + '); no BTC latest block');
-                return null;
+                tipFailed(this, REASONS.MALFORMED, 'getlatestblock returned no usable block_index'); return null;
             }
             let lagWhy = lagRefusal(result.lag);
             if(lagWhy){ logger.warn('XChainHub: BTC indexer ' + lagWhy); return null; }
@@ -95,7 +97,7 @@ class ChainTips {
             return directHeight;
         } catch (err) {
             logger.error(nodeUtil.format('XChainHub: failed to resolve BTC latest block from indexer:', err));
-            return null;
+            tipFailed(this, classifyFetchError(err), 'getlatestblock: ' + (err && err.message)); return null;
         }
     }
 
@@ -265,30 +267,30 @@ class ChainTips {
         return tip;
     }
 
-    // Per-chain freshness gate for the admission tip. Today's gates (btcPushedTipFresh,
-    // btcDirectTipAcceptable) are BTC-only and date a tip against a stored block_time;
-    // the decoder tip carries no time, so this one dates it against the last height THIS
-    // hub observed for that chain and how long ago it observed it.
+    // Decoder tips carry no time, so date freshness from this hub's last observation.
     //
-    // A height that BEATS the last observation proves the chain moved and is always
-    // taken, exactly as btcDirectTipAcceptable takes an advancing height. Only a height
-    // that has NOT moved can be dated as frozen, and only after the chain's own window.
+    // An advancing height proves movement. A lower height identifies a reset or
+    // shorter reorg, so re-baseline instead of dating it against an unreachable
+    // old height. Only an equal height can be frozen after the chain's own window.
     //
-    // First sight is accepted and recorded: a tip we have never seen before cannot be
-    // dated, and refusing it would make every hub restart a rail outage. The refusal
-    // that matters is the frozen decoder, which needs two observations to see.
+    // Accept first sight because it cannot be dated; refusing it makes restarts outages.
     admissionTipFresh(coin, tip){
         let c = admissionHeight.normalizeChain(coin);
         if(c === null) return false;
         if(!this._admissionTipSeen) this._admissionTipSeen = new Map();
         let nowMs = Date.now();
         let prev = this._admissionTipSeen.get(c);
-        if(!prev || Number(tip) > Number(prev.height)){
-            this._admissionTipSeen.set(c, { height: Number(tip), atMs: nowMs });
+        let height = Number(tip);
+        let prevHeight = prev && Number(prev.height);
+        if(prev && height < prevHeight)
+            logger.warn('XChainHub: the ' + c + ' decoder tip moved backward from height ' + prevHeight +
+                ' to ' + height + '; treating it as a new chain history and restarting the admission freshness window');
+        if(!prev || height !== prevHeight){
+            this._admissionTipSeen.set(c, { height, atMs: nowMs });
             return true;
         }
         // Keep a quiet regtest chain usable without requiring a manually mined block.
-        if(String(this.network).toLowerCase() === 'regtest' && Number(tip) === Number(prev.height)) return true;
+        if(String(this.network).toLowerCase() === 'regtest') return true;
         let maxAgeS = Number(hubConfig.ADMISSION_TIP_MAX_AGE_S);
         if(!Number.isFinite(maxAgeS) || maxAgeS <= 0)
             maxAgeS = ChainTips.ADMISSION_TIP_STALL_BLOCKS * blockIntervalS(c);

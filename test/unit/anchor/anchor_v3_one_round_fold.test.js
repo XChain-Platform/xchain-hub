@@ -10,6 +10,7 @@ const StateAnchorPublisher = require('../../../src/anchor/publisher');
 const ar = require('../../../src/consensus/gates/anchor_reward_gate.js');
 const { XANC_SIGN_REQ, XANCPUB_SIGN_REQ } = require('../../../src/anchor/publisher/constants.js');
 const { CP_ROW, buildMesh, v0Order, startAll, registerMeshHooks } = require('../../helpers/anchor_mesh.js');
+const canonicalVectors = require('../../fixtures/anchor_canonical_vectors.json');
 
 function section(chain, sig){
     return Object.assign({}, CP_ROW, {
@@ -36,6 +37,27 @@ function walkSections(wire){
 function archiveCount(wire){
     let parsed = walkSections(wire);
     return Number(parsed.fields[parsed.next]);
+}
+
+function vectorSections(bundle, decoyWrapper){
+    return bundle.sections.map(row => ({
+        ...row,
+        validator_signatures: JSON.stringify(decoyWrapper && row.chain === 'BTC'
+            ? [{ pubkey: 'decoy-pubkey', sig: 'decoy-signature' }]
+            : row.validator_signatures)
+    }));
+}
+
+function vectorArchive(bundle, crc){
+    const wrapper = bundle.sections.find(row => row.chain === 'BTC');
+    return {
+        wrapperSectionIndex: bundle.wrapper_section_index,
+        batchSeq: bundle.match_batch_seq,
+        count: bundle.match_count,
+        crc,
+        chunks: [bundle.archive_b64],
+        signatures: wrapper.validator_signatures
+    };
 }
 
 async function publishFoldedGroups(groups, archiveBody = 'body'){
@@ -117,10 +139,10 @@ describe('ANCHOR v3 one-round archive fold wire', function () {
         let archive = {
             wrapperSectionIndex: 0, batchSeq: 42, count: 17,
             crc: '9C4E1B22', chunks: ['body'],
-            signatures: [{ pubkey: 'b', sig: 'bs' }, { pubkey: 'a', sig: 'as' }]
+            signatures: [{ pubkey: 'B', sig: 'BS' }, { pubkey: 'a', sig: 'As' }]
         };
         let wire = pub.buildV3Payload({ network: 'regtest', snapshot_block: 100 },
-            [section('LTC', 'l'), section('BTC', 'b')], archive, 'publisher', []);
+            [section('ltc', 'l'), section('btc', 'b')], archive, 'publisher', []);
         let parsed = walkSections(wire);
         expect(parsed.fields.slice(0, 5)).to.deep.equal(['ANCHOR', '3', 'regtest', '100', '2']);
         expect(parsed.sections.map(s => s.chain)).to.deep.equal(['BTC', 'LTC']);
@@ -164,11 +186,31 @@ describe('ANCHOR v3 one-round archive fold wire', function () {
     });
 });
 
+describe('ANCHOR v3 one-round archive fold wire', function () {
+    it('matches both canonical v3 vectors through the live builder', function () {
+        const pub = Object.create(StateAnchorPublisher.prototype);
+        const bundle = canonicalVectors.fixture.bundle_v3;
+        const sections = vectorSections(bundle, false);
+        const header = { network: bundle.network, snapshot_block: bundle.snapshot_block };
+        expect(pub.buildV3Payload(header, sections, null, bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3_no_archive);
+        expect(pub.buildV3Payload(null, sections, null, bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3_no_archive);
+
+        const decoySections = vectorSections(bundle, true);
+        expect(pub.buildV3Payload(header, decoySections, vectorArchive(bundle, bundle.batch_crc32),
+            bundle.publisher, bundle.attest_sigs)).to.equal(canonicalVectors.vectors.v3);
+        expect(pub.buildV3Payload(header, decoySections,
+            vectorArchive(bundle, bundle.batch_crc32.toUpperCase()), bundle.publisher, bundle.attest_sigs))
+            .to.equal(canonicalVectors.vectors.v3);
+    });
+});
+
 describe('ANCHOR v3 one-round archive fold publication', function () {
     registerFoldHooks();
 
     it('publishes one folded transaction and retires the separate archive reward', async function () {
-        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         let node = bus.nodes[0];
         await startAll(bus);
         await node.pub.flush();
@@ -181,7 +223,7 @@ describe('ANCHOR v3 one-round archive fold publication', function () {
     });
 
     it('co-signs the archive through the bundle attestation request in a multi-node round', async function () {
-        let bus = buildMesh(4, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(4, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         await startAll(bus);
         let leader = v0Order(bus)[0];
         let messages = [];
@@ -205,7 +247,7 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
     registerFoldHooks();
 
     it('ships checkpoints on the archive sub-deadline with ARCHIVE_COUNT 0', async function () {
-        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true });
+        let bus = buildMesh(1, { stakeWeighted: true, checkpointCommitment: true, dogeBlock: 100 });
         let node = bus.nodes[0];
         node.pub.archiveFoldSubdeadlineMs = 10;
         node.pub.buildFoldArchiveSection = () => new Promise(() => {});
@@ -241,6 +283,14 @@ describe('ANCHOR v3 one-round archive fold liveness', function () {
     });
 });
 
+// A folded archive section and the indexer's content-key getarchiveanchor reply for it.
+const FOLD_ARCHIVE = { cp: { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }, batchSeq: 7, crc: '0a1b2c3d', count: 5, chunks: ['c0'] };
+function foldArchiveReply(params, extra){
+    return Object.assign({ exists: true, status: 'valid', version: 3, author: params.author,
+        checkpoint_chain: params.chain, checkpoint_network: params.network, block_index: params.block_index,
+        checkpoint_seq: params.checkpoint_seq, match_batch_seq: 7, match_count: params.match_count,
+        batch_crc32: params.batch_crc32, total_chunks: 1 }, extra);
+}
 describe('ANCHOR v3 one-round archive fold guard', function () {
     registerFoldHooks();
 
@@ -248,15 +298,20 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
         let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
         let txid = 'ab'.repeat(32);
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
-        pub.indexerCall = async (coin, method, params) => method === 'getanchoraction'
-            ? { exists: true, status: 'valid', version: 91, txid,
-                checkpoint_chain: params.chain, checkpoint_network: params.network,
-                block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-            : Object.assign({ exists: true, status: 'valid', version: 2, txid }, params);
+        let asked = [];
+        pub.indexerCall = async (coin, method, params) => {
+            asked.push({ method, params });
+            return method === 'getanchoraction'
+                ? { exists: true, status: 'valid', version: params.version, txid,
+                    checkpoint_chain: params.chain, checkpoint_network: params.network,
+                    block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
+                : foldArchiveReply(params, { version: 91, txid });
+        };
         let found = await pub.findExistingFoldedBundle([
             { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 }
-        ], { batchSeq: 7 });
-        expect(found).to.deep.equal({ exists: true, txid });
+        ], FOLD_ARCHIVE);
+        expect(found).to.deep.equal({ exists: true, txid, version: 3 });
+        expect(asked.find(a => a.method === 'getanchoraction').params.version).to.equal(3);
     });
 
     it('rejects indexer rows that do not match the requested folded row attributes', async function () {
@@ -270,7 +325,7 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
                 ? { exists: true, status: 'valid', version: 3, txid,
                 checkpoint_chain: params.chain, checkpoint_network: params.network,
                 block_index: params.block_index, checkpoint_seq: params.checkpoint_seq }
-                : Object.assign({ exists: true, status: 'valid', version: 3, txid }, params);
+                : foldArchiveReply(params, { txid });
             if(mismatch && mismatch.method === method) row[mismatch.field] = mismatch.value;
             return row;
         };
@@ -286,10 +341,41 @@ describe('ANCHOR v3 one-round archive fold guard', function () {
         for(let [method, field, value] of cases){
             mismatch = { method, field, value };
             let error;
-            try { await pub.findExistingFoldedBundle([section], { batchSeq: 7 }); }
+            try { await pub.findExistingFoldedBundle([section], FOLD_ARCHIVE); }
             catch(e){ error = e; }
             expect(error, field).to.be.an('error');
         }
+    });
+});
+
+describe('ANCHOR v3 one-round archive fold section version', function () {
+    registerFoldHooks();
+
+    it('refuses a v1 archive head or other non-v3 row as an existing folded section', async function () {
+        let pub = new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+        let section = { chain: 'BTC', network: 'regtest', block_index: 1, checkpoint_seq: 2 };
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        let answer;
+        pub.indexerCall = async (coin, method, params) => Object.assign({
+            exists: true, status: 'valid', txid: 'cd'.repeat(32),
+            checkpoint_chain: params.chain, checkpoint_network: params.network,
+            block_index: params.block_index, checkpoint_seq: params.checkpoint_seq
+        }, answer);
+        for(let version of [1, 0, undefined]){
+            answer = { version };
+            let error, found;
+            try { found = await pub.findExistingFoldedBundle([section], null); }
+            catch(e){ error = e; }
+            expect(found, 'v' + version).to.equal(undefined);
+            expect(error, 'v' + version).to.be.an('error');
+        }
+        answer = { exists: false, txid: null };
+        expect(await pub.findExistingFoldedBundle([section], null)).to.equal(null);
+
+        answer = { version: 1 };
+        pub.getAnchorIntent = async () => ({ intent_at: 'now' });
+        pub.anchorIntentHolds = () => true;
+        expect(await pub.bundleHeldByIntent([section], 'BTC', 'regtest', 1, true)).to.equal(true);
     });
 });
 

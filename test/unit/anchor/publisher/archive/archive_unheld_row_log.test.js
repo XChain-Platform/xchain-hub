@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { expect } = require('chai');
 const sinon = require('sinon');
 const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
+const canonicalForms = require('../../../../../src/anchor/publisher/canonical_forms.js');
 const { getLogger } = require('../../../../../src/observability');
 const { listMetaHash } = require('../../../../../src/cross_chain/list/canonical.js');
 const { DB_METHODS } = require('../../../../helpers/mockHub.js');
@@ -66,8 +67,32 @@ function listRow(){
     };
 }
 
+function match(){
+    return {
+        id: 3, match_id: 'd'.repeat(64), snapshot_block: BLOCK, network: 'regtest',
+        a_chain: 'BTC', a_action_index: 1, a_kind: 'swap', a_tick: 'AAA', a_amount: '1',
+        a_filled_before: '0', a_ownership: 0, a_payout_addr: 'addrA', a_payout_legs: null,
+        b_chain: 'DOGE', b_action_index: 2, b_kind: 'swap', b_tick: 'BBB', b_amount: '2',
+        b_filled_before: '0', b_ownership: 0, b_payout_addr: 'addrB', b_payout_legs: null,
+        effective_time: 150, finalizing_view: 0, validator_signatures: '[]', status: 'finalized'
+    };
+}
+
+function call(){
+    return {
+        id: 4, call_id: 'e'.repeat(64), phase: 'dispatch', snapshot_block: BLOCK, network: 'regtest',
+        source_chain: 'BTC', source_action_index: 1, source_contract_index: 2,
+        target_chain: 'DOGE', target_contract_index: 3, method: 'run', params_json: '{}',
+        gas_limit: 1000, cross_hops: 0, effective_time: 160, finalizing_view: 0,
+        result_status: null, return_payload_b64: null, validator_signatures: '[]', status: 'finalized'
+    };
+}
+
 function checkpointRow(){
-    return copy(vectors.C.inputs.checkpoints[0]);
+    return Object.assign(copy(vectors.C.inputs.checkpoints[0]), {
+        state_root: 'a'.repeat(64), state_root_version: 1,
+        block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
+    });
 }
 
 function priceRows(){
@@ -83,6 +108,8 @@ function buildPub(held){
             getBridgeTransferByTransferId: async () => rows(held.bridge),
             getPolicySnapshotBySnapshotId: async () => rows(held.policy),
             getListSnapshotBySnapshotId: async () => rows(held.list),
+            getCrossChainMatchByMatchId: async () => rows(held.match),
+            getCrossChainCallByCallIdAndPhase: async () => rows(held.call),
             getStateCheckpointByChainAndNetworkAndCheckpointSeq: async () => rows(held.checkpoint),
             findPriceSnapshotsForRound: async () => held.prices || []
         },
@@ -99,6 +126,10 @@ function buildPub(held){
 
 // Each kind: the held fixture, the archived row and the verifier call.
 const KINDS = [
+    { name: 'match', held: () => ({ match: match() }),
+      run: (pub, held) => pub.verifyArchivedMatch(canonicalForms.serializeMatch(held.match || match())) },
+    { name: 'call', held: () => ({ call: call() }),
+      run: (pub, held) => pub.verifyArchivedCall(canonicalForms.serializeCall(held.call || call())) },
     { name: 'bridge transfer', held: () => ({ bridge: bridge() }),
       run: (pub, held) => pub.verifyArchivedBridgeTransfer(pub.serializeBridgeTransfer(held.bridge || bridge())) },
     { name: 'policy snapshot', held: () => ({ policy: policy() }),
@@ -191,5 +222,137 @@ describe('archive verifiers refuse an unheld bridge or policy row the builder co
         expect(await buildPub({ bridge: held }).verifyArchivedBridgeTransfer(bridgeRow({ status: 'retracted' })))
             .to.equal(true);
         expect(await buildPub({ bridge: held }).verifyArchivedBridgeTransfer(bridgeRow())).to.equal(false);
+    });
+});
+
+describe('archive verifiers refuse an unheld list row the builder could not emit', () => {
+    const listArchiveRow = over => Object.assign(
+        StateAnchorPublisher.prototype.serializeListSnapshot(listRow()), over);
+
+    it('checks the unsigned status and complete builder shape before quorum acceptance', async () => {
+        expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow())).to.equal(true);
+        for(const status of ['retracted', 'bogus']){
+            expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow({ status })), status)
+                .to.equal(false);
+        }
+        expect(await buildPub({}).verifyArchivedListSnapshot(listArchiveRow({ extra: 1 }))).to.equal(false);
+        expect(await buildPub({}).verifyArchivedListSnapshot(
+            listArchiveRow({ snapshot_block: String(160000) }))).to.equal(false);
+        const missing = listArchiveRow();
+        delete missing.finalizing_view;
+        expect(await buildPub({}).verifyArchivedListSnapshot(missing)).to.equal(false);
+        const missingName = listArchiveRow();
+        delete missingName.name;
+        expect(await buildPub({}).verifyArchivedListSnapshot(missingName)).to.equal(false);
+
+        expect(await buildPub({ list: listRow() }).verifyArchivedListSnapshot(listArchiveRow())).to.equal(true);
+        expect(await buildPub({ list: listRow() }).verifyArchivedListSnapshot(
+            listArchiveRow({ status: 'retracted' }))).to.equal(false);
+    });
+});
+
+describe('archive verifiers refuse unheld match and call rows the builder could not emit', () => {
+    const cases = [
+        ['match', match, 'verifyArchivedMatch', 'serializeMatch'],
+        ['call', call, 'verifyArchivedCall', 'serializeCall']
+    ];
+
+    for(const [name, fixture, verify, serialize] of cases){
+        it('checks the unsigned status and complete builder shape for an unheld ' + name, async () => {
+            const pub = buildPub({});
+            const archived = over => Object.assign(canonicalForms[serialize](fixture()), over);
+            for(const status of ['finalized', 'retracted'])
+                expect(await pub[verify](archived({ status })), status).to.equal(true);
+            expect(await pub[verify](archived({ status: 'bogus' }))).to.equal(false);
+            expect(await pub[verify](archived({ extra: 1 }))).to.equal(false);
+            expect(await pub[verify](archived({ snapshot_block: String(BLOCK) }))).to.equal(false);
+        });
+    }
+});
+
+describe('archive checkpoint compare across the commitment gate', () => {
+    function rootedAt(block){
+        return Object.assign(checkpointRow(), {
+            network: 'mainnet', snapshot_block: block,
+            state_root: 'a'.repeat(64), state_root_version: 1,
+            block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
+        });
+    }
+
+    function rootlessAt(block){
+        return Object.assign(rootedAt(block), {
+            state_root: null, state_root_version: null,
+            block_merkle_root: null, block_merkle_version: null
+        });
+    }
+
+    it('ignores unsigned root differences below the gate', async () => {
+        const held = rootlessAt(960999);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(rootedAt(960999));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(true);
+    });
+
+    it('keeps root comparison strict at the gate', async () => {
+        const held = rootlessAt(961000);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(rootedAt(961000));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(false);
+    });
+
+    it('keeps signed columns strict below the gate', async () => {
+        const held = rootlessAt(960999);
+        const pub = buildPub({ checkpoint: held });
+        const archived = pub.serializeStateCheckpoint(Object.assign(rootedAt(960999), {
+            block_hash: 'c'.repeat(64)
+        }));
+        expect(await pub.verifyArchivedStateCheckpoint(archived, { network: 'mainnet' })).to.equal(false);
+    });
+});
+
+describe('archive verifiers shape-check unheld checkpoint and price rows', () => {
+    it('accepts a builder-shaped checkpoint and refuses shape drift or missing active roots', async () => {
+        const pub = buildPub({});
+        const good = pub.serializeStateCheckpoint(checkpointRow());
+        expect(await pub.verifyArchivedStateCheckpoint(good)).to.equal(true);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, { extra: 1 }))).to.equal(false);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, {
+            snapshot_block: String(good.snapshot_block)
+        }))).to.equal(false);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, {
+            state_root: good.state_root.toUpperCase()
+        }))).to.equal(false);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, {
+            block_merkle_root: null, block_merkle_version: null
+        }))).to.equal(false);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, {
+            id: String(good.id)
+        }))).to.equal(false);
+        expect(await pub.verifyArchivedStateCheckpoint(Object.assign({}, good, {
+            validator_signatures: []
+        }))).to.equal(false);
+    });
+
+    it('accepts an unheld rootless checkpoint, which recovery reads, and refuses a cross-network one', async () => {
+        const pub = buildPub({});
+        const good = pub.serializeStateCheckpoint(checkpointRow());
+        const rootless = Object.assign({}, good, {
+            state_root: null, state_root_version: null,
+            block_merkle_root: null, block_merkle_version: null
+        });
+        expect(await pub.verifyArchivedStateCheckpoint(rootless, { network: pub.network })).to.equal(true);
+        expect(await pub.verifyArchivedStateCheckpoint(good, { network: pub.network })).to.equal(true);
+        expect(await pub.verifyArchivedStateCheckpoint(good, { network: pub.network + '-other' })).to.equal(false);
+    });
+
+    it('accepts a builder-shaped price row and refuses extra or mis-coerced columns', async () => {
+        const pub = buildPub({});
+        const good = priceRows().map(row => pub.serializePriceSnapshot(row));
+        expect(await pub.verifyArchivedPriceGroup(good, { network: 'regtest' })).to.equal(true);
+        expect(await pub.verifyArchivedPriceGroup(
+            good.map(row => Object.assign({}, row, { extra: 1 })), { network: 'regtest' })).to.equal(false);
+        expect(await pub.verifyArchivedPriceGroup(
+            good.map(row => Object.assign({}, row, { validator_count: String(row.validator_count) })),
+            { network: 'regtest' })).to.equal(false);
     });
 });

@@ -30,6 +30,34 @@ const { PRICE_BATCH_MAX_ROUND_COUNT } = require('../../price_batch_compression.j
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+async function resolveBatchSigningSet(anchor, first, last) {
+    try {
+        return await this.resolvePriceSet(anchor);
+    } catch(e){
+        logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
+                    ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
+        return null;
+    }
+}
+
+async function prepareBatchCanonical(first, last, anchor, rounds, signingSet, me, exempt) {
+    const held = await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt);
+    if(held === null){
+        logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
+                    'that this proposal lacks; window skipped');
+        return null;
+    }
+    const canonical = this.leaderCanonical(first, last, anchor, rounds);
+    if(canonical === null) return null;
+    const missing = this.missingProposalRounds(held, rounds);
+    if(missing.length){
+        logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
+                    missing.join(',') + ' immediately before signing; window skipped');
+        return null;
+    }
+    return canonical;
+}
+
 module.exports = {
 
     // ---------------------------------------------------------------- leader
@@ -44,7 +72,7 @@ module.exports = {
     // has co-signed, or { met:false } on timeout / short quorum / an unresolvable
     // set. On met:false the caller publishes NOTHING for this window: the sigs
     // collected so far are returned for observability only, never for a wire.
-    async collectBatchSignatures(firstRound, lastRound, btcBlockHeight, rounds){
+    async collectBatchSignatures(firstRound, lastRound, btcBlockHeight, rounds, exempt){
         let first  = parseInt(firstRound);
         let last   = parseInt(lastRound);
         let anchor = parseInt(btcBlockHeight);
@@ -55,42 +83,30 @@ module.exports = {
         if(!Array.isArray(rounds) || rounds.length === 0 || rounds.length > PRICE_BATCH_MAX_ROUND_COUNT) return empty;
         if(!this.identity) return empty;
 
+        let exemptInside = exempt instanceof Set
+            ? Array.from(exempt).filter(n => Number.isFinite(n) && n >= first && n <= last)
+            : [];
+        if(exemptInside.length > 0){
+            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] spans landed round(s) ' +
+                         exemptInside.sort((a, b) => a - b).join(',') + '; window must be split before signing');
+            return empty;
+        }
+
         this.stats.batchSignRounds++;
 
-        // The SIGNING set is the price-capable set at the BATCH ANCHOR, which is the
-        // same set (and the same anchor) the indexer's _parseV0 resolves the wire's
-        // quorum against. Resolving it anywhere else would let this hub collect a
-        // quorum the chain then rejects, spending a DOGE fee for an invalid action.
-        let signingSet;
-        try {
-            signingSet = await this.resolvePriceSet(anchor);
-        } catch(e){
-            logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
-                         ' (' + (e && e.message) + '); no batch for window [' + first + ',' + last + ']');
-            return empty;
-        }
+        const signingSet = await resolveBatchSigningSet.call(this, anchor, first, last);
+        if(signingSet === null) return empty;
 
-        let me = this.leaderInSigningSet(signingSet, anchor, first, last);
+        const me = this.leaderInSigningSet(signingSet, anchor, first, last);
         if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return empty;
-        let snapCount = signingSet.length;
+        const snapCount = signingSet.length;
 
-        let held = await this.fillWindowGaps(first, last, rounds, signingSet, me);
-        if(held === null){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] has a round a hub finalized ' +
-                         'that this proposal lacks; window skipped');
-            return empty;
-        }
-        let canonical = this.leaderCanonical(first, last, anchor, rounds);
+        const canonical = await prepareBatchCanonical.call(
+            this, first, last, anchor, rounds, signingSet, me, exempt);
         if(canonical === null) return empty;
-        let missing = this.missingProposalRounds(held, rounds);
-        if(missing.length){
-            logger.warn('OracleBatchSigner: window [' + first + ',' + last + '] is missing round(s) ' +
-                         missing.join(',') + ' immediately before signing; window skipped');
-            return empty;
-        }
 
-        let mySig      = this.identity.sign(canonical);
-        let signatures = new Map();
+        const mySig      = this.identity.sign(canonical);
+        const signatures = new Map();
         signatures.set(me, mySig);
 
         // Genuine single-member set (membership proven above): this hub's own
@@ -114,13 +130,53 @@ module.exports = {
         return true;
     },
 
+    // Fill a proposal across the WINDOW's bounds before the publisher packs, anchors or
+    // splits it. collectBatchSignatures only fills inside the span the caller already
+    // holds, and that span is derived from the held rounds themselves, so a leader that
+    // restarted inside its own window (holding only its first rounds, or only its last)
+    // would propose a narrowed range: every co-signer re-derives that same narrowed
+    // range and signs it, and the rounds its peers finalized while it was down are
+    // never published by anyone. `exempt` names rounds that need no filling because the
+    // chain already carries them.
+    //
+    // Resolves true when `rounds` now holds every round any reachable hub finalized in
+    // [first, last] (filled in place, ascending), false when it cannot be shown, which
+    // the caller treats as "withhold and retry", never as "publish what is held".
+    async fillWindowBounds(firstRound, lastRound, rounds, btcBlockHeight, exempt){
+        let first  = parseInt(firstRound);
+        let last   = parseInt(lastRound);
+        let anchor = parseInt(btcBlockHeight);
+        if(!Number.isFinite(first) || !Number.isFinite(last) || !Number.isFinite(anchor) ||
+           first < 0 || last < first) return false;
+        if(!Array.isArray(rounds) || rounds.length === 0) return false;
+        // Peers drop a fill request wider than one batch can carry, so asking would only
+        // time out; such a window is packed into several wires and each one keeps the
+        // in-span fill collectBatchSignatures already runs.
+        if((last - first + 1) > PRICE_BATCH_MAX_ROUND_COUNT) return true;
+        if(!this.identity) return false;
+
+        let signingSet;
+        try {
+            signingSet = await this.resolvePriceSet(anchor);
+        } catch(e){
+            logger.warn('OracleBatchSigner: price capability set unresolvable at anchor ' + anchor +
+                         ' (' + (e && e.message) + '); cannot fill window [' + first + ',' + last + ']');
+            return false;
+        }
+        let me = this.leaderInSigningSet(signingSet, anchor, first, last);
+        if(me === null || this.peerlessMultiMemberSet(signingSet, anchor, first, last)) return false;
+        return (await this.fillWindowGaps(first, last, rounds, signingSet, me, exempt)) !== null;
+    },
+
     // Add every missing round finalized here or by an answering peer to the proposal
     // in place. Returns the numbers the proposal must hold, or null when a peer-held
-    // round cannot be obtained. A round no answering hub holds is a legitimate absence.
-    async fillWindowGaps(first, last, rounds, signingSet, me){
+    // round cannot be obtained. A round no answering hub holds is a legitimate absence,
+    // and so is one in `exempt` or one this hub holds only as a landed batch's copy:
+    // both are already on chain, and the latter's anchor is not recoverable here.
+    async fillWindowGaps(first, last, rounds, signingSet, me, exempt){
         let held = new Set(rounds.map(r => parseInt(r.round)));
         let gaps = new Set();
-        for(let n = first; n <= last; n++) if(!held.has(n)) gaps.add(n);
+        for(let n = first; n <= last; n++) if(!held.has(n) && !(exempt && exempt.has(n))) gaps.add(n);
         if(gaps.size === 0) return held;
 
         let local;
@@ -132,6 +188,7 @@ module.exports = {
         for(let r of local){
             let n = parseInt(r.round);
             if(!gaps.has(n)) continue;
+            if(r.batchSourced){ gaps.delete(n); continue; }
             let { batchSourced, ...proposalRound } = r;
             rounds.push(proposalRound);
             held.add(n);
@@ -142,38 +199,40 @@ module.exports = {
         return held;
     },
 
-    // Ask the price-capable peers for the remaining gaps. False when a quorum did not
-    // answer or an answering peer holds a round that could not be obtained.
+    // Ask the price-capable peers for the remaining gaps. A single peer cannot choose
+    // content or claim a round exists: f+1 matching answers include an honest peer.
     async fillFromPeers(first, last, gaps, signingSet, me, rounds, held){
         let quorum = bftQuorumOrSingle(signingSet.length, 1);
         if(quorum <= 1) return true;
         if(!this.peerManager) return false;
 
         let peers  = signingSet.map(v => v.pubkey).filter(pk => pk !== me);
-        let answer = await this.openFillRound({ first, last, gaps, peers, quorum });
+        let threshold = Math.floor((signingSet.length - 1) / 3) + 1;
+        let answer = await this.openFillRound({ first, last, gaps, peers, quorum, threshold });
         for(let [n, r] of answer.found){
             rounds.push(r);
             held.add(n);
             gaps.delete(n);
         }
         if(gaps.size > 0 && answer.responders.size < quorum - 1) return false;
-        return Array.from(answer.held).every(n => !gaps.has(n));
+        return Array.from(gaps).every(n => (answer.claims.get(n) || new Set()).size < threshold);
     },
 
-    // Ask peers for finalized rounds until the gaps are filled, a response quorum arrives,
-    // or the fill timeout expires.
-    openFillRound({ first, last, gaps, peers, quorum }){
+    // A quorum may establish absence immediately. Conflicting claims remain open until
+    // every peer answers or timeout, so arrival order cannot choose the proposal.
+    openFillRound({ first, last, gaps, peers, quorum, threshold }){
         return new Promise((resolve) => {
             let found = new Map();
-            let heldByPeers = new Set();
+            let claims = new Map();
+            let versions = new Map();
             let needed = Math.max(0, quorum - 1);
             let round = { first, last, gaps, peers: new Set(peers), responders: new Set(),
-                          found, held: heldByPeers, needed };
+                          found, claims, versions, needed, threshold };
             let finish = () => {
                 if(this._fillRound !== round) return;
                 clearTimeout(round.timer);
                 this._fillRound = null;
-                resolve({ found, held: heldByPeers, responders: round.responders });
+                resolve({ found, claims, responders: round.responders });
             };
             round.finish = finish;
             round.timer = setTimeout(finish, this.fillTimeoutMs);
@@ -185,8 +244,7 @@ module.exports = {
         });
     },
 
-    // Take one peer's answer to the fill request: only rounds this hub lacks, only from
-    // a price-capable peer, and only the canonical input fields.
+    // Count one claim per peer and accept only f+1 byte-identical canonical rounds.
     async handleFill(envelope){
         let d     = envelope.data;
         let round = this._fillRound;
@@ -195,16 +253,34 @@ module.exports = {
         let sender = String(envelope.sig_pubkey || '').toLowerCase();
         if(!round.peers.has(sender) || round.responders.has(sender)) return;
         round.responders.add(sender);
-        for(let n of (Array.isArray(d.held) ? d.held : [])) round.held.add(parseInt(n));
+        for(let value of (Array.isArray(d.held) ? d.held : [])){
+            let n = parseInt(value);
+            if(!round.gaps.has(n)) continue;
+            if(!round.claims.has(n)) round.claims.set(n, new Set());
+            round.claims.get(n).add(sender);
+        }
         for(let r of (Array.isArray(d.rounds) ? d.rounds : [])){
             let n = parseInt(r && r.round);
-            if(!round.gaps.has(n) || round.found.has(n) || !Array.isArray(r.pairs)) continue;
+            if(!round.gaps.has(n) || !Array.isArray(r.pairs)) continue;
             let kept = { round: n, timestamp: parseInt(r.timestamp),
                          btcBlockHeight: parseInt(r.btcBlockHeight), pairs: r.pairs };
             if(r.admitBlocks !== undefined && r.admitBlocks !== null) kept.admitBlocks = r.admitBlocks;
-            round.found.set(n, kept);
+            let canonical;
+            try { canonical = this.canonical(n, n, kept.btcBlockHeight, [kept]); }
+            catch(e){ continue; }
+            let key = Buffer.isBuffer(canonical) ? canonical.toString('hex') : String(canonical);
+            if(!round.claims.has(n)) round.claims.set(n, new Set());
+            round.claims.get(n).add(sender);
+            if(!round.versions.has(n)) round.versions.set(n, new Map());
+            let versions = round.versions.get(n);
+            if(!versions.has(key)) versions.set(key, { value: kept, responders: new Set() });
+            let version = versions.get(key);
+            version.responders.add(sender);
+            if(version.responders.size >= round.threshold) round.found.set(n, version.value);
         }
-        if(round.found.size === round.gaps.size || round.responders.size >= round.needed) round.finish();
+        let decided = round.responders.size >= round.needed && Array.from(round.gaps).every(n =>
+            round.found.has(n) || !round.claims.has(n));
+        if(decided || round.responders.size >= round.peers.size) round.finish();
     },
 
     missingProposalRounds(required, rounds){

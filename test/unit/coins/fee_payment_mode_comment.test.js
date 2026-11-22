@@ -10,9 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// The FEE_PAYMENT_MODE lines in the coin files must not call the field
-// informational or unread: the indexer persists and classifies against it
-// through the registry, and a stale comment invites its removal.
+// The FEE_PAYMENT_MODE lines must describe both consumers accurately: the
+// indexer checks its coin-based classification against the registry, and the
+// SDK reads the field when deciding whether to add the native-fee output.
 
 const assert = require('assert');
 const fs     = require('fs');
@@ -38,10 +38,10 @@ const EXPECTED_COMMENTS = new Map([
         /pinned by a registry test/i,
     ]],
     ['test/unit/coins/coins_consensus_subset.test.js', [
-        /declared mode/i,
-        /not a runtime decider/i,
+        /declared client mode/i,
         /outside the subset/i,
-        /divergent bundle cannot verify clean/i,
+        /no consensus path reads it/i,
+        /SDK reads it/i,
     ]],
 ]);
 
@@ -54,7 +54,7 @@ describe('FEE_PAYMENT_MODE comments', () => {
 
             const comment = line.split('//').slice(1).join('//').trim();
             assert.ok(comment, `no FEE_PAYMENT_MODE comment in ${rel}`);
-            assert.ok(!/informational|not read at runtime/i.test(comment), `stale comment: ${comment}`);
+            assert.ok(!/informational|not read at runtime|not a runtime decider/i.test(comment), `stale comment: ${comment}`);
             for(const guarantee of guarantees)
                 assert.match(comment, guarantee, `incomplete FEE_PAYMENT_MODE comment in ${rel}`);
         });

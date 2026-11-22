@@ -23,6 +23,9 @@
 const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
         refuseUnanchoredOrStraddlingBatch, validateBatchSigs } = require('./batch_validation.js');
 const { verifyBatchQuorum } = require('./batch_verification.js');
+const { parsePushGeneration } = require('./single_validation.js');
+const { storedRoundRows } = require('./stored_round_rows.js');
+const { isProducerRoundRow } = require('../../peers/hub_db/price_round_groups.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
@@ -34,8 +37,9 @@ const logger = getLogger();
 function batchFenceInputs(batchData) {
     let sourceActionIndex = batchData.action_index === undefined || batchData.action_index === null
         ? null : batchData.action_index;
-    let pushGeneration = parseInt(batchData.push_generation);
-    if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+    const parsedGeneration = parsePushGeneration(batchData.push_generation);
+    if (parsedGeneration.reason) return parsedGeneration;
+    let pushGeneration = parsedGeneration.value;
     let batchActionIndex = parseInt(sourceActionIndex);
     return { sourceActionIndex, pushGeneration, batchActionIndex };
 }
@@ -58,50 +62,6 @@ function rowsByRound(rows) {
         grouped.get(round).push(row);
     }
     return grouped;
-}
-
-// Column semantics pinned so a v2-sourced row is indistinguishable from a
-// v0-sourced one (§5.7): block_timestamp is the ROUND's own timestamp (the
-// field the fee path reads), and reference_block is the PUSH's block_index,
-// the landing block on the landing chain (D8), NOT the round's BTC anchor.
-// Two consensus readers read reference_block, so a v2 row that differed here
-// would fork them.
-//
-// batch_block_time is the LANDING BLOCK's own clock, and it is a different
-// quantity from every other time column here: block_timestamp is when the
-// round was priced, this is when the chain could first show it. Fee pricing
-// bounds itself on it so a hub-connected node and a chain-only node select
-// the same round (the indexer's registry row
-// price_fee_batch_landed_activation.PRICE_FEE_BATCH_LANDED_ACTIVATION in src/protocol_changes/gates_2.js).
-// The round's admission map lands in its per-chain columns, every federation
-// column named so a legacy round NULLs them rather than leaving a default a later
-// schema edit could change under a signed row. Appended AFTER created_at so every
-// positional reader of this INSERT keeps its index.
-function batchSnapshotRows(r, sourceChain, head, verified, fence, createdAt, admitCols) {
-    let insertedRows = [];
-    for (let p of r.pairs) {
-        insertedRows.push({
-            round_number:        r.round,
-            coin_pair:           p.pair,
-            price:               p.price,
-            reference_block:     head.referenceBlock,
-            reference_chain:     sourceChain || null,
-            block_timestamp:     r.timestamp,
-            validator_count:     verified.validatorCount,
-            consensus_round:     1,
-            consensus_proof:     verified.proofJson,
-            status:              'finalized',
-            source_chain:        sourceChain || null,
-            source_action_index: fence.sourceActionIndex,
-            push_generation:     fence.pushGeneration,
-            batch_block_time:    head.blockTime,
-            created_at:          createdAt,
-            admit_block_btc:     admitCols.admit_block_btc,
-            admit_block_ltc:     admitCols.admit_block_ltc,
-            admit_block_doge:    admitCols.admit_block_doge
-        });
-    }
-    return insertedRows;
 }
 
 // ONE multi-row INSERT PER ROUND, not one for the whole batch: a single
@@ -150,9 +110,17 @@ async function orphanedBatchLandingOf(sourceChain, rows, fence) {
 // canonical landing, so the generation fence of the late retraction spares it. Emits
 // what the hub now HOLDS (the upsert keeps the earlier landing clock), re-read rather
 // than built, so a mirror never receives a value this hub does not store.
-async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt) {
+//
+// A pair this hub finalized itself (a producer row, BTC-anchored and carrying a signature
+// array) keeps its row: the retraction never deletes it, so there is nothing to move, and the
+// upsert would replace its BTC anchor and proof with the batch's landing height and proof. The
+// round is decided per round but its pairs can differ in origin.
+async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, createdAt, existing) {
     let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
-    await batchRoundInsert.call(this, r, sourceChain, head, verified, fence, createdAt, admitCols);
+    let selfFinalized = new Set((existing || []).filter(isProducerRoundRow).map(row => row.coin_pair));
+    let pairs = r.pairs.filter(p => !selfFinalized.has(p.pair));
+    if (pairs.length > 0)
+        await batchRoundInsert.call(this, Object.assign({}, r, { pairs }), sourceChain, head, verified, fence, createdAt, admitCols);
     let rows = await this.db.findPriceSnapshotsForRound(r.round);
     for (let row of (Array.isArray(rows) ? rows : [])) {
         if (row && row.status !== 'skipped') {
@@ -164,29 +132,57 @@ async function restoreRelandedBatchRound(r, sourceChain, head, verified, fence, 
         '; its rolled-back batch row is moved onto the canonical landing');
 }
 
+async function fillMissingBatchPairs(r, sourceChain, head, verified, fence, createdAt, existing) {
+    if (!existing.some(row => row && typeof row.coin_pair === 'string')) return false;
+    const held = new Set(existing.map(row => row.coin_pair));
+    const pairs = r.pairs.filter(pair => !held.has(pair.pair));
+    if (pairs.length === 0) return false;
+    const admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
+    await batchRoundInsert.call(this, Object.assign({}, r, { pairs }), sourceChain, head,
+        verified, fence, createdAt, admitCols);
+    const filled = new Set(pairs.map(pair => pair.pair));
+    const rows = await this.db.findPriceSnapshotsForRound(r.round);
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+        if (row && row.status !== 'skipped' && filled.has(row.coin_pair))
+            this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
+    }
+    logger.info('PriceAggregator: filled round ' + r.round + ' with missing pairs ' + [...filled].join(', '));
+    return true;
+}
+
+async function emitStoredBatchRows(r) {
+    const storedRows = await storedRoundRows.call(this, r.round, r.pairs);
+    for (const row of storedRows)
+        this.emit('row:inserted', { table: 'price_snapshots', row, origin: 'chain-ingest' });
+}
+
 async function handleDuplicateBatchRound(sourceChain, r, head, verified, fence, createdAt,
-                                         existing, targetRounds) {
+                                         existing, targetRounds, fillRounds) {
     if (existing.length === 0) return false;
     // Repair validates the whole signed batch but only mutates rounds its one
     // bulk presence read selected. A present target was retained across a late
     // retraction and must move onto the active batch just like a same-position
     // re-land, including its action index, generation, proof and landing clock.
-    if (targetRounds && !targetRounds.has(r.round)) return true;
+    const target = targetRounds && targetRounds.has(r.round);
+    const fill = fillRounds && fillRounds.has(r.round);
+    if (targetRounds && !target && !fill) return 'duplicate';
     try {
-        let relanded = !!targetRounds ||
+        let relanded = !!target ||
             await orphanedBatchLandingOf.call(this, sourceChain, existing, fence);
         if (relanded)
-            await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt);
+            await restoreRelandedBatchRound.call(this, r, sourceChain, head, verified, fence, createdAt, existing);
+        else if (await fillMissingBatchPairs.call(this, r, sourceChain, head, verified, fence, createdAt, existing)) {
+            await this.stampBatchLanding(r.round, head.blockTime);
+            return 'stored';
+        }
     } catch (err) {
-        // The round is still finalized here; a failed move leaves it on the old
-        // landing, which is what the dedupe did before, so it is never a reject.
-        logger.error(nodeUtil.format('PriceAggregator: could not move re-landed round ' + r.round +
-            ' onto its canonical batch:', err));
+        logger.error(nodeUtil.format('PriceAggregator: could not update duplicate round ' + r.round + ':', err));
+        return 'error';
     }
     // The batch is how the round reached the chain even when this hub finalized
     // it first, so stamp the landing clock on every ordinary duplicate.
     await this.stampBatchLanding(r.round, head.blockTime);
-    return true;
+    return 'duplicate';
 }
 
 // Store every round of a verified batch that is not already finalized here, and
@@ -198,10 +194,20 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence, opti
     let stored = 0, duplicates = 0;
     let grouped = rowsByRound(await batchPresenceRows.call(this, rounds, options && options.existingRows));
     let targetRounds = options && options.targetRounds instanceof Set ? options.targetRounds : null;
+    let fillRounds = options && options.fillRounds instanceof Set ? options.fillRounds : null;
     for (let r of rounds) {
         let existing = (grouped.get(r.round) || []).filter(row => row && row.status !== 'skipped');
-        if (await handleDuplicateBatchRound.call(this, sourceChain, r, head, verified, fence,
-            createdAt, existing, targetRounds)) {
+        const duplicate = await handleDuplicateBatchRound.call(this, sourceChain, r, head, verified, fence,
+            createdAt, existing, targetRounds, fillRounds);
+        if (duplicate === 'error') {
+            return { accepted: false, stored, duplicates,
+                rejected: rounds.length - stored - duplicates, reason: 'db error' };
+        }
+        if (duplicate === 'stored') {
+            stored++;
+            continue;
+        }
+        if (duplicate === 'duplicate') {
             duplicates++;
             continue;
         }
@@ -212,7 +218,6 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence, opti
         }
 
         let admitCols = this.admission.admitBlocksToColumns(r.admitBlocks === undefined ? null : r.admitBlocks);
-        let insertedRows = batchSnapshotRows(r, sourceChain, head, verified, fence, createdAt, admitCols);
         try {
             await batchRoundInsert.call(this, r, sourceChain, head, verified, fence, createdAt, admitCols);
         } catch (err) {
@@ -223,12 +228,7 @@ async function storeBatchRounds(sourceChain, head, rounds, verified, fence, opti
                 reason: 'db error'
             };
         }
-
-        // Re-emit on the WS mirror stream exactly as v0-stored rows do, or a
-        // replaying node's mirror never fills and its price barrier never opens.
-        for (let row of insertedRows) {
-            this.emit('row:inserted', { table: 'price_snapshots', row: row, origin: 'chain-ingest' });
-        }
+        await emitStoredBatchRows.call(this, r);
         stored++;
 
         // Diagnostics only, and guarded: the round is already stored and must never
@@ -254,7 +254,8 @@ function noteLandedBatchToPublisher(sourceChain, batchData, head) {
     if (landedPublisher && typeof landedPublisher.noteBatchLanded === 'function') {
         try {
             landedPublisher.noteBatchLanded(head.firstRound, head.lastRound,
-                { sourceChain: sourceChain, actionIndex: batchData.action_index });
+                { sourceChain: sourceChain, actionIndex: batchData.action_index,
+                    rounds: batchData.rounds.map(round => round.round) });
         } catch (e) {
             logger.warn(nodeUtil.format('PriceAggregator: could not hand the landed batch [' + head.firstRound + '..' +
                 head.lastRound + '] to the publisher; its rounds stay buffered:', e && e.message));
@@ -336,6 +337,7 @@ module.exports = {
         if (structural.reason) return refuse(structural.reason);
 
         let fence = batchFenceInputs(batchData);
+        if (fence.reason) return refuse(fence.reason);
         if (Number.isFinite(fence.batchActionIndex)) {
             let wm = await this.db.getPriceIngestWatermark(sourceChain || '', this.fenceNetwork());
             if (wm && fence.pushGeneration <= wm.retraction_generation && fence.batchActionIndex >= wm.from_action_index) {

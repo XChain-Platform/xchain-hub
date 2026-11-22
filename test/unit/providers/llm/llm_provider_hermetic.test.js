@@ -157,6 +157,15 @@ describe('llm provider, fetch input validation', function () {
         expect(err.message).to.match(/envelope\.prompt/);
     });
 
+    it('rejects a NUL in envelope.system before dispatch', async function () {
+        const llm = _reloadProvider();
+        let err;
+        try { await llm.fetch(JSON.stringify({ prompt: 'hello', system: 'a\u0000b' }), {}); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.message).to.match(/envelope\.system/);
+    });
+
     it('accepts omitted options argument: options || {} branch', async function () {
         // Line 83: `options = options || {}`, the `{}` fallback when options is not passed
         const llm = _reloadProvider();

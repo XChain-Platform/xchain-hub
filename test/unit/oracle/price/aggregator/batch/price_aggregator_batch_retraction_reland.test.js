@@ -28,6 +28,7 @@ const PriceAggregator   = require('../../../../../../src/oracle/price_aggregator
 const queueMethods      = require('../../../../../../src/oracle/publisher/queue.js');
 const priceQueries      = require('../../../../../../src/db/prices/index.js');
 const { createMockHub } = require('../../../../../helpers/mockHub');
+const { projectPresenceRows } = require('../../../../../helpers/prices/presence_projection');
 function makeValidator() {
     let { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
     let pubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex');
@@ -92,10 +93,8 @@ function installRetractionBatchReads(db) {
 }
 
 function installBatchPresenceRead(db) {
-    db.findPriceSnapshotRowsForRounds = async (rounds) => {
-        let wanted = new Set(rounds);
-        return table.filter(r => wanted.has(r.round_number)).map(r => Object.assign({}, r));
-    };
+    db.findPriceSnapshotRowsForRounds = async (rounds) =>
+        projectPresenceRows(table.filter(r => rounds.includes(r.round_number)));
 }
 
 function installBatchUpsert(db) {
@@ -176,9 +175,10 @@ function installPublisher(carried) {
     publisher = Object.assign({}, queueMethods, {
         _publishedRounds: new Set([BATCH_ROUND, SELF_ROUND]),
         _assembledWindows: new Set([0]),
+        _retiredWindows: new Map(),
         _landed: [],
         roundsCarriedByChain: async (rounds) => new Set(rounds.filter(r => carried.includes(r))),
-        markRoundLanded(r) { this._landed.push(r); },
+        markRoundLanded(r) { this._landed.push(r); }, unmarkRoundLanded(r) { this._landed = this._landed.filter(x => x !== r); },
         windowIndexOf: () => 0,
         restoreBufferedRounds: async () => {},
         db: { deleteOraclePublishedRoundsByRounds: async (rounds) => { markerDeletes.push(rounds); return { affectedRows: rounds.length }; } }

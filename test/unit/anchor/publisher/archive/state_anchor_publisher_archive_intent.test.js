@@ -143,7 +143,7 @@ function mkRound(pub, identity, broadcastFn, batchSeq){
 }
 
 const ARCHIVE_ROWS = {
-    'FROM cross_chain_matches WHERE batch_seq IS NULL': [MATCH_ROW],
+    'FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL': [MATCH_ROW],
     'FROM state_checkpoints':                           [CP_ROW],
     'COALESCE(GREATEST(':                               [{ next_seq: 7 }]
 };

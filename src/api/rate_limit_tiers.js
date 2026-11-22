@@ -39,6 +39,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const net = require('net');
 const { ipKeyGenerator } = require('express-rate-limit');
 
 // The authenticated tier's default: the fleet value 08c756e5 shipped, kept for the
@@ -80,15 +81,98 @@ function batchCost(req) {
     return Array.isArray(body) ? Math.max(1, body.length) : 1;
 }
 
-// The per-IP key, with IPv6 collapsed to its /56 exactly as the library's default does,
-// so one host cannot rotate through its own subnet to reset the count.
+// The one key every req.ip that is not an address shares. Behind a proxy that forwards
+// X-Forwarded-For verbatim, req.ip is any string the client writes; keyed as given, each
+// new string was a fresh bucket of client-chosen length.
+const UNPARSED_IP_KEY = 'unparsed-ip';
+
+// Dotted IPv4 with each octet read as decimal, so 198.51.100.068 is 198.51.100.68.
+function canonicalV4(text) {
+    const parts = text.split('.');
+    if (parts.length !== 4 || !parts.every((part) => /^\d{1,3}$/.test(part))) return null;
+    const octets = parts.map(Number);
+    return octets.every((octet) => octet <= 255) ? octets.join('.') : null;
+}
+
+// The eight 16-bit groups of an address net.isIPv6 has accepted, a dotted tail included.
+function v6Groups(text) {
+    let head = text;
+    const tail = [];
+    const tailStart = text.lastIndexOf(':') + 1;
+    if (text.slice(tailStart).includes('.')) {
+        const v4 = canonicalV4(text.slice(tailStart));
+        if (!v4) return null;
+        const o = v4.split('.').map(Number);
+        tail.push(o[0] * 256 + o[1], o[2] * 256 + o[3]);
+        head = text.slice(0, tailStart);
+        if (!head.endsWith('::')) head = head.slice(0, -1);
+    }
+    const split = (s) => (s === '' ? [] : s.split(':').map((g) => parseInt(g, 16)));
+    const halves = head.split('::');
+    const left = split(halves[0]);
+    const right = halves.length > 1 ? split(halves[1]) : [];
+    const fill = halves.length > 1 ? 8 - left.length - right.length - tail.length : 0;
+    const groups = left.concat(new Array(Math.max(0, fill)).fill(0), right, tail);
+    return groups.length === 8 ? groups : null;
+}
+
+// The address req.ip names, with the spellings a forwarded value can carry removed:
+// surrounding space, brackets, a port, a trailing dot, an IPv6 zone and letter case.
+// A v4-mapped IPv6 address (::ffff:0:0/96) in any spelling, hex groups included, is the
+// IPv4 address it carries. Returns null when what is left is not an address.
+function canonicalAddress(raw) {
+    let text = raw.trim().toLowerCase();
+    const bracketed = text.match(/^\[([^\]]*)\](?::\d{1,5})?$/);
+    if (bracketed) text = bracketed[1];
+    else text = text.replace(/^([\d.]+):\d{1,5}$/, '$1');
+    if (/^[\d.]+\.$/.test(text)) text = text.slice(0, -1);
+    const v4 = canonicalV4(text);
+    if (v4) return { family: 4, address: v4 };
+    text = text.replace(/%.*$/, '');
+    if (!net.isIPv6(text)) return null;
+    const groups = v6Groups(text);
+    if (!groups) return null;
+    if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+        return { family: 4, address: [groups[6] >> 8, groups[6] & 255, groups[7] >> 8, groups[7] & 255].join('.') };
+    }
+    return { family: 6, address: groups.map((g) => g.toString(16)).join(':') };
+}
+
+// The per-IP key: the client's canonical address, so one address in any spelling is one
+// bucket. IPv6 is collapsed to its /56 by the library's own helper, so one host cannot
+// rotate through its subnet; it is handed the plain hex form, which the helper's is4()
+// test never mistakes for IPv4. Anything that is not an address shares one key.
 function rateLimitKey(req) {
-    return ipKeyGenerator(String((req && req.ip) || ''));
+    const found = canonicalAddress(String((req && req.ip) || ''));
+    if (!found) return UNPARSED_IP_KEY;
+    return found.family === 4 ? found.address : ipKeyGenerator(found.address);
+}
+
+// The limiter advertised its Remaining after charging one token; the surcharge then
+// takes extra more, so the advertised figure is rewritten to match the bucket. Every
+// spelling the library can emit is covered: the draft-6 and legacy single headers and the
+// draft-7 combined "RateLimit: limit=, remaining=, reset=" field. A header the limiter did
+// not set (headers disabled) is left absent.
+function rewriteRemaining(res, extra) {
+    if (!res || typeof res.getHeader !== 'function' || typeof res.setHeader !== 'function') return;
+    for (const name of ['RateLimit-Remaining', 'X-RateLimit-Remaining']) {
+        const current = res.getHeader(name);
+        if (current === undefined) continue;
+        const left = parseInt(String(current), 10);
+        if (Number.isFinite(left)) res.setHeader(name, String(Math.max(0, left - extra)));
+    }
+    const combined = res.getHeader('RateLimit');
+    if (typeof combined === 'string') {
+        res.setHeader('RateLimit', combined.replace(/remaining=(\d+)/, (m, left) =>
+            'remaining=' + Math.max(0, parseInt(left, 10) - extra)));
+    }
 }
 
 // Charges the rest of a batch against the tier whose limiter just passed the request.
 // `opts` is that limiter's own options object, so skip, key, store, limit and the 429
-// body can never disagree with the limiter it follows.
+// body can never disagree with the limiter it follows. The headers are rewritten before
+// the request moves on, so a served batch, the surcharge's own 429 and a later 400 from
+// the batch guard all advertise the bucket as it stands.
 function batchSurcharge(opts) {
     return function rpcBatchSurcharge(req, res, next) {
         const extra = batchCost(req) - 1;
@@ -99,6 +183,7 @@ function batchSurcharge(opts) {
         } catch (err) {
             return next(err);
         }
+        rewriteRemaining(res, extra);
         if (totalHits > opts.limit) return opts.handler(req, res);
         return next();
     };
@@ -106,6 +191,7 @@ function batchSurcharge(opts) {
 
 module.exports = {
     DEFAULT_AUTH_RPM,
+    UNPARSED_IP_KEY,
     authenticatedCaller,
     batchCost,
     batchSurcharge,

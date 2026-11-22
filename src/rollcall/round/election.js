@@ -54,6 +54,8 @@ module.exports = {
     // Returns null when the set is unresolved, and every caller treats null as
     // abstain: an empty order would make rankUnlocked false for everyone anyway,
     // but null says WHY, and it must never be read as "the federation is empty".
+    // Weighted rows are source-keyed, so each pubkey must appear exactly once in
+    // the ladder. Duplicate rows hash together and do not change rank zero.
     async electionOrder(epoch){
         let keys = null;
         try {
@@ -79,6 +81,7 @@ module.exports = {
             return null;
         }
         if(keys === null) return null;
+        keys = [...new Set(keys)];
         return StateAnchorPublisher.hashOrder(this.electionKey(epoch), keys);
     },
 

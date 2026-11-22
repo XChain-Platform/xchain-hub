@@ -123,9 +123,19 @@ function normalizeConsensusStrategy(value) {
     return s === '' ? null : s;
 }
 
+// Canonicalise a provider response cap to a positive safe integer. The cap is
+// consensus-visible through fetch outcomes and inbound envelope admission, so
+// malformed values stay null instead of being coerced to a permissive default.
+function normalizeMaxResponseBytes(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return null;
+    const n = Number(value);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 module.exports = {
     DEFAULTS,
     parseAttestationProviderParam,
     normalizeMinStakeXchain,
-    normalizeConsensusStrategy
+    normalizeConsensusStrategy,
+    normalizeMaxResponseBytes
 };

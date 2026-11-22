@@ -20,5 +20,7 @@ runbooks and does not examine or apply it. Run one by naming it:
 
 Read the file's header first; each runbook says what it changes and how to check the result.
 
-- `2026-06-02-backfill-price-snapshot-reference-chain.sql`: restores `price_snapshots.reference_chain` from `source_chain`.
+- `2026-06-02-backfill-price-snapshot-reference-chain.sql`: restores `price_snapshots.reference_chain` from `source_chain`. Superseded by `2026-11-15-backfill-price-snapshot-reference-chain-guarded.sql`: this file also rewrites the rounds the hub finalized itself, so run the guarded file instead.
+- `2026-11-15-backfill-price-snapshot-reference-chain-guarded.sql`: the same correction limited to rows that name a source action, with a check for hubs that already ran the earlier file. Preview it separately before using `migrate --file`, which runs through the commit without pausing or showing the preview. Apply it to every hub database in the federation: until the last hub is corrected, archive co-signers can refuse affected rounds. The update does not re-pend archived rows and emits no row event, so archived copies keep `BTC` and a mirror takes the corrected value for a finalized or disputed row only on its next reconnect re-page, and never below a bounded mirror's price floor. The table and update have no network discriminator, so a nonzero preview on a database shared across networks needs an operator decision first.
 - `2026-09-11-price-ingest-watermarks-network-column.sql`: re-keys `price_ingest_watermarks` by network.
+- `2026-10-24-z-price-snapshots-archive-pending-index.sql`: superseded by `2026-11-14-price-snapshots-archive-pending-column.sql`, a manual migration a boot baselines or reports pending; no separate run is needed.

@@ -102,7 +102,7 @@ module.exports = {
     // `admitBlocks` is the round's admission map, stored in its per-chain columns with every
     // federation column named (NULL for a legacy round, never 0), so the batch signer and
     // the publisher rebuild the map the quorum signed from the row rather than from memory.
-    async storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime, admitBlocks) {
+    async storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime, admitBlocks, opts = {}) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         if (!prices || prices.length === 0) return;
@@ -127,18 +127,21 @@ module.exports = {
         // of the same round is a no-op (same idempotency contract as the cross_chain and
         // oracle_publish writers).
         //
-        // Ordered first, and fail-closed by throwing, for the reason StateCheckpointEngine
-        // states for its oracle_publish persist: a mirror subscriber must never receive a
-        // quorum-signed row it cannot verify. A throw here skips the price_snapshots
-        // INSERT and its broadcast entirely; finalizeCommittedRound's retry loop then
-        // retains the round and re-drives it, and OracleRound's finalizeRound .catch logs
-        // the single-node path.
+        // Ordered first, and fail-closed for committed federation rounds: a mirror
+        // subscriber must never receive a quorum-signed row it cannot verify. The solo
+        // path may legitimately have no capability rows, so its caller does not require
+        // them. A refusal here skips both the price insert and its broadcast.
         //
         // referenceBlock is the same value the round resolved its snapshot at
         // (finalizeRound's btcBlockHeight, threaded through pending.btcBlockHeight), so
         // every chain's indexer reads the SAME snapshot block for the same round. Never
         // the local processing height.
-        await this.persistCapabilitySnapshot('price', referenceBlock);
+        const capabilityRows = await this.persistCapabilitySnapshot('price', referenceBlock);
+        if (opts.requireCapabilityRows && !capabilityRows) {
+            logger.error('Oracle: round ' + round + ' price capability snapshot at block ' +
+                referenceBlock + ' persisted zero rows; retaining the round for retry');
+            throw new Error('price capability snapshot persisted zero rows');
+        }
 
         // Write the whole round in ONE multi-row INSERT (mirrors db.setParams) so the
         // round lands atomically. The per-pair loop this replaced let a getfeequote /

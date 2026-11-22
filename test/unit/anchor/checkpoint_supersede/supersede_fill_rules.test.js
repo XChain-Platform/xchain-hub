@@ -19,8 +19,9 @@
 'use strict';
 
 const { expect } = require('chai');
-const { supersedeFieldsFor, supersedeGateRefusal } =
-    require('../../../../src/anchor/checkpoint_engine/supersede_fill.js');
+const {
+    supersedeFieldsFor, supersedeGateRefusal, supersedeFieldsRefusal,
+} = require('../../../../src/anchor/checkpoint_engine/supersede_fill.js');
 
 const DIGEST = 'AB'.repeat(32);
 
@@ -74,6 +75,11 @@ describe('checkpoint supersede fill rules @regression', function () {
         expect(supersedeGateRefusal({ rules_digest: DIGEST })).to.equal('supersede_below_gate');
         expect(supersedeGateRefusal(complete, 1)).to.equal('supersede_below_gate');
         expect(supersedeGateRefusal(complete, true)).to.equal(null);
+        expect(supersedeFieldsRefusal(complete, false)).to.equal('supersede_below_gate');
+        expect(supersedeFieldsRefusal({ supersedes_from: 40 }, true)).to.equal('supersede_malformed');
+        expect(supersedeFieldsRefusal({ supersedes_from: 40, rules_digest: 'bad' }, true))
+            .to.equal('supersede_malformed');
+        expect(supersedeFieldsRefusal(complete, true)).to.equal(null);
     });
 
     it('never refuses a plain checkpoint', function () {

@@ -75,15 +75,39 @@ function registerDdlTests() {
 }
 
 function registerFinderTests() {
+    describe('network-scoped archive selectors', function () {
+        it('scopes calls and matches before their pending OR predicate and LIMIT', async function () {
+            const { db } = makeDb();
+            sinon.stub(db, 'doQuery').resolves([]);
+            for(const method of ['findCrossChainCallsByBatchSeq', 'findCrossChainMatchesByBatchSeq']){
+                await db[method]('regtest', 25);
+                const [sql, params] = db.doQuery.lastCall.args;
+                expect(sql).to.match(/WHERE network = \? AND \(batch_seq IS NULL OR archived_status <> status\)/);
+                expect(sql.indexOf('network = ?')).to.be.lessThan(sql.indexOf('LIMIT ?'));
+                expect(params).to.deep.equal(['regtest', 25]);
+            }
+        });
+
+        it('strictly scopes list rows because recovery rejects a null or foreign network', async function () {
+            const { db } = makeDb();
+            sinon.stub(db, 'doQuery').resolves([]);
+            await db.findListSnapshotsByBatchSeq('regtest', 9);
+            const [sql, params] = db.doQuery.lastCall.args;
+            expect(sql).to.match(/WHERE network = \? AND batch_seq IS NULL/);
+            expect(sql).to.not.match(/network IS NULL/);
+            expect(params).to.deep.equal(['regtest', 9]);
+        });
+    });
+
     describe('findBridgeTransfersByBatchSeq(limit)', function () {
         it('selects pending rows only, bounded by limit', async function () {
             const { db } = makeDb();
             sinon.stub(db, 'doQuery').resolves([]);
-            await db.findBridgeTransfersByBatchSeq(25);
+            await db.findBridgeTransfersByBatchSeq('regtest', 25);
             let [sql, params] = db.doQuery.getCall(0).args;
             expect(sql).to.match(/FROM bridge_transfers/);
-            expect(sql).to.match(/batch_seq IS NULL OR archived_status <> status/);
-            expect(params).to.deep.equal([25]);
+            expect(sql).to.match(/network = \? AND \(batch_seq IS NULL OR archived_status <> status\)/);
+            expect(params).to.deep.equal(['regtest', 25]);
         });
     });
 
@@ -91,12 +115,13 @@ function registerFinderTests() {
         it('selects pending rows only, bounded by limit', async function () {
             const { db } = makeDb();
             sinon.stub(db, 'doQuery').resolves([]);
-            await db.findPolicySnapshotsByBatchSeq(10);
+            await db.findPolicySnapshotsByBatchSeq('regtest', 10);
             let [sql, params] = db.doQuery.getCall(0).args;
             expect(sql).to.match(/FROM policy_snapshots/);
             expect(sql).to.match(/batch_seq IS NULL/);
             expect(sql).to.not.match(/archived_status/);
-            expect(params).to.deep.equal([10]);
+            expect(sql).to.match(/network = \? AND batch_seq IS NULL/);
+            expect(params).to.deep.equal(['regtest', 10]);
         });
     });
 }

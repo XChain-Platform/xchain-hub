@@ -22,7 +22,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const nock = require('nock');
+const nock = require('nock').default;
 const models = require('../../../../src/providers/llm/models');
 
 function reloadProvider() {
@@ -45,12 +45,14 @@ describe('llm provider, always-thinking fetch headroom', function () {
     });
 
     it('grants headroom to the always-thinking ids, bare and dated', function () {
-        for (const id of ['claude-opus-4-7', 'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-7-20260101'])
+        for (const id of ['claude-opus-4-7', 'claude-opus-5', 'claude-sonnet-5',
+                          'claude-haiku-5-5', 'claude-haiku-5-5-20261007', 'claude-opus-4-7-20260101'])
             expect(models.needsFetchReasoningHeadroom(id), id).to.equal(true);
     });
 
     it('keeps the OpenAI reasoning family and leaves non-thinking ids unchanged', function () {
         expect(models.needsFetchReasoningHeadroom('gpt-5-mini')).to.equal(true);
+        expect(models.needsFetchReasoningHeadroom('gpt-6-astra')).to.equal(true);
         for (const id of ['claude-sonnet-4-6', 'claude-haiku-4-5', 'gpt-4o', 'gpt-5-chat-latest'])
             expect(models.needsFetchReasoningHeadroom(id), id).to.equal(false);
     });
@@ -79,7 +81,8 @@ describe('llm provider, always-thinking fetch headroom', function () {
     // judge id that fetch() treats as thinking never gets the 256 chat budget.
     it('sizes the judge budget with the fetch headroom predicate', function () {
         const { judgeRequest } = require('../../../../src/providers/llm/judge');
-        for (const id of ['claude-opus-4-7', 'claude-sonnet-5', 'claude-opus-5', 'claude-opus-4-7-20260101', 'gpt-5-mini'])
+        for (const id of ['claude-opus-4-7', 'claude-sonnet-5', 'claude-opus-5',
+                          'claude-haiku-5-5', 'claude-opus-4-7-20260101', 'gpt-5-mini', 'gpt-6-astra'])
             expect(judgeRequest(id, 'sys', 'prompt', 1000, {}).maxTokens, id).to.equal(models.JUDGE_MAX_TOKENS_REASONING);
         for (const id of ['claude-haiku-4-5', 'claude-sonnet-4-6', 'gpt-5-chat-latest', 'gpt-4o'])
             expect(judgeRequest(id, 'sys', 'prompt', 1000, {}).maxTokens, id).to.equal(models.JUDGE_MAX_TOKENS);

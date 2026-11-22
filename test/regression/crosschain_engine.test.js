@@ -88,7 +88,8 @@ function registerSuitePart1() {
                 engine.pendingAttestations.set(attestationId, {
                     attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                     destChain: 'LTC', confirmations: 3, digest,
-                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    quorum: 3, memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)), btcBlockHeight: 900000,
+                    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                     commits: new Set(), finalized: false, timer: null,
                     resolve: null, reject: null
                 });
@@ -115,8 +116,9 @@ function registerSuitePart1() {
                 engine.pendingAttestations.set(attestationId, {
                     attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                     destChain: 'LTC', confirmations: 3, digest,
-                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-                    commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    quorum: 3, memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)), btcBlockHeight: 900000,
+                    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+                    commits: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                     finalized: false, timer: null, _commitSent: true,
                     resolve: (v) => { resolvedValue = v; },
                     reject: () => {}
@@ -134,6 +136,7 @@ function registerSuitePart1() {
                 expect(emitted).to.not.be.null;
                 expect(emitted.attestationId).to.equal(attestationId);
                 expect(emitted.status).to.equal('attested');
+                expect(emitted.validatorCount).to.equal(3);
                 expect(engine.finalized.has(attestationId)).to.be.true;
             });
 }
@@ -280,8 +283,9 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 engine.pendingAttestations.set(attestationId, {
                     attestationId, sourceChain: 'LTC', sourceActionIndex: 10,
                     destChain: 'DOGE', confirmations: 3, digest,
-                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-                    commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    quorum: 3, memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)), btcBlockHeight: 900000,
+                    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+                    commits: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
                     finalized: false, timer: null, _commitSent: true,
                     resolve: () => {}, reject: () => {}
                 });
@@ -297,6 +301,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 expect(emitted).to.not.be.null;
                 expect(emitted.attestationId).to.equal('LTC:10:DOGE');
                 expect(emitted.status).to.equal('attested');
+                expect(emitted.validatorCount).to.equal(3);
             });
         });
 }

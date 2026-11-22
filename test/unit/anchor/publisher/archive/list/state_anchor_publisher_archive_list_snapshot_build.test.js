@@ -125,9 +125,9 @@ describe('archive list snapshot build', function () {
         const findLists = sinon.stub().resolves(pending);
         const { pub } = buildPub(emptySelectionDb({ findListSnapshotsByBatchSeq: findLists }));
 
-        const rows = await pub.gatherArchiveRows();
+        const rows = await pub.gatherArchiveRows('regtest');
 
-        expect(findLists.calledOnceWithExactly(ARCHIVE_MAX_LIST_ROWS + 1)).to.equal(true);
+        expect(findLists.calledOnceWithExactly('regtest', ARCHIVE_MAX_LIST_ROWS + 1)).to.equal(true);
         expect(rows.lists).to.have.length(ARCHIVE_MAX_LIST_ROWS);
         expect(rows.lists.map(row => row.snapshot_id))
             .to.deep.equal(pending.slice(0, ARCHIVE_MAX_LIST_ROWS).map(row => row.snapshot_id));

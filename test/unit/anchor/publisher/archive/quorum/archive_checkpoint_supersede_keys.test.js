@@ -131,23 +131,23 @@ describe('archive checkpoint supersede keys: co-signer verify', () => {
     it('verifies the superseding archive on a co-signer that holds the row and on one that does not', async () => {
         const held = supersedingRow();
         const { archive } = await buildArchive(held);
-        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100)).to.equal(true);
-        expect(await publisher().verifyArchiveAgainstLocal(archive, 100)).to.equal(true);
+        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100, 'regtest')).to.equal(true);
+        expect(await publisher().verifyArchiveAgainstLocal(archive, 100, 'regtest')).to.equal(true);
     });
 
     it('fails quorum when the supersede fields are dropped, the shape this row fixes', async () => {
         const held = supersedingRow();
         const { archive } = await buildArchive(held);
         for(const key of CHECKPOINT_SUPERSEDE_KEYS) delete archive.state_checkpoints[0][key];
-        expect(await publisher().verifyArchiveAgainstLocal(archive, 100)).to.equal(false);
-        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100)).to.equal(false);
+        expect(await publisher().verifyArchiveAgainstLocal(archive, 100, 'regtest')).to.equal(false);
+        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100, 'regtest')).to.equal(false);
     });
 
     it('still verifies a plain archive on a co-signer that holds the row', async () => {
         const held = signed(dbRow());
         const { archive } = await buildArchive(held);
         expect(archive.state_checkpoints[0]).to.not.have.any.keys(...CHECKPOINT_SUPERSEDE_KEYS);
-        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100)).to.equal(true);
+        expect(await publisher(held).verifyArchiveAgainstLocal(archive, 100, 'regtest')).to.equal(true);
     });
 });
 

@@ -237,6 +237,7 @@ function registerStructuredErrorTests() {
             expect(caught.rpcCode).to.equal(-32010);
             expect(caught.rpcData.reason).to.equal('INSUFFICIENT_FUNDS');
             expect(caught.rpcData.required).to.equal(12345);
+            expect(caught.rpcMethod).to.equal('create_tx');
         });
 
         // This one is a REAL encoder shape end to end, and is the fixture to copy: a
@@ -255,6 +256,7 @@ function registerStructuredErrorTests() {
             try { await c.call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.rpcCode).to.equal(-32010);
             expect(caught.rpcData.reason).to.equal('CHANGE_ADDRESS_REQUIRED');
+            expect(caught.rpcMethod).to.equal('create_tx');
             // Same object still, so the retry classifier and the dead-letter record
             // keep reading the HTTP status.
             expect(caught.response.status).to.equal(400);

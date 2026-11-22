@@ -126,6 +126,7 @@ const rewardMethods                = require('./publisher/reward.js');
 const rewardDeferMethods           = require('./publisher/reward_defer.js');
 const rewardJournalMethods         = require('./publisher/reward_journal/journal.js');
 const attestRoundMethods           = require('./publisher/attest_round.js');
+const archiveWrapperSlotMethods    = require('./publisher/archive/wrapper_slot.js');
 const archiveAttestMethods         = require('./publisher/archive/attest.js');
 const archiveRoundMethods          = require('./publisher/archive/round.js');
 const archiveSelectionMethods      = require('./publisher/archive/selection.js');
@@ -302,6 +303,7 @@ const PART_METHODS = [
     rewardDeferMethods,
     rewardJournalMethods,
     attestRoundMethods,
+    archiveWrapperSlotMethods,
     archiveAttestMethods,
     archiveRoundMethods,
     archiveSelectionMethods,

@@ -45,6 +45,14 @@ const forms = {
                 String(cp.checkpoint_seq), String(cp.snapshot_block)].join('|');
     },
 
+    checkpointRoundId(cp){
+        return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq;
+    },
+
+    archiveRoundId(cp, batchSeq){
+        return forms.checkpointRoundId(cp) + '|' + batchSeq;
+    },
+
     // Is CHECKPOINT_COMMITMENT active at this checkpoint's own network and snapshot_block?
     // The one reader of the flag-day key, shared by the suffix, the rootless guard and
     // the ANCHOR bundle selector's floor.
@@ -52,12 +60,23 @@ const forms = {
         return gateRegistry.activeAt(CHECKPOINT_COMMITMENT_KEY, cp.network, null, cp.snapshot_block, null);
     },
 
+    // The lowest snapshot_block at which isCheckpointCommitmentActive holds on `network`,
+    // or null when it holds at no height (UNPINNED, an unknown network). A height gate is
+    // active at every block at or above its threshold, so this bounds the gate in SQL.
+    checkpointCommitmentFloor(network){
+        if(typeof network !== 'string') return null;
+        const table = gateRegistry.get(CHECKPOINT_COMMITMENT_KEY);
+        const threshold = Object.prototype.hasOwnProperty.call(table, network) ? table[network] : undefined;
+        if(typeof threshold !== 'number' || !Number.isFinite(threshold)) return null;
+        return Math.max(0, Math.ceil(threshold));
+    },
+
     // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
     // canonical at/above the CHECKPOINT_COMMITMENT flag-day. This is the hub's only
     // copy and no other repo imports it: the SDK and sync checkpoint.js, the explorer's
     // proofs.js and the indexer's bin/recovery.js re-type the same gate and join inline,
     // and the indexer's ANCHOR FORMAT 0 parse and bridge checkpoint_source.js append the
-    // suffix ungated by design, so an edit here must be mirrored in every one of them.
+    // suffix ungated by design. Keep checkpoint_canonical.json aligned with every edit.
     checkpointRootSuffix(cp){
         if(!forms.isCheckpointCommitmentActive(cp)) return '';
         // Append only when the roots are actually present. Post-flag-day the engine
@@ -96,7 +115,7 @@ const forms = {
                   forms.checkpointSupersedeSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
+                forms.checkpointRoundId(cp), 0, raw);
         return raw;
     },
 

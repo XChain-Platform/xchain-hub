@@ -200,10 +200,44 @@ function registerRefusalTests() {
     });
 }
 
+function registerStatsTests() {
+    it('counts repeated co-sign refusals even when their log key is deduplicated', function () {
+        const h = harness();
+        expect(h.engine.noteSkip('sign_request_malformed', { sender: 'peer' })).to.equal(true);
+        expect(h.engine.noteSkip('sign_request_malformed', { sender: 'peer' })).to.equal(false);
+        const stats = h.engine.getStats();
+        expect(stats.cosign_declines_total).to.equal(2);
+        expect(stats.cosign_declines).to.deep.equal({ malformed: 2 });
+    });
+
+    it('reports a due snapshot before a non-leading decision', async function () {
+        const h = harness({
+            pubkey: key('9'),
+            validators: [{ pubkey: key('1') }, { pubkey: key('2') }],
+            due: [106],
+            tip: 106
+        });
+        await h.engine.tick();
+        expect(h.engine.getStats()).to.include({ due_snapshot_block: 106, due_overdue_blocks: 0 });
+    });
+
+    it('counts a failed tick and does not report it as successful', async function () {
+        const h = harness();
+        h.engine._startedAt = Date.now() - 1000;
+        sinon.stub(h.engine, 'checkpointNextDue').rejects(new Error('probe failure'));
+        let error;
+        try { await h.engine.tick(); } catch (e) { error = e; }
+        expect(error).to.have.property('message', 'probe failure');
+        expect(h.engine.getStats().tick_failures).to.equal(1);
+        expect(h.engine._lastTickOkAt).to.equal(null);
+    });
+}
+
 describe('SnapshotCheckpointEngine', function () {
     registerGateTests();
     registerCoinScopedGateTests();
     registerSoleValidatorTests();
     registerLeaderTests();
     registerRefusalTests();
+    registerStatsTests();
 });

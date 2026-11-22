@@ -22,7 +22,7 @@ const {
   expect
 } = require('chai');
 const sinon = require('sinon');
-const nock = require('nock');
+const nock = require('nock').default;
 const dns = require('dns');
 const httpGet = require('../../../src/providers/http_get.js');
 

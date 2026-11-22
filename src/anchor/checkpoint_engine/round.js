@@ -86,10 +86,11 @@ module.exports = {
         this.assertCheckpointNetwork(cp, 'propose');
         // The interval rule, re-read here because a peer's FINALIZED or this hub's own
         // co-signature on another round of the interval may have landed during the reads above.
-        if(this.declinesOwnRound(cp)) return;
+        if(this.declinesOwnRound(cp)) return this.noteLeaderDecline('off_cadence', cp);
         // One payload per sequence (first of the two call sites, with co-sign), ahead of
         // the signature so a refused proposal never produces one.
-        if(!this.claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical))
+            return this.noteLeaderDecline('seq_second_payload', cp);
         this.noteRoundSignature(snapshotBlock);
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches handleFinalized + the indexer's quorum.js oracleN)

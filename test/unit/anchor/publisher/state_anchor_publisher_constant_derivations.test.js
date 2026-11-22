@@ -34,8 +34,8 @@ const SIG_PAIR_BYTES = 64 + 128 + 2;
 const ENV_KEYS = ['ANCHOR_CHUNK_MAX_BYTES', 'ANCHOR_MATCH_BATCH_SIZE', 'ANCHOR_MAX_BATCH',
     'ANCHOR_ELECTION_TOLERANCE_BLOCKS', 'ANCHOR_INTERVAL_MS', 'ANCHOR_ROUND_TIMEOUT_MS'];
 
-function mkPub(){
-    return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+function mkPub(network){
+    return new StateAnchorPublisher({ db: {}, network, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
 }
 
 function hex(n){ return 'a'.repeat(n); }
@@ -83,7 +83,6 @@ const sections = (n, signers) => CHAINS.slice(0, n).map(c => section(c, signers)
 let saved;
 
 describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
-
     before(function () {
         saved = {};
         for(const k of ENV_KEYS){ saved[k] = process.env[k]; delete process.env[k]; }
@@ -114,9 +113,9 @@ function registerAnchorDefaultTests() {
     });
 
     // Build one publisher with a single env knob set, restoring it afterwards.
-    function mkPubWith(key, value){
+    function mkPubWith(key, value, network){
         process.env[key] = value;
-        try { return mkPub(); }
+        try { return mkPub(network); }
         finally { delete process.env[key]; }
     }
 
@@ -126,7 +125,13 @@ function registerAnchorDefaultTests() {
             expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', bad).electionToleranceBlocks, 'tolerance ' + bad).to.equal(36);
         }
         expect(mkPubWith('ANCHOR_ROUND_TIMEOUT_MS', '45000').roundTimeoutMs).to.equal(45000);
-        expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12').electionToleranceBlocks).to.equal(12);
+        expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12', 'regtest').electionToleranceBlocks).to.equal(12);
+    });
+
+    it('pins the election tolerance on live and standalone networks', function () {
+        for(const network of ['mainnet', 'testnet', ''])
+            expect(mkPubWith('ANCHOR_ELECTION_TOLERANCE_BLOCKS', '12', network).electionToleranceBlocks,
+                network || 'standalone').to.equal(36);
     });
 
     it('resolves the round timeout to the same value as the admission watermark for every input', function () {
@@ -147,7 +152,6 @@ function registerAnchorDefaultTests() {
 
 function registerAnchorChunkTests() {
     describe('ANCHOR_CHUNK_MAX_BYTES: head room under MAX_ACTION_DATA_LENGTH', function () {
-
         it('the v1/v6 fixed prefix costs about 322 bytes', function () {
             // Chunk 0 shares its action with the checkpoint prefix; that prefix is
             // the ~322 B the derivation note subtracts before counting signatures.
@@ -194,7 +198,6 @@ function registerAnchorChunkTests() {
 
 function registerAnchorElectionTests() {
     describe('ANCHOR_ELECTION_TOLERANCE_BLOCKS: the failover ladder ordering', function () {
-
         const BTC_BLOCK_MS   = 10 * 60 * 1000;         // BTC target spacing
         const DOGE_BURIAL_MS = 60 * 60 * 1000;         // 60 DOGE confirmations at ~1 min
 
@@ -380,7 +383,6 @@ function registerAnchorBundleFitTests() {
 
 function registerAnchorBatchTests() {
     describe('ANCHOR_MAX_BATCH: the per-cycle DOGE spend bound', function () {
-
         it('bounds one archive to roughly a hundred DOGE transactions', function () {
             const pub = mkPub();
             // Archived rows are dominated by validator signatures and do not

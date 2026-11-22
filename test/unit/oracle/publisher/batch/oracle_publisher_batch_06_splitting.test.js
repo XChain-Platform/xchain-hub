@@ -1,5 +1,15 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const {
     fs,
     os,
@@ -152,13 +162,100 @@ const testCase6 = async function () {
             expect(h.p.getStats().batchSplitCount).to.equal(0);
         };
 
+// A signer whose signing round fills one in-span round into the caller's array in
+// place, as the real in-span gap fill does.
+function fillOnSign(signer, fillRound) {
+    let sign = signer.collectBatchSignatures;
+    signer.collectBatchSignatures = async (first, last, anchor, rounds) => {
+        let held = rounds.some(r => r.round === fillRound);
+        if (!held && first < fillRound && fillRound < last) {
+            rounds.push(bufferedFixture(fillRound));
+            rounds.sort((a, b) => a.round - b.round);
+        }
+        return sign(first, last, anchor, rounds);
+    };
+}
+
+const testCase7 = async function () {
+            let h = makePublisher();
+            await h.p.start();
+            fillOnSign(h.signer, 102);
+            sinon.stub(h.p, 'packSegment').callsFake(r => Math.min(3, r.length));
+            let rounds = [100, 101, 103, 104, 105].map(n => bufferedFixture(n));
+
+            let wires = await h.p.signWindowWires(h.signer, rounds, 800105, 1);
+
+            expect(h.signer.calls.map(c => c.rounds)).to.deep.equal([[100, 101, 102, 103], [104, 105]]);
+            expect(wires.flatMap(w => w.rounds.map(r => r.round)), 'every round signed exactly once')
+                .to.deep.equal([100, 101, 102, 103, 104, 105]);
+        };
+
+const testCase8 = async function () {
+            let h = makePublisher();
+            await h.p.start();
+            fillOnSign(h.signer, 102);
+            sinon.stub(h.p, 'packSegment').callsFake(r => Math.min(3, r.length));
+            let fits = sinon.stub(h.p, 'wireFits').returns(true);
+            fits.onFirstCall().returns(false);
+            let rounds = [100, 101, 103].map(n => bufferedFixture(n));
+
+            let wires = await h.p.signWindowWires(h.signer, rounds, 800103, 1);
+
+            expect(h.signer.calls.map(c => c.rounds))
+                .to.deep.equal([[100, 101, 102, 103], [100, 101, 102], [103]]);
+            expect(wires.map(w => w.rounds.map(r => r.round))).to.deep.equal([[100, 101, 102], [103]]);
+        };
+
+const testCase9 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    for (let r of [0, 1, 4, 5]) h.p._buffer.set(r, bufferedFixture(r));
+    for (let r of [2, 3]) {
+        h.p.markRoundLanded(r);
+        h.p._publishedRounds.mark(r);
+    }
+
+    await h.p.assembleWindow(0);
+
+    expect(h.signer.calls.map(call => call.rounds)).to.deep.equal([[0, 1], [4, 5]]);
+    expect(h.broadcasts).to.have.length(2);
+};
+
+const testCase10 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    for (let r of [0, 1, 4, 5]) h.p._buffer.set(r, bufferedFixture(r));
+    sinon.stub(h.p, 'roundsCarriedByChain').resolves(new Set([2, 3]));
+
+    await h.p.assembleWindow(0);
+
+    expect(h.signer.calls.map(call => call.rounds)).to.deep.equal([[0, 1], [4, 5]]);
+    expect(h.broadcasts).to.have.length(2);
+};
+
+const testCase11 = async function () {
+    let h = makePublisher();
+    await h.p.start();
+    let rounds = [0, 1, 4, 5].map(r => bufferedFixture(r));
+
+    let wires = await h.p.signWindowWires(h.signer, rounds, 800005, 1, new Set());
+
+    expect(h.signer.calls.map(call => [call.first, call.last])).to.deep.equal([[0, 5]]);
+    expect(wires).to.have.length(1);
+};
+
 function registerSuite1() {
+    it('advances past the rounds a range really covered when its in-span fill grew it', testCase7);
+    it('still signs the tail round when a filled range shrinks to fit', testCase8);
     it('packs the largest range that fits and splits an overflowing window into several wires', testCase1);
     it('splits at an armed oracle flag-day boundary inside the window (D7)', testCase2);
     it('re-derives the header anchor for EVERY split, never the whole window\'s', testCase3);
     it('emits only wires the READER accepts: the inflated body is capped at the same 8189', testCase4);
     it('refuses to build a body whose header anchor is not the last round\'s anchor', testCase5);
     it('does not split a window that sits entirely on one side of every flag day', testCase6);
+    it('splits around landed interior rounds so neighboring wires still broadcast', testCase9);
+    it('splits around interior rounds reported as carried by the chain', testCase10);
+    it('does not split around an ordinary missing round', testCase11);
 }
 
 function registerOuterSuite6() {

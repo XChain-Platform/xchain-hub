@@ -24,7 +24,7 @@
 
 const { expect } = require('chai');
 const sinon      = require('sinon');
-const nock       = require('nock');
+const nock       = require('nock').default;
 
 function _withEnv(extra, fn){
     const saved = {};
@@ -91,6 +91,7 @@ describe('llm provider, reasoning-family classification (item 3535)', function (
 
     registerReasoningClassificationTests();
     registerReasoningTransportTests();
+    registerGpt6ReasoningTests();
 });
 
 function registerReasoningClassificationTests() {
@@ -117,6 +118,29 @@ function registerReasoningClassificationTests() {
         expect(llm._isReasoningModel('gpt-5.1-chat-latest')).to.equal(false);
         expect(llm._isReasoningModel('gpt-5.2-chat-latest')).to.equal(false);
         expect(llm._isReasoningModel('gpt-5.3-chat-latest')).to.equal(false);
+    });
+}
+
+function registerGpt6ReasoningTests() {
+    it('classifies GPT-6 reasoning ids but excludes chat variants', function () {
+        const llm = _reloadProvider();
+        for (const id of ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-terra'])
+            expect(llm._isReasoningModel(id), id).to.equal(true);
+        for (const id of ['gpt-6-chat-latest', 'gpt-6.2-chat-latest', 'gpt-60-astra'])
+            expect(llm._isReasoningModel(id), id).to.equal(false);
+    });
+
+    it('omits temperature and adds reasoning headroom for GPT-6 Astra', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const scope = nock(/^https:\/\//).post('/v1/chat/completions', body => {
+                expect(body).to.not.have.property('temperature');
+                expect(body.max_completion_tokens).to.equal(1024 + 2048);
+                return true;
+            }).reply(200, { choices: [{ message: { content: 'ok' } }] });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-6-astra' });
+            expect(scope.isDone()).to.equal(true);
+        });
     });
 }
 

@@ -102,8 +102,8 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(err.message).to.include('exit 1');
     });
 
-    // The Max-plan wording carries no numeric status at all; captured live on the
-    // Prometheus compute pool as "You've hit your session limit, resets 8:20pm (UTC)".
+    // The Max-plan wording carries no numeric status at all; captured live as
+    // "You've hit your session limit, resets 8:20pm (UTC)".
     it('classifies a session-limit exit with no status token as transient', async function () {
         let { runClaudePrint } = loadClaudeSpawn({
             exitCode: 1, stderr: "You've hit your session limit" });
@@ -122,7 +122,7 @@ describe('claude-spawn runClaudePrint()', function () {
 
     // A deterministic refusal never heals, so it outranks an availability match:
     // advancing the chain would re-ask a different model for an answer the first one
-    // already gave. Wording captured live (Prometheus item #2476).
+    // already gave. Wording captured live.
     it('keeps a content refusal hard even when it carries an availability token', async function () {
         let { runClaudePrint } = loadClaudeSpawn({
             exitCode: 1,
@@ -150,6 +150,17 @@ describe('claude-spawn runClaudePrint()', function () {
     });
 
     it('keeps an unrecognised non-zero exit hard', async function () {
+        const authStdout = JSON.stringify({
+            type: 'error', status: 401,
+            error: { type: 'authentication_error', message: 'bad key' }
+        });
+        const authRun = loadClaudeSpawn({ exitCode: 1, stdout: authStdout });
+        let authErr;
+        try { await authRun.runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { authErr = e; }
+        expect(authErr.transient).to.equal(false);
+        expect(authErr.kind).to.equal('vendor_config');
+
         let { runClaudePrint } = loadClaudeSpawn({ exitCode: 2, stderr: 'exceeded --max-budget-usd' });
         let err;
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }

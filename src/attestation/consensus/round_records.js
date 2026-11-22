@@ -43,6 +43,12 @@ module.exports = {
         }
     },
 
+    // Reopening a request retires its old teardown mark from both ring views.
+    clearTornDown(rid){
+        this.tornDown.delete(rid);
+        this._tornDownOrder = this._tornDownOrder.filter(entry => entry !== rid);
+    },
+
     // Record that `pubkey` proposed for `rid`. Called for every PROPOSE this hub
     // ACCEPTS (sig verified, sender responsible, payload within cap) and for this
     // hub's own proposal at the moment it enters the round. A proposal this hub

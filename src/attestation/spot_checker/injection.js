@@ -23,9 +23,12 @@
 
 'use strict';
 const { getLogger } = require('../../observability');
+const { APPROX_BTC_BLOCK_MS } = require('../publisher/constants.js');
 const logger = getLogger();
 
 const MAX_QUEUE_SIZE              = 1024;
+const DEFAULT_DEADLINE_BLOCKS     = 100;
+const QUEUE_AGE_SAFETY_MULTIPLIER = 4;
 
 module.exports = {
 
@@ -44,13 +47,48 @@ module.exports = {
         this._queue.set(rid, {
             providerId:      String(providerId),
             expectedPattern: String(expectedPattern || ''),
-            registeredAt:    Date.now()
+            registeredAt:    Date.now(),
+            // Fixed at registration so a later change to the provider deadline window
+            // cannot expire a request that was still inside its own deadline.
+            ttlMs:           this.queueTtlMs()
         });
     },
 
     // Check whether a request_id is being spot-checked.
     isSpotCheck(requestId){
         return this._queue.has(String(requestId || '').toLowerCase());
+    },
+
+    queueTtlMs(){
+        let blocks = DEFAULT_DEADLINE_BLOCKS;
+        if (this.providerRegistry && typeof this.providerRegistry.maxDeadlineWindowBlocks === 'function') {
+            const max = this.providerRegistry.maxDeadlineWindowBlocks();
+            const candidate = Number(max && max.blocks);
+            if (Number.isFinite(candidate) && candidate > 0) blocks = candidate;
+        }
+        const cfg = (this.hub && this.hub.p2pConfig) || {};
+        const configuredBlockMs = Number(cfg.ATTESTATION_BLOCK_MS);
+        const blockMs = Number.isFinite(configuredBlockMs) && configuredBlockMs > 0
+            ? configuredBlockMs : APPROX_BTC_BLOCK_MS;
+        return blocks * blockMs * QUEUE_AGE_SAFETY_MULTIPLIER;
+    },
+
+    expireStaleQueueEntries(now = Date.now()){
+        let expired = 0;
+        for (const [requestId, entry] of this._queue) {
+            const registeredAt = Number(entry && entry.registeredAt);
+            const ttl = Number(entry && entry.ttlMs);
+            if (Number.isFinite(registeredAt) && Number.isFinite(ttl) && now - registeredAt > ttl) {
+                this._queue.delete(requestId);
+                expired++;
+            }
+        }
+        if (expired > 0) {
+            this.queueExpired += expired;
+            logger.warn('AttestationSpotChecker: expired ' + expired +
+                        ' spot-check queue entries past their registered deadline allowance');
+        }
+        return expired;
     },
 
     // Start the injection scheduler when opted in and fully wired. Silent no-op
@@ -95,6 +133,7 @@ module.exports = {
             logger.warn('AttestationSpotChecker: injection tick still in flight; skipping this scheduler pass');
             return 0;
         }
+        this.expireStaleQueueEntries();
         // Backpressure: leave headroom so injections never evict live entries.
         if (this._queue.size >= Math.floor(MAX_QUEUE_SIZE * 0.9)) {
             logger.warn('AttestationSpotChecker: spot-check queue near capacity, skipping injection tick');

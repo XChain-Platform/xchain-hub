@@ -14,8 +14,10 @@
  *
  * XChain Hub - PRICE batch window, resolved from its config knobs in one place
  *
- * The batch signer refuses proposals by this window and the publisher proposes by
- * it, so both call this one resolver and cannot derive different boundaries.
+ * The publisher proposes by this window and the batch signer reads the same plan,
+ * so both call this one resolver and cannot derive different boundaries. The
+ * signer uses it only to refuse a range that straddles the hourly activation
+ * round; it does not veto a range for any other window-size difference.
  *
  ********************************************************************/
 

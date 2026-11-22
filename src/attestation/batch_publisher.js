@@ -87,9 +87,9 @@
 const fs   = require('fs');
 const path = require('path');
 
-// The mirror flag-day map is a registry row read by literal key (W5).
+// The mirror flag-day map is a registry row, read by the key response_mirror_era.js owns.
 const gateRegistry = require('../consensus/gate_registry');
-const ATTEST_RESPONSE_MIRROR_KEY = 'attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION';
+const { ATTEST_RESPONSE_MIRROR_KEY } = require('./response_mirror_era.js');
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./attest_response_timing.js');
 const { initBatchFiles, initBatchTimeouts, initBatchRuntime } = require('./batch_publisher/options.js');
 const { mainnetWritesOpen } = require('../lib/mainnet_write_window.js');

@@ -215,6 +215,9 @@ module.exports = {
         // Fail closed on an un-observed round: we only attest an archive election we
         // ourselves witnessed via its XANC_SIGN_REQ.
         if(!this.isObservedArchiveLeader(batchSeq, sender)) return;
+        // Election observation alone precedes body verification. Reward signatures
+        // require the exact archive content this hub byte-matched before co-signing.
+        if(!this.hasObservedArchiveContent(batchSeq, sender)) return;
         let id = this.observedArchiveCheckpoint(batchSeq);
         if(!id) return;
         // Resolve the stashed identity to OUR OWN state_checkpoints row (never the wire).

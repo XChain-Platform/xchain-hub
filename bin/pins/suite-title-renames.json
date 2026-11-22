@@ -1,6 +1,9 @@
 {
   "version": 1,
+  "test/unit/api/rpc_price_snapshots_quorum_margin.test.js": "test/unit/api/price_snapshots/rpc_price_snapshots_quorum_margin.test.js",
+  "test/unit/api/rpc_price_snapshots_shape.test.js": "test/unit/api/price_snapshots/rpc_price_snapshots_shape.test.js",
   "test/integration/anchor/archive_quorum_tables_recovery.test.js": "test/unit/anchor/archive_quorum_tables_recovery.test.js",
+  "test/unit/anchor/publisher/archive/orphaned_landing_cosign.test.js": "test/unit/anchor/publisher/archive/price/orphaned_landing_cosign.test.js",
   "note": "Title renames that ride a commit ahead of the deferred at1-suite-titles.json re-pin. Each entry is old title to new title, keyed by the file's current path.",
   "titles": {
     "test/unit/anchor/reward_tracker.test.js": {
@@ -14,6 +17,11 @@
     },
     "test/unit/cross_chain/dex/cross_chain_dex_engine_07_write_finalized_match_fail_closed_snapshot_persist.test.js": {
       "_insertMatchRow(): retracted-row revive": "insertMatchRow(): retracted-row revive"
+    },
+    "test/unit/capabilities/capability_registry.test.js": {
+      "CapabilityRegistry applyGovernanceChange() updates the in-memory MIN_STAKE for a known capability": "CapabilityRegistry applyMinStakeActivation() at block 0 updates the in-memory MIN_STAKE for a known capability",
+      "CapabilityRegistry applyGovernanceChange() creates a new config entry if the capability had none": "CapabilityRegistry applyMinStakeActivation() at block 0 creates a new config entry if the capability had none",
+      "CapabilityRegistry applyGovernanceChange() throws for an unknown capability": "CapabilityRegistry applyMinStakeActivation() at block 0 throws for an unknown capability"
     },
     "test/unit/oracle/publisher/oracle_publisher_lifecycle.test.js": {
       "_enqueue()": "enqueue()"
@@ -44,6 +52,10 @@
     "test/unit/oracle/price/price_admission_wire_carrier.test.js": {
       "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator REFUSES the identical round when the RPC drops the map": "the admission map on the price wire (rows 17 and 14) pushpriceround carries admit_blocks to the verifier end to end through the RPC surface, with the real aggregator still does not accept the identical round when the RPC drops the map"
     },
+    "test/unit/security/configuration/dependency_advisories.test.js": {
+      "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-1: package.json pins minimatch at or above 11.0.9",
+      "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 10.2.5": "Security: remediated dependency advisories @regression @tier4 ADV-2: every minimatch entry in package-lock.json is at or above 11.0.9"
+    },
     "test/unit/repo_guards/configuration_doc.test.js": {
       "CONFIGURATION.md env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/": "hub configuration page env-var coverage documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/",
       "CONFIGURATION.md env-var coverage documents every dynamically-composed <COIN>_ env var read in src/": "hub configuration page env-var coverage documents every dynamically-composed <COIN>_ env var read in src/"
@@ -53,6 +65,9 @@
     },
     "test/unit/rollcall/rollcall_status_rpc.test.js": {
       "capabilities/oracle_publish broadcast presence check leaves the no-signer-module posture unchanged": "capabilities/oracle_publish broadcast presence check fails when no signer module is configured"
+    },
+    "test/unit/peers/rpc_batch_guard.test.js": {
+      "JSON-RPC batch cap src/api.js mounts the guard before the jsonRouter mount": "JSON-RPC batch cap createApp mounts the guard before the jsonRouter mount"
     },
     "test/unit/anchor/snapshot_checkpoint/cosign_view.test.js": {
       "buildSnapshotCosignView accepted requests normalizes a string tip to a number": "buildSnapshotCosignView accepted requests normalizes string checkpoint heights to numbers"
@@ -69,6 +84,10 @@
     "test/unit/cross_chain/chain_tip_chain_id_purge.test.js": {
       "regtest chain-tip identity purge uses scoped SQL for cross-chain rows and an unfiltered snapshot delete": "regtest chain-tip identity purge uses scoped SQL for cross-chain and checkpoint rows and an unfiltered capability delete",
       "regtest chain-tip identity purge purges all three tables before replacing a changed BTC regtest tip": "regtest chain-tip identity purge purges all stale chain tables before replacing a changed BTC regtest tip"
+    },
+    "test/unit/shared/admission/admission_height_runtime.test.js": {
+      "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess refuses a tip that has not advanced past the chain's own stall window": "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess dates an equal tip against each chain's own stall window",
+      "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess a frozen chain stays refused, and an advance clears it": "XChainHub.admissionTipFresh: per chain, and a refusal is not a guess re-baselines a lower tip, then refuses it if the new history freezes"
     }
   }
 }

@@ -28,6 +28,8 @@ const { ANCHOR_FLAG_DAY_REWARD_TYPES, ARCHIVE_FLAG_DAY_REWARD_TYPE,
         ARCHIVE_MAX_WIRE_B64_BYTES, ARCHIVE_MAX_CHAIN_TXS,
         ARCHIVE_CHAIN_BYTES_BUDGET } = require('../constants.js');
 const { capListRows, sortedListRows } = require('./list/list_rows_select.js');
+const { priceKeyFold } = require('./unheld_row.js');
+const { supersededBySeq } = require('../../checkpoint_engine/superseded_rule.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 const ARCHIVE_FOLD_SUBDEADLINE_MS = 30000;
@@ -101,30 +103,33 @@ module.exports = {
             : this.db.findPriceSnapshotRoundsByBatchSeq(limit);
     },
 
-    // Every pending archive stream, with sentinel reads for the two protocol caps.
-    async gatherArchiveRows(){
+    // Every pending archive stream, with sentinel reads for the three protocol caps.
+    // Cargo is scoped in SQL to the wrapper network before each LIMIT, matching the
+    // co-signer and recovery network checks without letting foreign rows starve a page.
+    async gatherArchiveRows(network){
         if(!this.db.findPriceSnapshotRoundsByBatchSeq || !this.db.findPriceTombstonesByBatchSeq){
             let [matches, calls, rewards] = await Promise.all([
-                this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
-                this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+                this.db.findCrossChainMatchesByBatchSeq(network, this.maxBatch),
+                this.db.findCrossChainCallsByBatchSeq(network, this.maxBatch),
                 this.pendingArchiveRewards()
             ]);
             return this.archiveRows(matches, calls, this.dropChainDerivedRewards(rewards));
         }
         let [matches, calls, rewards, bridges, policies, lists, checkpoints, priceRounds, tombstones] = await Promise.all([
-            this.db.findCrossChainMatchesByBatchSeq(this.maxBatch),
-            this.db.findCrossChainCallsByBatchSeq(this.maxBatch),
+            this.db.findCrossChainMatchesByBatchSeq(network, this.maxBatch),
+            this.db.findCrossChainCallsByBatchSeq(network, this.maxBatch),
             this.pendingArchiveRewards(),
-            this.db.findBridgeTransfersByBatchSeq(this.maxBatch),
-            this.db.findPolicySnapshotsByBatchSeq(ARCHIVE_MAX_POLICY_ROWS + 1),
+            this.db.findBridgeTransfersByBatchSeq(network, this.maxBatch),
+            this.db.findPolicySnapshotsByBatchSeq(network, ARCHIVE_MAX_POLICY_ROWS + 1),
             this.db.findListSnapshotsByBatchSeq
-                ? this.db.findListSnapshotsByBatchSeq(ARCHIVE_MAX_LIST_ROWS + 1)
+                ? this.db.findListSnapshotsByBatchSeq(network, ARCHIVE_MAX_LIST_ROWS + 1)
                 : Promise.resolve([]),
-            this.db.findStateCheckpointsByBatchSeq(this.maxBatch),
+            this.db.findStateCheckpointsByBatchSeq(network, this.maxBatch),
             this.pendingPriceRounds(ARCHIVE_MAX_PRICE_ROUNDS + 1),
             this.db.findPriceTombstonesByBatchSeq(this.maxBatch)
         ]);
         rewards = this.dropChainDerivedRewards(rewards);
+        checkpoints = this.deferSupersededCheckpoints(checkpoints);
         let cappedLists = capListRows(lists, ARCHIVE_MAX_LIST_ROWS);
         let capped = policies.length > ARCHIVE_MAX_POLICY_ROWS || cappedLists.capped ||
             priceRounds.length > ARCHIVE_MAX_PRICE_ROUNDS;
@@ -132,10 +137,20 @@ module.exports = {
         priceRounds = priceRounds.slice(0, ARCHIVE_MAX_PRICE_ROUNDS).map(r => Number(r.round_number));
         let prices = await this.priceRoundsAboveCommonFloor(
             await this.db.findPriceSnapshotsForArchiveRounds(priceRounds));
+        const priceKeys = new Set(prices.map(priceKeyFold));
+        tombstones = tombstones.filter(row => !priceKeys.has(priceKeyFold(row)));
         return this.archiveRows(matches, calls, rewards, {
             bridges, policies, lists: cappedLists.rows, checkpoints, prices, tombstones,
             cappedOrTrimmed: capped
         });
+    },
+
+    // Recovery refuses an archive that carries a checkpoint beside a superseding marker
+    // for it, so a row a marker in the same page supersedes waits unstamped for a later
+    // archive, where the marker is already stamped and the row rides alone.
+    deferSupersededCheckpoints(checkpoints){
+        const page = checkpoints || [];
+        return page.filter(row => supersededBySeq(row, page) === null);
     },
 
     // All row sets normalized to arrays, or null when no stream has archive cargo.

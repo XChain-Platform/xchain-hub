@@ -49,6 +49,14 @@ function isFederatedHub({ minValidators, validators, peers, seedNodes } = {}) {
     return seedCount(seedNodes) > 0;
 }
 
+// A source-keyed weight snapshot can contain several rows for one signing key.
+// This is still a sole-validator federation when every row belongs to this hub.
+function isSoleSelfFederation(validators, selfPubkey) {
+    if (!Array.isArray(validators) || validators.length === 0 || !selfPubkey) return false;
+    const self = String(selfPubkey).toLowerCase();
+    return validators.every(row => row && String(row.pubkey || '').toLowerCase() === self);
+}
+
 // Whether the widened federation test governs a round pinned at `height`. The
 // height is the round's own BTC anchor, so every hub reads the same answer for
 // the same round; a missing or unparseable height reads as inactive.
@@ -105,5 +113,6 @@ async function tipAnchoredFederation(engine) {
 }
 
 module.exports = {
-    isFederatedHub, isFederatedHubActive, isFederatedHubArmed, liveFederationSignals, roundIsFederated, tipAnchoredFederation
+    isFederatedHub, isFederatedHubActive, isFederatedHubArmed, isSoleSelfFederation,
+    liveFederationSignals, roundIsFederated, tipAnchoredFederation
 };

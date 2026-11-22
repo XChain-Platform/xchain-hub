@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const { getLogger, getRegistry } = require('../observability');
+const { provenPubkey } = require('../lib/chain_signer_admission.js');
 const logger = getLogger();
 
 // Throttle the unverified-acceptance warning per (pubkey, capability, reason); peers
@@ -110,8 +111,6 @@ class CapabilityGossip {
                 return;
             }
             this.capabilityRegistry.applyMinStakeActivation(parsed.capability, Number(ev.activationBlock), String(ev.newValue));
-        } else {
-            this.capabilityRegistry.applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
         }
         // Drop cached validator-set snapshots for this capability so the next consensus
         // read re-queries the indexer under the new threshold. The cache key already folds
@@ -169,12 +168,18 @@ class CapabilityGossip {
         }
     }
 
-    // PeerManager has already sig-verified the envelope, so the only extra requirement
-    // is that data.pubkey match the sender's, or operator A could claim B's capabilities.
+    // Bind the claim to the proven signing key unconditionally. envelope.sender is
+    // self-asserted, and transport also admits signers absent from the address registry.
     async handleCapabilityMessage(envelope){
         if(!this.capabilityRegistry) return;
         let data = envelope.data || {};
         if(!data.pubkey || !data.capability) return;
+        let proven = provenPubkey(envelope);
+        if(!proven || proven !== String(data.pubkey).toLowerCase()){
+            logger.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey +
+                        ' but proven signing key is ' + (proven || 'none') + '; dropping');
+            return;
+        }
         let senderPubkey = this.peerManager && this.peerManager.validatorPubkeys
             ? this.peerManager.validatorPubkeys.get(envelope.sender) : null;
         if(senderPubkey && String(data.pubkey).toLowerCase() !== String(senderPubkey).toLowerCase()){

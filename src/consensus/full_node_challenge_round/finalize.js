@@ -31,6 +31,7 @@ const eq                = require('../equivocation_header.js');
 const { isAmbiguousSendError } = require('../../lib/guards/idempotent_broadcast.js');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { readDurableLog } = require('../../lib/fs/durable_log_read.js');
 const logger = getLogger();
 
 const { XNODE_DONE } = require('./message_types.js');
@@ -41,6 +42,9 @@ const { XNODE_DONE } = require('./message_types.js');
 // tick; the reservation it returns IS the fee, so the caller must commit or
 // release it.
 function claimVerdictSpend(self, state, epoch){
+    // The committed set below is only as complete as the log that fed it: until that log
+    // has been read, no verdict fee may be spent.
+    if(!self.spendLogReady()) return null;
     // A prior process already committed this epoch's BTC fee. The epoch is
     // recomputed deterministically from the tip, so a restart inside acceptWindow
     // rebuilds the same round and can re-win leadership; without this the verdict
@@ -197,10 +201,12 @@ module.exports = {
     // clause on 'no prior record' instead dropped it, so intent/failed/intent - retry,
     // then crash after the node accepted - reloaded as uncommitted and re-broadcast,
     // which is the very failure mode this durable guard exists to prevent.
+    //
+    // Only a missing file (a first run) is an empty log. Any other read failure leaves the
+    // log unread (spendLogReady), so a transient fault cannot forget a committed verdict.
     loadSpendLog(){
-        let text;
-        try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
-        catch(e){ return; }   // absent on a first run
+        let text = readDurableLog(fs, this, '_spendLogUnread', this.spendLogPath, 'FullNodeChallengeRound');
+        if(text === null) return;
         let outcome = new Map();
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
@@ -216,6 +222,12 @@ module.exports = {
         }
         for(let [epoch, state] of outcome)
             if(state === 'sent' || state === 'intent') this._committedEpochs.add(epoch);
+    },
+
+    // True once the spend log has been read (or is absent); the read is retried here.
+    spendLogReady(){
+        if(this._spendLogUnread) this.loadSpendLog();
+        return !this._spendLogUnread;
     },
 
     async maybeFinalize(epoch){

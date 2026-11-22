@@ -53,11 +53,18 @@ const haltedEval = () => evaluateStakeShare({
     operatorSources: OURS, minStake: '25000'
 });
 
+const unmatchedEval = (sources) => evaluateStakeShare({
+    validators: rows([{ source: 'community', weight: 25000 }]),
+    operatorSources: sources || OURS,
+    minStake: '25000'
+});
+
 describe('StakeShareMonitor', function () {
     registerMonitorAlertTests();
     registerMonitorSnapshotTests();
     registerMonitorHoldTests();
     registerMonitorHoldShapeTests();
+    registerMonitorDepartureTests();
     registerMonitorRecoveryLogTests();
 });
 
@@ -105,6 +112,54 @@ function registerMonitorAlertTests() {
         clock.t += 300001;
         monitor.record('BTC', 'price', criticalEval());
         expect(lines).to.have.lengthOf(2);
+    });
+}
+
+function registerMonitorDepartureTests() {
+    it('promotes previously measured sources disappearing to HALTED without clearing', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.record('BTC', 'price', criticalEval());
+        const entry = monitor.record('BTC', 'price', unmatchedEval());
+        expect(entry.level).to.equal(LEVELS.HALTED);
+        expect(entry.meetsGate).to.equal(false);
+        expect(entry.stakesToHalt).to.equal(0);
+        expect(monitor.isAlerting()).to.equal(true);
+        expect(lines.filter(line => line.includes('CLEARED'))).to.deep.equal([]);
+    });
+
+    it('alerts when healthy operator sources disappear from the next snapshot', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.record('BTC', 'price', okEval());
+        monitor.record('BTC', 'price', unmatchedEval(['ours1', 'ours2']));
+        expect(monitor.isAlerting()).to.equal(true);
+        expect(lines[0]).to.contain('STAKE SHARE HALTED [BTC/price]');
+    });
+
+    it('remembers matched sources through an unavailable snapshot', function () {
+        const { monitor } = makeMonitor();
+        monitor.record('BTC', 'price', criticalEval());
+        monitor.recordUnavailable('BTC', 'price', 'indexer timed out');
+        const entry = monitor.record('BTC', 'price', unmatchedEval());
+        expect(entry.level).to.equal(LEVELS.HALTED);
+        expect(entry.departedOperatorSources).to.deep.equal(OURS);
+    });
+
+    it('keeps a first unmatched reading and a replaced address list unconfigured', function () {
+        const first = makeMonitor().monitor;
+        expect(first.record('BTC', 'price', unmatchedEval()).level).to.equal(LEVELS.UNCONFIGURED);
+        const { monitor } = makeMonitor();
+        monitor.record('BTC', 'price', okEval());
+        expect(monitor.record('BTC', 'price', unmatchedEval(['replacement'])).level)
+            .to.equal(LEVELS.UNCONFIGURED);
+    });
+
+    it('clears a promoted departure only after a matched healthy reading', function () {
+        const { monitor, lines } = makeMonitor();
+        monitor.record('BTC', 'price', okEval());
+        monitor.record('BTC', 'price', unmatchedEval(['ours1', 'ours2']));
+        monitor.record('BTC', 'price', okEval());
+        expect(monitor.isAlerting()).to.equal(false);
+        expect(lines[lines.length - 1]).to.contain('STAKE SHARE ALERT CLEARED [BTC/price]');
     });
 }
 

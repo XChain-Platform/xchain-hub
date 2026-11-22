@@ -91,20 +91,69 @@ const TX_ALREADY_IN_CHAIN = 'TX_ALREADY_IN_CHAIN';
 const NODE_REJECTED_CODE = -32010;
 const NODE_REJECTED = 'NODE_REJECTED';
 
+const SDK_REFUSED_CODE = /^ENCODER_HTTP_4\d\d$/;
+const SDK_HTTP_CODE = /^ENCODER_HTTP_(\d{3})$/;
+const SDK_RATE_LIMITED = 'RATE_LIMITED';
+const SDK_PRE_SEND_METHODS = new Set(['create_tx', 'get_utxos']);
+
+function safeGet(obj, key){
+    try { return obj[key]; } catch(_e){ return undefined; }
+}
+
+function isObjectLike(value){
+    return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+
+// xchain-sdk keeps JSON-RPC fields under details.rpcError and represents HTTP
+// status in its code. Lift both into the hub-client view used by the rules below.
+function classifierView(e){
+    const details = safeGet(e, 'details');
+    const rpcError = isObjectLike(details) ? safeGet(details, 'rpcError') : undefined;
+    const code = safeGet(e, 'code');
+    const statusMatch = typeof code === 'string' ? SDK_HTTP_CODE.exec(code) : null;
+    let response = safeGet(e, 'response');
+    if(response === undefined && statusMatch) response = { status: Number(statusMatch[1]) };
+    const directCode = safeGet(e, 'rpcCode');
+    const directData = safeGet(e, 'rpcData');
+    const directMethod = safeGet(e, 'rpcMethod');
+    return {
+        message: safeGet(e, 'message'), code, response,
+        neverSent: safeGet(e, 'neverSent'), fundsCommitted: safeGet(e, 'fundsCommitted'),
+        rpcCode: directCode !== undefined ? directCode : safeGet(rpcError, 'code'),
+        rpcData: directData !== undefined ? directData : safeGet(rpcError, 'data'),
+        rpcMethod: directMethod !== undefined ? directMethod : safeGet(details, 'method')
+    };
+}
+
+function isSdkNeverSent(e){
+    const code = safeGet(e, 'code');
+    if(typeof code !== 'string') return false;
+    if(code === SDK_RATE_LIMITED || SDK_REFUSED_CODE.test(code)) return true;
+    if(code.indexOf('ENCODER_') !== 0) return false;
+    const details = safeGet(e, 'details');
+    return isObjectLike(details) && SDK_PRE_SEND_METHODS.has(safeGet(details, 'method'));
+}
+
 // True when the node answered that it already holds the transaction just sent.
 function isAlreadyKnownTx(e){
-    return !!(e && e.rpcData && e.rpcData.reason === TX_ALREADY_IN_CHAIN);
+    const view = classifierView(e);
+    const data = safeGet(view, 'rpcData');
+    return !!(isObjectLike(data) && safeGet(data, 'reason') === TX_ALREADY_IN_CHAIN);
 }
 
 // True when the encoder relayed the node's own rejection over an answered (non-5xx) call.
 function isNodeRejectedTx(e){
-    if (!e || Number(e.rpcCode) !== NODE_REJECTED_CODE) return false;
-    if (!e.rpcData || e.rpcData.reason !== NODE_REJECTED) return false;
-    return !(e.response && Number(e.response.status) >= 500);
+    const view = classifierView(e);
+    const data = safeGet(view, 'rpcData');
+    const response = safeGet(view, 'response');
+    if (Number(safeGet(view, 'rpcCode')) !== NODE_REJECTED_CODE) return false;
+    if (!isObjectLike(data) || safeGet(data, 'reason') !== NODE_REJECTED) return false;
+    return !(response && Number(safeGet(response, 'status')) >= 500);
 }
 
 function isAmbiguousSendError(e){
     if (!e) return false;
+    const view = classifierView(e);
     // Read BEFORE every message and status rule, because it outranks all of them. A
     // multi-phase signer hook (HUB_SIGNER_MODULE broadcast(), the P2SH fund-then-reveal
     // pipeline in docs/examples/doge-signer.example.js) puts its funding transaction on chain
@@ -114,24 +163,34 @@ function isAmbiguousSendError(e){
     // the same payload twice. Money has already moved, so the send is ambiguous by
     // definition and the caller must dead-letter rather than rebuild. The hook sets the
     // flag; nothing else in the hub does.
-    if (e.fundsCommitted) return true;
+    if (safeGet(view, 'fundsCommitted')) return true;
     // The node already holds this transaction, so its fee may be paid: take the
     // possibly-landed path, never a rebuild, whatever the message or status says.
-    if (isAlreadyKnownTx(e)) return true;
+    if (isAlreadyKnownTx(view)) return true;
     // A pipeline tags neverSent only on a failure before its send step, so a retry cannot double-spend.
-    if (e.neverSent === true) return false;
+    if (safeGet(view, 'neverSent') === true) return false;
+    if (isSdkNeverSent(e)) return false;
     // The node's own refusal is definitive whatever the sanitized message reads.
-    if (isNodeRejectedTx(e)) return false;
-    let message = String(e.message || '');
+    if (isNodeRejectedTx(view)) return false;
+    const message = String(safeGet(view, 'message') || '');
+    const response = safeGet(view, 'response');
+    // A broadcast_tx -32603 can be raised after the node accepted the bytes but
+    // returned no txid. Build-only methods are safe to retry; an unlabelled call
+    // takes the fail-safe possibly-landed path.
+    if (Number(safeGet(view, 'rpcCode')) === -32603) {
+        if (response && Number(safeGet(response, 'status')) < 500) return false;
+        if (SDK_PRE_SEND_METHODS.has(String(safeGet(view, 'rpcMethod') || ''))) return false;
+        return true;
+    }
     // A definitive rejection and an ambiguous transport failure share the SAME
     // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.
     // Guarded on the absence of a sub-500 HTTP response, the one shape that does prove
     // the encoder refused the call before it ever reached the node.
     if (message === 'Encoder RPC error: ' + ENCODER_TRANSPORT_FALLBACK &&
-        !(e.response && Number(e.response.status) < 500)) return true;
+        !(response && Number(safeGet(response, 'status')) < 500)) return true;
     if (/^Encoder RPC error/.test(message)) return false;                             // node/encoder rejected the tx
-    if (e.response && Number(e.response.status) < 500) return false;                   // refused before processing
-    let code = String(e.code || '');
+    if (response && Number(safeGet(response, 'status')) < 500) return false;           // refused before processing
+    const code = String(safeGet(view, 'code') || '');
     if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return false; // never sent
     return true;
 }
@@ -143,14 +202,17 @@ function isAmbiguousSendError(e){
 // named rejection is the node's own verdict on a transaction it received.
 function isNeverSentError(e){
     if (!e) return false;
+    const view = classifierView(e);
     // Outranks every shape below for the same reason it outranks every rule in
     // isAmbiguousSendError: a multi-phase signer hook can carry a funded phase-one
     // transaction on chain and still surface a 4xx or an ECONNREFUSED on its reveal.
-    if (e.fundsCommitted) return false;
-    if (isAlreadyKnownTx(e)) return false;                             // the node holds it
-    if (e.neverSent === true) return true;                             // failed before the send step
-    if (e.response && Number(e.response.status) < 500) return true;   // refused before processing
-    let code = String(e.code || '');
+    if (safeGet(view, 'fundsCommitted')) return false;
+    if (isAlreadyKnownTx(view)) return false;                           // the node holds it
+    if (safeGet(view, 'neverSent') === true) return true;               // failed before the send step
+    if (isSdkNeverSent(e)) return true;
+    const response = safeGet(view, 'response');
+    if (response && Number(safeGet(response, 'status')) < 500) return true; // refused before processing
+    const code = String(safeGet(view, 'code') || '');
     return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN';   // never connected
 }
 

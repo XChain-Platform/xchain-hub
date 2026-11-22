@@ -63,6 +63,11 @@ function createWindowPlan({ firstRound, smallRounds, largeRounds, alignmentRound
             return armed && round >= firstRound ? largeRounds : smallRounds;
         },
 
+        // True once the large window is the one in force for this round.
+        largeAt(round) {
+            return armed && round >= firstRound;
+        },
+
         straddles(first, last) {
             return armed && first < firstRound && firstRound <= last;
         }

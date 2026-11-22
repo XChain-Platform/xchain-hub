@@ -33,6 +33,10 @@ function sameHash(left, right){
     return String(left).toLowerCase() === String(right).toLowerCase();
 }
 
+function hashUnavailable(value){
+    return value == null || value === '';
+}
+
 function supersedeWitnessDecline(rules){
     if(rules && rules.replay && rules.replay.witness === 'passed') return null;
     return 'supersede_unwitnessed';
@@ -47,7 +51,11 @@ function witnessedReplayCovers(rules, blockIndex){
 }
 
 function checkpointHoldDecline(row, own, rules){
+    if(hashUnavailable(own.block_hash)) return 'indexer_no_block';
     if(!sameHash(row.block_hash, own.block_hash)) return 'checkpoint_reorged';
+    // A missing own hash confirms nothing, even inside a witnessed replay window.
+    if(CHECKPOINT_HASH_FIELDS.some((field) => hashUnavailable(own[field])))
+        return 'indexer_no_block';
 
     const disagrees = CHECKPOINT_HASH_FIELDS.some((field) =>
         !sameHash(row[field], own[field]));

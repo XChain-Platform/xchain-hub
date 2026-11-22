@@ -245,7 +245,21 @@ function registerHandingALandedBatchTo2Tests1() {
             expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
             expect(publisher.noteBatchLanded.calledOnce).to.equal(true);
             expect(publisher.noteBatchLanded.firstCall.args).to.deep.equal(
-                [FIRST_ROUND, LAST_ROUND, { sourceChain: 'DOGE', actionIndex: ACTION_INDEX }]);
+                [FIRST_ROUND, LAST_ROUND, { sourceChain: 'DOGE', actionIndex: ACTION_INDEX,
+                    rounds: [100, 101, 102, 103, 104, 105] }]);
+        });
+
+        it('hands the publisher the exact round list of a landed batch with a hole', async function () {
+            let rounds = makeRounds().filter(round => round.round !== 102);
+            stubDb(rounds.map(round => round.round));
+            let publisher = { noteBatchLanded: sinon.stub().returns(rounds.length) };
+            hub.oraclePublisher = publisher;
+
+            let result = await agg.receiveValidatedBatch('DOGE', makeBatch({ rounds }));
+
+            expect(result).to.include({ accepted: true, duplicates: rounds.length });
+            expect(publisher.noteBatchLanded.firstCall.args[2].rounds)
+                .to.deep.equal([100, 101, 103, 104, 105]);
         });
 
         it('hands over a batch that stored rows too, and never one it refused', async function () {

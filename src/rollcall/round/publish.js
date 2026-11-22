@@ -198,6 +198,9 @@ module.exports = {
         if(since > this.acceptWindow) return;       // nothing can land any more
         let myPubkey = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(!myPubkey) return;
+        // Nothing here may spend before the spend log has been read: the delivery memory
+        // and the committed set that restoreDelivered and publishPairs consult come from it.
+        if(!this.spendLogReady()) return;
 
         if(state.order === null){
             let order = await this.electionOrder(state.epoch);
@@ -283,6 +286,7 @@ module.exports = {
     // the undelivered tail) or 'held' (ambiguous; the slot stays claimed).
     async publishPairs(state, myPubkey, pairs, kind){
         let key = kind === 'self' ? (state.epoch + ':self') : String(state.epoch);
+        if(this._spendLogUnread) return 'retry';
         if(this._committed.has(key)){
             logger.warn('RollcallRound: epoch ' + state.epoch + ' (' + kind + ') already carries a committed ' +
                          'publish spend in ' + this.spendLogPath + '; NOT re-broadcasting after restart');

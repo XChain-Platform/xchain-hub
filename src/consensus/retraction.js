@@ -80,6 +80,7 @@ const { XRETRACT_SIGN_REQ, XRETRACT_SIGN, XRETRACT_FINALIZED } = require('./retr
 // the dispatch, the finalize and the capability-snapshot persist.
 const submitPart = require('./retraction/submit.js');
 const cosignPart = require('./retraction/cosign.js');
+const finalizeRetry = require('./retraction/finalize_retry.js');
 
 class RetractionConsensus {
 
@@ -100,10 +101,20 @@ class RetractionConsensus {
                                                 15000, 'RETRACT_SIGN_RETRY_MS');
         this.intentTtlMs    = positiveIntConfig(hubConfig.RETRACT_INTENT_TTL_MS    || (hub.p2pConfig && hub.p2pConfig.RETRACT_INTENT_TTL_MS),
                                                 3600000, 'RETRACT_INTENT_TTL_MS');
+        this.finalizeRetryMaxAttempts = positiveIntConfig(hubConfig.RETRACT_FINALIZE_MAX_ATTEMPTS ||
+                                                (hub.p2pConfig && hub.p2pConfig.RETRACT_FINALIZE_MAX_ATTEMPTS),
+                                                100, 'RETRACT_FINALIZE_MAX_ATTEMPTS');
 
         this.pending      = new Map();   // round id -> { canonical, evt, validators, quorum, weighted, signatures, timers }
         this.localIntents = new Map();   // intent key -> arrival ts (what OUR indexers pushed to us)
         this.finalized    = new Set();   // round ids already streamed (dedup leader/finalized double-delivery)
+
+        // Process-lifetime counts the scrape reads: signing rounds that timed out
+        // below quorum, and every unsigned broadcast by why it was sent.
+        this._roundTimeouts = 0;
+        this._finalizeDeferrals = 0;
+        this._finalizeRetriesExhausted = 0;
+        this.unsignedFallbackCount = { round_timeout: 0, out_of_class: 0, no_signing_deps: 0, gate_inactive: 0 };
 
         if(this.peerManager){
             this._messageHandler = (envelope) => this.handleMessage(envelope);
@@ -178,8 +189,8 @@ class RetractionConsensus {
     // mirror can verify: past the retraction gate the mirror refuses it, so the retracted
     // rows stay live in every indexer while this hub logs a finalized retraction and
     // retires the round id forever. Deferring is strictly better - the round id is
-    // released, so the next delivery of the same retraction (a peer's XRETRACT_FINALIZED,
-    // or our own indexer re-pushing the reorg through submitLocal) re-runs it cleanly.
+    // released and an in-memory retry retains the verified signatures, so recovery does
+    // not depend on a second peer delivery or on the indexer replaying the reorg.
     //
     // rememberFinalized still runs FIRST: it is the reentrancy guard that keeps a
     // duplicate FINALIZED arriving mid-await from streaming the same deletion twice.
@@ -196,6 +207,8 @@ class RetractionConsensus {
             logger.error('RetractionConsensus: snapshot persist on finalize FAILED (fail-closed; deferring ' +
                           'signed retraction ' + label + ', nothing streamed): ' + (e && e.message));
             this.forgetFinalized(id);
+            finalizeRetry.scheduleFinalizeRetry(this,
+                { evt, canonical, id, sigs, isInitiator }, e && e.message);
             return false;
         }
         if(!persistedRows){
@@ -203,6 +216,8 @@ class RetractionConsensus {
                           evt.snapshot_block + ' (degraded/empty/truncated validator set; fail-closed, deferring ' +
                           'signed retraction ' + label + ', nothing streamed)');
             this.forgetFinalized(id);
+            finalizeRetry.scheduleFinalizeRetry(this,
+                { evt, canonical, id, sigs, isInitiator }, 'snapshot persist wrote zero rows');
             return false;
         }
         if(this.broadcaster)
@@ -210,6 +225,7 @@ class RetractionConsensus {
         logger.info('RetractionConsensus: ' + (isInitiator ? 'finalized' : 'adopted') + ' signed retraction ' +
                     evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
                     ' (' + sigs.length + ' sigs, snapshot ' + evt.snapshot_block + ')');
+        finalizeRetry.clearFinalizeRetry(this, id);
         return true;
     }
 

@@ -88,6 +88,7 @@ function oracleConsensusPriceCapabilitySnapshotMirrSuite1MakePending(overrides) 
     }],
     btcBlockHeight: BTC_ANCHOR,
     btcBlockTime: 1700000000,
+    memberPubkeys: new Set(['pkA', 'pkB', 'pkC']),
     finalized: true // set by checkCommitQuorum before the store
   }, overrides || {});
 }
@@ -256,6 +257,32 @@ function registerOracleConsensusPriceCapabilitySnapshotMirrSuite1Part3() {
   });
 }
 function registerOracleConsensusPriceCapabilitySnapshotMirrSuite1Part4() {
+  it('refuses a committed round when the price capability persist returns zero rows', async function () {
+    sinon.stub(oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc, 'persistCapabilitySnapshot').resolves(0);
+    let error = null;
+    try {
+      await oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc.storeSnapshot(
+        ROUND, [{ coinPair: 'BTC/USD', price: '100000' }], 3, '[]',
+        BTC_ANCHOR, 1700000000, null, { requireCapabilityRows: true });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).to.be.an('error');
+    expect(error.message).to.include('persisted zero rows');
+    expect(oracleConsensusPriceCapabilitySnapshotMirrSuite1Db.calls.some(
+      call => /INSERT INTO price_snapshots/i.test(call.sql))).to.equal(false);
+    expect(oracleConsensusPriceCapabilitySnapshotMirrSuite1Broadcasts).to.deep.equal([]);
+  });
+
+  it('keeps zero capability rows valid for the explicit solo store path', async function () {
+    sinon.stub(oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc, 'persistCapabilitySnapshot').resolves(0);
+    await oracleConsensusPriceCapabilitySnapshotMirrSuite1Oc.storeSnapshot(
+      ROUND, [{ coinPair: 'BTC/USD', price: '100000' }], 1, '[]',
+      BTC_ANCHOR, 1700000000, null);
+    expect(oracleConsensusPriceCapabilitySnapshotMirrSuite1Db.calls.some(
+      call => /INSERT INTO price_snapshots/i.test(call.sql))).to.equal(true);
+  });
+
   it('single-node self-finalize path also mirrors the price set at the BTC anchor', async function () {
     // finalizeRound's quorum===0 branch stores the round directly, with no PBFT.
     oracleConsensusPriceCapabilitySnapshotMirrSuite1Hub.capabilitySnapshot.getQuorum.returns(0);

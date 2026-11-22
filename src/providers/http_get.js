@@ -107,6 +107,9 @@ function isForbiddenAddress(addr) {
         // embeds an IPv4 in the low bits; on a host with a NAT64 gateway that reaches the
         // private target the range checks below would miss it.
         if (ip.startsWith('64:ff9b:')) return true;
+        // 6to4 and Teredo also carry IPv4 targets that tunnel-capable hosts may route.
+        if (ip.startsWith('2002:')) return true;
+        if (/^2001:0{0,4}:/.test(ip)) return true;
         if (/^f[cd]/.test(ip))   return true;                     // fc00::/7 unique-local
         if (/^fe[89ab]/.test(ip)) return true;                    // fe80::/10 link-local
         if (/^ff/.test(ip))      return true;                     // multicast

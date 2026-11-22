@@ -92,6 +92,7 @@ class PriceAggregator extends EventEmitter {
         this._priceRestoreOldestRound = null;
         this._priceRestoreWalkingOlder = false;
         this._priceRestoreWarned = null;
+        this._priceRestoreVerifiedComplete = new Set();
         // Derived capability snapshots (chain-only hubs). Timer handle, re-entrancy
         // latch, the BTC heights this process has already covered, and the heights whose
         // last attempt failed loudly (so the failure is named once rather than once per

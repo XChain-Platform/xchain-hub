@@ -88,7 +88,10 @@ function registerFeature7pBFTAttestationFlowPart2() {
       destChain: 'LTC',
       confirmations: 3,
       digest,
-      prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+      quorum: 3,
+      memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+      btcBlockHeight: 900000,
+      prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
       commits: new Set(),
       finalized: false,
       timer: null,
@@ -126,8 +129,11 @@ function registerFeature7pBFTAttestationFlowPart3() {
       destChain: 'LTC',
       confirmations: 3,
       digest,
-      prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-      commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+      quorum: 3,
+      memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+      btcBlockHeight: 900000,
+      prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+      commits: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
       finalized: false,
       timer: null,
       _commitSent: true,
@@ -153,6 +159,7 @@ function registerFeature7pBFTAttestationFlowPart3() {
     expect(emitted).to.not.be.null;
     expect(emitted.attestationId).to.equal(attestationId);
     expect(emitted.status).to.equal('attested');
+    expect(emitted.validatorCount).to.equal(3);
     expect(resolvedValue).to.not.be.null;
     expect(rootSuiteEngine.finalized.has(attestationId)).to.be.true;
   });
@@ -169,8 +176,11 @@ function feature7pBFTAttestationFlowNested5QuorateRound(attestationId, digest) {
     destChain: 'LTC',
     confirmations: 3,
     digest,
-    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
-    commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+    quorum: 3,
+    memberPubkeys: new Set(VALIDATORS_4.map(v => v.pubkey)),
+    btcBlockHeight: 900000,
+    prepares: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey, VALIDATORS_4[2].pubkey]),
+    commits: new Set([VALIDATORS_4[0].pubkey, VALIDATORS_4[1].pubkey]),
     finalized: false,
     timer: null,
     _commitSent: true,

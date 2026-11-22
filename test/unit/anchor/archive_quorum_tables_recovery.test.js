@@ -156,9 +156,9 @@ function fixtureArchive(batch){
     return JSON.parse(zlib.gunzipSync(Buffer.from(joined, 'base64url')).toString('utf8'));
 }
 function project(row, columns){ return Object.fromEntries(columns.map(column => [column, row[column]])); }
-function expectRows(dbRows, hubRows, columns){
-    expect(dbRows.map(row => project(row, columns))).to.deep.equal(hubRows.map(row => project(row, columns)));
-}
+// Skip id: recovery lands each row under a local surrogate, not the publishing hub's AUTO_INCREMENT.
+const expectRows = (dbRows, hubRows, columns, carried = columns.filter(column => column !== 'id')) =>
+    expect(dbRows.map(row => project(row, carried))).to.deep.equal(hubRows.map(row => project(row, carried)));
 function setFor(archive, capability, block){
     return archive.capability_snapshots.filter(row => row.capability === capability &&
         Number(row.snapshot_block) === Number(block)).map(row =>
@@ -256,7 +256,7 @@ function registerBridgePolicyTest(state){
             rowDb(inputs, stamps), state.sets, inputs.rewards[0].source);
         const result = await buildArchive(publisher, inputs);
         const archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(stamps.map(stamp => stamp[0])).to.deep.equal([
             'match', 'call', 'reward', 'bridge', 'bridge', 'policy'
@@ -285,7 +285,7 @@ function registerCheckpointTest(state){
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
         const result = await buildArchive(publisher, inputs);
         const archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(stamps.map(stamp => stamp[0])).to.deep.equal(['checkpoint', 'checkpoint']);
         const recovered = await recover(publisher, result, inputs, state.oracleKeys);
@@ -304,7 +304,7 @@ function registerPriceTest(state){
         const inputs = signedPriceInputs(state.oracleKeys), stamps = [];
         const publisher = buildPublisher(rowDb(inputs, stamps), state.sets);
         const result = await buildArchive(publisher, inputs), archive = JSON.parse(result.json);
-        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK)).to.equal(true);
+        expect(await publisher.verifyArchiveAgainstLocal(archive, WRAPPER_BLOCK, inputs.network)).to.equal(true);
         await finalize(publisher, inputs);
         expect(archive.price_snapshots.map(row => [row.round_number, row.coin_pair, row.status]))
             .to.deep.equal([[11, 'BTC/USD', 'finalized'], [11, 'LTC/USD', 'finalized'],

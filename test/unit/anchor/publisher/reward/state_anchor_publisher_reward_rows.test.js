@@ -118,7 +118,7 @@ function registerRewardRederivationCases() {
             let snaps = set.map(v => ({ snapshot_block: Number(ar.block_index), capability: 'oracle_publish',
                                         signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
             return pub.verifyArchiveAgainstLocal(
-                { matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
+                { network: pub.network, matches: [], calls: [], rewards: [ar], capability_snapshots: snaps }, null, pub.network);
         };
         let good = {
             validator_pubkey: pk0, source: srcOf(pk0), round_number: 7,

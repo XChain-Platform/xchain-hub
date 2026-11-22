@@ -107,6 +107,31 @@ async function withWarnings(fn) {
     }
 }
 
+function registerMixedReadTests() {
+    it('classifies an error body in a mixed read but keeps rules null readable', async function () {
+        const mixed = replayEngine({
+            BTC: { block_index: 100, rules: null }, DOGE: { error: 'block not indexed: 5' }
+        });
+        const observed = await withWarnings(() => mixed.leaderReplayHeld(100));
+        expect(observed.result).to.equal(false);
+        expect(observed.warnings.some(line => line.includes('DOGE') && line.includes('block not indexed')))
+            .to.equal(true);
+
+        const readable = replayEngine({ BTC: { block_index: 100, rules: null } });
+        const clean = await withWarnings(() => readable.leaderReplayHeld(100));
+        expect(clean.result).to.equal(false);
+        expect(clean.warnings.some(line => line.includes('replay state unreadable'))).to.equal(false);
+    });
+
+    it('still holds with indexer_replaying when a readable chain replays beside an unreadable one', async function () {
+        const engine = replayEngine({ DOGE: new Error('HTTP 502'), BTC: { rules: { replay: { state: 'replaying' } } } });
+        const { result } = await withWarnings(() => engine.leaderReplayHeld(100));
+
+        expect(result).to.equal(true);
+        expect(engine).to.include({ _cadenceStalls: 1, _cadenceStallReason: 'indexer_replaying', _cadenceStallBlock: 100 });
+    });
+}
+
 describe('checkpoint leader replay hold on an unreadable indexer', function () {
     it('holds the cadence when every chain\'s replay state is unreadable', async function () {
         const engine = replayEngine({ BTC: new Error('ETIMEDOUT') });
@@ -118,8 +143,18 @@ describe('checkpoint leader replay hold on an unreadable indexer', function () {
         expect(warnings.some((line) => line.includes('replay state unreadable for BTC'))).to.equal(true);
     });
 
+    it('holds for an error body or empty result returned by every indexer', async function () {
+        for(const answer of [{ error: 'indexer database not ready' }, null]){
+            const engine = replayEngine({ BTC: answer });
+            const { warnings } = await withWarnings(() => cadence.tick.call(engine));
+            expect(engine._cadenceStalls).to.equal(1);
+            expect(engine._cadenceStallReason).to.match(/^indexer_replay_unreadable: BTC:/);
+            expect(warnings.some(line => line.includes('replay state unreadable for BTC'))).to.equal(true);
+        }
+    });
+
     it('logs an unreadable chain and leaves it to its own round when another chain answered', async function () {
-        const engine = replayEngine({ BTC: { rules: { replay: { state: 'idle' } } }, DOGE: new Error('HTTP 502') });
+        const engine = replayEngine({ BTC: { rules: { replay: { state: 'replayed' } } }, DOGE: new Error('HTTP 502') });
         const { result, warnings } = await withWarnings(() => engine.leaderReplayHeld(100));
 
         expect(result).to.equal(false);
@@ -128,11 +163,17 @@ describe('checkpoint leader replay hold on an unreadable indexer', function () {
             .to.equal(true);
     });
 
-    it('still holds with indexer_replaying when a readable chain replays beside an unreadable one', async function () {
-        const engine = replayEngine({ DOGE: new Error('HTTP 502'), BTC: { rules: { replay: { state: 'replaying' } } } });
+    it('holds the cadence on an unknown replay state', async function () {
+        const engine = replayEngine({ BTC: { rules: { replay: { state: 'aborted' } } } });
         const { result } = await withWarnings(() => engine.leaderReplayHeld(100));
 
         expect(result).to.equal(true);
-        expect(engine).to.include({ _cadenceStalls: 1, _cadenceStallReason: 'indexer_replaying', _cadenceStallBlock: 100 });
+        expect(engine).to.include({
+            _cadenceStalls: 1,
+            _cadenceStallReason: 'indexer_replaying',
+            _cadenceStallBlock: 100,
+        });
     });
+
+    registerMixedReadTests();
 });

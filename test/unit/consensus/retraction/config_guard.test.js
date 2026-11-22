@@ -15,7 +15,8 @@
 const assert = require('assert');
 const RetractionConsensus = require('../../../../src/consensus/retraction.js');
 
-const KEYS = ['RETRACT_ROUND_TIMEOUT_MS', 'RETRACT_SIGN_RETRY_MS', 'RETRACT_INTENT_TTL_MS'];
+const KEYS = ['RETRACT_ROUND_TIMEOUT_MS', 'RETRACT_SIGN_RETRY_MS', 'RETRACT_INTENT_TTL_MS',
+    'RETRACT_FINALIZE_MAX_ATTEMPTS'];
 
 function makeConsensus(p2p){
     return new RetractionConsensus({ db: {}, network: 'regtest', p2pConfig: p2p });
@@ -36,18 +37,28 @@ describe('RetractionConsensus timing config guard', function () {
 
     for (let bad of ['0', '-5', 'abc', -5]) {
         it('falls back to every default for ' + JSON.stringify(bad), function () {
-            let c = makeConsensus({ RETRACT_ROUND_TIMEOUT_MS: bad, RETRACT_SIGN_RETRY_MS: bad, RETRACT_INTENT_TTL_MS: bad });
+            let c = makeConsensus({ RETRACT_ROUND_TIMEOUT_MS: bad, RETRACT_SIGN_RETRY_MS: bad,
+                RETRACT_INTENT_TTL_MS: bad, RETRACT_FINALIZE_MAX_ATTEMPTS: bad });
             assert.strictEqual(c.roundTimeoutMs, 180000);
             assert.strictEqual(c.retrySignReqMs, 15000);
             assert.strictEqual(c.intentTtlMs, 3600000);
+            assert.strictEqual(c.finalizeRetryMaxAttempts, 100);
         });
     }
 
     it('keeps valid operator values', function () {
-        let c = makeConsensus({ RETRACT_ROUND_TIMEOUT_MS: 40, RETRACT_SIGN_RETRY_MS: '15', RETRACT_INTENT_TTL_MS: '250' });
+        let c = makeConsensus({ RETRACT_ROUND_TIMEOUT_MS: 40, RETRACT_SIGN_RETRY_MS: '15',
+            RETRACT_INTENT_TTL_MS: '250', RETRACT_FINALIZE_MAX_ATTEMPTS: '3' });
         assert.strictEqual(c.roundTimeoutMs, 40);
         assert.strictEqual(c.retrySignReqMs, 15);
         assert.strictEqual(c.intentTtlMs, 250);
+        assert.strictEqual(c.finalizeRetryMaxAttempts, 3);
+    });
+
+    it('lets the environment override the p2p finalize retry cap', function () {
+        process.env.RETRACT_FINALIZE_MAX_ATTEMPTS = '7';
+        let c = makeConsensus({ RETRACT_FINALIZE_MAX_ATTEMPTS: '3' });
+        assert.strictEqual(c.finalizeRetryMaxAttempts, 7);
     });
 
     it('keeps a fresh intent through pruneIntents when the TTL knob is negative', function () {

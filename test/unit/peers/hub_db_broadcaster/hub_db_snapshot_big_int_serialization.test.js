@@ -182,10 +182,10 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
   // The fault these routes were fixed for is the two feeds disagreeing about a BIGINT.
   // A duplicated one-line replacer would let them drift apart again silently, so the
   // identity is asserted structurally: same function object, not merely same behaviour.
-  const HubDbBroadcaster = require('../../../../src/peers/hub_db_broadcaster');
   it('exports the replacer the broadcaster signs its frames with', function () {
-    expect(typeof HubDbBroadcaster.bigIntReplacer).to.equal('function');
-    expect(JSON.stringify({v:10n}, HubDbBroadcaster.bigIntReplacer)).to.equal('{"v":"10"}');
+    const { bigIntReplacer } = require('../../../../src/lib/bigint_replacer.js');
+    expect(typeof bigIntReplacer).to.equal('function');
+    expect(JSON.stringify({v:10n}, bigIntReplacer)).to.equal('{"v":"10"}');
   });
   it('keeps the definition in a module with NO requires, so a cycle cannot half-load it', function () {
     // Sourcing it from the broadcaster put the rule behind that module's load order:
@@ -200,5 +200,14 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
     const src = fs.readFileSync(require.resolve('../../../../src/api.js'), 'utf8');
     expect(src).to.not.match(/const\s+bigIntReplacer\s*=/);
     expect(src).to.match(/\{\s*bigIntReplacer\s*\}\s*=\s*require\(/);
+  });
+  it('the broadcaster imports the leaf replacer instead of defining a copy', function () {
+    const fs = require('fs');
+    const src = fs.readFileSync(require.resolve('../../../../src/peers/hub_db_broadcaster.js'), 'utf8');
+    expect(src).to.not.match(/const\s+bigIntReplacer\s*=/);
+    expect(src).to.match(/\{\s*bigIntReplacer\s*\}\s*=\s*require\(\s*['"]\.\.\/lib\/bigint_replacer(\.js)?['"]\s*\)/);
+  });
+  it('does not publish a second access path on the broadcaster class', function () {
+    expect(require('../../../../src/peers/hub_db_broadcaster').bigIntReplacer).to.equal(undefined);
   });
 });

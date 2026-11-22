@@ -30,7 +30,9 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 function orderedSections(sections){
-    return (sections || []).slice().sort((a, b) => {
+    return (sections || []).map(section => Object.assign({}, section, {
+        chain: String(section.chain).toUpperCase()
+    })).sort((a, b) => {
         let x = String(a.chain), y = String(b.chain);
         return x < y ? -1 : (x > y ? 1 : 0);
     });
@@ -38,7 +40,10 @@ function orderedSections(sections){
 
 function appendSections(ctx, parts, ordered){
     for(let s of ordered){
-        let sigs = ctx.parseSigs(s.validator_signatures).slice().sort((a, b) => {
+        let sigs = ctx.parseSigs(s.validator_signatures).map(sig => ({
+            pubkey: String(sig.pubkey).toLowerCase(),
+            sig: String(sig.sig).toLowerCase()
+        })).sort((a, b) => {
             let x = String(a.pubkey), y = String(b.pubkey);
             return x < y ? -1 : (x > y ? 1 : 0);
         });
@@ -58,8 +63,8 @@ function appendPublisherTail(parts, publisher, attestSigs){
         parts.push(String(sig.pubkey).toLowerCase(), String(sig.sig).toLowerCase());
 }
 
-async function resolveFoldBlock(ctx, fallback){
-    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return Number(fallback);
+async function resolveFoldBlock(ctx){
+    if(!ctx.hub || typeof ctx.hub.resolveDogeLatestBlock !== 'function') return undefined;
     try {
         const resolved = await ctx.hub.resolveDogeLatestBlock();
         if(resolved == null || !Number.isFinite(Number(resolved))) return null;
@@ -149,6 +154,13 @@ module.exports = {
         return checkpointForms.isCheckpointCommitmentActive(row);
     },
 
+    // The lowest snapshot_block sectionCommitmentActive accepts on `network`, or null when
+    // it accepts none; the leader's ladder age reads it so both floors stay one rule. A
+    // harness that overrides sectionCommitmentActive overrides this beside it.
+    commitmentFloorBlock(network){
+        return checkpointForms.checkpointCommitmentFloor(network);
+    },
+
     // Group the result set into ONE bundle per network. A chain absent from a
     // group is NOT an anomaly (D4): under the daily cadence the normal case is a
     // chain whose newest eligible seq is already anchored.
@@ -217,8 +229,15 @@ module.exports = {
         // flag-day publishBundle attaches none at all, so charging a tail there would
         // refuse sections that anchor fine today; at/above it an unmet attestation
         // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
-        const foldBlock = await resolveFoldBlock(this, snapshotBlock);
-        const foldActive = foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, network);
+        const foldBlock = await resolveFoldBlock(this);
+        if(foldBlock === null){
+            this._bundlesDeferredFoldUnresolved++;
+            logger.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
+                ' deferred: DOGE tip unresolved; fold state unknown (fail closed)');
+            return;
+        }
+        const foldActive = foldBlock !== undefined &&
+            canonicalForms.isAnchorFoldActive(foldBlock, network);
         const attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
         const split = this.splitBundle(sections, me, attestTail, foldActive);
         for(let refused of split.oversize){
@@ -231,7 +250,7 @@ module.exports = {
                           'signer count comes down');
         }
         for(let group of split.bundles){
-            const contentBlock = await this.bundleContentBlock(network, group);
+            const contentBlock = await this.bundleContentBlock(network, group, true);
             await this.publishBundle(signer, network, group, this.bundleLadderBlock(group, btcBlock, contentBlock),
                                      failoverOnly, anchored, skipped,
                                      { active: foldActive, block: foldBlock });
@@ -253,8 +272,8 @@ module.exports = {
         let skipped  = { rows: 0 };
         for(let [network, sections] of this.groupSectionsByNetwork(rows))
             await this.publishNetworkBundles(signer, network, sections, btcBlock, failoverOnly, anchored, skipped);
-        const foldBlock = await resolveFoldBlock(this, btcBlock);
-        if(this.network && foldBlock !== null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
+        const foldBlock = await resolveFoldBlock(this);
+        if(this.network && foldBlock != null && canonicalForms.isAnchorFoldActive(foldBlock, this.network))
             this.suppressLegacyArchiveLeg();
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when

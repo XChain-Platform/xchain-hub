@@ -179,6 +179,24 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         expect(pending.winner.body.toString()).to.equal('shared-body');
     }); });
 
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('does not co-sign an ok empty-body winner when its own fetch failed', async function () {
+        const EMPTY = Buffer.alloc(0);
+        const state = roundState(me, [me, p1, p2], EMPTY, 'http_get', 3);
+        state.myProposal = { body: EMPTY, meta: '', status: 'provider_error' };
+        await c.propose(RID, state);
+        await flush();
+        const pending = c.pending.get(RID);
+
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY));
+        c.handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, EMPTY));
+        await flush();
+
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+        expect(pending.signatures.has(pub(p1))).to.equal(true);
+        expect(pending.signatures.has(pub(p2))).to.equal(true);
+    }); });
+
 describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () { beforeEach(hookAt101470); afterEach(hookAt101731); it('a sender re-announcing a different body REPLACES its previous candidate (AF4-R1: bounded per sender)', async function () {
         await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', 3));
         await flush();

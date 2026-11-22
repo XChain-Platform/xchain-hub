@@ -48,9 +48,9 @@ module.exports = {
         this.localIntents.set(retractionClass().intentKey(evt), Date.now());
 
         if(!QUORUM_CLASS_TABLES.has(String(evt.table)))
-            return broadcastUnsigned(this, evt, 'the table is outside the quorum class');
+            return broadcastUnsigned(this, evt, 'the table is outside the quorum class', 'out_of_class');
         if(!this.identity || !this.peerManager || !this.capSnapshot)
-            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable');
+            return broadcastUnsigned(this, evt, 'the signing dependencies are unavailable', 'no_signing_deps');
 
         return submitQuorumRetraction(this, evt, null);
     }
@@ -66,12 +66,16 @@ async function submitQuorumRetraction(self, evt, deferral){
         if(deferral)
             logger.info(retryLabel(deferral) + 'resolved below the signing gate; broadcasting unsigned');
         clearDeferral(self, evt, deferral);
-        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock);
+        return broadcastUnsigned(self, evt, 'the signing gate is inactive at snapshot ' + snapshotBlock, 'gate_inactive');
     }
 
     let validators = await self.resolveCapabilityValidators('cross_chain', snapshotBlock, self.network);
     if(!validators.length){
         deferSigningRound(self, evt, 'validator set is empty', deferral);
+        return;
+    }
+    if(validators.truncated === true){
+        deferSigningRound(self, evt, 'validator set is truncated (raise VALIDATOR_QUERY_LIMIT fleet-wide)', deferral);
         return;
     }
     clearDeferral(self, evt, deferral);
@@ -149,7 +153,9 @@ function scheduleDeferredRetry(self, state){
         state.attempts++;
         submitQuorumRetraction(self, state.evt, state).catch(error => {
             logger.warn(retryLabel(state) + 'failed: ' + (error && error.message));
-            scheduleDeferredRetry(self, state);
+            if(self.pending.get(state.id) === state) scheduleDeferredRetry(self, state);
+            else deferSigningRound(self, state.evt,
+                'previous retry threw: ' + ((error && error.message) || 'unknown error'), null);
         });
     }, delay);
     if(state.retryTimer.unref) state.retryTimer.unref();
@@ -203,8 +209,9 @@ function openSigningRound(self, ctx){
             // Liveness over the signature tier: mirrors past the gate refuse the
             // unsigned event anyway (fail closed there), mirrors below it still
             // converge under the activation fences. Never silently drop a retraction.
+            self._roundTimeouts = (self._roundTimeouts || 0) + 1;
             broadcastUnsigned(self, evt, 'round ' + id.substring(0, 16) + '... timed out at ' +
-                pending.signatures.size + '/' + pending.quorum + ' signatures');
+                pending.signatures.size + '/' + pending.quorum + ' signatures', 'round_timeout');
         }
     }, self.roundTimeoutMs);
     if(pending.timeoutTimer.unref) pending.timeoutTimer.unref();
@@ -212,7 +219,11 @@ function openSigningRound(self, ctx){
     self.peerManager.broadcast(XRETRACT_SIGN_REQ, signReq);
 }
 
-function broadcastUnsigned(self, evt, reason){
+// `kind` names the cause for the scrape; the warn below is deduped per intent key,
+// the count is not.
+function broadcastUnsigned(self, evt, reason, kind){
+    if(!self.unsignedFallbackCount) self.unsignedFallbackCount = {};
+    self.unsignedFallbackCount[kind] = (self.unsignedFallbackCount[kind] || 0) + 1;
     if(!self.unsignedRetractionWarnings) self.unsignedRetractionWarnings = new Set();
     const key = retractionClass().intentKey(evt);
     if(!self.unsignedRetractionWarnings.has(key)){

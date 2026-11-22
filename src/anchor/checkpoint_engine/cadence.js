@@ -355,8 +355,9 @@ module.exports = {
         // against any capability snapshot. (Single-operator regtest seeds a
         // local validator via XDEX_SEED_LOCAL_VALIDATOR, so it still runs.)
         if(pubkeys.length === 0){
-            this.noteCadenceStall(btcBlock, 'no qualified oracle_publish validator set (capability self-test failing, ' +
-                                             'not enabled, or no snapshot rows)');
+            const detail = validators && validators.snapshotUnavailable === true
+                ? 'capability snapshot unavailable' : 'capability snapshot qualifies no validator at this BTC block';
+            this.noteCadenceStall(btcBlock, 'no qualified oracle_publish validator set (' + detail + ')');
             return false;
         }
         // Membership + cadence run for EVERY set size: a size-1 set once

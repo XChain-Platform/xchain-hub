@@ -29,7 +29,8 @@ const COUNTERS = [
     ['takeoverPublished', 'xchain_oracle_publisher_takeover_published_total', 3],
     ['takeoverDeclinedUnproven', 'xchain_oracle_publisher_takeover_declined_unproven_total', 7],
     ['takeoverDeclinedReadError', 'xchain_oracle_publisher_takeover_declined_read_error_total', 8],
-    ['takeoverDeferred', 'xchain_oracle_publisher_takeover_deferred_total', 4]
+    ['takeoverDeferred', 'xchain_oracle_publisher_takeover_deferred_total', 4],
+    ['snapshotDarkSpells', 'xchain_oracle_publisher_set_unresolved_spells_total', 3]
 ];
 
 // A fake OraclePublisher carrying only the fields the collector reads.
@@ -40,7 +41,8 @@ function fakePublisher(overrides = {}){
         batchSignTimeouts: () => 6,
         failoverWindowBlocks: 6,
         _observationProven: true,
-        _takeoverUnlanded: new Map([[12, 1000]])
+        _takeoverUnlanded: new Map([[12, 1000]]),
+        _snapshotDark: false
     };
     for(const [field, , value] of COUNTERS) publisher[field] = value;
     return Object.assign(publisher, overrides);
@@ -141,5 +143,14 @@ describe('hub oracle publisher scrape series', function () {
             'failoverWindowBlocks', '_observationProven', '_takeoverUnlanded']);
         for(const field of fields) expect(assignsField(source, field), field).to.equal(true);
         expect(definesMethod(source, 'batchSignTimeouts')).to.equal(true);
+    });
+
+    it('tells a hub failing closed on an unresolved publisher set from a healthy non-leader', function () {
+        let out = install({ oraclePublisher: fakePublisher({ _snapshotDark: true }) }).render();
+        expect(sample(out, 'xchain_oracle_publisher_set_unresolved')).to.equal(1);
+        _resetObservability();
+        out = install({ oraclePublisher: fakePublisher() }).render();
+        expect(sample(out, 'xchain_oracle_publisher_set_unresolved')).to.equal(0);
+        expect(assignsField(sourceUnder('oracle/publisher'), '_snapshotDark')).to.equal(true);
     });
 });

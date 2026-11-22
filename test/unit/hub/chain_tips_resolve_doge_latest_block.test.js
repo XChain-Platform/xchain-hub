@@ -90,6 +90,10 @@ describe('anchor co-sign treats a null DOGE height as unresolved', function () {
         expect(await forms.foldPublisherMethods.coSignFoldArchiveRequest.call(ctx, env)).to.equal(null);
         expect(activeAt.called).to.equal(false);
         expect(getStateCheckpoint.called).to.equal(false);
+        ctx.hub = {};
+        expect(await forms.foldPublisherMethods.coSignFoldArchiveRequest.call(ctx, env)).to.equal(null);
+        expect(activeAt.called).to.equal(false);
+        expect(getStateCheckpoint.called).to.equal(false);
     });
 });
 
@@ -112,6 +116,11 @@ describe('anchor bundle callers treat a null DOGE height as unresolved', functio
                                                     777, false, [], { rows: 0 });
             expect(spy.called).to.equal(false);
             expect(suppress.called).to.equal(false);
+            delete ctx.hub;
+            await bundle.publishNetworkBundles.call(ctx, {}, 'mainnet', [{ snapshot_block: 9999999999 }],
+                                                    777, false, [], { rows: 0 });
+            expect(spy.called).to.equal(false);
+            expect(suppress.called).to.equal(false);
         } finally { spy.restore(); }
     });
 
@@ -127,6 +136,10 @@ describe('anchor bundle callers treat a null DOGE height as unresolved', functio
         const cf = require('../../../src/anchor/publisher/canonical_forms.js');
         const spy = sinon.spy(cf, 'isAnchorFoldActive');
         try {
+            await bundle.publishPendingCheckpoints.call(ctx, {}, 9999999999, false);
+            expect(spy.called).to.equal(false);
+            expect(suppress.called).to.equal(false);
+            delete ctx.hub;
             await bundle.publishPendingCheckpoints.call(ctx, {}, 9999999999, false);
             expect(spy.called).to.equal(false);
             expect(suppress.called).to.equal(false);

@@ -79,8 +79,8 @@ function registerConfiguration2Tests1() {
 function registerXchainpricegateopenWhetherThisRoundCarries3Tests4() {
 
         it('is CLOSED before the network resolves, so a hub that cannot tell stays quiet', function () {
-            // currentBtcNetwork is only set by a successful per-round resolve. A hub
-            // that does not know its own network must not guess: composing where the
+            // currentBtcNetwork is only set by a successful per-round resolve and stays
+            // undefined until the first one. A hub that has never known its own network must not guess: composing where the
             // gate is shut puts a pair in a signed round that every peer rejects wholesale.
             expect(or.currentBtcNetwork).to.equal(undefined);
             or.currentRound = 100;

@@ -127,13 +127,13 @@ describe('archive list snapshot follower integration', function () {
         const pub = publisher(held);
         const archived = signedRow(pub, 3, { origin_block: held.origin_block + 1 });
 
-        expect(await pub.verifyArchiveAgainstLocal(archiveFor(archived), null)).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archiveFor(archived), null, 'testnet')).to.equal(false);
     });
 
     it('refuses an archive whose list row fails signature quorum', async function () {
         const pub = publisher();
 
-        expect(await pub.verifyArchiveAgainstLocal(archiveFor(signedRow(pub, 2)), null))
+        expect(await pub.verifyArchiveAgainstLocal(archiveFor(signedRow(pub, 2)), null, 'testnet'))
             .to.equal(false);
     });
 
@@ -142,7 +142,7 @@ describe('archive list snapshot follower integration', function () {
         const archive = archiveFor(signedRow(pub, 3));
         archive.capability_snapshots = [];
 
-        expect(await pub.verifyArchiveAgainstLocal(archive, null)).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive, null, 'testnet')).to.equal(false);
     });
 
     it('stamps an announced list row after a verified FINALIZED', async function () {
@@ -198,7 +198,7 @@ describe('archive list snapshot follower integration', function () {
 
         expect(await pub.verifyArchiveAgainstLocal({
             network: 'testnet', matches: [], capability_snapshots: []
-        }, null)).to.equal(true);
+        }, null, 'testnet')).to.equal(true);
         expect(verifyList.called).to.equal(false);
     });
 });

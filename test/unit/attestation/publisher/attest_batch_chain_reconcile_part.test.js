@@ -59,14 +59,29 @@ function pending(){
     ];
 }
 
-function expectRpc(rpc, count){
-    expect(rpc.callCount).to.equal(count);
-    for(let call of rpc.getCalls()){
+function expectRpc(rpc, starts){
+    expect(rpc.callCount).to.equal(starts.length);
+    for(let [index, call] of rpc.getCalls().entries()){
         expect(call.args).to.deep.equal([
             'indexer-url', 'config-key', 'getattestbatches',
-            { window_start_from: 0, window_start_to: 7200, limit: 500 }
+            { window_start_from: starts[index], window_start_to: starts[index], limit: 8 }
         ]);
     }
+}
+
+async function assertFailureStopsAtFirstWindow(){
+    let ctx = context();
+    ctx.indexerRpc.rejects(new Error('unreachable'));
+    let list = [
+        { windowStart: 0, age: 2, reopened: true },
+        { windowStart: 3600, age: 1 },
+        { windowStart: 7200, age: 0, reopened: true }
+    ];
+    expect(await ctx.reconcilePendingAgainstChain(list)).to.deep.equal([
+        { windowStart: 3600, age: 1 }
+    ]);
+    expectRpc(ctx.indexerRpc, [0]);
+    expect(ctx.stats.chainReconcileRuns).to.equal(0);
 }
 
 function registerInterfaceTests(){
@@ -110,7 +125,7 @@ function registerLandedBatchTests(){
         ]);
         expect(ctx.stats.chainReconcileRuns).to.equal(1);
         expect(ctx.stats.chainReconcileLandedWindows).to.equal(2);
-        expectRpc(ctx.indexerRpc, 1);
+        expectRpc(ctx.indexerRpc, [7200, 0, 3600]);
     });
 
     it('ignores mismatched window ends and malformed batch bounds', async function(){
@@ -128,11 +143,10 @@ function registerLandedBatchTests(){
         expect(ctx.recordLandedWindow.called).to.equal(false);
         expect(ctx.stats.chainReconcileRuns).to.equal(1);
         expect(ctx.stats.chainReconcileLandedWindows).to.equal(0);
-        expectRpc(ctx.indexerRpc, 1);
+        expectRpc(ctx.indexerRpc, [7200, 0, 3600]);
     });
 
-    // A full page proves only its listed windows landed; an omitted window may sit
-    // past the page, so it is deferred to a later sweep rather than published.
+    // A full page for one window cannot say anything about another window.
     it('records listed windows and defers the omitted ones on a truncated answer', async function(){
         let ctx = context({
             batches: [{ window_start: 3600, window_end: 7200, row_count: 8 }],
@@ -143,7 +157,7 @@ function registerLandedBatchTests(){
         expect(ctx.recordLandedWindow.calledOnceWithExactly(3600, 7200, null, 8)).to.equal(true);
         expect(ctx.stats.chainReconcileLandedWindows).to.equal(1);
         expect(ctx.stats.windowsDeferred).to.equal(2);
-        expectRpc(ctx.indexerRpc, 1);
+        expectRpc(ctx.indexerRpc, [7200, 0, 3600]);
     });
 }
 
@@ -181,10 +195,11 @@ function registerFailureTests(){
 
         expect(await ctx.reconcilePendingAgainstChain(list)).to.equal(list);
         expect(await ctx.reconcilePendingAgainstChain(list)).to.equal(list);
-        expectRpc(ctx.indexerRpc, 2);
+        expectRpc(ctx.indexerRpc, [7200, 7200]);
         expect(ctx.stats.chainReconcileFailures).to.equal(2);
         expect(warnings).to.have.length(1);
         expect(warnings[0]).to.include('unreachable');
+        await assertFailureStopsAtFirstWindow();
     });
 
     for(let failure of [
@@ -197,7 +212,7 @@ function registerFailureTests(){
 
             expect(await ctx.reconcilePendingAgainstChain(list)).to.equal(list);
             expect(await ctx.reconcilePendingAgainstChain(list)).to.equal(list);
-            expectRpc(ctx.indexerRpc, 2);
+            expectRpc(ctx.indexerRpc, [7200, 7200]);
             expect(ctx.stats.chainReconcileFailures).to.equal(2);
             expect(ctx.stats.chainReconcileRuns).to.equal(0);
             expect(warnings).to.have.length(1);

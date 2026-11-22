@@ -21,7 +21,7 @@ const { expect } = require('chai');
 const fs   = require('fs');
 const os   = require('os');
 const path = require('path');
-const { migrationMode, listDatedMigrations } = require('../../../../src/db/schema/sql_migration_files.js');
+const { migrationMode, isRunbook, listDatedMigrations } = require('../../../../src/db/schema/sql_migration_files.js');
 const { siblingCheckout, skipOrFail } = require('../../../helpers/sibling_checkout.js');
 
 const DECODER_DIR = process.env.XCHAIN_DECODER_DIR ||
@@ -44,6 +44,26 @@ function bodyLines(source, opener){
     throw new Error('closing brace not found for ' + opener);
 }
 
+function assertCommittedMigrationModes(){
+    const migrations = path.resolve(__dirname, '../../../../src/sql/migrations');
+    for(const file of listDatedMigrations(migrations)){
+        const raw = fs.readFileSync(path.join(migrations, file), 'utf8');
+        if(isRunbook(raw)) continue;
+        const modes = [...raw.matchAll(/^\s*--\s*xchain:migration\b([^\n]*)$/gim)]
+            .flatMap((header) => [...header[1].matchAll(/\bmode\s*=\s*([A-Za-z]+)\b/gi)]);
+        expect(modes.length, file + ' must not carry conflicting mode tokens').to.be.at.most(1);
+        expect(migrationMode(raw)).to.equal(modes.length ? modes[0][1].toLowerCase() : 'manual');
+    }
+}
+
+function assertAmbiguousModesFailSafe(){
+    expect(migrationMode('-- xchain:migration mode=auto mode=auto\nSELECT 1;')).to.equal('auto');
+    expect(migrationMode('-- xchain:migration mode=auto\n-- see the mode=manual sibling\nSELECT 1;')).to.equal('auto');
+    expect(migrationMode('-- xchain:migration mode=manual (COPY rebuild, not mode=auto)\nSELECT 1;')).to.equal('manual');
+    expect(migrationMode('-- xchain:migration mode=auto mode=manual\nSELECT 1;')).to.equal('manual');
+    expect(migrationMode('-- xchain:migration mode=auto\n-- xchain:migration mode=manual\nSELECT 1;')).to.equal('manual');
+}
+
 describe('sql_migration_files', function(){
     describe('migrationMode', function(){
         it('reads a tag that sits after a long license banner', function(){
@@ -58,6 +78,8 @@ describe('sql_migration_files', function(){
         });
         it('reads an explicit manual tag', function(){
             expect(migrationMode('-- xchain:migration mode=manual\nALTER TABLE t ADD c INT;\n')).to.equal('manual');
+            assertAmbiguousModesFailSafe();
+            assertCommittedMigrationModes();
         });
     });
 

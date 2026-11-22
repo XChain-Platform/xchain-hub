@@ -73,8 +73,8 @@ class Oracle {
         this.slashDetector = new SlashDetector(this);
 
         this.oracleConsensus.on('round:finalized', async (event) => {
-            // db.doQuery throws on query errors, and a rejection out of an EventEmitter
-            // listener is an unhandled rejection, which exits the process.
+            // db.doQuery throws on query errors. A rejection out of an EventEmitter
+            // listener is logged by the crash handler but otherwise dropped.
             try {
                 // event.participants are SIGNING KEYS (OracleConsensus tallies votes
                 // by proven key), so they need no registry translation. That is the

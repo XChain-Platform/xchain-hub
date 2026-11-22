@@ -20,14 +20,13 @@
 const listCanonical = require('../../../../cross_chain/list/canonical.js');
 const { archivedListRowRefusal } = require('../../../../cross_chain/list/archive_checks.js');
 const { getLogger } = require('../../../../observability');
+const {
+    comparable, archivedIdRefusal, archivedSignaturesRefusal, unheldRowRefusal
+} = require('../unheld_row.js');
 const logger = getLogger();
 
-function comparable(row){
-    const out = Object.assign({}, row);
-    delete out.id;
-    delete out.validator_signatures;
-    return out;
-}
+// Admit only finalized unheld list snapshots because the table has no retraction path.
+const UNHELD_LIST_STATUSES = Object.freeze(['finalized']);
 
 function sameList(a, b){
     return String(a.network) === String(b.network) &&
@@ -89,7 +88,8 @@ module.exports = {
     },
 
     async verifyArchivedListSnapshot(row, archive){
-        const refusal = archivedListRowRefusal(row);
+        const refusal = archivedListRowRefusal(row) || archivedIdRefusal(row) ||
+            archivedSignaturesRefusal(row);
         if(refusal){
             logger.warn('StateAnchorPublisher: archive list snapshot ' +
                         String(row && row.snapshot_id).substring(0, 16) +
@@ -108,6 +108,14 @@ module.exports = {
                 return false;
             }
         } else {
+            const unheld = unheldRowRefusal(
+                row, this.serializeListSnapshot(row), UNHELD_LIST_STATUSES);
+            if(unheld){
+                logger.warn('StateAnchorPublisher: archive list snapshot ' +
+                            String(row.snapshot_id).substring(0, 16) +
+                            '... ' + unheld + '; NOT signing');
+                return false;
+            }
             // A full version we never wrote rests on the signature quorum below; a delta must also fold
             const deltaRefusal = Number(row.seq) > 1 ? await this.unheldListDeltaRefusal(row, archive) : null;
             if(deltaRefusal){

@@ -115,6 +115,31 @@ function registerUnfilledWindowTests() {
         expect(res.met).to.equal(true);
         expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 104, 105]);
     });
+
+    it('ignores one peer claiming a round that the answering quorum does not hold', async function () {
+        mesh = buildMesh(4, { rounds: withoutMissing(baseRounds()), timeoutMs: 400 });
+        quickFill(mesh);
+        mesh.nodes[1].signer.handleFillReq = async () => mesh.nodes[1].signer.peerManager.broadcast(
+            'XPRICEB_FILL', { first_round: 100, last_round: 105, held: [MISSING], rounds: [] });
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
+        expect(res.met).to.equal(true);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 104, 105]);
+    });
+
+    it('uses corroborated content instead of the first peer content received', async function () {
+        mesh = buildMesh(4, { perNodeRounds: leaderLacksRound, timeoutMs: 400 });
+        quickFill(mesh);
+        let fabricated = clone(baseRounds().find(r => r.round === MISSING));
+        fabricated.pairs[0].price = '1';
+        mesh.nodes[1].signer.handleFillReq = async () => mesh.nodes[1].signer.peerManager.broadcast(
+            'XPRICEB_FILL', { first_round: 100, last_round: 105, held: [MISSING], rounds: [fabricated] });
+        let rounds = bufferedProposal(withoutMissing(baseRounds()));
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, rounds);
+        expect(res.met).to.equal(true);
+        expect(res.canonical).to.equal(buildCanonical(100, 105, 5005, baseRounds()));
+        expect(rounds.find(r => r.round === MISSING).pairs[0].price).to.equal('60003');
+    });
 }
 
 function registerLocalFillTests() {
@@ -146,6 +171,16 @@ function registerLocalFillTests() {
         };
         let res = await signer.collectBatchSignatures(100, 105, 5005, bufferedProposal(baseRounds()));
         expect(res.met).to.equal(false);
+        expect(signReqs(mesh.nodes[0])).to.have.length(0);
+    });
+
+    it('refuses a signing span that contains an exempt landed round', async function () {
+        mesh = buildMesh(1, { timeoutMs: 400 });
+        let signer = mesh.nodes[0].signer;
+        let rounds = withoutMissing(baseRounds());
+        let res = await signer.collectBatchSignatures(100, 105, 5005, rounds, new Set([MISSING]));
+        expect(res.met).to.equal(false);
+        expect(rounds.map(r => r.round)).to.deep.equal([100, 101, 102, 104, 105]);
         expect(signReqs(mesh.nodes[0])).to.have.length(0);
     });
 }

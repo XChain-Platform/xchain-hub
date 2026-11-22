@@ -24,14 +24,16 @@
 
 const archivePublishGate = require('../../archive_publish_gate.js');
 
-// The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock.
+// The wrapper checkpoint's own group takes its capability here, judged on archive.network at wrapperSnapshotBlock;
+// verifyArchiveAgainstLocal has already bound archive.network to the follower's own wrapper row.
 function archiveWrapperCapability(archive, wrapperSnapshotBlock){
     return archivePublishGate.isArchivePublishActive(wrapperSnapshotBlock, archive.network)
         ? 'archive_publish' : 'oracle_publish';
 }
 
 // List every capability group the archive's rows oblige, with each block as archived (unsorted, may repeat).
-// A batch-proofed price round carries no signatures to check, so only signature-proofed rounds oblige one.
+// Only signature-proofed rounds oblige a price group. A batch-proofed round is held byte-identically by
+// the co-signer instead, and recovery quarantines a batch group it cannot prove from the archive alone.
 function archiveCapabilityWants(archive, wrapperSnapshotBlock, isSignatureProofedPrice){
     const wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
         .concat((archive.calls || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))

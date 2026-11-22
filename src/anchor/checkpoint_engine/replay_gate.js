@@ -22,6 +22,13 @@ const { indexerReplayOpen } = require('./replay_hold.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
+function noteUnreadable(unreadable, chain, value){
+    const reason = String(value).slice(0, 200);
+    unreadable.push(chain + ': ' + reason);
+    logger.warn('StateCheckpointEngine: replay state unreadable for ' + chain + ' (' + reason +
+                '); its round re-reads the indexer and fails closed on its own');
+}
+
 // Read each chain's replay state and return why the cadence holds, or null. An unreadable
 // chain is logged and left to its own round, whose fresh read fails or declines per chain;
 // with every chain unreadable the replay state is unknown everywhere, so the cadence holds.
@@ -33,12 +40,17 @@ async function leaderReplayHoldReason(engine){
         checked++;
         try {
             const bh = await engine.indexerCall(chain, 'getblockhashes', {});
-            if(indexerReplayOpen(bh && bh.rules)) return 'indexer_replaying';
+            if(!bh){
+                noteUnreadable(unreadable, chain, 'empty getblockhashes result');
+                continue;
+            }
+            if(bh.error){
+                noteUnreadable(unreadable, chain, bh.error);
+                continue;
+            }
+            if(indexerReplayOpen(bh.rules)) return 'indexer_replaying';
         } catch(e){
-            const reason = String((e && e.message) || e).slice(0, 200);
-            unreadable.push(chain + ': ' + reason);
-            logger.warn('StateCheckpointEngine: replay state unreadable for ' + chain + ' (' + reason +
-                        '); its round re-reads the indexer and fails closed on its own');
+            noteUnreadable(unreadable, chain, (e && e.message) || e);
         }
     }
     if(checked > 0 && unreadable.length === checked)

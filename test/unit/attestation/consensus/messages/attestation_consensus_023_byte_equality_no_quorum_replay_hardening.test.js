@@ -16,6 +16,7 @@ const { expect }           = require('chai');
 const AttestationConsensus = require('../../../../../src/attestation/consensus');
 const ValidatorIdentity    = require('../../../../../src/validators/identity');
 const { createMockHub }    = require('../../../../helpers/mockHub');
+const { waitUntil }        = require('../../../../helpers/waitUntil');
 
 // Minimal provider registry: the COMMIT/buffer paths exercised here never
 // call into a provider (no agree() / no def lookups for unsigned commits).
@@ -305,5 +306,43 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         expect(() => c.markTornDown(RID)).to.not.throw();
         expect(c.tornDown.has(RID)).to.equal(true);
         expect(c._tornDownOrder.filter(r => r === RID).length).to.equal(1);
+    }); });
+
+describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () { beforeEach(hookAt107990); afterEach(hookAt108336); it('keeps the torn-down set and order ring aligned across retries', function () {
+        c.tornDownMax = 3;
+        c.markTornDown(RID);
+        c.clearTornDown(RID);
+        c.markTornDown(RID);
+        c.markTornDown('rid-a');
+        c.markTornDown('rid-b');
+
+        expect(c._tornDownOrder.filter(r => r === RID)).to.have.length(1);
+        expect(c._tornDownOrder.length).to.equal(c.tornDown.size);
+        expect(c.tornDown.has(RID)).to.equal(true);
+
+        c.markTornDown('rid-c');
+        expect(c.tornDown.has(RID)).to.equal(false);
+        expect(c.tornDown.has('rid-a')).to.equal(true);
+        expect(c.tornDown.has('rid-b')).to.equal(true);
+        expect(c.tornDown.has('rid-c')).to.equal(true);
+    }); });
+
+describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () { beforeEach(hookAt107990); afterEach(hookAt108336); it('keeps one torn-down ring entry after reopening and tearing down a retry', async function () {
+        const makeState = () => {
+            const state = roundState(me, [me], EMPTY, 'http_get', 1);
+            state.myProposal = { body: EMPTY, meta: '', status: 'provider_error' };
+            return state;
+        };
+        await c.propose(RID, makeState());
+        await flush();
+        c.pending.delete(RID); // simulate the finalized-round retention timer expiring
+        c.roundTimeoutMs = 1;
+        await c.propose(RID, makeState());
+        await waitUntil(() => c.tornDown.has(RID), { label: 'the retry teardown' });
+
+        expect(c.pending.has(RID)).to.equal(false);
+        expect(c.tornDown.has(RID)).to.equal(true);
+        expect(c._tornDownOrder.filter(r => r === RID)).to.have.length(1);
+        expect(c._tornDownOrder.length).to.equal(c.tornDown.size);
     }); });
 }

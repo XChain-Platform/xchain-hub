@@ -22,7 +22,7 @@
 
 const { expect }        = require('chai');
 const sinon             = require('sinon');
-const nock              = require('nock');
+const nock              = require('nock').default;
 const { createCluster }  = require('../e2e/helpers/cluster');
 const { callRpc }        = require('../e2e/helpers/rpcClient');
 const testDb             = require('../helpers/testDb');
@@ -210,7 +210,7 @@ function register6cVariedAPILatencyTests() {
                 nock('https://api.coingecko.com')
                     .get('/api/v3/simple/price')
                     .query(true)
-                    .delayConnection(latency)
+                    .delay(latency)
                     .reply(200, mockApi.DEFAULT_COINGECKO_RESPONSE);
                 mockApi.mockCmcSuccess();
 

@@ -77,6 +77,13 @@ function onChain(over) {
 
 const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
 
+// Statuses that depend on whether a DOGE node mirrors the oracle_publish snapshot.
+const NODE_CLASS_STATUSES = [
+    'invalid: SECTION 0 insufficient signer stake',
+    'invalid: insufficient signer stake',
+    'invalid: insufficient valid signatures (1/3)'
+];
+
 // ── The attestation row waits for a MINED anchor, not a broadcast one ────
 // broadcastWithRetry returns on DOGE mempool acceptance, so writing the append-only,
 // never-retracted mirror row there minted a permanent COLLECT-spendable reward for an
@@ -88,6 +95,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     registerConfirmationCases();
     registerRejectionCases();
     registerBoundsCases();
+    registerNodeClassStatusCases();
 });
 
 // Below the gate nothing queues; above it the publish path queues and a buried anchor writes.
@@ -223,5 +231,59 @@ function registerBoundsCases() {
             pub.deferRewardAttestation(entry({ roundReference: i, txid: (i + 10).toString(16).repeat(32) }));
         expect(pub._deferredRewardAttest.size).to.equal(3);
         expect(inserts(queries).length).to.equal(0);
+    });
+}
+
+// The shared binding's isRewardCandidateRow does not reject a node-class-dependent status,
+// so the drain writes for one exactly when every other check passes.
+async function drainOnce(over) {
+    const { pub, queries } = makeRewardPub();
+    pub.deferRewardAttestation(entry());
+    pub.indexerCall = async () => onChain(over);
+    await pub.drainDeferredRewardAttest();
+    return { pub, written: inserts(queries).length, queued: pub._deferredRewardAttest.size };
+}
+
+function registerNodeClassStatusCases() {
+    for (const status of NODE_CLASS_STATUSES) {
+        it('writes a buried, bound, hash-matching anchor whose status is node-class dependent: ' + status, async function () {
+            sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+            const r = await drainOnce({ status });
+            expect(r.written, 'the binding accepts this status, so the drain writes').to.equal(1);
+            expect(r.queued, 'entry cleared').to.equal(0);
+        });
+    }
+
+    it('still applies the depth, hash, version and txid checks to a node-class-dependent status', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const status = NODE_CLASS_STATUSES[0];
+        const shallow = await drainOnce({ status, confirmations: 3 });
+        expect([shallow.written, shallow.queued], 'shallow: retained').to.deep.equal([0, 1]);
+        const mismatch = await drainOnce({ status, ledger_hash: 'ee'.repeat(32) });
+        expect([mismatch.written, mismatch.queued], 'hash mismatch: dropped').to.deep.equal([0, 0]);
+        const version = await drainOnce({ status, version: 1 });
+        expect([version.written, version.queued], 'wrong version: dropped').to.deep.equal([0, 0]);
+        const txid = await drainOnce({ status, txid: 'cc'.repeat(32) });
+        expect(txid.written, 'unbound txid: no write').to.equal(0);
+    });
+
+    it('writes an archive-leg reward whose v1 head status is invalid_archive', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub.deferRewardAttestation(entry({ anchorVersion: 1, rewardType: 'anchor_archive', roundReference: 42 }));
+        pub.indexerCall = async () => onChain({ version: 1, status: 'invalid_archive' });
+        await pub.drainDeferredRewardAttest();
+        expect(inserts(queries).length).to.equal(1);
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('keeps the strict status reject for callers that do not opt in (BUNDLE_DONE shape)', async function () {
+        const { pub } = makeRewardPub();
+        pub.indexerCall = async () => onChain({ status: NODE_CLASS_STATUSES[0] });
+        const strict = await pub.verifyAnchorOnChain(CP_ROW, { txid: TXID, rejectVersions: [1, 2] });
+        expect(strict).to.equal('rejected:status');
+        pub.indexerCall = async () => onChain({ status: 'invalid: CHECKPOINT_SEQ (stale; replay of an older checkpoint)' });
+        const deterministic = await pub.verifyAnchorOnChain(CP_ROW, { txid: TXID, version: 0, allowNodeClassStatus: true });
+        expect(deterministic, 'a deterministic invalid still rejects with the flag on').to.equal('rejected:status');
     });
 }

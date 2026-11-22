@@ -1,4 +1,14 @@
 'use strict';
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const { HUB_SCHEMA_VERSION } = require('../../../../src/hub_schema_version.js');
 const http = require('http');
 const sinon = require('sinon');
@@ -56,6 +66,22 @@ function registerRequestTests() {
             expect(err.message).to.equal('Snapshot request returned HTTP 429');
             expect(err.statusCode).to.equal(429);
             expect(err.retryAfterMs).to.equal(7000);
+        } finally {
+            await new Promise(resolve => server.close(resolve));
+        }
+    });
+
+    it('rejects an oversized declared response before reading its body', async function () {
+        const server = http.createServer((req, res) => {
+            res.writeHead(200, { 'Content-Length': String(HubDbPeerCatchup.MAX_RESPONSE_BYTES + 1) });
+            res.flushHeaders();
+        });
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        try {
+            const url = new URL('http://127.0.0.1:' + server.address().port + '/snapshot');
+            const err = await HubDbPeerCatchup.requestJson(url, '', 5000).then(() => null, e => e);
+            expect(err.code).to.equal(HubDbPeerCatchup.RESPONSE_TOO_LARGE);
+            expect(err.contentLength).to.equal(HubDbPeerCatchup.MAX_RESPONSE_BYTES + 1);
         } finally {
             await new Promise(resolve => server.close(resolve));
         }

@@ -23,6 +23,7 @@
 'use strict';
 
 const axios = require('axios');
+const { NODE_CLASS_DEPENDENT_STATUS } = require('../anchor_proof_binding.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -48,9 +49,11 @@ module.exports = {
     // the caller treats as ABSTAIN (skip stamp+reward): 'no-indexer' (a hub with no
     // DOGE indexer wired fails closed, i.e. skips the receiver stamp+reward; wire
     // DOGE_INDEXER_URL fleet-wide before deploy), 'unreachable',
-    // 'absent', 'shallow' are the benign redundant-re-anchor direction the receiver
-    // paths already tolerate; 'rejected:status' / 'rejected:mismatch' /
-    // 'rejected:txid' / 'rejected:version' are a positively-detected forge.
+    // 'absent', 'absent:other-anchor', 'shallow' are the benign redundant-re-anchor
+    // direction the receiver paths already tolerate; 'rejected:status' /
+    // 'rejected:mismatch' / 'rejected:txid' / 'rejected:version' are a
+    // positively-detected forge ('rejected:txid' only when a row came back carrying
+    // a different txid).
     //
     // `expect` BINDS the announcement to a specific on-chain transaction:
     //   expect.txid    - the txid the peer announced (signed into the BUNDLE_DONE /
@@ -65,6 +68,11 @@ module.exports = {
     //                    {1,2}, the archive-carrying set ARCHIVE_VERSIONS names in
     //                    findExistingCheckpointAnchor, so an archive anchor cannot pose
     //                    as a checkpoint anchor).
+    //   expect.allowNodeClassStatus - when true, a NODE_CLASS_DEPENDENT_STATUS 'invalid'
+    //                    status does not short-circuit to 'rejected:status' and must still
+    //                    pass every depth, txid, version and hash check below. Only the
+    //                    reward-attestation drain sets it, matching isRewardCandidateRow;
+    //                    BUNDLE_DONE stamping and the archive gate stay strict.
     // Without `expect` this only proves "this checkpoint is anchored at depth".
     //
     // FAIL CLOSED against an un-upgraded indexer: one that predates the txid filter
@@ -98,14 +106,18 @@ module.exports = {
     // the binding verifyAnchorOnChain was asked for (`want`, with its lowercased txid).
     anchorActionVerdict(res, cp, want, wantTxid){
         if(!res || !res.exists){
-            // The filtered lookup found nothing. `checkpoint_anchored` says whether ANY
-            // anchor exists for this checkpoint: if one does, the announced txid is a
-            // forge (the checkpoint is anchored, just not by that tx). If none does, the
-            // checkpoint simply is not anchored yet, which is the benign direction.
-            if(wantTxid && res && res.checkpoint_anchored) return 'rejected:txid';
+            // The filtered lookup found nothing. `checkpoint_anchored` is computed from the
+            // UNFILTERED rows, so it only says some anchor exists for this checkpoint
+            // (one key routinely carries both a v0 bundle and a v1 archive head). An
+            // announced tx that is still in the mempool misses the same way, so a miss is
+            // undecided, never a forge: the caller queues it, and only an exact-txid row
+            // at depth can stamp. A positive txid forge needs a returned row (below).
+            if(wantTxid && res && res.checkpoint_anchored) return 'absent:other-anchor';
             return 'absent';
         }
-        if(/^invalid/i.test(String(res.status || ''))) return 'rejected:status';
+        let status = String(res.status || '');
+        if(/^invalid/i.test(status) &&
+           !(want.allowNodeClassStatus === true && NODE_CLASS_DEPENDENT_STATUS.test(status))) return 'rejected:status';
         if(!(Number(res.confirmations) >= this.dogeConfirmations)) return 'shallow';
         // Re-check the binding client-side. The indexer already filtered, so this only
         // fires against an indexer that ignored the filter (pre-upgrade) or answered
@@ -231,12 +243,16 @@ module.exports = {
                 if(r && r.exists && Number(r.version) !== Number(v))
                     throw new Error('getanchoraction ignored the version filter (asked v' + v +
                                     ', answered v' + r.version + '); cannot rule out an existing anchor');
-                if(usable(r)) return { exists: true, txid: r.txid || null };
+                if(usable(r)) return { exists: true, txid: r.txid || null,
+                    version: r.version != null && Number.isFinite(Number(r.version))
+                        ? Number(r.version) : null };
             }
             return null;
         }
         if(!usable(res)) return null;
-        return { exists: true, txid: res.txid || null };
+        return { exists: true, txid: res.txid || null,
+            version: res.version != null && Number.isFinite(Number(res.version))
+                ? Number(res.version) : null };
     },
 
     // Existence check for a whole BUNDLE (spec §2.4), the failover-race guard on the
@@ -256,6 +272,7 @@ module.exports = {
     // section we would have published.
     async findExistingBundle(sections){
         let txid = null;
+        let version;
         for(let s of sections || []){
             let r = await this.findExistingCheckpointAnchor(s);   // throws when undetermined
             if(!(r && r.exists)) return null;                      // one section absent: not this bundle
@@ -263,8 +280,10 @@ module.exports = {
             if(!t) return null;                                    // cannot prove one transaction carried the set
             if(txid === null) txid = t;
             else if(txid !== t) return null;                       // sections anchored by DIFFERENT transactions
+            if(version === undefined) version = r.version;
+            else if(version !== r.version) return null;            // sections must share one anchor version
         }
-        return txid ? { exists: true, txid: txid } : null;
+        return txid ? { exists: true, txid: txid, version: version } : null;
     },
 
     // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1 head + its v2

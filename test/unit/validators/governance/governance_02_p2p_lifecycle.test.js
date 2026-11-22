@@ -194,9 +194,8 @@ it('start() subscribes and schedules the tally timer; stop() tears both down', a
             clock.restore();
         });
 it('the tally timer catches a rejecting tick instead of dropping the promise', async function () {
-            // The tick guards its two awaits but not the leader check between them, and
-            // the hub registers no process.on('unhandledRejection'), so an uncaught tick
-            // rejection would kill the process rather than log and re-arm.
+            // The tick guards its two awaits but not the leader check between them. The
+            // crash handler only logs an uncaught rejection, so the local catch must re-arm.
             let clock = sinon.useFakeTimers();
             gov.tallyInterval = 1000;
             sinon.stub(gov, 'checkExpiredProposals').rejects(new Error('tally tick blew up'));

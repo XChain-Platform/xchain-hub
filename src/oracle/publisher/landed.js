@@ -26,6 +26,7 @@ const axios = require('axios');
 const hubConfig = require('../../config');
 const nodeUtil = require('node:util');
 const { getLogger } = require('../../observability');
+const { resolveBatchRounds } = require('./batch_round_membership');
 const logger = getLogger();
 
 // The chain every PRICE batch lands on, and therefore the indexer the backlog
@@ -61,9 +62,11 @@ module.exports = {
     noteBatchLanded(first, last, info) {
         let f = parseInt(first), l = parseInt(last);
         if (!Number.isFinite(f) || !Number.isFinite(l) || l < f) return 0;
+        let exact = info && Array.isArray(info.rounds)
+            ? new Set(info.rounds.map(Number).filter(Number.isSafeInteger)) : null;
         let pruned = 0;
         for (let r of Array.from(this._buffer.keys())) {
-            if (r >= f && r <= l && this._buffer.delete(r)) {
+            if (r >= f && r <= l && (!exact || exact.has(r)) && this._buffer.delete(r)) {
                 pruned++;
                 // Remember WHY the round has no buffered copy, so the pre-publish
                 // self-check does not read a shed round as a coverage hole.
@@ -73,12 +76,16 @@ module.exports = {
         for (let w = this.windowIndexOf(f); w <= this.windowIndexOf(l); w++) {
             let range = this.windowPlan.rangeOf(w);
             if (this.bufferedRange(range.first, range.last).length > 0) continue;
+            // Memoize only when the whole window is in this batch or was already
+            // recorded as landed. A later round must remain publishable.
+            if (!this.windowFullyLanded(range, f, l, exact)) continue;
             this.noteAssembled(w);
             let state = this._windows.get(w);
             if (state && state.timer) clearTimeout(state.timer);
             this._windows.delete(w);
             let takeover = this._takeoverTimers.get(w);
             if (takeover) { clearTimeout(takeover); this._takeoverTimers.delete(w); }
+            this._takeoverReadRetries.delete(w);
             this._takeoverUnlanded.delete(w);
         }
         if (pruned > 0) {
@@ -107,6 +114,21 @@ module.exports = {
         return !!(this._landedRounds && this._landedRounds.has(round));
     },
 
+    // Every round in the publisher window is in this batch or already landed.
+    windowFullyLanded(range, first, last, exact) {
+        for (let r = range.first; r <= range.last; r++) {
+            const inBatch = exact ? exact.has(r) : r >= first && r <= last;
+            if (!inBatch && !this.isRoundLanded(r)) return false;
+        }
+        return true;
+    },
+
+    // A retracted batch no longer carries its rounds, so they stop being exempt from
+    // the bounds fill and the coverage self-check.
+    unmarkRoundLanded(round) {
+        if (this._landedRounds) this._landedRounds.delete(round);
+    },
+
     // Of `rounds` (finalized locally, not buffered), those a valid PRICE batch on the
     // landing chain already carries. Covers a restart or a window-size change, where
     // the in-memory record of shed rounds is gone. Fails open to "none carried": the
@@ -116,8 +138,13 @@ module.exports = {
         let answer = await this.fetchLandedBatches(Math.min(...rounds), Math.max(...rounds));
         let carried = new Set();
         if (!answer) return carried;
-        for (let r of rounds) {
-            if (answer.batches.some(b => r >= b.first_round && r <= b.last_round)) carried.add(r);
+        let cache = new Map();
+        for (let batch of answer.batches) {
+            let batchRounds = await resolveBatchRounds(batch, action => {
+                if (!cache.has(action)) cache.set(action, this.fetchLandedBatchPayload(action));
+                return cache.get(action);
+            });
+            for (let r of rounds) if (batchRounds.has(r)) carried.add(r);
         }
         return carried;
     },
@@ -136,7 +163,9 @@ module.exports = {
     // failure is logged once per distinct reason and counted, so a hub that is
     // silently re-publishing duplicates is visible in getoraclepublisherstatus.
     async reconcileBacklogAgainstChain() {
-        let pending = this.pendingCatchupWindows();
+        // Due retired windows are about to be re-proposed too, so one the chain already
+        // carries is shed here rather than signed again.
+        let pending = this.pendingCatchupWindows().concat(this.dueRetiredWindows()).sort((a, b) => a - b);
         if (pending.length === 0) return 0;
         let first = this.windowPlan.rangeOf(pending[0]).first;
         let last  = this.windowPlan.rangeOf(pending[pending.length - 1]).last;
@@ -144,10 +173,17 @@ module.exports = {
         if (!answer) return 0;
         this.chainReconcileRuns++;
         let pruned = 0, windowsBefore = pending.length;
-        for (let b of answer.batches) pruned += this.noteBatchLanded(b.first_round, b.last_round, null);
+        let cache = new Map();
+        for (let b of answer.batches) {
+            let rounds = await resolveBatchRounds(b, action => {
+                if (!cache.has(action)) cache.set(action, this.fetchLandedBatchPayload(action));
+                return cache.get(action);
+            });
+            pruned += this.noteBatchLanded(b.first_round, b.last_round, { rounds: Array.from(rounds) });
+        }
         if (pruned > 0) {
             this.chainReconcilePrunedRounds += pruned;
-            let remaining = this.pendingCatchupWindows().length;
+            let remaining = this.pendingCatchupWindows().length + this.dueRetiredWindows().length;
             logger.info('OraclePublisher: ' + pruned + ' buffered round(s) in [' + first + ',' + last +
                 '] are already carried by ' + answer.batches.length + ' valid PRICE batch(es) on ' +
                 PRICE_LANDING_COIN + '; ' + (windowsBefore - remaining) + ' of ' + windowsBefore +

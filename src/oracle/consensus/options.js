@@ -178,7 +178,11 @@ function initFinalizedAndEarlyBuffers() {
 
 // The round's timing and quorum knobs, read from config once at construction.
 function applyTimingConfig() {
-    this.finalizationTimeout = parseInt(hubConfig.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
+    // Both round timers go through positiveIntConfig: a negative delay makes setTimeout fire at
+    // once (every round evicted as timed out), and a negative leaderTimeout makes the follower's
+    // fallback-proposer grace check true the moment a round is ready, so a live leader is usurped.
+    this.finalizationTimeout = positiveIntConfig(hubConfig.ORACLE_FINALIZATION_TIMEOUT,
+        DEFAULT_FINALIZATION_TIMEOUT, 'ORACLE_FINALIZATION_TIMEOUT');
     // Default to a 2-hub diversity floor: a single hub's single external source must never
     // become a federation-signed price. A real federation always clears 2; single-host / regtest
     // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
@@ -200,7 +204,8 @@ function applyTimingConfig() {
             'is STOOD DOWN on this hub, so one submitter can carry a federation-signed round. ' +
             'Intended only for a deliberate single-host deployment.');
     }
-    this.leaderTimeout       = parseInt(hubConfig.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+    this.leaderTimeout       = positiveIntConfig(hubConfig.ORACLE_LEADER_TIMEOUT_MS,
+        DEFAULT_LEADER_TIMEOUT_MS, 'ORACLE_LEADER_TIMEOUT_MS');
     // Follower freshness bound on the leader-supplied btcBlockHeight in a
     // PROPOSE. That height selects the price snapshot (quorum N), the member set
     // the round's leader is elected from, and the STAKE_WEIGHTED_QUORUM

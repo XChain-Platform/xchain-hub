@@ -15,6 +15,7 @@
       "test/unit/api/jsonrpc_body_guard.test.js",
       "test/unit/api/openrpc_coverage.test.js",
       "test/unit/attestation/consensus/attest_response_canonical_era.test.js",
+      "test/unit/attestation/response_mirror_era.test.js",
       "test/unit/coins/fee_payment_mode_comment.test.js",
       "test/unit/consensus/consensus_rules_digest.test.js",
       "test/unit/consensus/gate_registry.test.js",
@@ -28,7 +29,8 @@
       "test/unit/peers/rpc_batch_guard.test.js",
       "test/unit/repo_guards/carrier_logic_pin.test.js",
       "test/unit/repo_guards/consensus_identity_cli.test.js",
-      "test/unit/rollcall/rollcall_status_rpc.test.js"
+      "test/unit/rollcall/rollcall_status_rpc.test.js",
+      "test/unit/validators/stake_share_watcher.test.js"
     ]
   },
   "reporters": [

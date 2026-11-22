@@ -9,21 +9,16 @@ const { validateBatchWindow, validateBatchAnchors, validateBatchRounds,
         refuseUnanchoredOrStraddlingBatch, validateBatchSigs } = require('./batch_validation.js');
 const { verifyBatchQuorum } = require('./batch_verification.js');
 const { validateOraclePriceIdentity, validateOraclePriceValue,
-        validateOraclePriceWireFields, effectiveAtFor } = require('./single_validation.js');
+        validateOraclePriceWireFields, parsePushGeneration, effectiveAtFor } = require('./single_validation.js');
 const { registerCatchupVerifier } = require('../../peers/hub_db/catchup_verifiers.js');
 const { catchupHub } = require('../../peers/hub_db/catchup_context.js');
-const { isProducerRoundRow, groupKey } = require('../../peers/hub_db/price_round_groups.js');
+const { isProducerRoundRow, groupKey, groupAgrees, sameValue } = require('../../peers/hub_db/price_round_groups.js');
+const { producerProofReason } = require('./producer_proof.js');
 const admissionHeight = require('../../lib/admission_height.js');
-
-const SOURCE_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
+const { SOURCE_CHAINS } = require('./source_chains.js');
 
 function refuse(reason) {
     return { ok: false, reason };
-}
-
-function sameValue(a, b) {
-    if (a === null || a === undefined || b === null || b === undefined) return a == null && b == null;
-    return String(a) === String(b);
 }
 
 function parseProof(raw) {
@@ -54,14 +49,15 @@ function matchingPair(row, pairs) {
 }
 
 function roundRowMatches(row, sourceChain, roundData, aggregator) {
+    const generation = parsePushGeneration(roundData.push_generation);
+    if (generation.reason) return false;
     if (!sameValue(row.round_number, roundData.round) ||
         !sameValue(row.block_timestamp, roundData.timestamp) ||
         !sameValue(row.reference_block, roundData.block_index) ||
         !sameValue(row.consensus_round, 1) ||
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, roundData.action_index == null ? null : roundData.action_index) ||
-        !sameValue(row.push_generation, Number.isFinite(parseInt(roundData.push_generation))
-            && parseInt(roundData.push_generation) >= 0 ? parseInt(roundData.push_generation) : 0) ||
+        !sameValue(row.push_generation, generation.value) ||
         !matchingPair(row, roundData.pairs)) return false;
     return rowHasAdmission(row, admissionColumns(aggregator, roundData.admit_blocks));
 }
@@ -102,6 +98,8 @@ async function verifyBatchBody(aggregator, sourceChain, batchData) {
 }
 
 function batchRowMatches(row, sourceChain, batchData, checked, aggregator) {
+    const parsedGeneration = parsePushGeneration(batchData.push_generation);
+    if (parsedGeneration.reason) return false;
     const round = checked.rounds.find(item => sameValue(item.round, row.round_number));
     if (!round || !matchingPair(row, round.pairs) ||
         !sameValue(row.block_timestamp, round.timestamp) ||
@@ -110,9 +108,7 @@ function batchRowMatches(row, sourceChain, batchData, checked, aggregator) {
         !sameValue(row.reference_chain, sourceChain) || !sameValue(row.source_chain, sourceChain) ||
         !sameValue(row.source_action_index, batchData.action_index == null ? null : batchData.action_index) ||
         !sameValue(row.batch_block_time, checked.head.blockTime)) return false;
-    let generation = parseInt(batchData.push_generation);
-    if (!Number.isFinite(generation) || generation < 0) generation = 0;
-    if (!sameValue(row.push_generation, generation)) return false;
+    if (!sameValue(row.push_generation, parsedGeneration.value)) return false;
     return rowHasAdmission(row, admissionColumns(aggregator, round.admitBlocks));
 }
 
@@ -133,19 +129,6 @@ async function verifyBatchRow(row, context, proof) {
         return refuse('stored batch proof is not the verified proof');
     }
     return { ok: true };
-}
-
-const ROUND_AGREEMENT_KEYS = ['round_number', 'reference_block', 'block_timestamp',
-    'admit_block_btc', 'admit_block_ltc', 'admit_block_doge', 'consensus_proof'];
-
-function groupAgrees(first, group) {
-    const pairs = new Set();
-    for (const member of group) {
-        if (!isProducerRoundRow(member) || pairs.has(member.coin_pair)) return false;
-        pairs.add(member.coin_pair);
-        if (!ROUND_AGREEMENT_KEYS.every(key => sameValue(first[key], member[key]))) return false;
-    }
-    return true;
 }
 
 // Routes the round's price snapshot read through the walk reader so a round costs at most one indexer read.
@@ -189,12 +172,20 @@ async function verifyProducerRound(row, context, proof) {
     catch (e) { return refuse('admission map unusable: ' + e.message); }
     const bound = readerBoundAggregator(aggregator, context);
     const verified = await roundIngest.verifyValidatedRound.call(bound, 'BTC', roundData, false);
-    return verified.accepted ? { ok: true } : refuse(verified.reason);
+    if (!verified.accepted) return refuse(verified.reason);
+    const proofReason = producerProofReason(row, proof, verified);
+    return proofReason ? refuse(proofReason) : { ok: true };
 }
 
+// A skipped row is a hub's own record of a round it lost, and a disputed row is its own retraction of a
+// finalized row after a reorg. The status is local state the signers never signed, and another hub that
+// never saw the round has no basis to claim the same outcome, so only finalized rows are mirrored and
+// the walk passes the rest by without counting them as refusals.
 async function verifyPriceSnapshot(row, context) {
     if (!row || typeof row !== 'object' || row.status !== 'finalized') {
-        return refuse('price snapshot is not finalized');
+        const local = row && (row.status === 'skipped' || row.status === 'disputed');
+        return local ? { ok: false, reason: 'price snapshot is not finalized', notMirrored: true }
+            : refuse('price snapshot is not finalized');
     }
     const proof = parseProof(row.consensus_proof);
     if (Array.isArray(proof) && isProducerRoundRow(row)) return verifyProducerRound(row, context, proof);

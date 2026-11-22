@@ -115,6 +115,9 @@ describe('StateCheckpointEngine round failure meter', function () {
         const { engine, state } = buildEngine();
         state.down.add('BTC');
         state.down.add('LTC');
+        // Every chain answers the replay read and then has no tip for its round; an
+        // indexer that answers nothing on every chain holds the cadence before any round.
+        engine.indexerCall = async (chain) => (state.down.has(chain) ? { rules: null } : Object.assign({}, TIP));
         await engine.tick();
         expect((await engine.getStats()).round_failures_by_chain).to.deep.equal({ BTC: 1, LTC: 1 });
     });

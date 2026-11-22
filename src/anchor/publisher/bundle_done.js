@@ -199,8 +199,17 @@ module.exports = {
                     continue;
                 }
                 if(verdicts.every(v => v === 'verified')){
+                    // Dequeue only after the back-fill lands, so a transient DB error is
+                    // retried rather than lost. A retry is safe: each stamp writes only
+                    // while anchor_txid IS NULL, and the TTL above still bounds the entry.
+                    try {
+                        await this.applyBundleDone(d, entry.sender, rows);
+                    } catch(werr){
+                        logger.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' confirmed on DOGE but ' +
+                                     'its back-fill FAILED (' + (werr && werr.message) + '); entry retained for a later drain');
+                        continue;
+                    }
                     this._deferredBundleDone.delete(key);
-                    await this.applyBundleDone(d, entry.sender, rows);
                     logger.info('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' confirmed on DOGE; stamped');
                 }
             } catch(e){

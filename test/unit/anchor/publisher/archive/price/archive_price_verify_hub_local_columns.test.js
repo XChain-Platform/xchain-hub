@@ -51,7 +51,7 @@ function signPrices(pub, rows, identities){
     return rows;
 }
 
-describe('archive price follower hub-local columns', () => {
+function registerHeldProofTests(){
     it('accepts a signature-proofed round with different held proof and validator count', async () => {
         const held = signaturePrices();
         const pub = buildPub(held);
@@ -96,7 +96,59 @@ describe('archive price follower hub-local columns', () => {
         expect(await pub.verifyArchivedPriceGroup([archived], { network: 'regtest' }))
             .to.equal(false);
     });
+}
 
+function registerChainShapeTests(){
+    it('accepts held and archived proofed rows with opposite honest chain shapes', async () => {
+        for(const [heldShape, archivedShape] of [
+            [['BTC', 'DOGE', null], ['LTC', 'LTC', 8]],
+            [['LTC', 'LTC', 8], ['BTC', 'DOGE', null]]
+        ]){
+            const held = signaturePrices().map(row => Object.assign(row, {
+                reference_chain: heldShape[0], source_chain: heldShape[1],
+                source_action_index: heldShape[2]
+            }));
+            const pub = buildPub(held);
+            signPrices(pub, held, IDENTITIES);
+            const archived = signaturePrices().map(row => Object.assign(row, {
+                reference_chain: archivedShape[0], source_chain: archivedShape[1],
+                source_action_index: archivedShape[2]
+            }));
+            signPrices(pub, archived, IDENTITIES);
+
+            expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' }))
+                .to.equal(true);
+        }
+    });
+
+    it('refuses unknown reference chains for held and unheld proofed rows', async () => {
+        for(const heldRows of [signaturePrices(), []]){
+            const pub = buildPub(heldRows);
+            if(heldRows.length) signPrices(pub, heldRows, IDENTITIES);
+            for(const chain of ['XYZ', 'btc']){
+                const archived = signaturePrices().map(row => Object.assign(row, {
+                    reference_chain: chain
+                }));
+                signPrices(pub, archived, IDENTITIES);
+                expect(await pub.verifyArchivedPriceGroup(archived, { network: 'regtest' }))
+                    .to.equal(false);
+            }
+        }
+    });
+
+    it('keeps batch-proofed source action indexes in the held comparison', async () => {
+        const archived = copy(vectors.P.inputs.prices.find(row => row.round_number === 12));
+        const held = copy(archived);
+        held.source_action_index = Number(archived.source_action_index || 0) + 1;
+
+        expect(await buildPub([held]).verifyArchivedPriceGroup([archived], { network: 'regtest' }))
+            .to.equal(false);
+    });
+}
+
+describe('archive price follower hub-local columns', () => {
+    registerHeldProofTests();
+    registerChainShapeTests();
     registerLandingClockTests();
     registerUnheldChainShapeTests();
 });

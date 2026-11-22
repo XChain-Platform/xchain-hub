@@ -27,13 +27,18 @@ function buildAnchorRpc(ctx) {
 function anchorStatusRpc(ctx) {
     const { hub } = ctx;
     return {
-        // Get state-checkpoint health: last finalized block per chain and a
-        // process-lifetime count of rounds that timed out below quorum.
+        // Get state and snapshot checkpoint health, including process-lifetime
+        // quorum counters and current cadence signals.
         // Mirrors getattestationstats / getcrosschaincallstats.
         async getcheckpointstats(){
             if(!hub.stateCheckpoints) return {error: "checkpoint engine not active"};
             try {
-                return await hub.stateCheckpoints.getStats();
+                const stats = await hub.stateCheckpoints.getStats();
+                return Object.assign({}, stats, {
+                    snapshot_checkpoints: hub.snapshotCheckpoints
+                        ? hub.snapshotCheckpoints.getStats()
+                        : null
+                });
             } catch (err) {
                 return {error: "error fetching checkpoint stats"};
             }

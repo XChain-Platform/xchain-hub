@@ -17,7 +17,7 @@
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
-const { buildOracleRpc } = require('../../../src/api/rpc/oracle.js');
+const { buildOracleRpc } = require('../../../../src/api/rpc/oracle.js');
 
 const ROWS = [
     { pair: 'DOGE/USD', price: '0.1234', round: 7 },

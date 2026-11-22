@@ -126,3 +126,41 @@ describe('CrossChainEngine attestation store re-drive', function () {
     expect(db.calls).to.equal(callsAtStop);
   });
 });
+
+describe('CrossChainEngine attestation listener faults after storage', function () {
+  beforeEach(setUp);
+  afterEach(tearDown);
+
+  it('settles the opener and joined waiter without a false store re-drive', async function () {
+    db.down = false;
+    let outcome = openLeaderRound();
+    let pending = engine.pendingAttestations.get(ID);
+    let joined = { settled: null, value: null };
+    engine.joinAttestationRound(pending).then(
+      value => { joined.settled = 'resolved'; joined.value = value; },
+      error => { joined.settled = 'rejected'; joined.value = error; });
+    engine.on('attestation:finalized', () => { throw new Error('listener boom'); });
+    reachCommitQuorum();
+    await clock.tickAsync(10);
+    expect(outcome.settled).to.equal('resolved');
+    expect(joined.settled).to.equal('resolved');
+    expect(outcome.value.attestationId).to.equal(ID);
+    expect(joined.value.attestationId).to.equal(ID);
+    expect(engine.finalized.has(ID)).to.equal(true);
+    expect(engine.pendingAttestations.has(ID)).to.equal(false);
+    expect(db.calls).to.equal(1);
+    await clock.tickAsync(120000);
+    expect(db.calls).to.equal(1, 'a listener fault must not arm a store re-drive');
+  });
+
+  it('returns the stored single-node attestation when a listener throws', async function () {
+    db.down = false;
+    engine.on('attestation:finalized', () => { throw new Error('listener boom'); });
+    const resultPromise = engine.finalizeSingleNode(ID, 'BTC', 5, 'LTC', 3, null);
+    await clock.tickAsync(10);
+    const result = await resultPromise;
+    expect(result.attestationId).to.equal(ID);
+    expect(engine.finalized.has(ID)).to.equal(true);
+    expect(db.calls).to.equal(1);
+  });
+});

@@ -61,6 +61,8 @@ module.exports = {
             }
         }
 
+        // stop() may have run while marker hydration was pending.
+        if (this._stopped) return;
         this.armPublishRails();
 
         logger.info('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
@@ -71,13 +73,19 @@ module.exports = {
     // after the durable state is hydrated, so nothing fires against a half-loaded
     // buffer or an unread marker table.
     armPublishRails() {
+        if (this._stopped) return;
         // Subscribe to oracle finalization events
         if (this.hub.oracleConsensus) {
-            this.hub.oracleConsensus.on('round:finalized', (event) => {
+            // Kept on the instance so stop() can detach it: a handler that outlives stop()
+            // re-arms grace timers, and a stop/start cycle would otherwise buffer every
+            // round twice.
+            this.detachFinalizedHandler();
+            this._finalizedHandler = (event) => {
                 this.onRoundFinalized(event).catch(err => {
                     logger.error(nodeUtil.format('OraclePublisher: onRoundFinalized error:', err));
                 });
-            });
+            };
+            this.hub.oracleConsensus.on('round:finalized', this._finalizedHandler);
         }
 
         // Catch-up for windows that closed while this hub was down. Every buffered
@@ -109,30 +117,44 @@ module.exports = {
     // that is publishing perfectly on a cadence too slow for the fee gate looks
     // healthy in every other line this class logs.
     logBatchCadence() {
-        let peakMs = worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+        // The window the scheduler runs, the same figure the status reports, never the
+        // small-window default the hourly plan may already have superseded.
+        let rounds = this.windowRoundsInForce();
+        let bounds = this.cadenceBoundsInForce();
+        let peakMs = worstCaseSnapshotAgeMs(rounds, {
             roundIntervalMs:  this.roundIntervalMs,
             graceMs:          this.batchGraceMs,
             landingReserveMs: this.batchLandingReserveMs });
-        logger.info('OraclePublisher PRICE batch cadence: ' + this.batchWindowRounds +
+        logger.info('OraclePublisher PRICE batch cadence: ' + rounds +
             ' round(s)/batch = one wire per ' +
-            Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000) + 's' +
-            (this.batchWindowRoundsCeiling === null
+            Math.round((rounds * this.roundIntervalMs) / 1000) + 's' +
+            (bounds.ceiling === null
                 ? ' (no staleness bound resolved; window not capped)'
-                : ', ceiling ' + this.batchWindowRoundsCeiling + '; newest snapshot peaks at ' +
+                : ', ceiling ' + bounds.ceiling + '; newest snapshot peaks at ' +
                   (peakMs === null ? '?' : Math.round(peakMs / 1000)) + 's against a ' +
-                  Math.round(this.oracleMaxPriceAgeMs / 1000) + 's fee-price staleness bound'));
+                  Math.round(bounds.maxPriceAgeMs / 1000) + 's fee-price staleness bound'));
+    },
+
+    detachFinalizedHandler() {
+        let consensus = this.hub && this.hub.oracleConsensus;
+        if (this._finalizedHandler && consensus && typeof consensus.removeListener === 'function') {
+            consensus.removeListener('round:finalized', this._finalizedHandler);
+        }
+        this._finalizedHandler = null;
     },
 
     // Release every timer this class owns, plus a batch signer it created itself.
     // The class had no stop() before the batch rail, because it had no timers.
     stop() {
         this._stopped = true;
+        this.detachFinalizedHandler();
         for (let state of this._windows.values()) {
             if (state.timer) clearTimeout(state.timer);
         }
         this._windows.clear();
         for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
         this._takeoverTimers.clear();
+        this._takeoverReadRetries.clear();
         this._takeoverUnlanded.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
         if (this._catchupSweepTimer) { clearTimeout(this._catchupSweepTimer); this._catchupSweepTimer = null; }
@@ -148,6 +170,8 @@ module.exports = {
         // item 2677 kill switch: when disabled, do not enqueue or broadcast.
         // Skip rather than queue-for-later so a disabled publisher does not silently
         // build a backlog that floods on-chain the moment it is re-enabled.
+        // A round that finalizes after stop() must not buffer or re-arm a grace timer.
+        if (this._stopped) return;
         if (!this.enabled) {
             logger.info('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
             return;

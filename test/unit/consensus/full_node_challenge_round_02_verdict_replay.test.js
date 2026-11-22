@@ -327,3 +327,51 @@ it('an in-process send marks the epoch committed, matching the reload rule', asy
 });
 });
 });
+
+async function answerAndClose(eng) {
+    const st = eng.rounds.get(288);
+    eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+    await eng.closeCollection(288);
+    return st;
+}
+
+function registerUnreadableLogTests() {
+    it('a read fault other than ENOENT blocks the verdict until the log reads, then honours it', async function () {
+        const logPath = writeLog([{ phase: 'intent', epoch: 288 }, { phase: 'sent', epoch: 288, txid: 'TXPRIOR' }]);
+        const eng = await startEpoch(makeHub());
+        eng.spendLogPath = logPath;
+        const realRead = fs.readFileSync;
+        const readStub = sinon.stub(fs, 'readFileSync').callsFake(function (f, ...rest) {
+            if (f === logPath) throw Object.assign(new Error('io'), { code: 'EIO' });
+            return realRead.call(fs, f, ...rest);
+        });
+        eng.loadSpendLog();
+        expect(eng._spendLogUnread).to.equal(true);
+        expect(eng._committedEpochs.size).to.equal(0);
+        const st = await answerAndClose(eng);
+        expect(eng.broadcastFn.called, 'an unread log must never pass for an empty one').to.equal(false);
+        expect(st.finalized, 'the round is not claimed, so a later read can still decide it').to.equal(false);
+        readStub.restore();
+        await eng.maybeFinalize(288);
+        expect(eng._spendLogUnread).to.equal(false);
+        expect(eng._committedEpochs.has(288)).to.equal(true);
+        expect(eng.broadcastFn.called).to.equal(false);
+    });
+
+    it('a log that was never written stays an empty log and does not block the verdict', async function () {
+        const eng = await startEpoch(makeHub());
+        eng.spendLogPath = path.join(dir, 'never-written.jsonl');
+        eng.loadSpendLog();
+        expect(eng._spendLogUnread).to.equal(false);
+        await answerAndClose(eng);
+        expect(eng.broadcastFn.calledOnce).to.equal(true);
+    });
+}
+
+describe('FullNodeChallengeRound', function () {
+    installSuiteHooks1();
+    describe('unreadable spend log', function () {
+        installSuiteHooks4();
+        registerUnreadableLogTests();
+    });
+});

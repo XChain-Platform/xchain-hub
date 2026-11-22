@@ -151,9 +151,11 @@ const PRICE_KEYS = ['id', 'round_number', 'coin_pair', 'price', 'reference_block
     'consensus_proof', 'status', 'source_chain', 'source_action_index', 'batch_block_time',
     'admit_block_btc', 'admit_block_ltc', 'admit_block_doge'];
 
-// One policy list can reach 10000 members, so a round carries at most this many policy
-// rows; the whole archive JSON stays under the byte ceiling, well inside the 16 MiB
-// decompress cap every verifier enforces.
+// Policy, list and distinct-price-round caps are protocol limits enforced by builders
+// and co-signers. Other row counts use the builder's operator-configured maxBatch.
+// Raise a protocol cap only after followers have upgraded; lowering one remains a
+// builder-only rollout. JSON and wire byte limits size builder output; followers have
+// a separate bounded-decompression limit in decodeArchiveProposal.
 const ARCHIVE_MAX_POLICY_ROWS = 8;
 // One version-1 list snapshot row can carry 10000 members, so use the same archive cap.
 const ARCHIVE_MAX_LIST_ROWS = 8;

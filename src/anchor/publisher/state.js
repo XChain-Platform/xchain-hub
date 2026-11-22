@@ -25,7 +25,7 @@
 const coins = require('../../coins');
 const hubConfig = require('../../config');
 const { DEFAULT_ANCHOR_MARKER_RETENTION_MS } = require('./constants.js');
-const { classifyArchiveSeqFloorReply } = require('./archive/seq_floor_seed.js');
+const { readArchiveSeqFloorOutcome } = require('./archive/seq_floor_seed.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -66,6 +66,8 @@ module.exports = {
         // claimAttestSlot), and how many second payloads it has refused.
         this._attestSlots        = new Map();
         this._attestSlotRefusals = 0;
+        this._archiveWrapperSlots = new Map();
+        this._archiveWrapperSlotRefusals = 0;
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
         this._callHandler      = null;
         this._flushing         = false;
@@ -92,7 +94,9 @@ module.exports = {
         // operator's post-deploy check, not for a dashboard tile.
         this._sectionsAnchored = 0;
         this._bundlesOversize  = 0;
+        this._bundlesDeferredFoldUnresolved = 0;
         this._foldArchiveNoHeadRoom = 0;
+        this._foldArchiveNoHeadRoomStreak = {};
         this._foldArchiveDroppedOversize = 0;
         // Split of that count by the rank this hub held for the row it anchored.
         // A backup-rank publish means the elected rank-0 publisher did NOT anchor
@@ -163,6 +167,10 @@ module.exports = {
         // lists to this set before anything is stamped. Recorded ONLY where the body was
         // already parsed, so no hub decompresses an extra archive on the p2p path.
         this._observedArchiveContents = new Map();
+        // Folded archive content keys observed per (batch_seq, proposer). A v3 wrapper
+        // checkpoint row exists even when no archive section rode the transaction, so
+        // FINALIZED must also bind the co-signed archive content before stamping rows.
+        this._observedFoldArchiveKeys = new Map();
         // Highest batch_seq this hub has learned the FEDERATION already consumed, from
         // evidence other than its own rows: an authenticated XANC_FINALIZED, a co-sign
         // refusal naming the refuser's own consumed seq, or an archive head resolved
@@ -185,6 +193,8 @@ module.exports = {
         // Highest batch seq THIS hub's own DOGE address spent (its own heads, never peer
         // input), so the v1 leader draw honours it without the jump cap. -1 means none known.
         this._ownArchiveBatchSeq = -1;
+        // True after the DOGE indexer definitively reports either a floor or no prior head.
+        this._ownArchiveSeqFloorKnown = false;
 
     },
 
@@ -224,30 +234,40 @@ module.exports = {
 
     async seedArchiveSeqFloor(){
         const ix = this.indexers && this.indexers.DOGE;
-        if(!this.dogeAddress || !ix || !ix.url){
-            logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE address or indexer is not configured');
-            return;
-        }
         try {
-            const res = await this.indexerCall('DOGE', 'getarchiveanchor', { author: this.dogeAddress });
-            const reply = classifyArchiveSeqFloorReply(res);
-            // Report an indexer error as a failed lookup, never as "no archive"
-            if(reply.kind === 'error'){
-                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: the DOGE indexer answered ' + reply.detail);
+            const outcome = await readArchiveSeqFloorOutcome({
+                indexerCall: (coin, method, params) => this.indexerCall(coin, method, params),
+                dogeAddress: this.dogeAddress,
+                dogeIndexerUrl: ix && ix.url,
+                logger: null
+            });
+            if(outcome.kind === 'unconfigured'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE address or indexer is not configured');
                 return;
             }
-            if(reply.kind === 'none'){
+            // Report an indexer error as a failed lookup, never as "no archive"
+            if(outcome.kind === 'unknown' && outcome.reason === 'indexer_error'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: the DOGE indexer answered ' + outcome.detail);
+                return;
+            }
+            if(outcome.kind === 'unknown' && outcome.reason === 'lookup_failed'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + outcome.detail);
+                return;
+            }
+            if(outcome.kind === 'none'){
+                this._ownArchiveSeqFloorKnown = true;
                 logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer found no archive');
                 return;
             }
             // Refuse a seq that is not a whole number >= 0 (it would make the next batch seq fractional)
-            if(reply.kind === 'invalid'){
-                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer returned an invalid seq ' + String(reply.raw));
+            if(outcome.kind === 'unknown' && outcome.reason === 'invalid_seq'){
+                logger.warn('StateAnchorPublisher: archive batch-seq floor was not seeded at boot because the DOGE indexer returned an invalid seq ' + String(outcome.raw));
                 return;
             }
-            this.noteConsumedBatchSeq(reply.seq, 'boot-time floor seed from the DOGE indexer');
+            this.noteConsumedBatchSeq(outcome.seq, 'boot-time floor seed from the DOGE indexer');
             // Also hold it as our own floor, which the jump cap never discards and a later failed read keeps
-            this.noteOwnArchiveSeq(reply.seq);
+            this.noteOwnArchiveSeq(outcome.seq);
+            this._ownArchiveSeqFloorKnown = true;
         } catch(err){
             logger.warn('StateAnchorPublisher: archive batch-seq floor seed failed: ' + (err && err.message ? err.message : String(err)));
         }

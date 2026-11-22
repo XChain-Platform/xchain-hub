@@ -48,8 +48,10 @@
  * req.ip to the leftmost address the trust chain does not vouch for, so a
  * public client arriving through a private-IP proxy still presents a public
  * req.ip and is still throttled. Only a caller that is genuinely on the host
- * or the private network is exempt. Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to
- * enforce the cap on every caller including those.
+ * or the private network is exempt. HUB_RATE_LIMIT_EXEMPT_LOCAL=false applies
+ * the cap to each resolved client IP. A private peer trusted by HUB_TRUST_PROXY
+ * can still choose that IP via X-Forwarded-For, so capping the peer itself also
+ * requires HUB_TRUST_PROXY=false or a list of only the real proxy addresses.
  *
  * 3. ONE BUDGET SERVED TWO WORKLOADS THAT STARVE EACH OTHER, measured on the
  *    2026-09-16 fleet roll. Recreating the five testnet validator hubs made
@@ -75,6 +77,9 @@
  *    number is the one whose per-request cost is already bounded by its own
  *    `limit` parameter.
  */
+
+const net = require('net');
+const { rateLimitKey } = require('./rate_limit_tiers.js');
 
 // JSON-RPC reserves -32000..-32099 for server-defined errors. -32029 is the
 // hub's "you are being rate limited" code; clients key retry/backoff on it
@@ -115,7 +120,9 @@ function v4ToInt (ip) {
     if (parts.length !== 4) return null;
     let n = 0;
     for (const part of parts) {
-        if (!/^\d{1,3}$/.test(part)) return null;
+        // No zero-padded octets: inet_aton reads 010 as octal 8, strict parsers reject it,
+        // and a spelling the parsers disagree on must not be read as private.
+        if (!/^(?:0|[1-9]\d{0,2})$/.test(part)) return null;
         const octet = Number(part);
         if (octet > 255) return null;
         n = (n * 256) + octet;
@@ -137,8 +144,9 @@ function normalizeIp (ip) {
     if (!out) return '';
     const zone = out.indexOf('%');
     if (zone !== -1) out = out.slice(0, zone);
-    // ::ffff:127.0.0.1 and the (rarer) ::127.0.0.1 both carry a v4 address.
-    const mapped = out.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
+    // ::ffff:127.0.0.1 carries a v4 address. The deprecated IPv4-compatible ::a.b.c.d is
+    // deliberately left alone so it falls through to the closed IPv6 branch.
+    const mapped = out.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
     if (mapped) return mapped[1];
     return out;
 }
@@ -171,7 +179,9 @@ function isLocalCaller (ip) {
         return false;
     }
 
-    if (addr.includes(':')) {
+    // net.isIPv6 rejects every non-address string, so trailing junk after a fc/fd/fe8-feb
+    // prefix can no longer ride the prefix test.
+    if (net.isIPv6(addr)) {
         // fc00::/7 unique-local (docker's IPv6 bridges live here) and
         // fe80::/10 link-local. Both are unroutable on the public internet.
         const head = parseInt(addr.split(':')[0] || '', 16);
@@ -223,10 +233,37 @@ function requestPath (req) {
  * @returns {boolean} true when the request is under the snapshot prefix
  */
 function isSnapshotRequest (req) {
-    const path = requestPath(req);
+    // Express matches routes case-insensitively, so the prefix must too, or a mixed-case
+    // path reaches the snapshot limiter and is also charged by the general one.
+    const path = requestPath(req).toLowerCase();
     if (!path.startsWith(SNAPSHOT_PATH_PREFIX)) return false;
     const next = path.charAt(SNAPSHOT_PATH_PREFIX.length);
     return next === '' || next === '/';
+}
+
+/**
+ * Does this request get the snapshot budget? Only a bodyless GET or HEAD under the
+ * snapshot prefix does. The prefix alone is not enough: the JSON-RPC router is mounted
+ * at the root after the snapshot routes, so a JSON-RPC body sent to any snapshot path
+ * no page route answers (POST to /hub-db/snapshot/x, or a GET with a body to an unknown
+ * table) is dispatched as JSON-RPC. Judged on the prefix, such a call was charged one
+ * snapshot token per HTTP request with no batch surcharge, escaping the public tier.
+ * A JSON-RPC call always carries a body and a page read never does, so this split
+ * needs no list of table routes that could drift. The limiters run before the body is
+ * parsed, so the body is judged by its headers: any Transfer-Encoding or a non-zero
+ * Content-Length counts as a body.
+ *
+ * @param {*} req - an express request
+ * @returns {boolean} true only for a bodyless GET or HEAD under the snapshot prefix
+ */
+function isSnapshotPageRead (req) {
+    if (!isSnapshotRequest(req)) return false;
+    const method = typeof req.method === 'string' ? req.method.toUpperCase() : '';
+    if (method !== 'GET' && method !== 'HEAD') return false;
+    const headers = req.headers || {};
+    if (headers['transfer-encoding'] !== undefined) return false;
+    const length = headers['content-length'];
+    return length === undefined || String(length).trim() === '0';
 }
 
 /**
@@ -256,10 +293,8 @@ function rateLimitMessage (facts) {
         '); retry after ' + facts.retryAfterSeconds + 's';
 }
 
-// A throttled JSON-RPC request still deserves its id echoed back, so a client
-// correlating responses can retire the right call. express.json() runs before
-// the limiter in api.js, so req.body is already parsed here. A batch array has
-// no single id; JSON-RPC says use null, and so do we.
+// Echo a legal single-call id only when a caller already parsed the body. Production
+// limiters run before parsing and surcharges refuse batches, so wire refusals use null.
 function requestId (req) {
     const body = req && req.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
@@ -300,6 +335,9 @@ function buildRateLimitOptions (opts) {
         limit,
         standardHeaders: true,
         legacyHeaders: false,
+        // Every bucket keys on the client's canonical address, the snapshot bucket included,
+        // so no limiter built here can fall back to the raw req.ip string.
+        keyGenerator: rateLimitKey,
         skip (req) {
             if (skipPath && skipPath(req)) return true;
             return exemptLocal && isLocalCaller(req && req.ip);
@@ -333,6 +371,7 @@ module.exports = {
     SNAPSHOT_PATH_PREFIX,
     buildRateLimitOptions,
     isLocalCaller,
+    isSnapshotPageRead,
     isSnapshotRequest,
     normalizeIp,
     parseExemptLocal,

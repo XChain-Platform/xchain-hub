@@ -34,7 +34,9 @@ const { bftQuorumOrSingle } = require('../lib/bft_quorum.js');
 // round: { weighted: bool, validators: [{ pubkey, source, weight }], signers: iterable of pubkeys }
 function computeQuorumMargin(round){
     let validators = (round && Array.isArray(round.validators)) ? round.validators : [];
-    let signers = Array.from(new Set((round && round.signers) ? Array.from(round.signers) : []));
+    let members = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
+    let signers = Array.from(new Set((round && round.signers) ? Array.from(round.signers)
+        .map(pk => String(pk).toLowerCase()).filter(pk => members.has(pk)) : []));
     let weighted = !!(round && round.weighted);
     let result = { mode: weighted ? 'stake' : 'count', met: false, oneFaultTolerant: false, signers: signers.length };
 

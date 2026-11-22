@@ -79,7 +79,9 @@ async function postWith429Retry(url, body, config) {
 class CapabilitySnapshot {
     constructor(hub) {
         this.hub = hub;
-        // (capability:blockIndex) → { validators: [{pubkey, amount}], count, blockIndex, capability, expiresAt }
+        // Keys: net:cap:buried:minStake (count), w:net:cap:buried:minStake (weight), *:net:buried and wa:net:buried
+        // (whole federation), buried = buriedBlockIndex(). net and minStake must stay in the key (min_stake.js) and
+        // flushCapability deletes by the first two prefixes. Values: { capability, blockIndex, count, truncated, validators, expiresAt }.
         this.cache = new Map();
         // How long to keep a snapshot. 60s default, enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
@@ -92,11 +94,10 @@ class CapabilitySnapshot {
         // blocks below the tip pins the set to a buried, reorg-stable height.
         // CONSENSUS-CRITICAL: the buffer is part of what every hub folds into
         // the same round height, so it must be identical federation-wide (same
-        // tier as ORACLE_EPOCH_START). Override via HUB_SNAPSHOT_REORG_BUFFER
-        // only as a coordinated fleet change; on mainnet/testnet a divergent
-        // value now refuses boot rather than forking silently (#4167, see
-        // resolveReorgBuffer). Default 6 = the BTC confirmation depth the
-        // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
+        // tier as ORACLE_EPOCH_START). HUB_SNAPSHOT_REORG_BUFFER is limited to
+        // isolated standalone tests; every declared network refuses a divergent
+        // value because external verifiers use the shared protocol constant.
+        // Default 6 = the BTC confirmation depth the platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this.resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
         // Truncation is alarm-and-PROCEED (the snapshot is still usable and
@@ -113,21 +114,20 @@ class CapabilitySnapshot {
         });
     }
 
-    // Network qualifier folded into every cache key. HUB_NETWORK is read once at
-    // process start, validated, and frozen onto the hub (XChainHub.js), so it is
-    // invariant across every entry today and this prefix changes nothing for a
-    // single-network process. It is bound explicitly so the network-safety of the
-    // key is stated by construction rather than inferred: a future change that lets
-    // one CapabilitySnapshot instance straddle networks (multi-network reader, a
-    // test harness swapping hub.network, reuse across two indexer targets) can no
-    // longer serve a mainnet snapshot for a testnet (capability, blockIndex) query.
+    // Network qualifier folded into every cache key. A standalone hub may adopt
+    // one recognized network through learnNetworkFromConfig, which rechecks the
+    // canonical reorg buffer before changing the hub. It is bound explicitly so
+    // the network-safety of the key is stated by construction rather than inferred: a future
+    // change that lets one CapabilitySnapshot instance straddle networks (multi-network reader, a
+    // test harness swapping hub.network, reuse across two indexer targets) can no longer serve a
+    // mainnet snapshot for a testnet (capability, blockIndex) query.
     netKey() {
         return (this.hub && this.hub.network) || '';
     }
 
     // Fetch (or read from cache) the deterministic validator set for the given
     // capability at the given block boundary. Returns:
-    //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
+    //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability, truncated }
     // Returns null when the indexer can't be reached or returns an error.
     async getSnapshot(capability, blockIndex) {
         blockIndex = this.buriedBlockIndex(blockIndex);
@@ -254,38 +254,38 @@ class CapabilitySnapshot {
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
-
-        if (this.monitor.inBackoff()) return null;
-        let url = await this.hub.resolveBtcIndexerUrl();
-        if (!url) return this.fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
-
-        try {
-            let res = await postWith429Retry(url, {
-                jsonrpc: '2.0',
-                id:      now,
-                method:  'getactivevalidators',
-                params:  { block_index: blockIndex }
-            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
-            let result = res && res.data && res.data.result;
-            if (!result || result.error) return this.fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this.coerceValidators(result);
-            if (validators === null) return this.fail('getactivevalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
-            if (!this.blockEchoOk('getactivevalidators', result, blockIndex)) return null;
-            this.monitor.recordSuccess('getactivevalidators');
-            let snapshot = {
-                capability:  '*',
-                blockIndex:  result.block_index,
-                count:       result.count,
-                truncated:   result.truncated === true,
-                validators:  validators,
-                expiresAt:   now + this.cacheTtlMs
-            };
-            this.cache.set(key, snapshot);
-            this.prune(now);
-            return snapshot;
-        } catch (err) {
-            return this.onFetchError('getactivevalidators', err);
-        }
+        return this.singleFlight(key, async () => {
+            if (this.monitor.inBackoff()) return null;
+            let url = await this.hub.resolveBtcIndexerUrl();
+            if (!url) return this.fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+            try {
+                let res = await postWith429Retry(url, {
+                    jsonrpc: '2.0',
+                    id:      now,
+                    method:  'getactivevalidators',
+                    params:  { block_index: blockIndex }
+                }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
+                let result = res && res.data && res.data.result;
+                if (!result || result.error) return this.fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
+                let validators = this.coerceValidators(result);
+                if (validators === null) return this.fail('getactivevalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
+                if (!this.blockEchoOk('getactivevalidators', result, blockIndex)) return null;
+                this.monitor.recordSuccess('getactivevalidators');
+                let snapshot = {
+                    capability:  '*',
+                    blockIndex:  result.block_index,
+                    count:       result.count,
+                    truncated:   result.truncated === true,
+                    validators:  validators,
+                    expiresAt:   now + this.cacheTtlMs
+                };
+                this.cache.set(key, snapshot);
+                this.prune(now);
+                return snapshot;
+            } catch (err) {
+                return this.onFetchError('getactivevalidators', err);
+            }
+        });
     }
 
     // Source-keyed whole-federation weight snapshot: every staker with ANY active
@@ -300,40 +300,40 @@ class CapabilitySnapshot {
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
-
-        if (this.monitor.inBackoff()) return null;
-        let url = await this.hub.resolveBtcIndexerUrl();
-        if (!url) return this.fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
-
-        try {
-            let res = await postWith429Retry(url, {
-                jsonrpc: '2.0',
-                id:      now,
-                method:  'getactivestakeweights',
-                params:  { block_index: blockIndex }
-            }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
-            let result = res && res.data && res.data.result;
-            if (!result || result.error) return this.fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this.coerceValidators(result, { requireWeight: true });
-            if (validators === null) return this.fail('getactivestakeweights', REASONS.MALFORMED,
-                Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
-            if (!this.blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
-            this.monitor.recordSuccess('getactivestakeweights');
-            let snapshot = {
-                capability:  '*',
-                blockIndex:  result.block_index,
-                count:       result.count,
-                truncated:   result.truncated === true,
-                sourceCount: result.source_count,
-                validators:  validators,                   // [{pubkey, source, weight}]
-                expiresAt:   now + this.cacheTtlMs
-            };
-            this.cache.set(key, snapshot);
-            this.prune(now);
-            return snapshot;
-        } catch (err) {
-            return this.onFetchError('getactivestakeweights', err);
-        }
+        return this.singleFlight(key, async () => {
+            if (this.monitor.inBackoff()) return null;
+            let url = await this.hub.resolveBtcIndexerUrl();
+            if (!url) return this.fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
+            try {
+                let res = await postWith429Retry(url, {
+                    jsonrpc: '2.0',
+                    id:      now,
+                    method:  'getactivestakeweights',
+                    params:  { block_index: blockIndex }
+                }, { headers: this.hub.btcIndexerHeaders(), timeout: 5000 });
+                let result = res && res.data && res.data.result;
+                if (!result || result.error) return this.fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
+                let validators = this.coerceValidators(result, { requireWeight: true });
+                if (validators === null) return this.fail('getactivestakeweights', REASONS.MALFORMED,
+                    Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
+                if (!this.blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
+                this.monitor.recordSuccess('getactivestakeweights');
+                let snapshot = {
+                    capability:  '*',
+                    blockIndex:  result.block_index,
+                    count:       result.count,
+                    truncated:   result.truncated === true,
+                    sourceCount: result.source_count,
+                    validators:  validators,                   // [{pubkey, source, weight}]
+                    expiresAt:   now + this.cacheTtlMs
+                };
+                this.cache.set(key, snapshot);
+                this.prune(now);
+                return snapshot;
+            } catch (err) {
+                return this.onFetchError('getactivestakeweights', err);
+            }
+        });
     }
 
     // Drop every cached snapshot for a capability: both the count-keyed

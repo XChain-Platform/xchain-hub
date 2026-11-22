@@ -23,8 +23,9 @@
 
 const canonicalForms    = require('./canonical_forms.js');
 const { hasSupersedeFields } = require('./supersede_suffix.js');
+const { supersedeFieldsRefusal } = require('./supersede_fill.js');
 const {
-    supersedeCosignDecline,
+    supersedePrefilterDecline,
     checkpointProposalDecline,
 } = require('./replay_hold.js');
 const ValidatorIdentity = require('../../validators/identity.js');
@@ -33,7 +34,11 @@ const { getLogger } = require('../../observability');
 const logger = getLogger();
 
 // Co-sign declines handleSignReq reaches before it authenticates the sender.
-const PRE_AUTH_COSIGN_DECLINES = new Set(['own_tip_unresolved', 'snapshot_out_of_tolerance']);
+const PRE_AUTH_COSIGN_DECLINES = new Set([
+    'network_mismatch', 'own_tip_unresolved', 'snapshot_out_of_tolerance', 'seq_not_derived',
+    'validator_resolve_failed', 'not_member', 'not_cadence_leader', 'sender_sig_invalid',
+    'supersede_below_gate', 'supersede_malformed'
+]);
 // Fallback pre-auth decline log window when the engine has no stall-log window set.
 const DECLINE_LOG_WINDOW_MS = 60 * 60 * 1000;
 
@@ -49,6 +54,17 @@ function divergentFields(cp, bh){
 
 module.exports = {
 
+    declinesNetworkMismatch(cp){
+        try { this.assertCheckpointNetwork(cp, 'co-sign'); return false; }
+        catch(e){
+            this.noteCosignDecline('network_mismatch', cp, String(e && e.message).slice(0, 300));
+            return true;
+        }
+    },
+
+    declinesSupersedeFields(cp){ const reason = supersedeFieldsRefusal(cp, canonicalForms.isCheckpointSupersedeActive(cp));
+        if(reason) this.noteCosignDecline(reason, cp); return !!reason;
+    },
     // Follower: independently confirm the proposed checkpoint against OUR OWN
     // indexer before signing (never sign state we don't hold ourselves).
     async handleSignReq(envelope){
@@ -67,9 +83,9 @@ module.exports = {
         // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
         // then refuse the finalized checkpoint under the other. Placed before the tip
         // resolve and the validator resolve, like the propose and peer FINALIZED paths, so
-        // a cross-network record costs no lookups. A throw is caught by the XCHK_SIGN_REQ
-        // .catch in handleMessage; an unscoped hub (this.network === '') is warned, not refused.
-        this.assertCheckpointNetwork(cp, 'co-sign');
+        // a cross-network record costs no lookups. A mismatch is counted and its warning
+        // uses the pre-auth throttle; an unscoped hub (this.network === '') is warned, not refused.
+        if(this.declinesNetworkMismatch(cp)) return;
 
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
         // the validator set AND every flag-day gate below, but is a wire field the
@@ -77,7 +93,7 @@ module.exports = {
         // reach leader-selection (grinding), the validator-set resolve, or the flag-
         // day gates (regression). If we cannot resolve our own tip, we decline rather
         // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
-        // Both declines here run before the sender is authenticated, so any peer can
+        // These guards run before the sender is authenticated, so any peer can
         // trigger them: noteCheckpointDecline throttles their warning per reason for that.
         let myBtc = await this.resolveSnapshotBlock();
         if(!Number.isFinite(myBtc)) return this.noteCosignDecline('own_tip_unresolved', cp);   // no own tip -> fail closed
@@ -90,21 +106,54 @@ module.exports = {
         // This closes seq-grinding (a leader picking an arbitrary seq to dodge the
         // replay guard below or fork the anchor/reward bookkeeping) and makes the
         // tightened (chain, network, checkpoint_seq) unique key a true split-brain fence.
-        if(Number(cp.checkpoint_seq) !== canonicalForms.deriveCheckpointSeq(cp.snapshot_block)) return;
+        if(this.declinesInvalidSequence(cp)) return;
 
-        let validators = await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
-        if(!this.followsCadenceLeader(validators, sender, myPubkey, cp)) return;
+        const validators = await this.resolveCosignValidators(cp);
+        if(!validators) return;
+        if(!this.followsCadenceLeader(validators, sender, myPubkey, cp) || this.declinesSupersedeFields(cp)) return;
 
         let canonical = canonicalForms.canonicalCheckpoint(cp);
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender))
+            return this.noteCosignDecline('sender_sig_invalid', cp);
         this.supersedeOwnAttempt(myBtc);                           // our tip moved past a round we led
         if(this.declinesOffCadence(cp, true)) return;              // too soon after the last checkpoint
 
         // Replay guard: never co-sign a seq at-or-below one we've already recorded.
-        let maxSeq = await this.getMaxCheckpointSeq(cp.chain, cp.network);
-        if(maxSeq != null && cp.checkpoint_seq <= maxSeq) return;
+        const seqRead = await this.readCosignMaxSeq(cp);
+        if(!seqRead.ok) return;
+        const maxSeq = seqRead.value;
+        if(maxSeq != null && cp.checkpoint_seq <= maxSeq)
+            return this.noteCosignDecline('seq_at_or_below_max', cp, 'max recorded seq ' + maxSeq);
 
         await this.coSignConfirmedCheckpoint(cp, canonical, myPubkey);
+    },
+
+    declinesInvalidSequence(cp){
+        const derivedSeq = canonicalForms.deriveCheckpointSeq(cp.snapshot_block);
+        if(Number(cp.checkpoint_seq) === derivedSeq) return false;
+        this.noteCosignDecline('seq_not_derived', cp,
+            'seq ' + cp.checkpoint_seq + ', derived ' + derivedSeq);
+        return true;
+    },
+
+    async resolveCosignValidators(cp){
+        try {
+            return await this.resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
+        } catch(e){
+            this.noteCosignDecline('validator_resolve_failed', cp,
+                String(e && e.message ? e.message : e).slice(0, 200));
+            return null;
+        }
+    },
+
+    async readCosignMaxSeq(cp){
+        try {
+            return { ok: true, value: await this.getMaxCheckpointSeq(cp.chain, cp.network) };
+        } catch(e){
+            this.noteCosignDecline('seq_read_failed', cp,
+                String(e && e.message ? e.message : e).slice(0, 200));
+            return { ok: false };
+        }
     },
 
     async coSignConfirmedCheckpoint(cp, canonical, myPubkey){
@@ -117,11 +166,17 @@ module.exports = {
             const reason = /^block not indexed:/.test(detail) ? 'indexer_no_block' : 'indexer_read_failed';
             return this.noteCosignDecline(reason, cp, detail);
         }
-        let proposalDecline = supersedeCosignDecline(cp, bh.rules);
+        let proposalDecline = supersedePrefilterDecline(cp, bh.rules);
         let expectedSupersede;
-        if(!proposalDecline && hasSupersedeFields(cp))
-            expectedSupersede = await this.supersedeFieldsForRound(
-                cp.chain, cp.network, bh);
+        if(!proposalDecline && hasSupersedeFields(cp)){
+            try {
+                expectedSupersede = await this.supersedeFieldsForRound(
+                    cp.chain, cp.network, bh);
+            } catch(e){
+                return this.noteCosignDecline('supersede_read_failed', cp,
+                    String(e && e.message).slice(0, 200));
+            }
+        }
         if(!proposalDecline)
             proposalDecline = checkpointProposalDecline(
                 cp, bh, expectedSupersede);
@@ -135,6 +190,7 @@ module.exports = {
     noteCosignDecline(reason, cp, detail){
         const declines = this._cosignDeclines || (this._cosignDeclines = {});
         declines[reason] = (declines[reason] || 0) + 1;
+        this._cosignDeclinesTotal = (this._cosignDeclinesTotal || 0) + 1;
         this._lastCosignDeclineReason = reason;
         this.noteCheckpointDecline(reason, cp, 'co-sign', detail, declines[reason]);
     },
@@ -202,8 +258,19 @@ module.exports = {
         // site in leadsCadenceSlot (see the rationale there). Both MUST rank the same list or leader
         // and follower disagree on the cadence slot (split-brain). Inert below SWQ.
         let pubkeys    = [...new Set(validators.map(v => String(v.pubkey).toLowerCase()))].sort();
-        if(!pubkeys.includes(myPubkey)) return false;              // we don't qualify
-        if(sender !== pubkeys[cp.snapshot_block % pubkeys.length]) return false;   // not the cadence leader
+        if(!pubkeys.includes(myPubkey)){
+            // Observer hubs receive requests but cannot publish their reply, so do not meter them each round.
+            if(!this.observerHold()) this.noteCosignDecline('not_member', cp,
+                pubkeys.length + ' members' +
+                (validators && validators.snapshotUnavailable ? ', capability snapshot unavailable' : ''));
+            return false;
+        }
+        const slot = cp.snapshot_block % pubkeys.length;
+        if(sender !== pubkeys[slot]){
+            this.noteCosignDecline('not_cadence_leader', cp,
+                'sender ' + sender.slice(0, 12) + '... is not slot ' + slot + ' of ' + pubkeys.length);
+            return false;
+        }
         return true;
     },
 
@@ -245,7 +312,9 @@ module.exports = {
         // would have declined anyway never claims the sequence.
         this.yieldToLowerRound(cp);
         if(this.declinesOffCadence(cp)) return;
-        if(!this.claimSeqSignature(cp, canonical)) return;
+        if(!this.claimSeqSignature(cp, canonical))
+            return this.noteCosignDecline('seq_second_payload', cp,
+                'already signed a different payload at this seq');
         this.noteRoundSignature(cp.snapshot_block);
 
         this.peerManager.broadcast(XCHK_SIGN, {
@@ -295,10 +364,10 @@ module.exports = {
     // signature set under different rules and disagreeing about whether quorum was
     // reached. Callers treat a throw as "do not sign / do not persist".
     // Scoped to a genuine disagreement between two KNOWN networks. An UNSCOPED hub
-    // (this.network === '') is a different, already-documented problem: it silently
-    // resolves every flag-day gate to "off" (isStakeWeightedQuorumActive returns false
-    // on an unknown network) and it is what #2236 found double-crediting the COLLECT
-    // rail. It is warned about loudly here but NOT refused, because refusing would take
+    // (this.network === '') is a different, already-documented problem: only the
+    // stake-weighted-quorum gate falls back to "off" on the empty deployment network.
+    // The signed canonical's gates still follow cp.network. It is warned about loudly
+    // here but NOT refused, because refusing would take
     // every unscoped deployment offline at once, which is a far larger behavioural
     // change than this finding asks for and is not what it is about.
     assertCheckpointNetwork(cp, context){
@@ -307,10 +376,11 @@ module.exports = {
         if(this.network === ''){
             if(!this._warnedUnscopedNetwork){
                 this._warnedUnscopedNetwork = true;
-                logger.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
-                    'flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-commitment) ' +
-                    'resolves to OFF while the checkpoints it handles are scoped to "' + recordNet +
-                    '". Set HUB_NETWORK. Continuing on the legacy unscoped path.');
+                logger.warn('StateCheckpointEngine: this hub has NO deployment network, so the ' +
+                    'stake-weighted quorum gate falls back to OFF (a count tally), while the signed ' +
+                    'canonical gates follow the record network "' + recordNet + '". The quorum rule ' +
+                    'and signed bytes can therefore use different network planes. Set HUB_NETWORK. ' +
+                    'Continuing on the legacy unscoped path.');
             }
             return;
         }

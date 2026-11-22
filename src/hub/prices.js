@@ -63,8 +63,9 @@ async function warnInertChainRows(hub, chain, network, gasSchedule, gasPrice) {
     } catch (_) { /* config store unavailable; the pinned bundle is the answer anyway */ }
 }
 
-// The quote itself, at the exactly-8-decimal shape consumers and the indexer
-// fee charging expect.
+// Carry USD intermediates at 18 decimals like the indexer's
+// computeNativeFeeBand, then format only the response at 8 decimals. This keeps
+// nativeCoinAmount equal to the indexer's requiredFeeNative quote.
 function buildFeeQuote(action, chain, gasCost, gasPrice, xchainAmount, xchainUsdStr, coinPrice) {
     // Exactly 8 decimals, trailing zeros preserved, matching the toFixed(8) shape the
     // consumer tests and the indexer's fee charging expect.
@@ -82,8 +83,8 @@ function buildFeeQuote(action, chain, gasCost, gasPrice, xchainAmount, xchainUsd
     if (coinPrice && coinPrice.price) {
         let coinUsdStr = coinPrice.price;
         if (parseFloat(coinUsdStr) > 0) {
-            let feeUsd           = bcmul(xchainAmount, xchainUsdStr, 8);
-            let nativeCoinAmount = bcdiv(feeUsd, coinUsdStr, 8);
+            let feeUsd           = bcmul(xchainAmount, xchainUsdStr, 18);
+            let nativeCoinAmount = bcdiv(feeUsd, coinUsdStr, 18);
 
             result.feeUsd           = fmt8(feeUsd);
             result.coinUsd          = fmt8(coinUsdStr);

@@ -27,7 +27,7 @@ const {
     ATTESTED_VERSIONS, REWARD_FAMILY_VERSIONS, isRewardCandidateRow, judgeAnchors
 } = require('../anchor_proof_binding.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
-const { hasLegacyByteRow, isPinnedEntry, legacyPinGateProven } = require('./legacy_reward_pin.js');
+const { isPinnedEntry, legacyPinGateState, judgeWithLegacyPin } = require('./legacy_reward_pin.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -173,15 +173,18 @@ module.exports = {
     // that a reorg is not expected to change it.
     //
     // 'rejected:status' and 'rejected:txid' are deliberately NOT terminal here.
-    // 'rejected:txid' fires while getanchoraction's checkpoint_anchored is UNFILTERED, so
-    // it also fires while our own tx is merely unmined on a checkpoint that already carries
-    // an earlier anchor, which is the v1 archive head's normal state. 'rejected:status'
-    // (the indexer's decoded-invalid verdict, e.g. a CHECKPOINT_SEQ replay guard) is
-    // checked BEFORE that same depth gate, so it can be reached by a still-shallow txid
-    // whose ordering a pending reorg can still rewrite: today's "stale replay" against a
-    // competing anchor can undecide itself once the chain resettles, so treating it as
-    // terminal here can drop a reward for an anchor that goes on to verify. Retrying either
-    // until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
+    // A txid-filtered miss on a checkpoint that already carries an earlier anchor (the v1
+    // archive head's normal state while our own tx is unmined) reads 'absent:other-anchor'
+    // and retries here too; 'rejected:txid' needs a returned row naming a different txid
+    // and stays retained. A node-class-dependent status (NODE_CLASS_DEPENDENT_STATUS) is not
+    // a rejection here, as the shared binding's isRewardCandidateRow does not reject it; it
+    // goes on to the depth, txid, version, hash and binding checks like any other row.
+    // 'rejected:status' (the indexer's decoded-invalid verdict, e.g. a
+    // CHECKPOINT_SEQ replay guard) is checked BEFORE that same depth gate, so a still-shallow
+    // txid can reach it, one whose ordering a pending reorg can still rewrite: today's "stale
+    // replay" against a competing anchor can undecide itself once the chain resettles, so
+    // treating it as terminal here can drop a reward for an anchor that goes on to verify.
+    // Retrying either until the TTL costs a queue slot; dropping either would forfeit a legitimate reward.
     // Every non-verified outcome writes nothing either way, so the safety property does not
     // depend on this choice.
     //
@@ -228,16 +231,16 @@ module.exports = {
             try {
                 r = await this.indexerCall('DOGE', 'getanchorconfirmations', params);
             } catch(err){
-                if(err && /^no indexer url for /.test(err.message)) return await this.judgeDrainEntry([], expect, screenLegacy);
+                if(err && /^no indexer url for /.test(err.message)) return await judgeWithLegacyPin(this, [], expect, screenLegacy, judgeDrainAnchors, logger);
                 throw err;
             }
-            if(r && r.exists && r.anchors === undefined) return await this.judgeDrainEntry([], expect, screenLegacy);
+            if(r && r.exists && r.anchors === undefined) return await judgeWithLegacyPin(this, [], expect, screenLegacy, judgeDrainAnchors, logger);
             if(!r || !Array.isArray(r.anchors)) return 'unknown';
             // Defer when the FIRST page shows no anchor: the DOGE indexer may simply be behind.
             // A later page may be empty, and the rows already walked are judged, as the indexer does.
             if(page === 0 && (!r.exists || r.anchors.length === 0)) return 'unknown';
             anchors = anchors.concat(r.anchors);
-            if(r.truncated !== true) return await this.judgeDrainEntry(anchors, expect, screenLegacy);
+            if(r.truncated !== true) return await judgeWithLegacyPin(this, anchors, expect, screenLegacy, judgeDrainAnchors, logger);
             // Defer when a truncated page gives no usable cursor, or one that does not advance.
             let next = parseAnchorCursor(r.next_after_action_index);
             if(!Number.isInteger(next) || next < 0 || (after !== null && next <= after)){
@@ -251,28 +254,6 @@ module.exports = {
         logger.error('StateAnchorPublisher: ' + txid + ' still truncated after ' + MAX_ANCHOR_PAGES +
                      ' pages; binding left undecided');
         return 'unknown';
-    },
-
-    // judgeDrainAnchors, dropping the pre-restart bytes 6 and 7 as the indexer does once the
-    // LEGACY_ANCHOR_REWARD_PIN gate is proven on. Unproven, the bytes still bind and nothing is forfeit.
-    async judgeDrainEntry(anchors, expect, screenLegacy){
-        if(screenLegacy === true && hasLegacyByteRow(anchors) && await this.legacyPinGateOn(expect.network))
-            return judgeDrainAnchors(anchors, Object.assign({}, expect, { legacyDropped: true }));
-        return judgeDrainAnchors(anchors, expect);
-    },
-
-    // Is LEGACY_ANCHOR_REWARD_PIN proven on for this network (legacy_reward_pin.js)? False, after a
-    // warning, when this hub's BTC indexer cannot prove it.
-    async legacyPinGateOn(network){
-        if(!this._legacyPinProvenFrom) this._legacyPinProvenFrom = new Map();
-        try {
-            return await legacyPinGateProven((coin, method, params) => this.indexerCall(coin, method, params),
-                String(network || ''), this._legacyPinProvenFrom, Math.floor(Date.now() / 1000));
-        } catch(err){
-            logger.warn('StateAnchorPublisher: LEGACY_ANCHOR_REWARD_PIN not proven from the BTC indexer (' +
-                        (err && err.message) + '); legacy anchor bytes still bind');
-            return false;
-        }
     },
 
     // One pass of the drain above, over a copy of the queue taken when the pass starts.
@@ -292,7 +273,8 @@ module.exports = {
                 // byte-matches the decoded on-chain payload against it.
                 let rows = await this.db.getStateCheckpointByChain(String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq));
                 if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
-                let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
+                let v = await this.verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion),
+                                                                  allowNodeClassStatus: true });
                 if(v === 'verified') await this.drainVerifiedRewardAttest(key, e);
                 else if(v === 'rejected:mismatch' || v === 'rejected:version'){
                     await this.dropDeferredRewardAttest(key);
@@ -318,11 +300,19 @@ module.exports = {
         }
         if(bound !== 'verified') return;   // undecided: retained until the TTL
         // A tuple the indexer pins is never minted again once the gate is on, so write nothing for it.
-        if(isPinnedEntry(e) && await this.legacyPinGateOn(e.network)){
-            await this.dropDeferredRewardAttest(key);
-            logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
-                         'tuple; dropped, no reward');
-            return;
+        if(isPinnedEntry(e)){
+            let pinState = await legacyPinGateState(this, e.network, logger);
+            if(pinState === 'unproven'){
+                logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a pinned legacy tuple, ' +
+                            'but the gate is unproven; entry retained');
+                return;
+            }
+            if(pinState === 'on'){
+                await this.dropDeferredRewardAttest(key);
+                logger.warn('StateAnchorPublisher: reward attestation ' + key + ' is a LEGACY_ANCHOR_REWARD_PIN ' +
+                            'tuple; dropped, no reward');
+                return;
+            }
         }
         // The proven txid goes ONTO the row (doge_anchor_txid): it is what every
         // downstream re-proof (a peer's XANCREWARD check, the BTC indexer's

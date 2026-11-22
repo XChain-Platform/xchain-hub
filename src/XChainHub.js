@@ -187,7 +187,7 @@ class XChainHub {
                 ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
             return;
         }
-        let ac, ms, cs;
+        let ac, ms, cs, mrb;
         try {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
@@ -198,12 +198,14 @@ class XChainHub {
             ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
             // The PBFT consensus_strategy rides it too, on the same both-paths rule.
             cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
+            // The response cap must be identical on live apply and restart replay.
+            mrb = (parsed && parsed.max_response_bytes !== undefined) ? parsed.max_response_bytes : undefined;
         } catch (e) {
             logger.warn(nodeUtil.format('Governance ATTESTATION_PROVIDER change for ' + providerId +
                 ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e));
             return;
         }
-        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms, cs);
+        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms, cs, mrb);
     }
 }
 

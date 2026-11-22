@@ -176,6 +176,7 @@ function archiveSetup() {
     let make = (node) => {
         let canonical = node.pub.archiveAttestationCanonical(node.pub.cpFromRow(row), batchSeq, node.pubkey);
         follower.pub.recordObservedArchiveLeader(batchSeq, node.pubkey, row);
+        follower.pub.recordObservedArchiveContent(batchSeq, node.pubkey, {});
         return { canonical, req: { data: { batch_seq: batchSeq, publisher: node.pubkey,
                                            sig_pubkey: node.pubkey, sig: node.identity.sign(canonical) } } };
     };
@@ -183,6 +184,18 @@ function archiveSetup() {
 }
 
 function registerArchiveTests() {
+    it('does not attest an observed leader whose archive body was not verified', async function () {
+        let { follower, row, batchSeq, a0 } = archiveSetup();
+        follower.pub._observedArchiveContents.clear();
+        let sent = captureBroadcasts(follower);
+        await follower.pub.handleArchiveAttestSignReq(a0.req);
+        expect(signedBy(sent, XANCARCHPUB_SIGN, follower.pubkey, [a0.canonical])).to.deep.equal([]);
+        expect(follower.pub.isObservedArchiveLeader(batchSeq, a0.req.data.sig_pubkey)).to.equal(true);
+        expect(follower.pub.observedArchiveCheckpoint(batchSeq)).to.deep.include({
+            chain: row.chain, network: row.network
+        });
+    });
+
     it('a follower co-signs one archive publisher per batch slot', async function () {
         let { follower, a0, a1 } = archiveSetup();
         expect(isPublisherOnlyPair(contentOf(a0.canonical), contentOf(a1.canonical))).to.equal(true);

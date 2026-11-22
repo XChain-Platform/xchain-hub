@@ -17,7 +17,8 @@
  * The indexer judges the gate on the time of the BTC block that derives a reward, which does
  * not exist yet when the drain runs. Every BTC block is timed after the median time past of
  * the blocks before it, so a median at or past the instant proves the gate on at every later
- * block. Short of that proof the drain keeps its old verdict and never forfeits a reward.
+ * block. An unavailable or immature proof stays distinct from a proven-inactive gate so the
+ * drain can hold any entry whose binding depends on it.
  *
  ********************************************************************/
 
@@ -25,6 +26,7 @@
 
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { loadLegacyRewardPins } = require('../legacy_reward_pins.js');
+const { REWARD_FAMILY_VERSIONS, rewardFamilyVersions } = require('../anchor_proof_binding.js');
 
 // The hub row mirroring the time columns of the indexer's protocol change.
 const LEGACY_PIN_GATE = 'anchor/publisher/legacy_reward_pin.LEGACY_ANCHOR_REWARD_PIN';
@@ -34,8 +36,12 @@ const MTP_SPAN = 11;
 const TIP_MARGIN = 6;
 // Bitcoin refuses a block timed over two hours past the receiving node's clock.
 const MAX_FUTURE_BLOCK_S = 7200;
-// The pre-restart wire bytes the gate stops from proving a reward.
-const LEGACY_BYTES = [6, 7];
+// The pre-restart wire bytes the gate stops from proving a reward: every byte the binding's
+// legacyDropped form removes from a reward family, read from the binding so the two cannot drift.
+const LEGACY_BYTES = Object.freeze([...new Set(Object.keys(REWARD_FAMILY_VERSIONS).flatMap(f => {
+    let kept = rewardFamilyVersions(f, { legacyDropped: true });
+    return rewardFamilyVersions(f).filter(v => !kept.includes(v));
+}))].sort((a, b) => a - b));
 
 // The vendored pin list, read once at first use.
 let pins = null;
@@ -78,22 +84,49 @@ async function medianTimePast(indexerCall, network, height, tip){
     return times[(MTP_SPAN - 1) / 2];
 }
 
-// Is the gate proven on at every BTC block that can still derive a reward on `network`?
+// Is the gate on, off, or not yet provable for every BTC block that can still derive a reward?
 // `provenFrom` maps a network to the lowest height already proven, which no later height can undo.
-// Returns false, never throws, when the proof cannot be made: the caller then keeps its old verdict.
+// Indexer failures still throw so the wrapper can report and convert them to `unproven`.
 async function legacyPinGateProven(indexerCall, network, provenFrom, nowS){
     // An unarmed network, or an instant no block can have reached yet, reads no BTC block at all.
-    if(!activeAt(LEGACY_PIN_GATE, network, null, null, nowS + MAX_FUTURE_BLOCK_S)) return false;
+    if(!activeAt(LEGACY_PIN_GATE, network, null, null, nowS + MAX_FUTURE_BLOCK_S)) return 'off';
     let tip = await indexerCall('BTC', 'getblockhashes', {});
-    if(!tip || String(tip.network) !== network) return false;
+    if(!tip || String(tip.network) !== network) return 'unproven';
     let height = Number(tip.block_index) - TIP_MARGIN;
-    if(!Number.isSafeInteger(height) || height < MTP_SPAN - 1) return false;
+    if(!Number.isSafeInteger(height) || height < MTP_SPAN - 1) return 'unproven';
     let known = provenFrom.get(network);
-    if(known !== undefined && height >= known) return true;
+    if(known !== undefined && height >= known) return 'on';
     let mtp = await medianTimePast(indexerCall, network, height, tip);
-    if(mtp === null || !activeAt(LEGACY_PIN_GATE, network, null, null, mtp)) return false;
+    if(mtp === null || !activeAt(LEGACY_PIN_GATE, network, null, null, mtp)) return 'unproven';
     provenFrom.set(network, known === undefined ? height : Math.min(known, height));
-    return true;
+    return 'on';
 }
 
-module.exports = { LEGACY_PIN_GATE, hasLegacyByteRow, isPinnedEntry, legacyPinGateProven, medianTimePast };
+// Resolve the gate for a publisher without conflating a failed proof with off.
+async function legacyPinGateState(publisher, network, logger){
+    if(!publisher._legacyPinProvenFrom) publisher._legacyPinProvenFrom = new Map();
+    try {
+        return await legacyPinGateProven((coin, method, params) => publisher.indexerCall(coin, method, params),
+            String(network || ''), publisher._legacyPinProvenFrom, Math.floor(Date.now() / 1000));
+    } catch(err){
+        logger.warn('StateAnchorPublisher: LEGACY_ANCHOR_REWARD_PIN not proven from the BTC indexer (' +
+                    (err && err.message) + '); affected reward attestations stay queued');
+        return 'unproven';
+    }
+}
+
+// Judge both gate outcomes when the legacy state is unproven.
+async function judgeWithLegacyPin(publisher, anchors, expect, screenLegacy, judge, logger){
+    if(screenLegacy !== true || !hasLegacyByteRow(anchors)) return judge(anchors, expect);
+    let state = await legacyPinGateState(publisher, expect.network, logger);
+    if(state === 'on') return judge(anchors, Object.assign({}, expect, { legacyDropped: true }));
+    if(state === 'off') return judge(anchors, expect);
+    let current = judge(anchors, expect);
+    let dropped = judge(anchors, Object.assign({}, expect, { legacyDropped: true }));
+    return current === dropped ? current : 'unknown';
+}
+
+module.exports = {
+    LEGACY_PIN_GATE, LEGACY_BYTES, hasLegacyByteRow, isPinnedEntry, legacyPinGateProven,
+    legacyPinGateState, judgeWithLegacyPin, medianTimePast
+};

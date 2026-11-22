@@ -34,10 +34,12 @@ const ValidatorIdentity = require('../../validators/identity.js');
 const { activeAt } = require('../../consensus/gate_registry.js');
 const { foldArchiveSuffix } = require('./fold/wrapper_canonical.js');
 const { foldArchiveSplitter, NO_HEAD_ROOM } = require('./fold/archive_head_budget.js');
+const { foldArchiveAnchorRequest, foldArchiveRowMatches } = require('./fold/archive_existence.js');
 const { listIdsOf } = require('./archive/list/list_rows_select.js');
-
+const rewardMembershipKeys = require('./archive/reward_membership/keys.js');
 const ANCHOR_FOLD_GATE = 'anchor_fold_activation.ANCHOR_FOLD_ACTIVATION';
-
+// Folds send and reward only v3; a non-v3 row (say a v1 archive head) is undetermined, never adopted
+const FOLD_SECTION_VERSION = 3;
 async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock, rewards, splitter){
     try {
         return await ctx.buildSizedArchive(network, batchSeq, rows, snapshotBlock, rewards, splitter);
@@ -46,13 +48,12 @@ async function buildSizedFoldArchive(ctx, network, batchSeq, rows, snapshotBlock
         throw error;
     }
 }
-
-// The fold height is a DOGE height (the chain ANCHOR is mined on), so the armed
-// 'DOGE:<network>' key the cut writes resolves before the bare network sentinel.
+// The fold height is the current DOGE tip, while the indexer checks the mined
+// DOGE height. A reorg below activation after broadcast can therefore reject an
+// already-sent v3 action. Missing DOGE height resolution defers the decision.
 function isAnchorFoldActive(blockIndex, network){
     return activeAt(ANCHOR_FOLD_GATE, String(network || ''), 'DOGE', blockIndex, null);
 }
-
 function isArchiveAnchorRow(row){
     return !!row && row.match_batch_seq !== null && row.match_batch_seq !== undefined;
 }
@@ -73,16 +74,45 @@ function foldArchiveCanonical(checkpoint, batchSeq, count, crc, totalChunks){
                   MATCH_BATCH_SEQ: batchSeq, MATCH_COUNT: count, BATCH_CRC32: crc, TOTAL_CHUNKS: totalChunks });
     if(eq.isEquivHeaderActive(checkpoint.snapshot_block, checkpoint.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-            checkpoint.chain + '|' + checkpoint.network + '|' + checkpoint.block_index + '|' +
-            checkpoint.checkpoint_seq + '|' + batchSeq, 0, raw);
+            checkpointForms.archiveRoundId(checkpoint, batchSeq), 0, raw);
     return raw;
 }
-
+function foldArchiveResult(ctx, cp, batchSeq, archive, wire, splitter, wrapperSectionIndex,
+                           signatures, canonical, signingSet, rows, rewardRows){
+    return {
+        cp, batchSeq, count: archive.count, crc: wire.crc, b64: wire.b64, chunks: wire.chunks,
+        headChars: splitter.headChars,
+        wrapperSectionIndex, signatures, canonical, validators: signingSet,
+        weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
+                                                   resolveQuorumNetwork(cp, ctx.network)),
+        matchIds: rows.matches.map(m => ({ match_id: m.match_id, status: m.status })),
+        callIds: rows.calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
+        rewardIds: rewardRows.map(({row}) => ({
+            reward_type: String(row.reward_type), round_number: Number(row.round_number),
+            validator_pubkey: String(row.validator_pubkey).toLowerCase(),
+            round_qualifier: Number(row.round_qualifier || 0)
+        })),
+        bridgeIds: rows.bridges.map(r => ({ transfer_id: String(r.transfer_id), status: String(r.status) })),
+        policyIds: rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
+        listIds: listIdsOf(rows.lists),
+        checkpointIds: rows.checkpoints.map(r => ({
+            chain: String(r.chain), network: String(r.network), checkpoint_seq: Number(r.checkpoint_seq)
+        })),
+        priceIds: rows.prices.map(r => ({
+            round_number: Number(r.round_number), coin_pair: String(r.coin_pair),
+            status: String(r.status), batch_block_time: Number(r.batch_block_time),
+            proof_sha: crypto.createHash('sha256').update(String(r.consensus_proof)).digest('hex')
+        })),
+        tombstoneIds: rows.tombstones.map(r => ({
+            round_number: Number(r.round_number), coin_pair: String(r.coin_pair)
+        }))
+    };
+}
 const foldPublisherMethods = {
     async buildFoldArchiveSection(group, network){
         if(!this.db || typeof this.db.findCrossChainMatchesByBatchSeq !== 'function' ||
            typeof this.db.findCrossChainCallsByBatchSeq !== 'function') return null;
-        let rows = await this.gatherArchiveRows();
+        let rows = await this.gatherArchiveRows(network);
         if(!rows) return null;
         let ordered = this.orderedBundleSections(group);
         let wrapperSectionIndex = ordered.findIndex(s => String(s.chain) === 'BTC');
@@ -92,7 +122,7 @@ const foldPublisherMethods = {
         let cp = this.cpFromRow(wrapper);
         if(this.archiveRoundIntentHeld(await this.getLiveArchiveIntent(network), network)) return null;
         let batchSeq = await this.getNextBatchSeq();
-        if(this.foldSeqSpentByOwnAddress(batchSeq)) return null;
+        if(this.ownArchiveSeqFloorUnknown() || this.foldSeqSpentByOwnAddress(batchSeq)) return null;
         let rewardRows = await this.resolveArchiveRewardSources(rows.rewards);
         if(this.archiveEmptyAfterResolution(rows, rewardRows)) return null;
         let signingSet = await this.archiveSigningSet(cp);
@@ -107,40 +137,16 @@ const foldPublisherMethods = {
         if(rows.cappedOrTrimmed) this._leaderRetryDue = true;
         let wire = this.archiveWire(archive.json, splitter);
         let canonical = foldArchiveCanonical(wrapper, batchSeq, archive.count, wire.crc, wire.chunks.length);
+        if(!(await this.claimArchiveWrapperSlot(canonical))) return null;
         let signatures = [];
         if(me && signingSet.some(v => String(v.pubkey).toLowerCase() === me))
             signatures.push({ pubkey: me, sig: this.identity.sign(canonical) });
-        return {
-            cp, batchSeq, count: archive.count, crc: wire.crc, b64: wire.b64, chunks: wire.chunks,
-            headChars: splitter.headChars,
-            wrapperSectionIndex, signatures, canonical, validators: signingSet,
-            weighted: swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block),
-                                                       resolveQuorumNetwork(cp, this.network)),
-            matchIds: rows.matches.map(m => ({ match_id: m.match_id, status: m.status })),
-            callIds: rows.calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
-            rewardIds: rewardRows.map(({row}) => ({
-                reward_type: String(row.reward_type), round_number: Number(row.round_number),
-                validator_pubkey: String(row.validator_pubkey).toLowerCase(),
-                round_qualifier: Number(row.round_qualifier || 0)
-            })),
-            bridgeIds: rows.bridges.map(r => ({ transfer_id: String(r.transfer_id), status: String(r.status) })),
-            policyIds: rows.policies.map(r => ({ snapshot_id: String(r.snapshot_id) })),
-            listIds: listIdsOf(rows.lists),
-            checkpointIds: rows.checkpoints.map(r => ({
-                chain: String(r.chain), network: String(r.network), checkpoint_seq: Number(r.checkpoint_seq)
-            })),
-            priceIds: rows.prices.map(r => ({
-                round_number: Number(r.round_number), coin_pair: String(r.coin_pair),
-                status: String(r.status), batch_block_time: Number(r.batch_block_time),
-                proof_sha: crypto.createHash('sha256').update(String(r.consensus_proof)).digest('hex')
-            })),
-            tombstoneIds: rows.tombstones.map(r => ({
-                round_number: Number(r.round_number), coin_pair: String(r.coin_pair)
-            }))
-        };
+        return foldArchiveResult(this, cp, batchSeq, archive, wire, splitter, wrapperSectionIndex,
+                                 signatures, canonical, signingSet, rows, rewardRows);
     },
 
     foldArchiveRequest(round){
+        if(!this.archiveWrapperSlotHeld(round.canonical)) return null;
         return {
             checkpoint: round.cp, wrapper_section_index: round.wrapperSectionIndex,
             batch_seq: round.batchSeq, match_count: round.count,
@@ -151,21 +157,20 @@ const foldPublisherMethods = {
         };
     },
 
-    async coSignFoldArchiveRequest(envelope){
+    // Never checks the sender's election, so it claims the wrapper slot only once `admitted` (this envelope's bundle verdict) is true.
+    async coSignFoldArchiveRequest(envelope, admitted){
         let d = envelope && envelope.data;
         let a = d && d.archive;
         if(!this.identity || !a || !a.checkpoint || !Array.isArray(d.sections)) return null;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         if(!sender || sender === myPubkey || String(d.publisher || '').toLowerCase() !== sender) return null;
-        let foldBlock = Number(d.snapshot_block);
-        if(this.hub && typeof this.hub.resolveDogeLatestBlock === 'function'){
-            let resolved;
-            try { resolved = await this.hub.resolveDogeLatestBlock(); }
-            catch(_e){ return null; }
-            if(resolved == null || !Number.isFinite(Number(resolved))) return null;
-            foldBlock = Number(resolved);
-        }
+        if(!this.hub || typeof this.hub.resolveDogeLatestBlock !== 'function') return null;
+        let resolved;
+        try { resolved = await this.hub.resolveDogeLatestBlock(); }
+        catch(_e){ return null; }
+        if(resolved == null || !Number.isFinite(Number(resolved))) return null;
+        const foldBlock = Number(resolved);
         if(!isAnchorFoldActive(foldBlock, String(d.network))) return null;
         let index = Number(a.wrapper_section_index);
         let sec = Number.isInteger(index) ? d.sections[index] : null;
@@ -183,19 +188,23 @@ const foldPublisherMethods = {
         let signingSet = await this.archiveSigningSet(mine);
         if(!signingSet.some(v => String(v.pubkey).toLowerCase() === myPubkey)) return null;
         let archive = this.decodeArchiveProposal(a);
-        if(!archive || !(await this.verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))) return null;
+        if(!archive || !(await this.verifyArchiveAgainstLocal(
+            archive, Number(mine.snapshot_block), mine.network))) return null;
+        if((await admitted) !== true || !(await this.claimArchiveWrapperSlot(canonical))) return null;
         return {
-            batchSeq: Number(a.batch_seq), sender, cp, archive,
+            batchSeq: Number(a.batch_seq), sender, cp, archive, batchCrc32: String(a.batch_crc32).toLowerCase(),
+            matchCount: Number(a.match_count), totalChunks: Number(a.total_chunks),
             reply: {
                 network: String(d.network), snapshot_block: Number(d.snapshot_block),
                 sig_pubkey: myPubkey, sig: '', archive_sig: this.identity.sign(canonical)
             }
         };
     },
-
-    armFoldArchiveRound(round){
+    armFoldArchiveRound(round, bundle){
         let waitMs = Math.max(1, Math.min(Number(this.archiveFoldSubdeadlineMs) || 1000,
                                          Number(this.roundTimeoutMs) || 30000));
+        round.bundleNetwork = String(bundle && bundle.network != null ? bundle.network : round.cp.network);
+        round.bundleSnapshotBlock = Number(bundle && bundle.snapshot_block != null ? bundle.snapshot_block : round.cp.snapshot_block);
         round.signatures = new Map((round.signatures || []).map(s => [String(s.pubkey).toLowerCase(), String(s.sig)]));
         round.done = false;
         round.result = new Promise(resolve => { round.resolve = resolve; });
@@ -204,7 +213,6 @@ const foldPublisherMethods = {
         if(round.timer.unref) round.timer.unref();
         this.checkFoldArchiveQuorum(round);
     },
-
     finishFoldArchiveRound(round, result){
         if(!round || round.done) return;
         round.done = true;
@@ -213,7 +221,6 @@ const foldPublisherMethods = {
         if(this._foldArchiveRound === round) this._foldArchiveRound = null;
         round.resolve(result);
     },
-
     checkFoldArchiveQuorum(round){
         if(!round || round.done) return;
         let signatures = Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig }));
@@ -225,8 +232,7 @@ const foldPublisherMethods = {
     acceptFoldArchiveSignature(d){
         let round = this._foldArchiveRound;
         if(!round || round.done || !d || !d.archive_sig) return;
-        if(String(d.network) !== String(round.cp.network) ||
-           Number(d.snapshot_block) !== Number(round.cp.snapshot_block)) return;
+        if(String(d.network) !== round.bundleNetwork || Number(d.snapshot_block) !== round.bundleSnapshotBlock) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!round.validators.some(v => String(v.pubkey).toLowerCase() === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.archive_sig), pubkey)) return;
@@ -265,11 +271,11 @@ const foldPublisherMethods = {
         };
         for(let section of (sections || [])){
             let requested = {
-                chain: String(section.chain), network: String(section.network),
+                chain: String(section.chain), network: String(section.network), version: FOLD_SECTION_VERSION,
                 block_index: Number(section.block_index), checkpoint_seq: Number(section.checkpoint_seq)
             };
             let row = await this.indexerCall('DOGE', 'getanchoraction', requested);
-            let found = accept(row, r => isCheckpointAnchorRow(r) &&
+            let found = accept(row, r => isCheckpointAnchorRow(r) && Number(r.version) === FOLD_SECTION_VERSION &&
                 String(r.checkpoint_chain) === requested.chain &&
                 String(r.checkpoint_network) === requested.network &&
                 Number(r.block_index) === requested.block_index &&
@@ -279,17 +285,14 @@ const foldPublisherMethods = {
             else if(txid !== found) return null;
         }
         if(archiveSection){
-            let requested = { match_batch_seq: Number(archiveSection.batchSeq),
-                              author: String(this.dogeAddress || '') };
+            let requested = foldArchiveAnchorRequest(archiveSection, this.dogeAddress);
             let row = await this.indexerCall('DOGE', 'getarchiveanchor', requested);
-            let found = accept(row, r => isArchiveAnchorRow(r) &&
-                Number(r.match_batch_seq) === requested.match_batch_seq &&
-                String(r.author) === requested.author);
+            let found = accept(row, r => foldArchiveRowMatches(r, requested, archiveSection));
             if(found === null) return null;
             if(txid === null) txid = found;
             else if(txid !== found) return null;
         }
-        return txid ? { exists: true, txid } : null;
+        return txid ? { exists: true, txid, version: FOLD_SECTION_VERSION } : null;
     },
 
     async completeFoldArchive(archiveSection, signer, txid){
@@ -392,9 +395,6 @@ module.exports = {
             block_index:      Number(r.block_index)
         };
     },
-    // Reward identity shared by the archive body and FINALIZED reward list.
-    archiveRewardKey(r){
-        return String(r.reward_type) + '|' + String(Number(r.round_number)) + '|' +
-               String(r.validator_pubkey).toLowerCase();
-    }
+    archiveBodyRewardKey: rewardMembershipKeys.archiveBodyRewardKey,
+    finalizedRewardKey: rewardMembershipKeys.finalizedRewardKey
 };

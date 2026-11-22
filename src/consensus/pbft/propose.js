@@ -27,6 +27,7 @@
 
 const { PBFT_PRE_PREPARE } = require('./message_types.js');
 const { isNonMemberSnapshot } = require('./federation_round.js');
+const { isSoleSelfFederation } = require('../federation.js');
 const { getLogger } = require('../../observability');
 const logger = getLogger();
 
@@ -58,6 +59,8 @@ function proposeRoundQuorum(self, snapshot, weighted) {
     let quorum = snapshot
         ? self.hub.capabilitySnapshot.getQuorum(snapshot)
         : self.getQuorum();
+    if (weighted && quorum !== 0 && snapshot &&
+        isSoleSelfFederation(snapshot.validators, self.selfPubkey())) quorum = 0;
 
     // Single-node fallback: no peers connected -> apply directly. But a
     // present-but-empty federation snapshot also yields quorum 0; applying

@@ -285,3 +285,46 @@ describe('OracleConsensus: the propose-side clamp reference honours the same hei
   registerOracleConsensusTheProposeSideClampReferencSuite2Part1.call(this);
   registerOracleConsensusTheProposeSideClampReferencSuite2Part2.call(this);
 });
+
+// A hub that is not federated at its own tip keeps the round id as its height when the wire
+// height is not an integer, so the gate reads that same value and never the raw field.
+describe('OracleConsensus: the propose-side clamp reference follows the bounded height on a lone hub', function () {
+  let hub, oc, refresh;
+  beforeEach(function () {
+    hub = createMockHub();
+    hub._peerManager.validatorPubkeys = new Set();
+    hub._peerManager.getPeerStatus = sinon.stub().returns([]);
+    oc = new OracleConsensus(hub, {
+      epochStart: 0,
+      roundInterval: 15000,
+      getSubmissions: sinon.stub().returns(new Map())
+    });
+    oc.minValidators = 1;
+    sinon.stub(oc, 'getQuorum').returns(0);
+    refresh = sinon.stub(oc, 'refreshLastFinalizedForRound').resolves();
+    sinon.stub(console, 'warn');
+    sinon.stub(console, 'log');
+  });
+  afterEach(function () {
+    sinon.restore();
+  });
+  function propose(btcBlockHeight) {
+    const prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+    return {
+      sender: 'lone',
+      sig_pubkey: 'lone',
+      data: { round: 7, prices, digest: oc.digest(7, prices), btcBlockHeight, btcBlockTime: null }
+    };
+  }
+  it('keys the gate on the round id when the wire height is a string, not on the string', async function () {
+    hub.network = 'testnet';
+    expect(await oc.boundedProposeHeight(7, String(ARMED + 100))).to.equal(7);
+    await oc.handlePropose(propose(String(ARMED + 100)));
+    expect(refresh.called, 'round 7 is below the testnet height').to.be.false;
+  });
+  it('keys the gate on the round id when the wire height is missing', async function () {
+    hub.network = 'regtest';
+    await oc.handlePropose(propose(undefined));
+    expect(refresh.calledOnceWithExactly(7), 'round 7 is above the regtest height').to.be.true;
+  });
+});

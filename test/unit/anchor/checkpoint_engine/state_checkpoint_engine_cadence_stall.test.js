@@ -29,6 +29,7 @@ const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../../../src/anchor/checkpoint_engine');
 const ValidatorIdentity     = require('../../../../src/validators/identity');
 const { DB_METHODS } = require('../../../helpers/mockHub.js');
+const { memDb }     = require('../../../helpers/cadence_stall_mem_db.js');
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -49,43 +50,6 @@ describe('StateCheckpointEngine cadence stall meter', function () {
     registerCadenceRecoveryTests();
     registerCadenceMirrorFailureTest();
 });
-
-    // Minimal in-memory state_checkpoints + capability_snapshots store (same shape
-    // as the cadence-latch suite; unknown SELECTs fall through to []).
-function memDb() {
-        let checkpoints = [], snapshots = [];
-        return { ...DB_METHODS,
-            checkpoints, snapshots,
-            async doQuery(sql, params) {
-                if (sql.startsWith('SELECT MAX(checkpoint_seq)')) {
-                    let max = null;
-                    for (let r of checkpoints) if (r.chain === params[0] && r.network === params[1] && (max == null || r.checkpoint_seq > max)) max = r.checkpoint_seq;
-                    return [{ max_seq: max }];
-                }
-                if (sql.startsWith('SELECT MAX(snapshot_block)')) {
-                    let max = null;
-                    for (let r of checkpoints) if (max == null || r.snapshot_block > max) max = r.snapshot_block;
-                    return [{ last_block: max }];
-                }
-                if (sql.startsWith('INSERT IGNORE INTO state_checkpoints')) {
-                    let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash,
-                         checkpoint_seq, snapshot_block] = params;
-                    if (!checkpoints.some(r => r.chain === chain && r.network === network && r.checkpoint_seq === checkpoint_seq))
-                        checkpoints.push({ chain, network, block_index, block_hash, ledger_hash, actions_hash,
-                                           contract_hash, checkpoint_seq, snapshot_block });
-                    return [];
-                }
-                if (sql.startsWith('SELECT * FROM state_checkpoints'))
-                    return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] &&
-                                                   r.block_index === params[2] && r.checkpoint_seq === params[3]).slice(0, 1);
-                if (sql.startsWith('INSERT IGNORE INTO capability_snapshots')) {
-                    snapshots.push({ snapshot_block: params[0], capability: params[1], signing_pubkey: params[2] });
-                    return [];
-                }
-                return [];
-            }
-        };
-    }
 
     // One engine, single-member federation by default. `state` is mutable so a test
     // can take the validator set away (or hand it back) between ticks.
@@ -181,6 +145,9 @@ function registerCadenceRecoveryTests() {
         const { engine, state } = buildEngine();
         state.btcBlock = null;
         engine.hub.resolveBtcLatestBlock = async () => null;
+        // The indexer still answers, so the replay gate passes and only the snapshot
+        // block is missing; an indexer that answers nothing holds the cadence earlier.
+        engine.indexerCall = async () => Object.assign({}, TIP);
 
         await engine.tick();
 

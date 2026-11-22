@@ -37,7 +37,11 @@ CREATE TABLE price_snapshots (
     archived_status           VARCHAR(20) DEFAULT NULL,
     archived_batch_block_time BIGINT DEFAULT NULL,
     archived_proof_sha        CHAR(64) DEFAULT NULL,
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Materializes PENDING_PRICE_STAMP_PREDICATE in src/db/prices/archive_bookkeeping.js, so
+    -- the two change together. Existing tables get the column from a dated migration:
+    -- alterTableForDrift skips generated columns because a STORED one rebuilds the table.
+    archive_pending           TINYINT(1) GENERATED ALWAYS AS (batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time OR archived_proof_sha <> SHA2(consensus_proof, 256)) STORED,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_round_pair (round_number, coin_pair),
     KEY idx_pair_block (coin_pair, reference_block),
     KEY idx_pair_timestamp (coin_pair, block_timestamp),
@@ -71,5 +75,13 @@ CREATE TABLE price_snapshots (
     -- The batch retraction reads (rounds of a retracted PRICE batch, orphaned landing
     -- stamps) pin source_chain and range over source_action_index under a generation fence;
     -- without this key they scan the table and hit the statement timeout.
-    KEY idx_source_chain_action (source_chain, source_action_index, push_generation)
+    KEY idx_source_chain_action (source_chain, source_action_index, push_generation),
+    -- The archive's pending-round page reads (FORCE INDEX) walk the materialized
+    -- archive_pending flag in round order.
+    KEY idx_archive_pending_round (archive_pending, round_number),
+    -- The explorer oracle price-history read pins coin_pair and status and ranges over
+    -- block_timestamp; with status in the key and price as the last column the filter
+    -- and the price IS NOT NULL test resolve in the index (index-only) instead of one row
+    -- lookup per round.
+    KEY price_snapshots_pair_status_ts (coin_pair, status, block_timestamp, price)
 );

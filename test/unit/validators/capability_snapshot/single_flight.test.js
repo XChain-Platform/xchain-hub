@@ -15,8 +15,10 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
 const CASES = [
-    { method: 'getSnapshot', rpc: 'getcapabilityvalidators' },
-    { method: 'getWeightSnapshot', rpc: 'getstakeweightsbycapability' },
+    { method: 'getSnapshot', rpc: 'getcapabilityvalidators', args: ['attestation', 106] },
+    { method: 'getWeightSnapshot', rpc: 'getstakeweightsbycapability', args: ['attestation', 106] },
+    { method: 'getActiveValidatorSnapshot', rpc: 'getactivevalidators', args: [106] },
+    { method: 'getActiveWeightSnapshot', rpc: 'getactivestakeweights', args: [106] },
 ];
 
 function deferred() {
@@ -27,7 +29,7 @@ function deferred() {
 }
 
 function rpcReply(body) {
-    const weighted = body.method === 'getstakeweightsbycapability';
+    const weighted = ['getstakeweightsbycapability', 'getactivestakeweights'].includes(body.method);
     const validator = weighted
         ? { pubkey: 'ab', source: 'source-a', weight: '50000' }
         : { pubkey: 'ab', amount: '50000' };
@@ -63,7 +65,7 @@ describe('CapabilitySnapshot single-flight success', function () {
             const { axios, snapshot } = fixture();
             axios.post.returns(gate.promise);
 
-            const calls = Array.from({ length: 8 }, () => snapshot[testCase.method]('attestation', 106));
+            const calls = Array.from({ length: 8 }, () => snapshot[testCase.method](...testCase.args));
             await Promise.resolve();
             expect(axios.post.callCount).to.equal(1);
 
@@ -85,7 +87,7 @@ describe('CapabilitySnapshot single-flight failure cleanup', function () {
             const { axios, snapshot } = fixture();
             axios.post.callsFake((url, body) => failing ? gate.promise : Promise.resolve(rpcReply(body)));
 
-            const calls = Array.from({ length: 6 }, () => snapshot[testCase.method]('attestation', 106));
+            const calls = Array.from({ length: 6 }, () => snapshot[testCase.method](...testCase.args));
             await Promise.resolve();
             gate.reject(failure);
             const failures = await Promise.all(calls);
@@ -93,7 +95,7 @@ describe('CapabilitySnapshot single-flight failure cleanup', function () {
             expect(snapshot.monitor.failures).to.equal(1);
 
             failing = false;
-            expect(await snapshot[testCase.method]('attestation', 106)).not.to.equal(null);
+            expect(await snapshot[testCase.method](...testCase.args)).not.to.equal(null);
             expect(axios.post.callCount).to.equal(2);
         });
     }

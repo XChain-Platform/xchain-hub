@@ -21,6 +21,7 @@ const identity = require('../../../../bin/consensus-identity.js');
 const pin = require('../../../../bin/pins/at1-consensus-identity.json');
 
 const KEY = 'cross_chain/dex/offer_lists.CROSS_CHAIN_OFFER_LIST_ENFORCEMENT';
+const SOURCE_KEY = 'cross_chain/dex/offer_lists.CROSS_CHAIN_LIST_SOURCE_ACTIVATION';
 
 describe('cross-chain offer list enforcement registry row', function () {
     // The testnet heights are read off the registry, so a re-slide of the cut
@@ -49,5 +50,17 @@ describe('cross-chain offer list enforcement registry row', function () {
         assert.deepStrictEqual(pin.hub_only_rules_gates, measured.hub_only_rules_gates);
         assert.strictEqual(pin.hub_only_rules_digest, measured.hub_only_rules_digest);
         assert.strictEqual(pin.hub_only_gate_key_count, measured.hub_only_gate_key_count);
+    });
+
+    it('arms counterparty source checks by effective time on testnet and regtest only', function () {
+        assert.deepStrictEqual(registry.get(SOURCE_KEY), {
+            mainnet: registry.UNARMED,
+            testnet: 1794873600,
+            regtest: 0,
+        });
+        assert.strictEqual(registry.activeAt(SOURCE_KEY, 'mainnet', null, 0, 1794873600), false);
+        assert.strictEqual(registry.activeAt(SOURCE_KEY, 'testnet', null, 0, 1794873599), false);
+        assert.strictEqual(registry.activeAt(SOURCE_KEY, 'testnet', null, 0, 1794873600), true);
+        assert.strictEqual(registry.activeAt(SOURCE_KEY, 'regtest', null, 0, 0), true);
     });
 });

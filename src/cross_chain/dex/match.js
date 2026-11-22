@@ -158,10 +158,10 @@ module.exports = {
     },
 
     // Attempt to match offers a and b. Returns a canonical-ordered descriptor or null.
-    tryMatch(a, b, snapshotBlock){
+    tryMatch(a, b, snapshotBlock, effectiveTime){
         if(a.home_coin === b.home_coin) return null;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return null; // never match across networks
-        if(!offerLists.offerPairAllowed(a, b)) return null;
+        if(!offerLists.offerPairAllowed(a, b, effectiveTime = offerLists.matchPolicyTime(this, a, b, effectiveTime))) return null;
         let aKind = (a.kind === 'order') ? 'order' : 'swap';
         let bKind = (b.kind === 'order') ? 'order' : 'swap';
         if(aKind === 'swap' && bKind === 'swap'){
@@ -171,9 +171,9 @@ module.exports = {
             // the reservation gate. Ownership offers expose amount '1' (see getOpenCrossChain*).
             if(bc.bclte(this.effectiveRemaining(a).give, 0) || bc.bclte(this.effectiveRemaining(b).give, 0)) return null;
             // Single full fill (committed is 0 pre-match → filled_before 0).
-            return this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount));
+            return offerLists.withPolicyTime(this.buildDesc(a, b, 'swap', 'swap', bc.bcstr(a.give_amount), bc.bcstr(b.give_amount)), effectiveTime);
         }
-        if(aKind === 'order' && bKind === 'order') return this.tryOrderMatch(a, b, snapshotBlock);
+        if(aKind === 'order' && bKind === 'order') return offerLists.withPolicyTime(this.tryOrderMatch(a, b, snapshotBlock), effectiveTime);
         return null;                                   // SWAP↔ORDER: carry-forward
     },
 

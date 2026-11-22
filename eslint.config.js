@@ -16,7 +16,7 @@
  *
  * This is a vendored copy of the platform's shared preset, taken by copy
  * because a public clone has no platform tree beside it to import from. Core
- * rules only, no plugins, so its one dependency is eslint ^9. Refresh it by
+ * rules only, no plugins, so its one dependency is eslint ^10. Refresh it by
  * re-copying the preset; a local edit here is drift.
  *
  * The pre-push structure check depends on neither eslint nor this file. The

@@ -23,7 +23,8 @@ const { DB_METHODS }       = require('../../../../helpers/mockHub.js');
 const SEQ = 12;
 const CP  = { chain: 'BTC', network: 'regtest', block_index: 500, checkpoint_seq: 100, snapshot_block: 100 };
 
-function mkFoldLeader({ nextSeq = SEQ, intent = null, indexerReply = { exists: false } } = {}){
+function mkFoldLeader({ nextSeq = SEQ, intent = null, indexerReply = { exists: false },
+                        floorKnown = true } = {}){
     const identity = new ValidatorIdentity('11'.repeat(32));
     const db = { ...DB_METHODS, doQuery: async () => [] };
     const pub = new StateAnchorPublisher({
@@ -41,6 +42,7 @@ function mkFoldLeader({ nextSeq = SEQ, intent = null, indexerReply = { exists: f
     pub.db.findCrossChainCallsByBatchSeq = async () => [];
     pub.dogeAddress = 'Downer';
     pub.indexers = { DOGE: { url: 'http://indexer.invalid' } };
+    pub._ownArchiveSeqFloorKnown = floorKnown;
     pub.indexerCall = async (coin, method, params) => {
         indexerCalls.push({ coin, method, params });
         if(indexerReply instanceof Error) throw indexerReply;
@@ -81,6 +83,12 @@ describe('StateAnchorPublisher: fold archive own seq guard', function () {
         const { pub } = mkFoldLeader();
         expect(pub.ownArchiveSeqFloor()).to.equal(-1);
         expect(await buildOutcome(pub)).to.equal('built');
+    });
+
+    it('drops the archive section while the configured own seq floor is unknown', async function () {
+        const { pub, drawn } = mkFoldLeader({ floorKnown: false });
+        expect(await buildOutcome(pub)).to.equal(null);
+        expect(drawn).to.deep.equal([]);
     });
 
     it('holds the draw while an unsettled archive intent is inside its TTL', async function () {

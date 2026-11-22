@@ -99,7 +99,7 @@ describe('archive bridge and policy follower verification', () => {
         sign(pub, p, 3);
         expect(await pub.verifyArchiveAgainstLocal(archive({
             bridge_transfers: [b], policy_snapshots: [p]
-        }))).to.equal(true);
+        }), null, 'regtest')).to.equal(true);
     });
 
     it('refuses bridge terms that diverge from the held row', async () => {
@@ -107,13 +107,13 @@ describe('archive bridge and policy follower verification', () => {
         const archived = Object.assign({}, local, { amount: '150000001' });
         const pub = buildPub({ bridge: local });
         sign(pub, archived, 3);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [archived] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [archived] }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses a bridge row with only a sub-quorum signature set', async () => {
         const pub = buildPub();
         const row = sign(pub, bridge(), 2);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [row] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [row] }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses an archive that drops the required cross_chain snapshot group', async () => {
@@ -121,7 +121,7 @@ describe('archive bridge and policy follower verification', () => {
         const row = sign(pub, bridge(), 3);
         expect(await pub.verifyArchiveAgainstLocal(archive({
             bridge_transfers: [row], capability_snapshots: []
-        }))).to.equal(false);
+        }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses unhashed policy lists when the follower does not hold the row', async () => {
@@ -129,7 +129,7 @@ describe('archive bridge and policy follower verification', () => {
         const row = policy();
         sign(pub, row, 3);
         row.allow_list = JSON.stringify(['attacker']);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }), null, 'regtest')).to.equal(false);
     });
 });
 
@@ -137,7 +137,7 @@ describe('archive bridge and policy row shape', () => {
     it('refuses a quorum-signed policy row filed under bridge_transfers', async () => {
         const pub = buildPub();
         const row = sign(pub, policy(), 3);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [row] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [row] }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses a quorum-signed transfer row filed under policy_snapshots', async () => {
@@ -147,14 +147,14 @@ describe('archive bridge and policy row shape', () => {
         row.allow_list = policy().allow_list;
         row.block_list = policy().block_list;
         row.sleeping = 0;
-        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [row] }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses without throwing a row carrying both ids in either array', async () => {
         const pub = buildPub();
         const both = Object.assign(bridge(), { snapshot_id: 'b'.repeat(64) });
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [both] }))).to.equal(false);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [both] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [both] }), null, 'regtest')).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [both] }), null, 'regtest')).to.equal(false);
     });
 
     it('refuses without throwing a row carrying neither id or a malformed id', async () => {
@@ -163,10 +163,10 @@ describe('archive bridge and policy row shape', () => {
         delete neither.transfer_id;
         const nonHex = Object.assign(bridge(), { transfer_id: 'g'.repeat(64) });
         const short = Object.assign(bridge(), { transfer_id: 'a'.repeat(63) });
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [neither] }))).to.equal(false);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [neither] }))).to.equal(false);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [nonHex] }))).to.equal(false);
-        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [short] }))).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [neither] }), null, 'regtest')).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ policy_snapshots: [neither] }), null, 'regtest')).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [nonHex] }), null, 'regtest')).to.equal(false);
+        expect(await pub.verifyArchiveAgainstLocal(archive({ bridge_transfers: [short] }), null, 'regtest')).to.equal(false);
     });
 
     // Followers co-sign an id case-insensitively, so a refused held row would stall every later archive.
@@ -178,6 +178,6 @@ describe('archive bridge and policy row shape', () => {
         sign(pub, snapshot, 3);
         expect(await pub.verifyArchiveAgainstLocal(archive({
             bridge_transfers: [transfer], policy_snapshots: [snapshot]
-        }))).to.equal(true);
+        }), null, 'regtest')).to.equal(true);
     });
 });

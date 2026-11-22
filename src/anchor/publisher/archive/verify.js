@@ -14,9 +14,14 @@
  *
  * ANCHOR publisher - archive verification against local rows
  *
- * Byte-comparison of a proposed archive against this hub's own matches, calls,
- * rewards and capability snapshots. A Byzantine leader cannot collect a quorum
- * for rows no honest hub holds.
+ * Verifies matches, calls, rewards, capability_snapshots, bridge_transfers,
+ * policy_snapshots, list_snapshots, state_checkpoints, price_snapshots and
+ * price_tombstones against local rows, re-derived fields or cryptographic proof.
+ * Checkpoints retain validator_signatures in comparisons, proofed price comparisons
+ * omit consensus_proof and validator_count, and unsigned tombstones may pass on absence.
+ * Per-kind rules live in bridge_policy/bridge_policy_verify.js,
+ * list/list_snapshot_verify.js and checkpoint_price/checkpoint_price_verify.js.
+ * A Byzantine leader cannot collect a quorum for rows honest hubs refuse.
  *
  ********************************************************************/
 
@@ -24,14 +29,31 @@
 
 const canonicalForms = require('../canonical_forms.js');
 const { archiveCapabilityWants } = require('./capability_wants.js');
+const { archiveWithinRowCaps } = require('./archive_row_caps.js');
+const { archivedSignaturesRefusal, unheldRowRefusal } = require('./unheld_row.js');
+const { supersededBySeq } = require('../../checkpoint_engine/superseded_rule.js');
 const { resolveQuorumNetwork } = require('../../quorum_network.js');
 const swq = require('../../../consensus/stake_weighted_quorum.js');
-const ar = require('../../../consensus/gates/anchor_reward_gate.js');
 const ark = require('../../anchor_reward_key.js');
-const { legacyAnchorRewardAmount } = require('../../reward_tracker.js');
+const { legacyAnchorRewardAmount, frozenAnchorRewardAmount } = require('../../reward_tracker.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
+const UNHELD_MATCH_STATUSES = Object.freeze(['finalized', 'retracted']);
+const UNHELD_CALL_STATUSES = Object.freeze(['finalized', 'retracted']);
 
+function boundToWrapperNetwork(archive, wrapperNetwork){
+    if(wrapperNetwork != null && archive && String(archive.network) === String(wrapperNetwork)) return true;
+    logger.warn('StateAnchorPublisher: archive body network ' + String(archive && archive.network) +
+                ' differs from wrapper network ' + String(wrapperNetwork) + '; NOT signing');
+    return false;
+}
+
+function signaturesShapeOk(row, label){
+    const refusal = archivedSignaturesRefusal(row);
+    if(!refusal) return true;
+    logger.warn('StateAnchorPublisher: archive ' + label + ' ' + refusal + '; NOT signing');
+    return false;
+}
 module.exports = {
 
     // Every archived match's TERMS must byte-equal our own cross_chain_matches
@@ -44,11 +66,11 @@ module.exports = {
     // resolution (set equality, not subset, so a leader can neither inject a
     // fake validator nor omit a real one).
     //
-    // `wrapperSnapshotBlock` is the archive wrapper checkpoint's snapshot_block (the
-    // caller's own byte-matched row, never the archive body), needed because the
-    // completeness check below has to know which oracle_publish group buildArchive
-    // was obliged to emit for the wrapper itself.
-    async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
+    // Callers pass the block and network of their own byte-matched wrapper row. The block picks the
+    // required wrapper group; the network must be present and equal the body's, as it picks recovery's quorum rules.
+    async verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock, wrapperNetwork){
+        if(!boundToWrapperNetwork(archive, wrapperNetwork)) return false;
+        if(!archiveWithinRowCaps(archive, logger)) return false;
         for(let am of archive.matches){
             if(!(await this.verifyArchivedMatch(am))) return false;
         }
@@ -64,12 +86,22 @@ module.exports = {
         for(const list of (archive.list_snapshots || [])){
             if(!(await this.verifyArchivedListSnapshot(list, archive))) return false;
         }
-        for(const checkpoint of (archive.state_checkpoints || [])){
-            if(!(await this.verifyArchivedStateCheckpoint(checkpoint))) return false;
+        const checkpoints = archive.state_checkpoints || [];
+        for(const checkpoint of checkpoints){
+            if(!(await this.verifyArchivedStateCheckpoint(checkpoint, archive))) return false;
+        }
+        // Match both the builder's deferral rule and recovery's refusal rule.
+        for(const checkpoint of checkpoints){
+            const supersedingSeq = supersededBySeq(checkpoint, checkpoints);
+            if(supersedingSeq === null) continue;
+            logger.warn('StateAnchorPublisher: archive checkpoint ' + checkpoint.chain + '/' +
+                        checkpoint.network + '/' + checkpoint.checkpoint_seq +
+                        ' is superseded by seq ' + supersedingSeq + ' in the same archive; NOT signing');
+            return false;
         }
         if(!(await this.verifyArchivedPriceSnapshots(archive.price_snapshots || [], archive))) return false;
         for(const tombstone of (archive.price_tombstones || [])){
-            if(!(await this.verifyArchivedPriceTombstone(tombstone))) return false;
+            if(!(await this.verifyArchivedPriceTombstone(tombstone, archive))) return false;
         }
         // Reward rows carry no per-row signatures (they are unilateral local
         // writes), so they verify by RE-DERIVATION: every field must equal what
@@ -96,6 +128,7 @@ module.exports = {
 
     // One archived match against our own row and the cross_chain set at its block.
     async verifyArchivedMatch(am){
+        if(!signaturesShapeOk(am, 'match ' + String(am && am.match_id).substring(0, 16) + '...')) return false;
         let rows = await this.db.getCrossChainMatchByMatchId(am.match_id);
         if(rows && rows.length > 0){
             let localTerms    = canonicalForms.serializeMatch(rows[0]);
@@ -121,6 +154,12 @@ module.exports = {
             // OUR OWN resolved cross_chain set at the row's snapshot_block)
             // is the same proof full-parse recovery accepts, so absence is
             // not divergence. A forged row cannot carry those signatures.
+            const refusal = unheldRowRefusal(am, canonicalForms.serializeMatch(am), UNHELD_MATCH_STATUSES);
+            if(refusal){
+                logger.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                            '... ' + refusal + '; NOT signing');
+                return false;
+            }
             logger.info('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                         '... predates our local history; accepting on signature quorum alone');
         }
@@ -137,6 +176,8 @@ module.exports = {
 
     // One archived XCALL relay record, the same way.
     async verifyArchivedCall(ac){
+        if(!signaturesShapeOk(ac, 'call ' + String(ac && ac.call_id).substring(0, 16) +
+           '... (' + String(ac && ac.phase) + ')')) return false;
         let rows = await this.db.getCrossChainCallByCallIdAndPhase(ac.call_id, ac.phase);
         if(rows && rows.length > 0){
             let localTerms    = canonicalForms.serializeCall(rows[0]);
@@ -152,6 +193,12 @@ module.exports = {
                 return false;
             }
         } else {
+            const refusal = unheldRowRefusal(ac, canonicalForms.serializeCall(ac), UNHELD_CALL_STATUSES);
+            if(refusal){
+                logger.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                            '... (' + ac.phase + ') ' + refusal + '; NOT signing');
+                return false;
+            }
             logger.info('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                         '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
         }
@@ -219,24 +266,11 @@ module.exports = {
     // The amount this hub expects on the row, or null when neither a frozen constant
     // nor a configured reward applies.
     expectedArchivedRewardAmount(rr, recordNetwork){
-        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rr.reward_type || '')) &&
-                               ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
-        // anchor_bundle is the ONLY per-anchor reward the v0 bundle rail records, and it takes the
-        // per-chain form's frozen amount and flag-day (RewardTracker isDerivedBundle). Omit
-        // it here and every bundle row falls through to the operator-tunable
-        // ANCHOR_REWARD_PER_PUBLISH, so a hub carrying that override refuses to co-sign a
-        // correct archive (quorum stalls) or signs a non-frozen amount into COLLECT
-        // bookkeeping. Keep this branch in lockstep with RewardTracker.
-        let isDerivedBundle  = String(rr.reward_type || '') === 'anchor_bundle' &&
-                               ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
-        let isDerivedArchive = String(rr.reward_type || '') === 'anchor_archive' &&
-                               ar.isArchiveRewardActive(Number(rr.block_index), recordNetwork);
-        let expectedAmount = (isDerivedChain || isDerivedBundle)
-            ? ar.ANCHOR_REWARD_AMOUNT
-            : isDerivedArchive
-            ? ar.ARCHIVE_REWARD_AMOUNT
-            : (this.hub.rewardTracker ? legacyAnchorRewardAmount(this.hub.rewardTracker.anchorReward) : null);
-        return expectedAmount;
+        const frozen = frozenAnchorRewardAmount(rr.reward_type, rr.block_index, recordNetwork);
+        if(frozen !== null) return frozen;
+        return this.hub.rewardTracker
+            ? legacyAnchorRewardAmount(this.hub.rewardTracker.anchorReward)
+            : null;
     },
 
     // Cross-check against ALL our own local rows for this (reward_type,

@@ -60,8 +60,8 @@ function verifyCarriedKey(pm, envelope, outcome) {
     // could sign envelopes naming every OTHER validator's addr and forge a
     // full quorum (or stuff the oracle median that all hubs then co-sign).
     // If the registry knows this sender, the signing key MUST be the pubkey
-    // registered to it (the same addr<->pubkey binding handleCapabilityMessage
-    // enforces). A sender the registry doesn't know still passes here (an
+    // registered to it. Capability messages separately bind their claimed
+    // data.pubkey to this proven signing key. A sender the registry doesn't know still passes here (an
     // on-chain-active key not yet in the manual registry, or a relayed gossip
     // origin), but its votes are dropped downstream by isKnownSender, so
     // consensus attribution stays bound to a registered key either way.

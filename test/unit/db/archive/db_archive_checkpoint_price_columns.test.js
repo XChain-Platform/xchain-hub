@@ -97,10 +97,10 @@ describe('DDL: checkpoint and price archive bookkeeping', function () {
 describe('state_checkpoints archive selectors and stamp', function () {
     it('pending is batch_seq IS NULL, ordered by (chain, network, checkpoint_seq)', async function () {
         const db = stubbedDb();
-        await db.findStateCheckpointsByBatchSeq(50);
+        await db.findStateCheckpointsByBatchSeq('regtest', 50);
         let { sql, args } = lastCall(db);
-        expect(sql).to.match(/FROM state_checkpoints WHERE batch_seq IS NULL ORDER BY chain ASC, network ASC, checkpoint_seq ASC LIMIT \?/);
-        expect(args).to.deep.equal([50]);
+        expect(sql).to.match(/FROM state_checkpoints WHERE network = \? AND batch_seq IS NULL ORDER BY chain ASC, network ASC, checkpoint_seq ASC LIMIT \?/);
+        expect(args).to.deep.equal(['regtest', 50]);
     });
 
     it('the stamp is guarded on batch_seq IS NULL and binds the row key', async function () {

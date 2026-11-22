@@ -22,18 +22,19 @@ const { supersedeWitnessDecline, checkpointHoldDecline } = require('./checkpoint
 const { hasSupersedeFields } = require('./supersede_suffix.js');
 
 function indexerReplayOpen(rules){
-    const state = rules && rules.replay && rules.replay.state;
-    return state === 'pending' || state === 'replaying';
+    if(!rules || rules.replay == null) return false;
+    // Only a completed replay is closed. Unknown states hold signing during version skew.
+    return rules.replay.state !== 'replayed';
 }
 
-function supersedeCosignDecline(cp, rules, expectedSupersede){
+function supersedeDecline(cp, rules, strict, expectedSupersede){
     if(indexerReplayOpen(rules)) return 'indexer_replaying';
 
     cp = cp || {};
     if(!hasSupersedeFields(cp)) return null;
     if(!rules || !rules.replay || rules.replay.state !== 'replayed')
         return 'supersede_no_replay';
-    if(arguments.length > 2){
+    if(strict){
         const witnessDecline = supersedeWitnessDecline(rules);
         if(witnessDecline) return witnessDecline;
         if(rules.replay.changed !== true || expectedSupersede == null)
@@ -46,9 +47,19 @@ function supersedeCosignDecline(cp, rules, expectedSupersede){
     return null;
 }
 
+// The first follower pass checks replay metadata before reading the local replay window.
+function supersedePrefilterDecline(cp, rules){
+    return supersedeDecline(cp, rules, false, null);
+}
+
+// The final leader and follower decision requires witness and local disagreement evidence.
+function supersedeStrictDecline(cp, rules, expectedSupersede){
+    return supersedeDecline(cp, rules, true, expectedSupersede);
+}
+
 function checkpointProposalDecline(cp, own, expectedSupersede){
     const rules = own && own.rules;
-    const supersedeDecline = supersedeCosignDecline(
+    const supersedeDecline = supersedeStrictDecline(
         cp, rules, expectedSupersede);
     return supersedeDecline || checkpointHoldDecline(cp || {}, own || {}, rules);
 }
@@ -56,6 +67,7 @@ function checkpointProposalDecline(cp, own, expectedSupersede){
 module.exports = {
     indexerReplayOpen,
     hasSupersedeFields,
-    supersedeCosignDecline,
+    supersedePrefilterDecline,
+    supersedeStrictDecline,
     checkpointProposalDecline,
 };

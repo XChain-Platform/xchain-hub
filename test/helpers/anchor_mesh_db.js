@@ -159,22 +159,6 @@ function checkpointQuery(sql, params, s) {
         return Object.values(latest).filter(r => r.anchor_txid == null && (net == null || r.network === net) &&
                                                  supersededBySeq(r, checkpoints) == null);
     }
-    if (sql.startsWith('SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block')) {
-        // Faithful to the SQL: per chain, the oldest eligible unanchored row above the
-        // newest anchored seq; a chain with no anchored row yields nothing.
-        let [net, , step, everyN] = params;
-        let anchored = {}, oldest = {};
-        for (let r of checkpoints)
-            if (r.network === net && r.anchor_txid != null)
-                anchored[r.chain] = Math.max(anchored[r.chain] == null ? -1 : anchored[r.chain], r.checkpoint_seq);
-        for (let r of checkpoints) {
-            if (r.network !== net || r.anchor_txid != null || anchored[r.chain] == null) continue;
-            if (r.checkpoint_seq <= anchored[r.chain]) continue;
-            if (Math.floor(r.checkpoint_seq / (step || 1)) % (everyN || 1) !== 0) continue;
-            if (oldest[r.chain] == null || r.snapshot_block < oldest[r.chain]) oldest[r.chain] = r.snapshot_block;
-        }
-        return Object.keys(oldest).map(chain => ({ chain, oldest_block: oldest[chain] }));
-    }
     if (sql.startsWith("SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC")) {
         let sorted = checkpoints.filter(r => r.network === params[0])
             .sort((x, y) => (y.chain === 'BTC') - (x.chain === 'BTC') || y.id - x.id);
@@ -207,10 +191,35 @@ function checkpointQuery(sql, params, s) {
     return undefined;
 }
 
+// The two ladder-age statements, faithful to the SQL: per chain, the oldest unanchored
+// row on the stride above the newest anchored seq, or from the first row when the chain
+// was never anchored (the LEFT JOIN). The bundle-eligible one (anti-joined on markers)
+// also drops markers, rootless rows, superseded rows and rows below the floor.
+function oldestBlockQuery(sql, params, s) {
+    if (!sql.startsWith('SELECT sc.chain, MIN(sc.snapshot_block) AS oldest_block')) return undefined;
+    const eligible = sql.includes('m.chain IS NULL');
+    const [net, step, everyN, floor] = eligible ? [params[2], params[3], params[4], params[5]] : [params[1], params[2], params[3], null];
+    const anchored = {}, oldest = {};
+    for (const r of s.checkpoints)
+        if (r.network === net && r.anchor_txid != null)
+            anchored[r.chain] = Math.max(anchored[r.chain] == null ? -1 : anchored[r.chain], r.checkpoint_seq);
+    for (const r of s.checkpoints) {
+        if (r.network !== net || r.anchor_txid != null) continue;
+        if (anchored[r.chain] != null && r.checkpoint_seq <= anchored[r.chain]) continue;
+        if (Math.floor(r.checkpoint_seq / (step || 1)) % (everyN || 1) !== 0) continue;
+        if (eligible && (r.supersedes_from != null || r.rules_digest != null || r.state_root == null ||
+                         r.state_root_version == null || r.block_merkle_root == null || r.block_merkle_version == null ||
+                         r.snapshot_block < floor || supersededBySeq(r, s.checkpoints) != null)) continue;
+        if (oldest[r.chain] == null || r.snapshot_block < oldest[r.chain]) oldest[r.chain] = r.snapshot_block;
+    }
+    return Object.keys(oldest).map(chain => ({ chain, oldest_block: oldest[chain] }));
+}
+
 function matchQuery(sql, params, s) {
     const { matches, calls, rewardRows } = s;
-    if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status')) {
-        return matches.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+    if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status)')) {
+        return matches.filter(r => r.network === params[0] &&
+            (r.batch_seq == null || r.archived_status !== r.status)).slice(0, params[1]);
     }
     if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id = ?')) {
         return matches.filter(r => r.match_id === params[0]).slice(0, 1);
@@ -262,8 +271,9 @@ function rewardQuery(sql, params, s) {
 
 function callQuery(sql, params, s) {
     const calls = s.calls;
-    if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status')) {
-        return calls.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+    if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status)')) {
+        return calls.filter(r => r.network === params[0] &&
+            (r.batch_seq == null || r.archived_status !== r.status)).slice(0, params[1]);
     }
     if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE call_id = ?')) {
         return calls.filter(r => r.call_id === params[0] && r.phase === params[1]).slice(0, 1);
@@ -306,7 +316,7 @@ function consensusStateQuery(sql, params, s) {
     return undefined;
 }
 
-const QUERY_FAMILIES = [checkpointQuery, matchQuery, rewardQuery, callQuery, snapshotQuery, consensusStateQuery];
+const QUERY_FAMILIES = [checkpointQuery, oldestBlockQuery, matchQuery, rewardQuery, callQuery, snapshotQuery, consensusStateQuery];
 
 // A doQuery that answers only consensus_state, over its own Map, for a hand-built
 // db double whose every other statement answers [] (or whatever `fallback` returns).

@@ -79,8 +79,10 @@ module.exports = {
     },
 
     // Answer a leader's fill request with this hub's own finalized, locally derived
-    // rounds of the window. Rounds ingested from an already-landed batch are withheld
-    // because their anchor is no longer recoverable here.
+    // rounds of the window. Rounds ingested from an already-landed batch are neither
+    // sent nor listed in `held`: their anchor is no longer recoverable here and they are
+    // already on chain, and `held` means "finalized here and sent in `rounds`", so
+    // listing one would read to the leader as a round this hub holds back.
     async handleFillReq(envelope){
         let d = envelope.data;
         if(!this.identity || !this.peerManager || !this.db) return;
@@ -98,14 +100,15 @@ module.exports = {
         } catch(e){
             return;
         }
+        let sendable = mine.filter(r => !r.batchSourced).map(r => {
+            let { batchSourced, ...rest } = r;
+            return rest;
+        });
         this.peerManager.broadcast(this.constructor.XPRICEB_FILL, {
             first_round: first,
             last_round:  last,
-            held:        mine.map(r => parseInt(r.round)),
-            rounds:      mine.filter(r => !r.batchSourced).map(r => {
-                let { batchSourced, ...rest } = r;
-                return rest;
-            })
+            held:        sendable.map(r => parseInt(r.round)),
+            rounds:      sendable
         });
     },
 

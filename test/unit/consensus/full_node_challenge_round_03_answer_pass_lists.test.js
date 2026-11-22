@@ -210,3 +210,36 @@ it('signs a complete PASS list', async function () {
         });
 });
 });
+
+// ── The verdict broadcast through a hook built on xchain-sdk: its errors carry the
+// status in a code and the node's reason under details.rpcError ────────────────
+describe('FullNodeChallengeRound', function () {
+    installSuiteHooks1();
+describe('SDK encoder errors on the verdict broadcast', function () {
+it('hands the window back when the SDK reports the verdict rate limited', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng.recordSpend = () => true;
+            eng.broadcastFn = () => Promise.reject(Object.assign(new Error('Encoder returned HTTP 429'),
+                { code: 'RATE_LIMITED', details: { method: 'broadcast_tx', status: 429 } }));
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
+            expect(eng.spendGuard.spentInWindow(), 'refused before the node, so nothing is charged').to.equal(0);
+            expect(st.finalized, 'and the round unlocks for a retry').to.equal(false);
+        });
+it('keeps the round claimed when the SDK says the node already holds the verdict', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng.recordSpend = () => true;
+            eng.broadcastFn = () => Promise.reject(Object.assign(new Error('Encoder RPC error: transaction already in block chain'),
+                { code: 'ENCODER_RPC_ERROR', details: { method: 'broadcast_tx',
+                    rpcError: { code: -32010, data: { reason: 'TX_ALREADY_IN_CHAIN' } } } }));
+            eng.onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng.answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng.closeCollection(288);
+            expect(eng.spendGuard.spentInWindow(), 'a possibly landed verdict is charged').to.equal(eng.spendGuard.estSpendUsdCents);
+            expect(st.finalized, 'and is never re-broadcast').to.equal(true);
+        });
+});
+});

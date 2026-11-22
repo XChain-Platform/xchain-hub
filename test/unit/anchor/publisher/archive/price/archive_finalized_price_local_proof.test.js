@@ -42,6 +42,7 @@ function publisher(db){
 
 function heldPrice(extra){
     return Object.assign({
+        round_number: 11,
         coin_pair: 'BTC/USD',
         status: 'finalized',
         batch_block_time: 1234,
@@ -68,6 +69,17 @@ describe('verifyFinalizedAgainstLocal follower price proofs', function () {
 
         const verified = await pub.verifyFinalizedAgainstLocal(
             [], [], [], quorumRows([announcedPrice()]));
+
+        expect(verified).to.equal(false);
+    });
+
+    it('finds a differently spelled database key before checking status', async function () {
+        const pub = publisher({
+            findPriceSnapshotsForRound: async () => [heldPrice()]
+        });
+
+        const verified = await pub.verifyFinalizedAgainstLocal(
+            [], [], [], quorumRows([announcedPrice({ coin_pair: 'btc/usd ', status: 'disputed' })]));
 
         expect(verified).to.equal(false);
     });
@@ -104,6 +116,21 @@ describe('applyFinalized follower price proof stamp', function () {
 
         expect(stamps).to.deep.equal([[
             7, 'finalized', 1234, digest(FOLLOWER_PROOF), 11, 'BTC/USD'
+        ]]);
+    });
+
+    it('carries local proof for a differently spelled database key', async function () {
+        const stamps = [];
+        const pub = publisher({
+            findPriceSnapshotsForRound: async () => [heldPrice()],
+            updatePriceSnapshotArchiveBatchSeq: async (...args) => stamps.push(args)
+        });
+
+        await pub.applyFinalized({ batch_seq: 8, txid: null, matches: [] },
+            'sender', [], [], quorumRows([announcedPrice({ coin_pair: 'btc/usd ' })]));
+
+        expect(stamps).to.deep.equal([[
+            8, 'finalized', 1234, digest(FOLLOWER_PROOF), 11, 'btc/usd '
         ]]);
     });
 });

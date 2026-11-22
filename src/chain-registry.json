@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T14:42:09.213Z",
+  "generated_at": "2026-11-16T03:07:17.625Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -13,6 +13,7 @@
         "p2tr"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/0'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
@@ -104,6 +105,7 @@
         "p2tr"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/0'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
@@ -191,6 +193,7 @@
         "p2tr"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/0'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
@@ -529,6 +532,7 @@
         "p2wpkh"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/2'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/2'/A'/C/I",
@@ -617,6 +621,7 @@
         "p2wpkh"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/2'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/2'/A'/C/I",
@@ -701,6 +706,7 @@
         "p2wpkh"
       ],
       "defaultAddressType": "p2wpkh",
+      "taprootEnvelope": true,
       "derivationPaths": {
         "p2pkh": "m/44'/2'/A'/C/I",
         "p2sh-p2wpkh": "m/49'/2'/A'/C/I",

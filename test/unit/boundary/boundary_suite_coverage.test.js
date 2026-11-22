@@ -1,3 +1,13 @@
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 // the boundary suite lives in TWO directories and the `test:boundary`
 // script has to glob both: globbing one makes `npm run test:boundary` report 14
 // passing while 270 more boundary cases sit in test/unit/boundary, reached only

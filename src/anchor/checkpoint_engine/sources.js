@@ -39,11 +39,13 @@ module.exports = {
     // resolved correctly at tick, before the per-chain network is known.
     async resolveCapabilityValidators(capability, block){
         let validators = [];
+        let snapshotUnavailable = true;
         let weighted = swq.isStakeWeightedQuorumActive(block, this.network);
         if(this.capSnapshot){
             if(weighted){
                 let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
                 if(snap && Array.isArray(snap.validators)){
+                    snapshotUnavailable = false;
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
                     // Carry the truncation flag through the .map so the quorum check fails
                     // closed on an over-cap weighted snapshot (SWQ-TRUNC parity with the sibling
@@ -56,6 +58,7 @@ module.exports = {
             } else {
                 let snap = await this.capSnapshot.getSnapshot(capability, block);
                 if(snap && Array.isArray(snap.validators)){
+                    snapshotUnavailable = false;
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
                     // getSnapshot marks an over-cap COUNT set truncated too, and the persist
                     // guard reads the marker off this array, so carry it in both modes or the
@@ -64,6 +67,9 @@ module.exports = {
                 }
             }
         }
+        // Preserve the array API while letting cadence distinguish an unavailable
+        // snapshot from a valid snapshot that currently qualifies nobody.
+        if(snapshotUnavailable) validators.snapshotUnavailable = true;
         if(validators.length === 0 && this._seedLocalValidator && this.identity){
             let pk = this.identity.getPubkeyHex();
             validators = [{ pubkey: pk, source: 'seed:' + String(pk).toLowerCase(), weight: '1', amount: '1' }];

@@ -75,7 +75,7 @@ const verify = async (pub, reward) => {
                                 signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
     return pub.verifyArchiveAgainstLocal({
         network: NETWORK, matches: [], calls: [], rewards: [reward], capability_snapshots: snaps
-    });
+    }, null, NETWORK);
 };
 
 function archivedReward(rewardType, amount) {

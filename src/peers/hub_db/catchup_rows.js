@@ -5,11 +5,23 @@
 
 // How catch-up asks whether the hub already holds a peer row, and how it stores one it verified.
 
-const { priceSnapshotAlreadyHeld, storePriceSnapshot } = require('./price_round_groups.js');
+const { groupKey, priceSnapshotAlreadyHeld, storePriceSnapshot, storePriceRound } = require('./price_round_groups.js');
 const { hasSupersedeFields } = require('../../anchor/checkpoint_engine/supersede_suffix.js');
 
 function withoutWireId(row) {
     return Object.fromEntries(Object.entries(row || {}).filter(([column]) => column !== 'id'));
+}
+
+// A verifier that checked a normalized form of the row hands back the row it verified, and that
+// is what gets stored; every other verifier's accepted row is stored as the wire sent it.
+function verifiedRowOr(verdict, wireRow) {
+    const verified = verdict && typeof verdict === 'object' && verdict.ok === true ? verdict.row : null;
+    return verified && typeof verified === 'object' ? withoutWireId(verified) : wireRow;
+}
+
+// A verdict that names a row as the peer's own local record, passed by without a refusal.
+function notMirrored(verdict) {
+    return Boolean(verdict) && typeof verdict === 'object' && verdict.notMirrored === true;
 }
 
 async function hasRows(promise) {
@@ -74,4 +86,19 @@ function storeVerifiedRow(db, table, row) {
     return writer(db, withoutWireId(row));
 }
 
-module.exports = { withoutWireId, rowAlreadyHeld, storeVerifiedRow };
+function storeVerifiedRound(db, table, rows) {
+    if (table !== 'price_snapshots') throw new Error('No grouped hub DB catch-up writer for table: ' + table);
+    return storePriceRound(db, rows.map(withoutWireId));
+}
+
+async function localRoundRows(db, table, row) {
+    if (table !== 'price_snapshots') return [];
+    const key = groupKey(row);
+    const rows = await db.findPriceSnapshotsForRound(row.round_number);
+    return (Array.isArray(rows) ? rows : []).filter(candidate => groupKey(candidate) === key).map(withoutWireId);
+}
+
+module.exports = {
+    withoutWireId, verifiedRowOr, notMirrored, rowAlreadyHeld, storeVerifiedRow,
+    storeVerifiedRound, localRoundRows
+};

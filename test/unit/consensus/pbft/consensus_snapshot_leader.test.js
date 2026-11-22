@@ -71,7 +71,6 @@ function registerLeaderPrimitiveTests() {
             expect(consensus.leaderAt(0, 2, members).pubkey).to.equal(SNAPSHOT_SET[2].pubkey);
             expect(consensus.leaderAt(4, 0, members).pubkey).to.equal(SNAPSHOT_SET[0].pubkey); // wraps
         });
-
         it('is unaffected by live validatorSet drift when a snapshot exists', function () {
             let members = memberSetOf(SNAPSHOT_SET);
             // Registration churn reorders AND extends the live set mid-round.
@@ -187,6 +186,7 @@ function registerProposeTests() {
             expect(await consensus.propose({ cfg: 1 })).to.be.true;
             expect(hub.applyConfig.calledOnce).to.be.true;
         });
+
     });
 }
 function registerPrePrepareLeaderTests() {

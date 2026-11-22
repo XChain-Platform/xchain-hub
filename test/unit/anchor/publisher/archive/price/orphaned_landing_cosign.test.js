@@ -1,12 +1,22 @@
 'use strict';
 
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
 const { expect } = require('chai');
-const StateAnchorPublisher = require('../../../../../src/anchor/publisher');
-const ValidatorIdentity = require('../../../../../src/validators/identity');
-const { DB_METHODS } = require('../../../../helpers/mockHub.js');
-const { CP_ROW } = require('../../../../helpers/anchor_mesh_db.js');
-const vectors = require('../../../../fixtures/anchor_archive_vectors.json');
-const { XANC_SIGN } = require('../../../../../src/anchor/publisher/constants.js');
+const StateAnchorPublisher = require('../../../../../../src/anchor/publisher');
+const ValidatorIdentity = require('../../../../../../src/validators/identity');
+const { DB_METHODS } = require('../../../../../helpers/mockHub.js');
+const { CP_ROW } = require('../../../../../helpers/anchor_mesh_db.js');
+const vectors = require('../../../../../fixtures/anchor_archive_vectors.json');
+const { XANC_SIGN } = require('../../../../../../src/anchor/publisher/constants.js');
 
 const PRICE_BLOCK = 111;
 const ELECTION_BLOCK = 200;
@@ -30,6 +40,7 @@ function publisher(held, broadcasts){
     const pub = new StateAnchorPublisher({
         db: {
             ...DB_METHODS,
+            doQuery: async () => [],
             getStateCheckpointByChainAndNetwork: async () => [CP_ROW],
             findPriceSnapshotsForRound: async () => held
         },

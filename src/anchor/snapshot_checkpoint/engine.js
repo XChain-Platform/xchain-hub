@@ -35,6 +35,7 @@ const { learnBtcChainId } = require('./chain_identity.js');
 const { snapshotCheckpointFromBlockHashes } = require('./payload.js');
 const { createSnapshotSignedRecord } = require('./signed_record.js');
 const snapshotRound = require('./round.js');
+const snapshotStats = require('./stats.js');
 
 const logger = getLogger();
 const SNAPSHOT_CHECKPOINT_ACTIVATION =
@@ -103,11 +104,13 @@ class SnapshotCheckpointEngine {
         this.fallbackTimer = null;
         this.stopWrittenListener = null;
         this.skipLogKeys = new Map();
+        snapshotStats.initialize(this);
         snapshotRound.initialize(this);
     }
 
     async start() {
         if (!this.source || !this.db) return;
+        this._startedAt = Date.now();
         snapshotRound.start(this);
         this.pollTimer = setInterval(() => {
             this.tick().catch(error => logger.error(nodeUtil.format(
@@ -206,6 +209,7 @@ class SnapshotCheckpointEngine {
     }
 
     noteSkip(reason, fields = {}) {
+        snapshotStats.recordSkip(this, reason);
         const snapshotBlock = Number.isSafeInteger(fields.snapshotBlock)
             ? fields.snapshotBlock
             : 'unknown';
@@ -260,6 +264,10 @@ class SnapshotCheckpointEngine {
             for (let i = 0; i < DUE_LIMIT; i++) {
                 if (!await this.checkpointNextDue()) break;
             }
+            this._lastTickOkAt = Date.now();
+        } catch (error) {
+            this._tickFailures += 1;
+            throw error;
         } finally {
             this.ticking = false;
             if (this.tickRequested) {
@@ -271,35 +279,31 @@ class SnapshotCheckpointEngine {
 
     // One due snapshot: true only when this hub alone stored a new checkpoint for it.
     async checkpointNextDue() {
+        const roundInFlight = this.snapshotRounds.size > 0;
         const rows = await this.db.listUncheckpointedSnapshotBlocks(
             this.network, this.gateHeight(), CANONICAL_REORG_BUFFER, DUE_LIMIT);
         const heights = await this.btcHeights() || {};
         const due = pickDueSnapshot(snapshotBlocks(rows), {
-            inFlight: this.snapshotRounds.size > 0,
+            inFlight: roundInFlight,
             gateActive: block => this.gateActive(block),
             blockOf: block => snapshotCheckpointBlock(block, this.network),
             committedHeight: heights.committedHeight,
             chainHeight: heights.chainHeight,
             confirmations: this.confirmations,
         });
-        if (!due) return false;
+        if (!due) {
+            if (!roundInFlight) snapshotStats.recordDue(this, null, null);
+            return false;
+        }
 
         const validators = await this.resolveValidators(due.snapshot_block);
         const myPubkey = this.localPubkey();
         const overdue = Number(heights.chainHeight) - due.block_index - this.confirmations;
+        snapshotStats.recordDue(this, due, overdue);
         const decision = snapshotLeaderDecision(
             due.block_index, validators, myPubkey, overdue);
         if (!decision.leads) {
-            this.noteSkip(decision.reason, {
-                snapshotBlock: due.snapshot_block,
-                blockIndex: due.block_index,
-                rank: decision.rank,
-                waitBlocks: decision.waitBlocks,
-            });
-            if (decision.reason === SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT ||
-                decision.reason === SNAPSHOT_LEADER_SKIP.MISSING_DEPTH) {
-                this.scheduleFallbackTick();
-            }
+            this.declineLeadership(due, decision);
             return false;
         }
         const rank = decision.rank;
@@ -327,6 +331,16 @@ class SnapshotCheckpointEngine {
         if (validators.length === 1) return this.persistSoleCheckpoint(cp, signature);
         await this.leadRound(cp, validators, due.snapshot_block, signature);
         return false;
+    }
+
+    // Record why this hub does not lead a due snapshot and re-arm the wait when it must.
+    declineLeadership(due, decision) {
+        const { reason, rank, waitBlocks } = decision;
+        this.noteSkip(reason, {
+            snapshotBlock: due.snapshot_block, blockIndex: due.block_index, rank, waitBlocks,
+        });
+        if (reason === SNAPSHOT_LEADER_SKIP.FALLBACK_WAIT ||
+            reason === SNAPSHOT_LEADER_SKIP.MISSING_DEPTH) this.scheduleFallbackTick();
     }
 
     async claimPayload(cp) {
@@ -360,6 +374,10 @@ class SnapshotCheckpointEngine {
 
     async leadRound(cp, validators, snapshotBlock, signature) {
         return snapshotRound.lead(this, cp, validators, snapshotBlock, signature);
+    }
+
+    getStats() {
+        return snapshotStats.getStats(this);
     }
 }
 

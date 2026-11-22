@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-22
+
+### Changed
+- Enforced mapped source addresses for cross-chain offer lists behind a testnet time gate, with mainnet unarmed.
+- Updated the chain registry snapshot for Taproot envelope support.
+- Added a price snapshot index for pair, status and timestamp so price history reads stay fast.
+
+### Fixed
+- Hardened JSON-RPC envelopes, parameter coercion, canonical client address handling and public rate-limit accounting.
+- Kept catch-up readiness false until a fetchable signer peer is classified and reported unserved tables in health output.
+- Recovered missed producer price rounds and persisted refusal memos so restarts avoid repeating rejected catch-up work.
+- Made restarted oracle leaders fill complete windows and follow backlog cadence from the first catch-up sweep.
+- Reported Bitcoin tip fetch failures to the consensus input monitor and bounded price snapshot reads below the database pool.
+- Adopted only a version 3 anchor row as the folded bundle and rebaselined admission tip freshness after chain resets.
+
+### Security
+- Updated vulnerable dependencies, including axios, express, express-rate-limit, ws, zod, qs, serialize-javascript, minimatch, glob and diff.
+
 ## [0.27.0] - 2026-11-01
 
 ### Added

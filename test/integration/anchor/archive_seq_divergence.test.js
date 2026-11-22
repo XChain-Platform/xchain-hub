@@ -117,8 +117,9 @@ function memDb(){
                 return hits.slice(0, 1);
             }
             if(sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) return [];   // v0 leg: nothing pending
-            if(sql.startsWith('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status'))
-                return matches.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+            if(sql.startsWith('SELECT * FROM cross_chain_matches WHERE network = ? AND (batch_seq IS NULL OR archived_status <> status)'))
+                return matches.filter(r => r.network === params[0] &&
+                    (r.batch_seq == null || r.archived_status !== r.status)).slice(0, params[1]);
             if(sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id = ?'))
                 return matches.filter(r => r.match_id === params[0]).slice(0, 1);
             if(sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id IN'))

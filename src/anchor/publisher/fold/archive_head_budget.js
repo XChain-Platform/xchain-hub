@@ -14,6 +14,7 @@ const { ANCHOR_BUNDLE_MAX_BYTES } = require('../constants.js');
 const { getLogger } = require('../../../observability');
 const logger = getLogger();
 const NO_HEAD_ROOM = 'FOLD_ARCHIVE_NO_HEAD_ROOM';
+const NO_HEAD_ROOM_ALARM_EVERY = 3;
 
 function fixedSignatures(count){
     return Array.from({ length: Math.max(0, Number(count) || 0) }, () => ({
@@ -26,9 +27,28 @@ function noteNoHeadRoom(ctx, batchSeq, network, baseBytes){
     logger.warn('StateAnchorPublisher: folded archive batch ' + batchSeq + ' for ' + network +
                 ' has no chunk-0 room: its worst-case v3 head is ' + baseBytes +
                 ' bytes before archive data against the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget');
+    escalateNoHeadRoomStreak(ctx, network);
 }
 
-function sizedSplitter(ctx, availableBytes, onNoHeadRoom){
+// With the legacy archive leg suppressed the fold is the only archive route, so
+// consecutive misses on one network leave its rows unarchived until the signing set
+// or the group shrinks. The error repeats every NO_HEAD_ROOM_ALARM_EVERY misses.
+function escalateNoHeadRoomStreak(ctx, network){
+    if(!ctx._foldArchiveNoHeadRoomStreak) ctx._foldArchiveNoHeadRoomStreak = {};
+    const streak = (ctx._foldArchiveNoHeadRoomStreak[network] || 0) + 1;
+    ctx._foldArchiveNoHeadRoomStreak[network] = streak;
+    if(streak % NO_HEAD_ROOM_ALARM_EVERY !== 0) return;
+    logger.error('StateAnchorPublisher: ' + streak + ' consecutive folded archive head measurements for ' +
+                 network + ' found no head room; its archive rows stay unarchived until the signing set or the bundle group shrinks');
+}
+
+function clearNoHeadRoomStreak(ctx, network){
+    if(ctx._foldArchiveNoHeadRoomStreak) delete ctx._foldArchiveNoHeadRoomStreak[network];
+}
+
+// The streak clears only once a split fits, because the chunk-count miss below
+// happens after the head measurement already returned a splitter.
+function sizedSplitter(ctx, availableBytes, onNoHeadRoom, onFit){
     const splitter = b64 => {
         let headChars = Math.min(ctx.chunkMaxBytes, availableBytes);
         let chunks;
@@ -46,6 +66,7 @@ function sizedSplitter(ctx, availableBytes, onNoHeadRoom){
             headChars = next;
         }
         splitter.headChars = headChars;
+        onFit();
         return chunks;
     };
     splitter.headChars = Math.min(ctx.chunkMaxBytes, availableBytes);
@@ -73,7 +94,8 @@ async function foldArchiveSplitter(ctx, group, network, batchSeq, wrapperSection
         return null;
     }
     const splitter = sizedSplitter(ctx, availableBytes,
-        () => noteNoHeadRoom(ctx, batchSeq, network, baseBytes));
+        () => noteNoHeadRoom(ctx, batchSeq, network, baseBytes),
+        () => clearNoHeadRoomStreak(ctx, network));
     splitter.baseBytes = baseBytes;
     return splitter;
 }

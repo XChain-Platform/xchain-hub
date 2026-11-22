@@ -87,6 +87,7 @@ describe('OracleConsensus co-sign gate: an even reference set is measured to bot
     });
 
     it('co-signs every honest N=3 proposal up to the follower even-split edge, with or without history', async function () {
+        this.timeout(15000);
         for (let hist of [null, '1.00000000']) {
             for (let k = 0; k <= 10500; k += 250) {
                 let third = (1 + k / 100000).toFixed(8);

@@ -76,6 +76,7 @@ function archivedListRowRefusal(row) {
     if (seq === 1 && listMembersHash(added) !== row.members_hash) {
         return 'full row members hash mismatch';
     }
+    if (seq === 1 && removed.length !== 0) return 'full row has removed members';
     return archivedListMetaRefusal(row);
 }
 

@@ -31,14 +31,19 @@
  * round-keyed, and a per-pair drop marker writes a skipped row for some pairs of an
  * otherwise finalized round), so folding it in would make healthy rounds diverge and
  * train operators to ignore the signal. Counts still ride along as detail.
+ *
+ * A hub that catches up from its peers stores finalized rounds only. A round the peers recorded
+ * as skipped or disputed is their own local record, so a hub that was offline for it reads
+ * missing beside their skipped or disputed. That divergence is accurate, since this hub did not
+ * record the round, and the check keeps flagging it rather than tolerating the difference.
  */
 'use strict';
 
 const crypto = require('crypto');
 
 // Outcome classes, most-to-least authoritative. A round with ANY finalized pair
-// finalized here; one with only skipped rows was recorded as lost here; 'disputed'
-// is the reorg-retraction state; 'missing' is the absence this module exists for.
+// finalized here. Any disputed pair records a reorg retraction; skipped wins only
+// when every recognized row is skipped. Missing is the absence this module exposes.
 const STATUS_FINALIZED = 'finalized';
 const STATUS_SKIPPED   = 'skipped';
 const STATUS_DISPUTED  = 'disputed';
@@ -113,8 +118,8 @@ function summarizeRoundPresence(rows, fromRound, toRound) {
             continue;
         }
         entry.status = entry.finalized_pairs > 0 ? STATUS_FINALIZED
-                     : entry.skipped_pairs   > 0 ? STATUS_SKIPPED
                      : entry.disputed_pairs  > 0 ? STATUS_DISPUTED
+                     : entry.skipped_pairs   > 0 ? STATUS_SKIPPED
                      : STATUS_MISSING;   // rows with an unrecognised status: presence unproven
         out.push(entry);
     }
@@ -168,10 +173,36 @@ function comparePresence(answers) {
     return { agreed: divergent.length === 0, divergent: divergent, hubs: entries.length };
 }
 
+// Advisory only, and never part of the digest or of 'agreed': a round every hub finalized can still
+// hold a different number of finalized pairs on each, and only a short count shows a hub that
+// stored part of a round. Skipped and missing pairs are left out, since a hub that caught up from
+// its peers never receives their skipped markers and that difference is not a fault. Only hubs
+// that finalized the round are compared; one that did not already shows as divergent.
+function comparePairCounts(answers) {
+    let byRound = new Map();
+    let seenHubs = new Set();
+    for (let a of (answers || [])) {
+        if (!a || !a.presence || !Array.isArray(a.presence.rounds) || seenHubs.has(a.hub)) continue;
+        seenHubs.add(a.hub);
+        for (let r of a.presence.rounds) {
+            if (r.status !== STATUS_FINALIZED) continue;
+            if (!byRound.has(r.round)) byRound.set(r.round, {});
+            byRound.get(r.round)[a.hub] = r.finalized_pairs;
+        }
+    }
+    let differing = [];
+    for (let round of [...byRound.keys()].sort((x, y) => x - y)) {
+        let counts = byRound.get(round);
+        if (new Set(Object.values(counts)).size > 1) differing.push({ round: round, finalized_pairs: counts });
+    }
+    return differing;
+}
+
 module.exports = {
     summarizeRoundPresence,
     presenceDigest,
     comparePresence,
+    comparePairCounts,
     MAX_RANGE,
     DEFAULT_RANGE,
     STATUS_FINALIZED,

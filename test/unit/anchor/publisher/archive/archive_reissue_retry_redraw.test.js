@@ -10,9 +10,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Pins the retry after a refused v1 head: the head's rows stay pending, so a restart that
-// loses process memory draws the same row-derived seq again. The hub must read its own
-// spent seq back from the DOGE indexer and lead above it instead.
+// Pins prevention of a repeated v1 head. A restarted hub must either read its own spent
+// seq from the DOGE indexer and lead above it, or skip before arming an intent or spending.
 
 const { expect }           = require('chai');
 const sinon                = require('sinon');
@@ -71,8 +70,10 @@ describe('StateAnchorPublisher: archive reissue after a refused head', function 
         wireIndexer(pub, new Error('down'));
         await pub.seedArchiveSeqFloor();
         expect(pub.ownArchiveSeqFloor()).to.equal(-1);
+        expect(pub.ownArchiveSeqFloorUnknown()).to.equal(true);
         wireIndexer(pub, REFUSED_HEAD);
         expect(await pub.leaderBatchSeqAboveOwn(await pub.getNextBatchSeq())).to.equal(SPENT_SEQ + 1);
+        expect(pub.ownArchiveSeqFloorUnknown()).to.equal(false);
     });
 
     it('MATCH_BATCH_SEQ (retry; no head on chain) keeps the row-derived draw', async function () {
@@ -80,5 +81,34 @@ describe('StateAnchorPublisher: archive reissue after a refused head', function 
         wireIndexer(pub, { exists: false });
         await pub.seedArchiveSeqFloor();
         expect(await pub.leaderBatchSeqAboveOwn(await pub.getNextBatchSeq())).to.equal(SPENT_SEQ);
+        expect(pub.ownArchiveSeqFloorUnknown()).to.equal(false);
+    });
+
+});
+
+describe('StateAnchorPublisher: archive reissue after a refused head', function () {
+    it('MATCH_BATCH_SEQ (retry; floor unknown) skips before archive build or intent', async function () {
+        const pub = mkPub(SPENT_SEQ);
+        wireIndexer(pub, null);
+        const build = sinon.stub().throws(new Error('archive build must not run'));
+        const intent = sinon.spy();
+        const flush = sinon.spy(pub, 'archiveFlushStatus');
+        Object.assign(pub, {
+            archiveTipUnresolved: () => false,
+            archiveElectionPubkeys: async () => ['aa'],
+            archiveElectionAdmits: () => true,
+            gatherUnpublishedArchiveRows: async () => ({ rewards: [] }),
+            latestArchiveWrapperRows: async () => [{ network: 'regtest' }],
+            cpFromRow: () => ({ snapshot_block: 100 }),
+            getLiveArchiveIntent: async () => null,
+            archiveRoundIntentHeld: () => false,
+            buildSizedArchive: build,
+            recordArchiveIntent: intent
+        });
+
+        expect(await pub.startArchiveRound({}, 100)).to.equal('none');
+        expect(flush.calledWith('none', 'seq_floor_unknown')).to.equal(true);
+        expect(build.called).to.equal(false);
+        expect(intent.called).to.equal(false);
     });
 });
