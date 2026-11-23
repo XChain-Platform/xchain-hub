@@ -2217,13 +2217,6 @@
       "78c9b113bd61e686d0dc58de02c3b426cb9efce7a26a483498b6658c72dc13cb",
       "2a48e234b9515b7875508df2256d10010a7e4addef950d3f6b8e25db44db884c"
     ],
-    "29c8188588d7f341": [
-      "e94df6182e627d1ed36013c6dc672627634d33f7b25b56d43feb88ece4cbf867",
-      "b0d036456bbeaefcf5e90c692d1cde33adc8d52ca782a22bfabc1a3a2d06a678",
-      "01e3ada7d2943d88f3d85a33b7818cf8db4215ce8c21147f033a576984d4dfb5",
-      "114a5a00d2da11ce3c10e04b6cb2301c3e3c9be6f6ecb5745bb8f25af72275ba",
-      "7687e2598e7a90c08b5c9b7d53301057be3772bd190e5e8cf9f7526aa460cc55"
-    ],
     "29d92c64732f6606": [
       "1ba54ffbf3116ad8b51b70b554e6e1b2455897d9b51c13a241e985e1c5067e1d",
       "c8ba2f07c7113b657a6d509d0c76c3d2a2b11d08e3ed6b117eccd132adfb2b51",
@@ -13976,6 +13969,16 @@
       "7532f0372013eb6394c8a19b7f8e244d8f411aa4760e147f228053b41cf6980a",
       "6dd8500027e703b0009bd1390c4d2d4310f20258a426277bbdd78657f337ee14"
     ],
+    "f7acef859fbe83e4": [
+      "217f50b3be69dadcc93c2af6228d5bc25ddec6646aeea726c6abe8a758d56b54",
+      "c3390696cae02f4e457d44e2c0c4e1914a16d10d7111636b820e213684627a75",
+      "e94df6182e627d1ed36013c6dc672627634d33f7b25b56d43feb88ece4cbf867",
+      "b0d036456bbeaefcf5e90c692d1cde33adc8d52ca782a22bfabc1a3a2d06a678",
+      "01e3ada7d2943d88f3d85a33b7818cf8db4215ce8c21147f033a576984d4dfb5",
+      "908e99ef54550ab9fc49b9108b391afff8261bce6c3016215c93d9c1879425de",
+      "f28262495ebe6649fa2d837c209fd8cee7d4e37fb38c4e9207b61085f0b00b84",
+      "7687e2598e7a90c08b5c9b7d53301057be3772bd190e5e8cf9f7526aa460cc55"
+    ],
     "f7b09e34fdecf336": [
       "33f7ea75de7703a63b36ec815264daa29f81ab8b0b323806b79b12375b2ad9c8",
       "8757fbe8b886d024ab928ab7180913a75c889536b9523cff84fff91a87921583",
@@ -14463,7 +14466,7 @@
         "ci:regression"
       ],
       "fileCount": 1200,
-      "titleCount": 10588,
+      "titleCount": 10591,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -15218,7 +15221,7 @@
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
         "test/unit/hub/capability_gossip_pubkey_binding.test.js": "c84693b4d1c62e94",
         "test/unit/hub/capability_gossip_unverified.test.js": "8c95d89c069072d5",
-        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "29c8188588d7f341",
+        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "f7acef859fbe83e4",
         "test/unit/hub/chain_tips_null_reasons.test.js": "7a4fbd66aea774c1",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/close/hub_close_stops_oracle_publisher.test.js": "16635e1dfac8dbb0",
@@ -15722,7 +15725,7 @@
     },
     "test": {
       "fileCount": 1200,
-      "titleCount": 10588,
+      "titleCount": 10591,
       "files": {
         "test/unit/activations/anchor_reward_activation_parity.test.js": "8af335364d29936b",
         "test/unit/activations/anchor_reward_null_threshold.test.js": "933e30dd79ca0699",
@@ -16477,7 +16480,7 @@
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
         "test/unit/hub/capability_gossip_pubkey_binding.test.js": "c84693b4d1c62e94",
         "test/unit/hub/capability_gossip_unverified.test.js": "8c95d89c069072d5",
-        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "29c8188588d7f341",
+        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "f7acef859fbe83e4",
         "test/unit/hub/chain_tips_null_reasons.test.js": "7a4fbd66aea774c1",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/close/hub_close_stops_oracle_publisher.test.js": "16635e1dfac8dbb0",
@@ -16928,7 +16931,7 @@
     },
     "test:all": {
       "fileCount": 1290,
-      "titleCount": 11502,
+      "titleCount": 11505,
       "files": {
         "test/boundary/consensus_activation.test.js": "1cce93ce97880cf7",
         "test/chaos/api/rate_limit_saturation.test.js": "75b91fe8c6876a35",
@@ -17773,7 +17776,7 @@
         "test/unit/db/state_checkpoints_rules_digest.test.js": "58de64b81fdc0ed1",
         "test/unit/hub/capability_gossip_pubkey_binding.test.js": "c84693b4d1c62e94",
         "test/unit/hub/capability_gossip_unverified.test.js": "8c95d89c069072d5",
-        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "29c8188588d7f341",
+        "test/unit/hub/chain_tips_consensus_input_monitor.test.js": "f7acef859fbe83e4",
         "test/unit/hub/chain_tips_null_reasons.test.js": "7a4fbd66aea774c1",
         "test/unit/hub/chain_tips_resolve_doge_latest_block.test.js": "0e3ec47209992d0f",
         "test/unit/hub/close/hub_close_stops_oracle_publisher.test.js": "16635e1dfac8dbb0",
