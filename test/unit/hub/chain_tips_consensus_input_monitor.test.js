@@ -14,9 +14,9 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
-const { ConsensusInputMonitor } = require('../../../src/validators/consensus_input_monitor.js');
+const { ConsensusInputMonitor, REASONS } = require('../../../src/validators/consensus_input_monitor.js');
 
-let XChainHub, axiosStub, mockDb, monitor;
+let XChainHub, axiosStub, mockDb, monitor, monitorLog;
 
 function hubWith(url) {
     const hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: 'mainnet' });
@@ -45,7 +45,8 @@ function registerStubHooks() {
             getAllConfigs: sinon.stub().resolves({}),
             getChainTip:   sinon.stub().resolves(null)
         };
-        monitor = new ConsensusInputMonitor({ log: () => {} });
+        monitorLog = [];
+        monitor = new ConsensusInputMonitor({ log: line => monitorLog.push(line) });
         sinon.stub(console, 'warn');
         sinon.stub(console, 'error');
         sinon.stub(console, 'log');
@@ -54,8 +55,56 @@ function registerStubHooks() {
     afterEach(function () { sinon.restore(); });
 }
 
+function registerPushedTipRecoveryTests() {
+    it('clears an outage streak when fresh pushed tips resume', async function () {
+        const hub = hubWith('http://idx');
+        axiosStub.post.rejects(new Error('connect ECONNREFUSED'));
+        for (let i = 0; i < 3; i++) await hub.resolveBtcLatestBlock();
+        expect(monitor.snapshot().alerting).to.equal(true);
+
+        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
+        axiosStub.post.reset();
+        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
+
+        const snap = monitor.snapshot();
+        expect(snap.consecutive_failures).to.equal(0);
+        expect(snap.alerting).to.equal(false);
+        expect(axiosStub.post.called).to.equal(false);
+        expect(monitorLog.filter(line => line.startsWith('ALERT CLEARED:'))).to.have.lengthOf(1);
+    });
+
+    it('counts a failed direct read after rejecting a stale pushed tip', async function () {
+        const hub = hubWith('http://idx');
+        mockDb.getChainTip.resolves({
+            blockHeight: 600,
+            blockTime: Math.floor(Date.now() / 1000) - 7200
+        });
+        axiosStub.post.rejects(new Error('connect ECONNREFUSED'));
+
+        expect(await hub.resolveBtcLatestBlock()).to.equal(null);
+        expect(monitor.snapshot()).to.include({ failures: 1, consecutive_failures: 1 });
+        expect(monitor.snapshot().by_reason.unreachable).to.equal(1);
+    });
+
+    it('preserves other method counters when a fresh pushed tip succeeds', async function () {
+        const hub = hubWith('http://idx');
+        monitor.recordFailure('getactivevalidators', REASONS.AUTH, 'bad key');
+        monitor.recordFailure('getstakeweightsbycapability', REASONS.MALFORMED, 'bad weights');
+        const before = monitor.snapshot();
+        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
+
+        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
+        const after = monitor.snapshot();
+        expect(after.failures).to.equal(before.failures);
+        expect(after.by_reason).to.deep.equal(before.by_reason);
+        expect(after.last_failure).to.deep.equal(before.last_failure);
+    });
+}
+
 describe('chain tips: BTC tip failures reach the consensus-input monitor', function () {
     registerStubHooks();
+    registerPushedTipRecoveryTests();
 
     it('counts an unreachable indexer and alerts after repeated nulls', async function () {
         const hub = hubWith('http://idx');
@@ -80,15 +129,10 @@ describe('chain tips: BTC tip failures reach the consensus-input monitor', funct
         expect(monitor.snapshot().by_reason.rpc_error).to.equal(1);
     });
 
-    it('leaves the monitor untouched on a good tip and on the pushed-tip fast path', async function () {
+    it('leaves the monitor untouched on a good direct tip', async function () {
         const hub = hubWith('http://idx');
         axiosStub.post.resolves({ data: { result: { block_index: 500, lag: 0 } } });
         expect(await hub.resolveBtcLatestBlock()).to.equal(500);
-        expect(monitor.snapshot().failures).to.equal(0);
-        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
-        axiosStub.post.reset();
-        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
-        expect(axiosStub.post.called).to.equal(false);
         expect(monitor.snapshot().failures).to.equal(0);
     });
 
