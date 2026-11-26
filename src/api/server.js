@@ -27,7 +27,7 @@ const defaultJsonRouter = require('express-json-rpc-router');
 const { noteShutdown } = require('../consensus/diagnostics');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('../peers/rpc_batch_guard.js');
 const { installMiddleware, terminalErrorHandler } = require('./middleware');
-const { withEnvelopeRepair } = require('./jsonrpc_envelope');
+const { withEnvelopeRepair, rejectIllegalIds } = require('./jsonrpc_envelope');
 const { buildRpcController } = require('./rpc');
 const { mountSnapshotRoutes } = require('./rest/hub_db_snapshot');
 const { snapshotCapWarnings } = require('./snapshot_read_caps');
@@ -64,6 +64,7 @@ function createApp(ctx) {
         }
         next();
     });
+    app.use(rejectIllegalIds);
     // The router's error envelopes drop a falsy id (0 becomes null) and echo the
     // caller's jsonrpc member; the wrapper repairs both on the way out.
     app.use(withEnvelopeRepair(jsonRouter({ methods: jsonRpcController })));

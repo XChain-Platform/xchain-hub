@@ -81,4 +81,40 @@ function withEnvelopeRepair(rpcMiddleware) {
     };
 }
 
-module.exports = { requestId, repairEnvelope, withEnvelopeRepair };
+// JSON-RPC 2.0 allows only a string, number or null id (absent is a
+// notification). Anything else is refused before dispatch: the router would run
+// the method and then echo the id, and a deeply nested one overflows the stack
+// in JSON.stringify after the side effects landed.
+function hasIllegalId(call) {
+    if (!call || typeof call !== 'object' || Array.isArray(call) || !('id' in call)) return false;
+    const id = call.id;
+    return id !== null && typeof id !== 'string' && typeof id !== 'number';
+}
+
+const INVALID_REQUEST = { jsonrpc: VERSION, id: null, error: { code: -32600, message: 'Invalid Request' } };
+
+// Middleware: a single call with an illegal id is answered 400 -32600; in a
+// batch only the offending entries are dropped from dispatch and answered
+// -32600 beside the other answers.
+function rejectIllegalIds(req, res, next) {
+    const body = req.body;
+    if (Array.isArray(body)) {
+        if (!body.some(hasIllegalId)) return next();
+        const good = body.filter((call) => !hasIllegalId(call));
+        const refusals = body.length - good.length;
+        const errors = Array.from({ length: refusals }, () => ({ ...INVALID_REQUEST, error: { ...INVALID_REQUEST.error } }));
+        if (good.length === 0) return res.json(errors);
+        req.body = good;
+        const send = res.send;
+        res.send = function sendWithRefusals(payload) {
+            if (!Array.isArray(payload)) return send.call(this, payload);
+            res.send = send;
+            return send.call(this, payload.concat(errors));
+        };
+        return next();
+    }
+    if (hasIllegalId(body)) return res.status(400).json({ ...INVALID_REQUEST, error: { ...INVALID_REQUEST.error } });
+    return next();
+}
+
+module.exports = { requestId, repairEnvelope, withEnvelopeRepair, rejectIllegalIds };
