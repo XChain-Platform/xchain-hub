@@ -56,24 +56,6 @@ function registerStubHooks() {
 }
 
 function registerPushedTipRecoveryTests() {
-    it('clears an outage streak when fresh pushed tips resume', async function () {
-        const hub = hubWith('http://idx');
-        axiosStub.post.rejects(new Error('connect ECONNREFUSED'));
-        for (let i = 0; i < 3; i++) await hub.resolveBtcLatestBlock();
-        expect(monitor.snapshot().alerting).to.equal(true);
-
-        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
-        axiosStub.post.reset();
-        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
-        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
-
-        const snap = monitor.snapshot();
-        expect(snap.consecutive_failures).to.equal(0);
-        expect(snap.alerting).to.equal(false);
-        expect(axiosStub.post.called).to.equal(false);
-        expect(monitorLog.filter(line => line.startsWith('ALERT CLEARED:'))).to.have.lengthOf(1);
-    });
-
     it('counts a failed direct read after rejecting a stale pushed tip', async function () {
         const hub = hubWith('http://idx');
         mockDb.getChainTip.resolves({
@@ -97,14 +79,52 @@ function registerPushedTipRecoveryTests() {
         expect(await hub.resolveBtcLatestBlock()).to.equal(600);
         const after = monitor.snapshot();
         expect(after.failures).to.equal(before.failures);
+        expect(after.consecutive_failures).to.equal(before.consecutive_failures);
+        expect(after.ok).to.equal(before.ok);
         expect(after.by_reason).to.deep.equal(before.by_reason);
         expect(after.last_failure).to.deep.equal(before.last_failure);
+    });
+}
+
+function registerStreakMaskingTests() {
+    it('does not let fresh pushed tips mask a snapshot-fetch failure streak', async function () {
+        const hub = hubWith('http://idx');
+        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
+        const rounds = 10;
+        for (let i = 0; i < rounds; i++) {
+            expect(await hub.resolveBtcLatestBlock()).to.equal(600);
+            monitor.recordFailure('getactivevalidators', REASONS.AUTH, 'bad key');
+        }
+        const snap = monitor.snapshot();
+        expect(snap.consecutive_failures).to.equal(rounds);
+        expect(snap.alerting).to.equal(true);
+        expect(snap.ok).to.equal(0);
+        expect(axiosStub.post.called).to.equal(false);
+    });
+
+    it('does not cancel an armed rate-limit backoff on a pushed-tip read', async function () {
+        const hub = hubWith('http://idx');
+        mockDb.getChainTip.resolves({ blockHeight: 600, blockTime: Math.floor(Date.now() / 1000) });
+        monitor.recordFailure('getactivevalidators', REASONS.RATE_LIMITED, 'slow down');
+        expect(monitor.inBackoff()).to.equal(true);
+        expect(await hub.resolveBtcLatestBlock()).to.equal(600);
+        expect(monitor.inBackoff()).to.equal(true);
+        expect(monitor.snapshot().ok).to.equal(0);
+    });
+
+    it('still clears the streak on a real consensus-input success', function () {
+        for (let i = 0; i < 3; i++) monitor.recordFailure('getactivevalidators', REASONS.AUTH, 'bad key');
+        expect(monitor.isAlerting()).to.equal(true);
+        monitor.recordSuccess('getactivevalidators');
+        expect(monitor.snapshot().consecutive_failures).to.equal(0);
+        expect(monitor.isAlerting()).to.equal(false);
     });
 }
 
 describe('chain tips: BTC tip failures reach the consensus-input monitor', function () {
     registerStubHooks();
     registerPushedTipRecoveryTests();
+    registerStreakMaskingTests();
 
     it('counts an unreachable indexer and alerts after repeated nulls', async function () {
         const hub = hubWith('http://idx');

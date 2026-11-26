@@ -31,9 +31,9 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const { getLogger } = require('../observability');
 const { lagRefusal, resolveBtcCheckpointHeights } = require('./btc_checkpoint_heights.js');
 const logger = getLogger(); const { REASONS, classifyFetchError } = require('../validators/consensus_input_monitor.js');
-// Feed fresh pushed-tip success and direct-path failures to the gate monitor before a snapshot fetch.
+// Feed direct-path failures to the gate monitor; no success twin, since a pushed-tip read never
+// contacts the indexer and would zero the streak and 429 backoff the snapshot fetches build.
 const tipFailed = (hub, reason, why) => { const m = hub.capabilitySnapshot && hub.capabilitySnapshot.monitor; if(m && m.recordFailure) try { m.recordFailure('getlatestblock', reason, why); } catch (_) { /* observability only */ } };
-const tipSucceeded = (hub) => { const m = hub.capabilitySnapshot && hub.capabilitySnapshot.monitor; if(m && m.recordSuccess) try { m.recordSuccess('getlatestblock'); } catch (_) { /* observability only */ } };
 // One store per asynchronous proposal flow. The WeakMap keeps separate hub instances
 // isolated even when tests or embedded callers deliberately use more than one in a scope.
 const admissionTipMemo = new AsyncLocalStorage();
@@ -67,7 +67,7 @@ class ChainTips {
             // Freshness bound on the pushed tip. If the co-located indexer halts,
             // getChainTip serves the same frozen row forever, so rounds would anchor to a
             // stale height. Fall through when the tip is stale or unverifiable.
-            if(pushedTip && pushedTip.blockHeight && this.btcPushedTipFresh(pushedTip)) { tipSucceeded(this); return pushedTip.blockHeight; }
+            if(pushedTip && pushedTip.blockHeight && this.btcPushedTipFresh(pushedTip)) return pushedTip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this.resolveBtcIndexerUrl();
         if(!url){
