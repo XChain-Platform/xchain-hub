@@ -27,7 +27,7 @@ const helmet     = require('helmet');
 const cors       = require('cors');
 const rateLimit  = require('express-rate-limit');
 const http       = require('http');
-const { createApp } = require('../../../src/api/server.js');
+const { createApp } = require('../../../../src/api/server.js');
 
 function buildCtx(extra) {
     const quiet = { info() {}, warn() {}, error() {}, debug() {} };
@@ -56,8 +56,12 @@ function postJson(server, payload) {
     return call(server, { headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
 }
 
-describe('JSON-RPC ids that are not string, number or null are refused before dispatch', function () {
-    this.timeout(10000);
+const TITLE = 'JSON-RPC ids that are not string, number or null are refused before dispatch';
+const invalid = { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
+
+// Starts a hub app whose ping records each dispatch and whose logger records each error.
+function useServer(suite) {
+    suite.timeout(10000);
     const calls = [];
     const logged = [];
     const logger = { info() {}, warn() {}, debug() {}, error: (...args) => logged.push(args) };
@@ -70,8 +74,12 @@ describe('JSON-RPC ids that are not string, number or null are refused before di
         await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     });
     after((done) => { server.close(() => done()); });
-    const invalid = { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
     beforeEach(() => { calls.length = 0; logged.length = 0; });
+    return { calls, logged, srv };
+}
+
+describe(TITLE, function () {
+    const { calls, logged, srv } = useServer(this);
 
     it('refuses a 20000-deep nested id with -32600, never runs the method and logs nothing', async () => {
         const deep = '['.repeat(20000) + ']'.repeat(20000);
@@ -93,6 +101,10 @@ describe('JSON-RPC ids that are not string, number or null are refused before di
         }
         expect(calls).to.have.length(0);
     });
+});
+
+describe(TITLE, function () {
+    const { calls, srv } = useServer(this);
 
     it('still dispatches string, number, 0 and null ids', async () => {
         for (const id of ['a', '', 5, 0]) {
