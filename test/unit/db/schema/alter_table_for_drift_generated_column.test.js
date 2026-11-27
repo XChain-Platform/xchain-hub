@@ -63,7 +63,13 @@ describe('alterTableForDrift and generated columns', function () {
         const cols = databaseWithSource(source).parseExpectedColumns(source);
         const hit = cols.find(c => c.name === 'archive_pending');
         expect(hit).to.be.an('object');
-        expect(hit.definition).to.match(/GENERATED ALWAYS AS \(.*SHA2\(consensus_proof, 256\)\) STORED$/);
+        expect(hit.definition.replace(/\s+/g, ' ')).to.equal(
+            'archive_pending TINYINT(1) GENERATED ALWAYS AS (batch_seq IS NULL OR ' +
+            'archived_status <> status OR archived_batch_block_time <> batch_block_time OR ' +
+            'archived_proof_sha <> SHA2(consensus_proof, 256) OR ' +
+            'NOT (archived_reference_block <=> reference_block) OR ' +
+            'NOT (archived_source_action_index <=> source_action_index)) STORED'
+        );
     });
 
     it('still adds a missing plain column beside a missing generated one', async function () {
