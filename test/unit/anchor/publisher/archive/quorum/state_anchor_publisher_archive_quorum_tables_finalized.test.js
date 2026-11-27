@@ -27,7 +27,7 @@ function ids(){
         checkpointIds: [{ chain: 'BTC', network: 'regtest', checkpoint_seq: 4 }],
         priceIds: [{
             round_number: 8, coin_pair: 'BTC/USD', status: 'finalized',
-            batch_block_time: 1234,
+            batch_block_time: 1234, reference_block: 55, source_action_index: 9,
             proof_sha: crypto.createHash('sha256').update(PROOF).digest('hex')
         }],
         tombstoneIds: [{ round_number: 3, coin_pair: 'DOGE/USD' }]
@@ -104,7 +104,7 @@ describe('archive quorum-table FINALIZED back-fill', function () {
             ['bridge', 7, 'finalized', TXID, 'bridge-1'],
             ['policy', 7, TXID, 'policy-1'],
             ['checkpoint', 7, 'BTC', 'regtest', 4],
-            ['price', 7, 'finalized', 1234, all.priceIds[0].proof_sha, 8, 'BTC/USD'],
+            ['price', 7, 'finalized', 1234, all.priceIds[0].proof_sha, 55, 9, 8, 'BTC/USD'],
             ['tombstone', 7, 3, 'DOGE/USD']
         ]);
     });

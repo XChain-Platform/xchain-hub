@@ -84,7 +84,8 @@ describe('DDL: checkpoint and price archive bookkeeping', function () {
 
     it('price_snapshots.sql carries the four bookkeeping columns', function () {
         expect(ddlColumns('price_snapshots')).to.include.members(
-            ['batch_seq', 'archived_status', 'archived_batch_block_time', 'archived_proof_sha']);
+            ['batch_seq', 'archived_status', 'archived_batch_block_time', 'archived_proof_sha',
+                'archived_reference_block', 'archived_source_action_index']);
     });
 
     it('archive_price_tombstones.sql keys on (round_number, coin_pair) and carries batch_seq', function () {
@@ -137,11 +138,13 @@ describe('price_snapshots pending predicate', function () {
 
     it('materializes every mutable pending condition behind the indexed read', function () {
         const migration = fs.readFileSync(path.join(SRC_DIR, 'sql', 'migrations',
-            '2026-10-24-z-price-snapshots-archive-pending-index.sql'), 'utf8');
+            '2026-11-27-price-snapshots-archive-anchor-stamp.sql'), 'utf8');
         expect(migration).to.include('GENERATED ALWAYS AS');
         for (const condition of ['batch_seq IS NULL', 'archived_status <> status',
             'archived_batch_block_time <> batch_block_time',
-            'archived_proof_sha <> SHA2(consensus_proof, 256)']) {
+            'archived_proof_sha <> SHA2(consensus_proof, 256)',
+            'NOT (archived_reference_block <=> reference_block)',
+            'NOT (archived_source_action_index <=> source_action_index)']) {
             expect(migration).to.include(condition);
         }
         expect(migration).to.include('idx_archive_pending_round` (`archive_pending`, `round_number`)');
@@ -226,25 +229,30 @@ describe('folded archive pending-price budget', function () {
 describe('price_snapshots stamp', function () {
     it('is guarded on status, batch_block_time and proof digest still equalling the archived values', async function () {
         const db = stubbedDb();
-        await db.updatePriceSnapshotArchiveBatchSeq(3, 'finalized', 1700, 'ab'.repeat(32), 11, 'BTC/USD');
+        await db.updatePriceSnapshotArchiveBatchSeq(
+            3, 'finalized', 1700, 'ab'.repeat(32), 900, 17, 11, 'BTC/USD');
         let { sql, args } = lastCall(db);
-        expect(sql).to.match(/SET batch_seq = \?, archived_status = \?, archived_batch_block_time = \?, archived_proof_sha = \?/);
-        expect(sql).to.match(/WHERE round_number = \? AND coin_pair = \? AND status = \? AND batch_block_time = \? AND SHA2\(consensus_proof, 256\) = \?/);
+        expect(sql).to.include('archived_reference_block = ?, archived_source_action_index = ?');
+        expect(sql).to.match(/WHERE round_number = \? AND coin_pair = \? AND status = \? AND batch_block_time = \? AND SHA2\(consensus_proof, 256\) = \? AND reference_block <=> \? AND source_action_index <=> \?/);
         expect(sql).to.include('(batch_seq IS NULL OR archived_status <> status');
         expect(sql).to.include('archived_batch_block_time <> batch_block_time');
         expect(sql).to.include('archived_proof_sha <> SHA2(consensus_proof, 256)');
-        expect(args).to.deep.equal([3, 'finalized', 1700, 'ab'.repeat(32), 11, 'BTC/USD', 'finalized', 1700, 'ab'.repeat(32)]);
+        expect(sql).to.include('NOT (archived_reference_block <=> reference_block)');
+        expect(sql).to.include('NOT (archived_source_action_index <=> source_action_index)');
+        expect(args).to.deep.equal([3, 'finalized', 1700, 'ab'.repeat(32), 900, 17,
+            11, 'BTC/USD', 'finalized', 1700, 'ab'.repeat(32), 900, 17]);
     });
 
     it('refuses a stamp after a mid-round mutation: the WHERE compares the live row to the archived values', async function () {
         const db = stubbedDb();
         db.doQuery.resolves({ affectedRows: 0 });
-        let r = await db.updatePriceSnapshotArchiveBatchSeq(3, 'finalized', 1700, 'cd'.repeat(32), 11, 'BTC/USD');
+        let r = await db.updatePriceSnapshotArchiveBatchSeq(
+            3, 'finalized', 1700, 'cd'.repeat(32), 901, null, 11, 'BTC/USD');
         expect(r.affectedRows).to.equal(0);
         let { sql, args } = lastCall(db);
         // every archived value is bound a second time into the WHERE, so a row whose
         // status, landing clock or proof changed since the build matches no row
-        expect(args.slice(6)).to.deep.equal(['finalized', 1700, 'cd'.repeat(32)]);
+        expect(args.slice(8)).to.deep.equal(['finalized', 1700, 'cd'.repeat(32), 901, null]);
         expect(sql.indexOf('WHERE')).to.be.greaterThan(sql.indexOf('archived_proof_sha = ?'));
     });
 });

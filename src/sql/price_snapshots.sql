@@ -24,9 +24,9 @@ CREATE TABLE price_snapshots (
     batch_block_time    BIGINT NOT NULL DEFAULT 0,             -- clock of the block the PRICE batch carrying this round LANDED in; 0 = no landed batch seen yet (a round this hub finalized over P2P, ahead of its batch). Stamped by PriceAggregator batch ingest for every round a landed batch carries, stored or deduped, and mirrored to every indexer that follows this hub.
     -- ANCHOR v1 archive bookkeeping, hub-side only. The table is mutated in place (a skipped
     -- row upgrades, a v0 row takes a batch proof, batch_block_time is stamped late, a
-    -- finalized row flips to disputed), so a stamped row is pending again whenever its
-    -- status, batch_block_time or SHA2(consensus_proof, 256) no longer equals what the
-    -- archive carried.
+    -- finalized row flips to disputed, or a re-landed or chain-restored batch row moves
+    -- to its canonical reference_block and source_action_index), so a stamped row is
+    -- pending again whenever an archived value no longer equals what the archive carried.
     -- RETENTION: archived rows are kept, deliberately. getNextAnchorBatchSeq takes
     -- MAX(batch_seq)+1 across the archive tables, so deleting stamped rows can reissue a
     -- spent seq; indexer and explorer mirrors copy this table unfiltered and, after a
@@ -37,10 +37,12 @@ CREATE TABLE price_snapshots (
     archived_status           VARCHAR(20) DEFAULT NULL,
     archived_batch_block_time BIGINT DEFAULT NULL,
     archived_proof_sha        CHAR(64) DEFAULT NULL,
+    archived_reference_block  BIGINT DEFAULT NULL,
+    archived_source_action_index BIGINT DEFAULT NULL,
     -- Materializes PENDING_PRICE_STAMP_PREDICATE in src/db/prices/archive_bookkeeping.js, so
     -- the two change together. Existing tables get the column from a dated migration:
     -- alterTableForDrift skips generated columns because a STORED one rebuilds the table.
-    archive_pending           TINYINT(1) GENERATED ALWAYS AS (batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time OR archived_proof_sha <> SHA2(consensus_proof, 256)) STORED,
+    archive_pending           TINYINT(1) GENERATED ALWAYS AS (batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time OR archived_proof_sha <> SHA2(consensus_proof, 256) OR NOT (archived_reference_block <=> reference_block) OR NOT (archived_source_action_index <=> source_action_index)) STORED,
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_round_pair (round_number, coin_pair),
     KEY idx_pair_block (coin_pair, reference_block),

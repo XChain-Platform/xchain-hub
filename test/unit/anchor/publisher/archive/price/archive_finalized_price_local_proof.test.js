@@ -46,6 +46,8 @@ function heldPrice(extra){
         coin_pair: 'BTC/USD',
         status: 'finalized',
         batch_block_time: 1234,
+        reference_block: 55,
+        source_action_index: 9,
         consensus_proof: FOLLOWER_PROOF
     }, extra);
 }
@@ -115,7 +117,7 @@ describe('applyFinalized follower price proof stamp', function () {
         }, 'sender', [], [], quorumRows(prices));
 
         expect(stamps).to.deep.equal([[
-            7, 'finalized', 1234, digest(FOLLOWER_PROOF), 11, 'BTC/USD'
+            7, 'finalized', 1234, digest(FOLLOWER_PROOF), 55, 9, 11, 'BTC/USD'
         ]]);
     });
 
@@ -130,7 +132,7 @@ describe('applyFinalized follower price proof stamp', function () {
             'sender', [], [], quorumRows([announcedPrice({ coin_pair: 'btc/usd ' })]));
 
         expect(stamps).to.deep.equal([[
-            8, 'finalized', 1234, digest(FOLLOWER_PROOF), 11, 'btc/usd '
+            8, 'finalized', 1234, digest(FOLLOWER_PROOF), 55, 9, 11, 'btc/usd '
         ]]);
     });
 });

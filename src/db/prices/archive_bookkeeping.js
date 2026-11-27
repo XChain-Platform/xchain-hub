@@ -21,15 +21,18 @@
  *
  * price_snapshots rows are mutated in place and hard-deleted by a source-chain
  * retraction, so the archive moves them by whole round and records what it carried:
- * a row is pending again when its status, batch_block_time or consensus_proof digest
- * differs from the stamp, and a deleted row leaves a tombstone.
+ * a row is pending again when its status, batch_block_time, consensus_proof digest,
+ * reference_block or source_action_index differs from the stamp, and a deleted row
+ * leaves a tombstone.
  *
  ********************************************************************/
 
 const PENDING_PRICE_READ_PREDICATE = 'archive_pending = 1';
 const PENDING_PRICE_STAMP_PREDICATE =
     '(batch_seq IS NULL OR archived_status <> status OR archived_batch_block_time <> batch_block_time ' +
-    'OR archived_proof_sha <> SHA2(consensus_proof, 256))';
+    'OR archived_proof_sha <> SHA2(consensus_proof, 256) ' +
+    'OR NOT (archived_reference_block <=> reference_block) ' +
+    'OR NOT (archived_source_action_index <=> source_action_index))';
 const PENDING_PRICE_INDEX = 'idx_archive_pending_round';
 
 const ARCHIVABLE_PRICE_PROOF_PREDICATE = 'status <> \'skipped\' AND consensus_proof NOT LIKE \'["%\'';
@@ -70,12 +73,16 @@ module.exports = {
     // twice: on those values still being the row's current ones, so a mutation between
     // build and back-fill leaves the row pending; and on the row still being pending, so
     // a row an earlier round already covered is not restamped.
-    async updatePriceSnapshotArchiveBatchSeq(batchSeq, status, batchBlockTime, proofSha, roundNumber, coinPair) {
+    async updatePriceSnapshotArchiveBatchSeq(batchSeq, status, batchBlockTime, proofSha,
+                                              referenceBlock, sourceActionIndex, roundNumber, coinPair) {
         return this.doQuery(
-            'UPDATE price_snapshots SET batch_seq = ?, archived_status = ?, archived_batch_block_time = ?, archived_proof_sha = ? ' +
+            'UPDATE price_snapshots SET batch_seq = ?, archived_status = ?, archived_batch_block_time = ?, ' +
+            'archived_proof_sha = ?, archived_reference_block = ?, archived_source_action_index = ? ' +
             'WHERE round_number = ? AND coin_pair = ? AND status = ? AND batch_block_time = ? ' +
-            'AND SHA2(consensus_proof, 256) = ? AND ' + PENDING_PRICE_STAMP_PREDICATE,
-            [batchSeq, status, batchBlockTime, proofSha, roundNumber, coinPair, status, batchBlockTime, proofSha]);
+            'AND SHA2(consensus_proof, 256) = ? AND reference_block <=> ? AND source_action_index <=> ? AND ' +
+            PENDING_PRICE_STAMP_PREDICATE,
+            [batchSeq, status, batchBlockTime, proofSha, referenceBlock, sourceActionIndex,
+                roundNumber, coinPair, status, batchBlockTime, proofSha, referenceBlock, sourceActionIndex]);
     },
 
     // Records the (round, pair) keys a retraction is about to delete. It uses the exact

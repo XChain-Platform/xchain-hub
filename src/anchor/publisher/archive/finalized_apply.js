@@ -117,7 +117,11 @@ module.exports = {
             }
             const proofSha = crypto.createHash('sha256')
                 .update(String(held.consensus_proof)).digest('hex');
-            localPrices.push(Object.assign({}, price, { proof_sha: proofSha }));
+            localPrices.push(Object.assign({}, price, {
+                proof_sha: proofSha,
+                reference_block: Number(held.reference_block),
+                source_action_index: held.source_action_index == null ? null : Number(held.source_action_index)
+            }));
         }
         return localPrices;
     },

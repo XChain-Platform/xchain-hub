@@ -197,7 +197,8 @@ describe('archive quorum-table round', function () {
             policies: [{ snapshot_id: 'p1' }],
             checkpoints: [{ chain: 'BTC', network: 'regtest', checkpoint_seq: 7 }],
             prices: [{ round_number: 8, coin_pair: 'BTC/USD', status: 'disputed',
-                batch_block_time: 1234, consensus_proof: proof }],
+                batch_block_time: 1234, reference_block: 55, source_action_index: 9,
+                consensus_proof: proof }],
             tombstones: [{ round_number: 6, coin_pair: 'LTC/USD' }]
         });
         const me = identity.getPubkeyHex().toLowerCase();
@@ -212,6 +213,7 @@ describe('archive quorum-table round', function () {
         expect(round.checkpointIds).to.deep.equal([{ chain: 'BTC', network: 'regtest', checkpoint_seq: 7 }]);
         expect(round.priceIds).to.deep.equal([{ round_number: 8, coin_pair: 'BTC/USD',
             status: 'disputed', batch_block_time: 1234,
+            reference_block: 55, source_action_index: 9,
             proof_sha: crypto.createHash('sha256').update(proof).digest('hex') }]);
         expect(round.tombstoneIds).to.deep.equal([{ round_number: 6, coin_pair: 'LTC/USD' }]);
     });

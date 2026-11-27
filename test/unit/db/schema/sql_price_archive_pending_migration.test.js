@@ -19,15 +19,14 @@ const fs = require('fs');
 const path = require('path');
 const { expect } = require('chai');
 const { declaredIndex, declaredColumnDefinition, freshSchemaRows } = require('../../../helpers/fresh_schema_model.js');
-const { isRunbook } = require('../../../../src/db/schema/sql_migration_files.js');
+const { isRunbook, splitMigrationStatements } = require('../../../../src/db/schema/sql_migration_files.js');
 const { planEndState, schemaModel, unmetEndState } = require('../../../../src/db/schema/migration_end_state.js');
 
 const SRC = path.resolve(__dirname, '../../../../src');
-const FILE = '2026-11-14-price-snapshots-archive-pending-column.sql';
+const FILE = '2026-11-27-price-snapshots-archive-anchor-stamp.sql';
 const RUNBOOK = '2026-10-24-z-price-snapshots-archive-pending-index.sql';
 const raw = fs.readFileSync(path.join(SRC, 'sql', 'migrations', FILE), 'utf8');
-const statements = raw.split('\n').filter(line => !line.trim().startsWith('--')).join('\n')
-    .split(';').map(s => s.trim()).filter(Boolean);
+const statements = splitMigrationStatements(raw);
 
 const squash = (text) => text.replace(/\s+/g, ' ').replace(/\( /g, '(').replace(/ \)/g, ')').trim();
 
@@ -53,8 +52,8 @@ describe('price_snapshots archive_pending column SQL migration', function () {
     it('declares the key as src/sql does', function () {
         expect(declaredIndex('price_snapshots', 'idx_archive_pending_round'))
             .to.deep.equal({ columns: ['archive_pending', 'round_number'], unique: false });
-        expect(statements).to.have.length(1);
-        expect(statements[0]).to.include('`idx_archive_pending_round` (`archive_pending`, `round_number`)');
+        expect(statements).to.have.length(3);
+        expect(statements[2]).to.include('`idx_archive_pending_round` (`archive_pending`, `round_number`)');
     });
 
     it('keeps the base schema, the migration and the stamp predicate on one expression', function () {
@@ -62,7 +61,7 @@ describe('price_snapshots archive_pending column SQL migration', function () {
         expect(declared).to.match(/^TINYINT\(1\) GENERATED ALWAYS AS /);
         const fromSchema = generatedExpression(declared);
         expect(fromSchema.length).to.be.greaterThan(40);
-        expect(generatedExpression(statements[0])).to.equal(fromSchema);
+        expect(generatedExpression(statements[2])).to.equal(fromSchema);
         expect(stampPredicate()).to.equal(fromSchema);
     });
 
@@ -71,11 +70,20 @@ describe('price_snapshots archive_pending column SQL migration', function () {
         const fresh = freshSchemaRows();
         expect(unmetEndState(plan, schemaModel(fresh.columns, fresh.indexes))).to.deep.equal([]);
 
-        const noColumn = fresh.columns.filter(r => !(r.t === 'price_snapshots' && r.c === 'archive_pending'));
+        const noColumn = fresh.columns.filter(r => !(r.t === 'price_snapshots' &&
+            ['archived_reference_block', 'archived_source_action_index', 'archive_pending'].includes(r.c)));
         const noKey = fresh.indexes.filter(r => !(r.t === 'price_snapshots' && r.i === 'idx_archive_pending_round'));
         expect(unmetEndState(plan, schemaModel(noColumn, noKey))).to.deep.equal([
+            'price_snapshots.archived_reference_block is absent',
+            'price_snapshots.archived_source_action_index is absent',
             'price_snapshots.archive_pending is absent',
             'price_snapshots index idx_archive_pending_round is absent'
+        ]);
+        const oldColumns = fresh.columns.filter(r => !(r.t === 'price_snapshots' &&
+            ['archived_reference_block', 'archived_source_action_index'].includes(r.c)));
+        expect(unmetEndState(plan, schemaModel(oldColumns, fresh.indexes))).to.deep.equal([
+            'price_snapshots.archived_reference_block is absent',
+            'price_snapshots.archived_source_action_index is absent'
         ]);
         expect(unmetEndState(plan, schemaModel(fresh.columns, noKey)))
             .to.deep.equal(['price_snapshots index idx_archive_pending_round is absent']);
@@ -85,6 +93,7 @@ describe('price_snapshots archive_pending column SQL migration', function () {
         const cols = freshSchemaRows().columns.filter(r => r.t === 'price_snapshots').map(r => r.c);
         expect(cols.filter(c => c === 'archive_pending')).to.have.length(1);
         for (const dep of ['batch_seq', 'archived_status', 'archived_batch_block_time', 'archived_proof_sha',
+            'archived_reference_block', 'archived_source_action_index', 'reference_block', 'source_action_index',
             'status', 'batch_block_time', 'consensus_proof']) {
             expect(cols.indexOf(dep), dep).to.be.within(0, cols.indexOf('archive_pending') - 1);
         }
